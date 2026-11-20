@@ -25,10 +25,12 @@
 
 ### 2.3 客戶 BeClass 工作簿的人工配對與確認匯入
 
-- **候選範圍**。資料匯入中心的客戶 BeClass 工作簿預覽先依姓名與正規化手機精確查找客戶及其 HCM 案件。唯一命中一筆客戶及一個可綁定案件時直接匯入。一筆客戶有多個案件，或命中多筆客戶而無法唯一確定案件時，將該問卷與可綁定的 HCM 案件列入人工配對。已匯入且來源內容相同的問卷列為重複略過。格式錯誤、來源衝突或無可綁定案件的列保留原未匯入分類。BeClass 查詢序號識別來源問卷。報名時間、建檔時間、預計服務日期及縣市供人工核對，系統不得用日期接近程度或清單順序代為選案。
+- **候選範圍**。資料匯入中心的客戶 BeClass 工作簿預覽先依姓名與正規化手機精確查找客戶及其 HCM 案件。唯一命中一筆客戶及一個可綁定案件時直接匯入。一筆客戶有多個案件，或命中多筆客戶而無法唯一確定案件時，將該問卷與可綁定的 HCM 案件列入人工配對。已匯入且來源內容相同的問卷列為重複略過。不可補正的必要欄位格式錯誤、來源衝突或無可綁定案件的列保留原未匯入分類。BeClass 查詢序號識別來源問卷。報名時間、建檔時間、預計服務日期及縣市供人工核對，系統不得用日期接近程度或清單順序代為選案。
 - **抽屜與左右核對**。匯入預覽顯示人工配對組數、待配對筆數及「開啟人工配對」。抽屜將直接或間接共用候選 HCM 案號的問卷歸為同組，一次顯示一組，可切換組別或前往下一組待配對。切換組別或關閉抽屜保留本次預覽已建立的連線。抽屜沿用帳務核銷的左側來源、右側目標版型。左欄展開當組待配對問卷，顯示 Excel 列號、BeClass 查詢序號、姓名、遮蔽後的手機、縣市與問卷報名時間。右欄展開當組候選案件，每個 HCM 案號只出現一次，並顯示姓名、遮蔽後的手機、縣市、HCM 建檔時間與預計服務日期。缺值明示「未提供」，日期時間以臺灣時間顯示。
 - **連線與改配**。承辦人先點選左側問卷，再勾選右側同一位客戶的一個或多個案件。畫面為每個案件繪製連線，並在兩端顯示查詢序號與案號。已配給另一份問卷的案件顯示其配對對象且不可選。再次點選案件可解除該連線。預覽和連線操作皆為零寫入。
 - **確認與套用**。每份待選問卷至少勾選一案後，可點「檢查配對」核對 Excel 列號、查詢序號與各 HCM 案號。確認畫面分別顯示人工配對的問卷數與套用案件數。點「確認匯入」後，Apply 重驗工作簿、同一客戶及所有已選案件的綁定資格。每案各存一筆來源副本，以「查詢序號＋綁定案號」防止重複，後續補正按案件獨立。任一選案失效或已遭綁定時，該問卷列整批以型別化衝突回報並須重新預覽。匯入分類按 Excel 列計數，人工綁定明細按案件列出成功的對應。結果未明時依 §2.2 以同一組已確認選案重查。
+- **可補欄位局部匯入（`CLIENT-FIELD-REPAIR-01`）**。Email、縣市、退款銀行代號加分行與銀行帳號格式錯誤時，該正式來源欄位存 `NULL`，其餘合法欄位及唯一案件綁定照常匯入。銀行兩欄各自驗證，使用既有退款帳戶正規化規則。銀行代號加分行須為 7 碼，帳號為不超過 50 碼的數字文字並保留前導零。允許空白、空格、連字號及全形數字的既有正規化，不得剝掉中文等非法字元後假裝合法。兩欄皆空白或只填一欄不新增匯入必填條件，退款可用性沿有效帳戶完整性判定。查詢序號、姓名與電話精確識別、唯一配對、出生日期、報名時間、來源衝突與既有綁定仍沿原拒絕條件。
+- **成功列欄位警示證據**。同一列交易保存去敏欄位 issue code 與原查詢序號，不保存錯誤銀行原值。成功列 receipt 的 outcome 保持 `created`，以 `root_id` 與 `review_identity` 關聯來源及問題證據；計入成功匯入，不放進 `row_issues`。人工多案配對仍逐列原子，各案件成功 receipt 指向各自 accepted source。
 - **結果回讀**。匯入結果沿用 §2.2 四項統計，另提供可展開的「人工綁定明細」，只列本次實際綁定成功的 Excel 列號、BeClass 查詢序號與 HCM 案號。人工綁定成功屬「成功匯入」的一部分。未匯入明細與人工綁定明細各自依結果顯示，並可從結果頁選擇下一份檔案。
 - **綁定失敗原因**。預覽及 Apply 能判定一個案件無法綁定時，未匯入明細區分既有問卷綁定（`client_beclass_case_already_bound`）、既有 BeClass 人工補登（`client_beclass_case_manually_registered`）與缺同案號 HCM 資料（`client_beclass_hcm_case_missing`）。其他選案失效仍使用 `case_import_candidate_stale`。原因不帶既有問卷或人工補登內容。
 
@@ -39,7 +41,8 @@
 - **進件獨立性（`NC-ENTRY-01～03`）**：非市民可由 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 的「非新竹市民 → 尚未申請」進入專屬 LINE LIFF 合併表單，經工會審核取得新 `A` 案號；亦可由承辦人依 §3.1.1 從既有案件帶入資料，透過後台手動非市民建案取得新 `A` 案號。原 HCM 報名及其審核結果保留，禁止沿用原 HCM 案號或假借補件覆活已作廢之補助案件。
 - **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆於銀行帳號欄位固定備註「**請填入產婦本人銀行帳號**」，並皆須必填上傳「**存摺封面**」圖片（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼並一併歸檔至 NAS `02_客戶存摺封面` 資料夾；皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
 - **後台手動新案必填**。客戶姓名、連絡電話、預計服務開始日、服務天數、服務時段、胎數、電子郵件、退款銀行代號（含分行共 7 碼）及退款銀行帳號均為必填。胎數只接受單胞胎或雙胞胎；同一建案交易寫入 BeClass「特殊計費:胎數」，並以此胎數初始化客戶帳務及月嫂薪資。後台表單與建案 API 均拒絕缺漏或只有空白的值。
-- **需求調查時薪與假日意願**。市民與非市民 LIFF 在單胞胎及雙胞胎選項旁顯示 [Client Finance 計價政策](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 的服務時薪。市民以一般市民費率為參考，區分不同的補助內及用盡後費率，非市民顯示自費費率。兩種 LIFF 的「費用與同意條款」及後台手動非市民新案皆選填遇端午、中秋、除夕、初一或初二是否願意支付雙倍薪水，答案為「是」或「否」。此答案只保存於需求調查。
+- **需求調查時薪**。市民與非市民 LIFF 在單胞胎及雙胞胎選項旁顯示 [Client Finance 計價政策](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 的服務時薪。市民以一般市民費率為參考，區分補助內及用盡後費率。非市民顯示自費費率。
+- **三節假日雙薪意願**。市民與非市民 LIFF 的「費用與同意條款」及後台手動非市民新案均提供選填欄位，記錄遇端午、中秋、除夕、初一或初二服務時的雙薪意願。可選「是」、「否」或未填。答案保存於需求調查，供名冊維護，業務語意依 [CRX-REGISTRATION-01](33_案件與月嫂整合名冊正式規格.md#52-client-profile-與-beclass-欄位及照護修正crx-account-01)。
 - **非市民表單服務時段**。LIFF 與後台手動新案提供相同的服務方式、生產方式及居住型態選項。每日服務時段提供 08:30–12:30（4 小時）、08:30–16:30（8 小時）、09:00–17:00（8 小時）、13:00–17:00（4 小時）。LIFF 表單及 Preview／Apply 僅接受這四個時段。後台手動新案及原案資料帶入可調整每日開始與結束時間，同日起訖時間差須大於或等於所選的 4 或 8 小時；多出的時間可供客戶與月嫂協調休息，不自動增加每日服務時數或扣除固定午休。服務時數與起訖時間分別保存，例如 08:00–17:00 選 8 小時時，每日服務時數仍為 8 小時。前端與手動建案 API 使用相同驗證。LIFF 依預計服務開始日、天數及休假規則推算結束日。退款帳號正規化後須有數字。
 - **年度流水配號與後續對齊（`NC-NUMBER-01～02`、`NC-FLOW-01`、`NC-PAYMENT-01`）**：案號採 `A＋民國年度＋3碼流水號`，依正式建案日的臺灣時間年度自 `001` 起算。虛擬帳號依 [Client Finance 帳號規則](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 解析。LINE 申請在核准時正式配號。手動新案先唯讀顯示預估案號與帳號，送出時與 LINE 核准共用年度流水號，在同一建案交易內鎖定取號並跳過已使用的案號或帳號，成功後顯示實際配號。可表示的流水號用完時回報衝突。正式建案後的統計、推薦媒合、契約簽署、5 天訂金與分期計價及排班結算沿用既有 owner 流程（見 [營運報表與統計口徑 §5](34_營運報表與統計口徑正式規格.md#noncitizen-statistics-20261029)、[Client Finance §2.3](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 與 [Contract Signing](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)）。
 
@@ -101,8 +104,19 @@
 - **Validator Issue 代碼對齊**：已知驗證狀態不得誤為 unknown：`CLIENT-BECLASS-SOURCE-001`（`client_field_missing:<field_path>`／`client_field_invalid:<field_path>` 區分缺欄與格式錯誤，嚴禁保存錯誤原值）、`HCM-CASE-002/$source_row`（HCM 既有案指紋差異）、`IMPORT-004`（僅供 HCM 來源列驗證失敗，不得將缺少 Client BeClass 投影成 `IMPORT-004`）、`ORDER-HIST-FIELD-01/actual_start_date|actual_end_date`（歷史訂單起迄解析失敗）。
 - **Unknown Issue 防護與 Typed Errors**：未登錄 issue code 必須交易回滾並進 3 次間隔 >= 1s 重試後進 dead-letter。Typed Errors：`case_import_source_conflict`、`case_import_row_invalid`、`case_import_identity_ambiguous`、`case_import_candidate_stale`、`case_import_already_applied`、`case_bootstrap_failed`、`import_warning_transition_not_allowed`、`import_warning_resubmission_association_invalid`、`import_warning_predicate_owner_unavailable`。
 
+### 4.3 目前進件欄位問題 Query（`IMPORT-FIELD-QUERY-01`）
+
+- `GET /api/v1/case-import/field-issues` 是經管理員認證的唯讀 Query。`case_no` 可選，`page` 為大於等於 1 的整數，`page_size` 為 1 至 100。回傳 `items[{case_no, issues}]`、`next_page` 與可為 `null` 的 `total`。每一 issue 提供 `source`、`owner`、正式欄位 `field`、中文來源 `source_field`、`code` 與去敏 `message`。
+- 每案合併 current HCM 尚未解決且未人工略過的欄位，以及成功匯入 Client BeClass 的欄位警示。HCM 沿既有 current review、owner root 重驗與 skip 規則。BeClass 只透過 `created` receipt 的 `root_id`、`review_identity` 與 accepted `bound_case_no` 連結，不能把失敗重匯的同查詢序號 review 投射到舊案件。
+- 查詢每次讀取正式 owner 值。BeClass 來源的 Email／縣市以 Client Profile 的 current value 及原驗證規則判定，`owner=client_profile`；銀行兩欄以 BeClass 有效修正獨立判定，`owner=client_beclass`。合法 owner 值解除該欄警示；銀行明確補正為合法選填空白也可解除，不改寫原來源與 review evidence。通知工作台與名冊共用此 Query，不另存問題狀態。
+- 候選案件先去重且有界分頁，再依 current facts 過濾已解決欄位。即使本頁過濾後為空，仍保留候選的 `next_page`。Query／owner 讀取失敗必須回報錯誤，不得轉成空清單或零問題。
+
 ## 5. 驗收標準
 
 1. **Redis 隔離與非市民進件**：實機 Redis 7 ＋ MySQL 驗證核准前零問卷入 MySQL、`registration-intake` 無 DB 憑證、AOF `always/noeviction` 容量拒絕與斷電重啟、14 天到期解除占用、`REG-REDIS-07` 全部故障點恢復、小時 `BGREWRITEAOF` 整理、`A` 案號跨年並發配號、`501+` 虛擬帳號與 `beclass_records` 退款帳戶同步。
 2. **HCM 與雙軌配對**：驗證 7 項待補件／`縣市` 零警示／`服務方式` 原文保留與 4 種 weekday 隔離、`clients.email` 空白補齊、`BECLASS-001／IMPORT-003` 自動解除與不同來源解除 lineage、逐欄略過 CAS 409／同鍵重播，及 180 秒匯入超時跨分頁自動輪詢。
 3. **客戶 BeClass 人工配對**。驗證共用候選案件的問卷逐組呈現，同案只顯示一次，切組與關閉保留連線。以同一客戶的兩案驗證一份問卷可勾選兩案、每案各存一筆、重播不增筆、兩案補正獨立，且任一選案失效時該列零寫入。另驗證跨客戶選案、同案重複配對、解除連線及確認前零寫入。無歧義的工作簿直接匯入。
+
+4. `CLIENT-FIELD-REPAIR-01`／`IMPORT-FIELD-QUERY-01`。
+   - S：唯一可綁定客戶的 BeClass 列含非法銀行代號或帳號，或 Email／縣市格式錯誤。T：匯入合法資料並補正該欄。A：Preview／Apply 後由共同 Query 與名冊查詢，再經正式 owner 修改單欄並重新查詢。R：列計成功、非法來源欄為 NULL、合法欄保留；各欄警示獨立顯示及解除，主檔合法自由文字縣市可解除，原 review 不變且不含錯誤銀行原值。
+   - S：缺識別／唯一配對、既有來源衝突、失敗重匯或 owner Query 故障。T：避免錯綁、誤清警示及假成功。A：提交同查詢序號異內容、非法識別與多案失效案例，並讀取分頁。R：原拒絕與整列原子性保留，失敗 review 不掛入已成功案件，讀取錯誤不變成空結果；已解決候選空頁仍可沿 next_page 繼續。

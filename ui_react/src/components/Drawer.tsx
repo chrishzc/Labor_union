@@ -51,7 +51,9 @@ export const Drawer: React.FC<DrawerProps> = ({
       containerRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [],
     );
     const firstTarget = focusableElements()[0] ?? containerRef.current;
-    const frameId = window.requestAnimationFrame(() => firstTarget?.focus());
+    const frameId = window.requestAnimationFrame(() => {
+      if (!containerRef.current?.contains(document.activeElement)) firstTarget?.focus();
+    });
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (leavePendingRef.current) return;

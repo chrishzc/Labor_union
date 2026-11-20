@@ -1,6 +1,6 @@
 import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { historicalServiceAccountingClient, type HistoricalCaregiverDays, type HistoricalServiceAccountingPreview, type HistoricalServiceAccountingQuery } from '../api/orders/historical_service_accounting_client';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -22,7 +22,11 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState('');
   const [outcomeUnknown, setOutcomeUnknown] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [operation, setOperation] = useState<'query' | 'mutation' | null>(null);
+  const busy = operation !== null;
+  const request = useRef(0);
+  const activeCaseNo = useRef(propCaseNo ?? caseNo);
+  activeCaseNo.current = (propCaseNo ?? caseNo).trim();
 
   useEffect(() => {
     if (propCaseNo !== undefined) {
@@ -30,19 +34,9 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
       setFacts(null);
       setPreview(null);
       setMessage('');
-      if (propCaseNo.trim()) {
-        void run(async () => {
-          try {
-            const result = await historicalServiceAccountingClient.query(propCaseNo.trim());
-            setFacts(result);
-            setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, ''])));
-            setPreview(null);
-          } catch (error) {
-            setMessage(error instanceof Error ? error.message : '載入歷史服務帳務資料失敗。');
-          }
-        });
-      }
+      if (propCaseNo.trim()) void load(propCaseNo.trim());
     }
+    return () => { ++request.current; };
   }, [propCaseNo]);
 
   useEffect(() => {
@@ -64,7 +58,23 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
 
   const { requestLeave } = useUnsavedNavigation();
   const inputs = (): HistoricalCaregiverDays[] => (facts?.assignments ?? []).map((item) => ({ assignment_identity: item.assignment_identity, staff_id: item.staff_id, actual_service_days: Number(days[item.assignment_identity]) }));
-  const run = async (operation: () => Promise<void>) => { setBusy(true); setMessage(''); try { await operation(); } catch (error) { setMessage(error instanceof Error ? error.message : '處理失敗。'); } finally { setBusy(false); } };
+  async function load(targetCaseNo: string) {
+    const sequence = ++request.current;
+    const isCurrent = () => sequence === request.current && targetCaseNo === activeCaseNo.current;
+    setOperation('query'); setMessage('');
+    try {
+      const result = await historicalServiceAccountingClient.query(targetCaseNo);
+      if (!isCurrent()) return;
+      setFacts(result);
+      setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, ''])));
+      setPreview(null);
+    } catch (error) {
+      if (isCurrent()) setMessage(error instanceof Error ? error.message : '載入歷史服務帳務資料失敗。');
+    } finally {
+      if (isCurrent()) setOperation(null);
+    }
+  }
+  const runMutation = async (task: () => Promise<void>) => { const sequence = ++request.current; setOperation('mutation'); setMessage(''); try { await task(); } catch (error) { if (sequence === request.current) setMessage(error instanceof Error ? error.message : '處理失敗。'); } finally { if (sequence === request.current) setOperation(null); } };
   const caseOptionsUnavailable = orderListState !== 'ready' || orderSummaries.length === 0;
   const casePlaceholder = orderListState === 'loading'
     ? '載入案件中…'
@@ -73,7 +83,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
       : orderSummaries.length === 0
         ? '目前沒有可選案件'
         : '請選擇案件';
-  const unsaved = useUnsavedDraft('歷史服務天數', { '服務天數': days, '原因': reason }, { busy, resetKey: facts, save: outcomeUnknown ? undefined : () => run(save), discard: () => { setDays(Object.fromEntries((facts?.assignments ?? []).map(item => [item.assignment_identity, '']))); setReason(''); setPreview(null); } });
+  const unsaved = useUnsavedDraft('歷史服務天數', { '服務天數': days, '原因': reason }, { busy: operation === 'mutation' || outcomeUnknown, resetKey: facts, save: outcomeUnknown ? undefined : () => runMutation(save), discard: () => { setDays(Object.fromEntries((facts?.assignments ?? []).map(item => [item.assignment_identity, '']))); setReason(''); setPreview(null); } });
   async function save() {
     if (!facts || outcomeUnknown) return;
     const checkedInputs = inputs();
@@ -93,7 +103,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
       {propCaseNo ? (
         <div>
           <span>案件編號：<strong>{propCaseNo}</strong></span>{' '}
-          <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>重新查詢服務帳務</button>
+          <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void load(caseNo.trim())}>重新查詢服務帳務</button>
         </div>
       ) : (
         <>
@@ -101,7 +111,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
             <option value="">{casePlaceholder}</option>
             {orderSummaries.map((item) => <option key={item.case_no} value={item.case_no}>{item.case_no}｜{item.client_name}｜{item.order_status}</option>)}
           </select></label>
-          <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>查詢服務帳務</button>
+          <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void load(caseNo.trim())}>查詢服務帳務</button>
         </>
       )}
     </div>
@@ -109,7 +119,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
       <p>目前狀態：{facts.lifecycle_status}；原訂 {facts.contracted_service_days} 天；每日 {facts.service_hours_per_day} 小時。</p>
       {facts.assignments.map((item) => <label key={item.assignment_identity} style={{ display: 'block', marginBottom: 8 }}>{staffIdentity.label(item.staff_id, item.staff_name)}實際服務天數 <input type="number" min="1" step="1" value={days[item.assignment_identity] ?? ''} disabled={busy || outcomeUnknown} onChange={(event) => { setDays((current) => ({ ...current, [item.assignment_identity]: event.target.value })); setPreview(null); }} /></label>)}
       <label>更新原因（選填）<input value={reason} maxLength={500} disabled={busy || outcomeUnknown} onChange={event => setReason(event.target.value)} /></label>
-      <button type="button" disabled={busy || outcomeUnknown || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void run(save)}>儲存服務天數</button>
+      <button type="button" disabled={busy || outcomeUnknown || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void runMutation(save)}>儲存服務天數</button>
     </div>}
     {preview && <div className="import-result-state" role="status">
       <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元。</p>

@@ -7,6 +7,7 @@ import { canRepairHcmProfileField, HcmIntakeProfileRepairPanel } from '../../../
 const fingerprint = 'a'.repeat(64);
 const detail: ClientRegistryDetail = {
   case_no: 'SYNTH-REPAIR',
+  import_field_issues: [],
   client: {
     client_id: 1, version: 2,
     values: { name: '測試客戶', gender: null, phone: null, city: null, address: null,

@@ -7,6 +7,7 @@ from datetime import date
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, BeforeValidator
 from api.routes.line_payment_overdue_reminders import PaymentSnapshot
+from api.schemas.import_field_issues import ImportFieldIssueView
 from api.schemas.line_tasks import NotificationHandlingView
 
 
@@ -53,6 +54,7 @@ class NotificationSource(StrEnum):
     CUSTOMER_BINDING = 'customer_binding'
     STAFF_BINDING = 'staff_binding'
     STAFF_PROFILE = 'staff_profile'
+    IMPORT_FIELDS = 'import_fields'
     FOLLOWUP = 'followup'
     RECOMMENDATION = 'recommendation'
     SERVICE_START = 'service_start'
@@ -99,6 +101,7 @@ class NotificationItem(BaseModel):
     log: LogReminderContext | None = None
     failure: NotificationFailureContext | None = None
     receipt: ReceiptNotificationContext | None = None
+    import_field_issues: list[ImportFieldIssueView] = Field(default_factory=list)
 
 
 class NotificationPage(BaseModel):

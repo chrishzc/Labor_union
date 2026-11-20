@@ -3,7 +3,7 @@
  * Description: 驗證待辦看板十三階段 projection 與三軌案件受理統計呈現。
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CORE_STAGE_CODES,
   CoreStageProjectionSchema,
@@ -16,7 +16,9 @@ import {
 } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
-import { hcmResubmissionClient } from '../../../../../../../api/case_import/hcm_resubmission_client';
+import { loadCurrentImportFieldIssuesForCases } from '../../../../../../../api/case_import/import_field_issues';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { transport } from '../../../../../../../api/shared/transport';
 import { caseStatisticsQueryClient } from '../../../../../../../api/reports/weekly_operations_report_query_client';
 import { WorkbenchCaseStatistics } from '../../../../../../../components/WorkbenchCaseStatistics';
 import type { CaseStatisticsData } from '../../../../../../../api/reports/weekly_operations_report_schemas';
@@ -56,6 +58,11 @@ vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', ()
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   loadAllOrderSummaries: clientMocks.loadSummaries,
   ordersQueryClient: { getOrderSummaries: vi.fn() },
+}));
+
+vi.mock(import('../../../../../../../api/case_import/import_field_issues'), async (original) => ({
+  ...await original(),
+  loadCurrentImportFieldIssuesForCases: vi.fn(),
 }));
 
 const STAGE_LABELS: Readonly<Record<CoreStageCode, string>> = {
@@ -218,6 +225,8 @@ function formalServicePage(substatus?: CoreStageSubstatusCode) {
 }
 
 describe('待辦看板 Beta 正式十三階段 contract', () => {
+  let originalUrl: string;
+
   it('接受已完成但訂金未付的人工放行正式子狀態', () => {
     const stage = coreStage('deposit_settlement', 'completed', 'CASE-OVERRIDE');
 
@@ -238,29 +247,30 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
   });
 
   beforeEach(() => {
+    originalUrl = window.location.href;
+    window.history.replaceState(null, '', '#order-workbench-v2');
     vi.spyOn(caseStatisticsQueryClient, 'query').mockReset().mockImplementation(async (year, quarter, month) => statisticsResult(year, quarter, month));
-    vi.spyOn(hcmResubmissionClient, 'current').mockReset().mockResolvedValue({ items: [], next_cursor: null });
+    vi.mocked(loadCurrentImportFieldIssuesForCases).mockReset().mockResolvedValue([]);
     clientMocks.getCoreStageTimelines.mockReset();
     clientMocks.loadSummaries.mockReset();
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([]));
   });
 
-  it('從後續進件問題分頁顯示住宅型態驗證問題，保留其他案件的服務缺件提示', async () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', originalUrl);
+    vi.restoreAllMocks();
+  });
+
+  it('顯示住宅型態問題並直接導向名冊，保留其他案件提示', async () => {
     clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
       timeline('CASE-DATES', 'intake_validation', 'in_progress', {
         lifecycle: '待補件', blockers: [{ code: 'orders_terms_missing', message: '缺少欄位：服務開始日。' }],
       }),
       timeline('CASE-RESIDENCE', 'intake_validation', 'in_progress', { lifecycle: '待補件' }),
     ]));
-    const current = vi.mocked(hcmResubmissionClient.current)
-      .mockResolvedValueOnce({
-        items: [{ source_id: 40, review_identity: 'unrelated', case_no: 'CASE-OTHER', fields: ['手機'], can_correct: true }],
-        next_cursor: 40,
-      })
-      .mockResolvedValueOnce({
-        items: [{ source_id: 30, review_identity: 'residence-review', case_no: 'CASE-RESIDENCE', fields: ['居住型態'], can_correct: true }],
-        next_cursor: null,
-      });
+    vi.mocked(loadCurrentImportFieldIssuesForCases).mockResolvedValue([
+      { case_no: 'CASE-RESIDENCE', issues: [{ source: 'hcm', owner: 'client_profile', field: 'residence_type', source_field: '居住型態', code: 'invalid', message: '請確認居住型態' }] },
+    ]);
 
     render(<OrderWorkbenchV2Page />);
 
@@ -271,24 +281,41 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(within(cardFor('CASE-DATES')).getByText('缺少欄位：服務開始日。')).toBeInTheDocument();
     expect(within(cardFor('CASE-DATES')).queryByText('阻塞 · 進件與資料完整性驗證')).not.toBeInTheDocument();
     expect(within(cardFor('CASE-DATES')).queryByText('居住型態')).not.toBeInTheDocument();
-    expect(current).toHaveBeenNthCalledWith(2, 40, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    fireEvent.click(within(residence).getByRole('button', { name: /開啟案件/ }));
+    expect(window.location.hash).toBe('#clients?case=CASE-RESIDENCE&field=residence_type&from=workbench');
   });
 
   it('進件問題續頁失敗時顯示讀取失敗，不以部分清單聲稱問題已完整取得', async () => {
+    window.history.replaceState(null, '', '#clients?case=CASE-RESIDENCE');
     clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
+      timeline('CASE-OTHER', 'intake_validation', 'in_progress', { lifecycle: '待補件' }),
       timeline('CASE-RESIDENCE', 'intake_validation', 'in_progress', { lifecycle: '待補件' }),
     ]));
-    vi.mocked(hcmResubmissionClient.current)
+    const actual = await vi.importActual<typeof import('../../../../../../../api/case_import/import_field_issues')>(
+      '../../../../../../../api/case_import/import_field_issues',
+    );
+    vi.mocked(loadCurrentImportFieldIssuesForCases).mockImplementation(actual.loadCurrentImportFieldIssuesForCases);
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('intake-test-token');
+    const getCurrentIssues = vi.spyOn(transport, 'get')
       .mockResolvedValueOnce({
-        items: [{ source_id: 40, review_identity: 'unrelated', case_no: 'CASE-OTHER', fields: ['手機'], can_correct: true }],
-        next_cursor: 40,
+        data: {
+          items: [{
+            case_no: 'CASE-RESIDENCE',
+            issues: [{ source: 'hcm', owner: 'client_profile', field: 'phone', source_field: '手機', code: 'invalid', message: '請確認手機' }],
+          }],
+          next_page: 2,
+        },
       })
-      .mockRejectedValueOnce(new Error('review page unavailable'));
+      .mockRejectedValueOnce(new Error('issue page unavailable'));
 
     render(<OrderWorkbenchV2Page />);
 
-    expect(await screen.findByText('原始進件欄位問題讀取失敗，請重新讀取案件。')).toBeInTheDocument();
-    expect(within(cardFor('CASE-RESIDENCE')).queryByText('手機')).not.toBeInTheDocument();
+    await screen.findByText('CASE-RESIDENCE');
+    const residence = within(cardFor('CASE-RESIDENCE'));
+    expect(await residence.findByText('原始進件欄位問題讀取失敗，請重新讀取案件。')).toBeInTheDocument();
+    expect(residence.queryByText('手機')).not.toBeInTheDocument();
+    expect(getCurrentIssues.mock.calls.map(([, options]) => options?.params?.page)).toEqual([1, 2]);
+    expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(1);
   });
 
   it('案件列只在目前待辦是客戶結算時顯示未結清提醒', async () => {
@@ -357,6 +384,12 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
         ...orderSummary('CASE-PLAN-1', '林小芳', '歷史月嫂', '2026-10-01', '2026-10-20'),
         order_status: '訂單成立',
         staff_display_label: 'A001 歷史月嫂',
+        scheduled_staff_display_label: null,
+        recommended_staff_display_label: null,
+      },
+      {
+        ...orderSummary('CASE-PLAN-2', '已排班待開工客戶', null, '2026-10-01', '2026-10-20'),
+        order_status: '訂單成立',
         scheduled_staff_display_label: 'A005 已排班月嫂',
         recommended_staff_display_label: null,
       },
@@ -409,6 +442,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       expect(within(cardFor('CASE-ACTIVE-3')).getByText('A010 陳月嫂、A020 林月嫂')).toBeInTheDocument();
       expect(within(cardFor('CASE-PLAN-1')).getByText('尚無有效推薦方案')).toBeInTheDocument();
       expect(within(cardFor('CASE-PLAN-1')).queryByText('A005 已排班月嫂')).not.toBeInTheDocument();
+      expect(within(cardFor('CASE-PLAN-2')).getByText('A005 已排班月嫂')).toBeInTheDocument();
     });
 
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(

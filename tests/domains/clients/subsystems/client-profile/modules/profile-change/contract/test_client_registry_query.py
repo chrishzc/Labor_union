@@ -933,3 +933,24 @@ def test_change_history_preserves_optional_note_without_losing_actor_and_time(no
     assert response.data[0].reason == note.strip()
     assert response.data[0].actor == 'admin-1'
     assert response.data[0].occurred_at.isoformat() == '2026-10-17T08:00:00+00:00'
+
+
+
+def test_registry_detail_composes_fresh_case_import_query_and_propagates_failure():
+    from domains.case_import.import_field_issues import current_hcm_field_issue
+    issue = current_hcm_field_issue("email", "hcm_field_invalid:email")
+    class CurrentIssues:
+        issues = (issue,)
+        def query_case(self, case_no):
+            assert case_no == "CASE-001"
+            return self.issues
+    current = CurrentIssues()
+    application = ClientRegistryQueryApplication(_Repository(), current)
+    assert application.query("CASE-001").import_field_issues == (issue,)
+    current.issues = ()
+    assert application.query("CASE-001").import_field_issues == ()
+    def unavailable(case_no):
+        raise RuntimeError("import owner unavailable")
+    current.query_case = unavailable
+    with pytest.raises(RuntimeError, match="import owner unavailable"):
+        application.query("CASE-001")

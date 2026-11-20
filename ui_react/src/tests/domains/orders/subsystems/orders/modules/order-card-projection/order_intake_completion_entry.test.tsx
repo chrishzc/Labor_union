@@ -17,6 +17,7 @@ const FP2 = '2'.repeat(64);
 
 const profileDetail: ClientRegistryDetail = {
   case_no: 'CASE-153',
+  import_field_issues: [],
   client: { client_id: 1, version: 2,
     values: { name: '測試客戶', gender: null, phone: null, city: null, address: null,
       residence_type: null, delivery_type: null, baby_info: null, notes: null, service_type: '無休' },
@@ -63,6 +64,56 @@ describe('Orders intake repair entry', () => {
   beforeEach(() => {
     vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValue({ items: [], next_cursor: null });
     vi.spyOn(clientRegistryClient, 'query').mockResolvedValue(profileDetail);
+  });
+
+  it('以正式欄名標記已填值的進件問題，只移除回讀後已修正的提示', async () => {
+    const caseNo = 'CASE-HCM-TERMS-ISSUES';
+    const startDate = '2026-11-15';
+    const time = { start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 as const, service_hours_per_day: 8 };
+    const repairedTime = { ...time, service_hours_per_day: 7.5 };
+    const completion = {
+      case_no: caseNo, lifecycle_version: 7, current_status: '洽談中', target_status: '洽談中',
+      current_start_date: startDate, current_service_days: 20, current_service_time: time,
+      missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'], apply_allowed: false, preview_fingerprint: FP1,
+    };
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion')
+      .mockResolvedValueOnce(completion)
+      .mockResolvedValue({ ...completion, lifecycle_version: 8, current_service_time: repairedTime, preview_fingerprint: FP2 });
+    const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
+      case_no: caseNo, lifecycle_version: 7, before_start_date: startDate, after_start_date: startDate,
+      before_service_days: 20, after_service_days: 20, before_service_time: time, after_service_time: repairedTime,
+      changed_fields: ['service_time'], blockers: [], apply_allowed: true, preview_fingerprint: FP1,
+    });
+    vi.spyOn(orderIntakeCompletionClient, 'applyTerms').mockResolvedValue({
+      receipt_key: 'hours-repair', case_no: caseNo, lifecycle_version: 8, start_date: startDate, service_days: 20,
+      service_time: repairedTime, changed_fields: ['service_time'], preview_fingerprint: FP1, replayed: false,
+    });
+    const issue = { source: 'hcm', owner: 'order_terms', code: 'hcm_field_repair_required' } as const;
+    const dateIssue = { ...issue, field: 'planned_start_date', source_field: '預計服務日期', message: '請核對來源日期。' };
+    const hoursIssue = { ...issue, field: 'service_hours_per_day', source_field: '服務時間', message: '請核對來源時數。' };
+    const { rerender } = render(<OrderIntakeRepairPanel caseNo={caseNo} registry repairServiceTime issues={[dateIssue, hoursIssue]} />);
+
+    const date = await screen.findByLabelText(/約定服務開始日/);
+    const hours = screen.getByLabelText('每日服務時數');
+    expect(date).toBeEnabled();
+    expect(date).toHaveValue(startDate);
+    expect(date).toHaveAttribute('aria-invalid', 'true');
+    expect(date).toHaveAccessibleDescription(dateIssue.message);
+    expect(hours).toBeEnabled();
+    expect(hours).toHaveValue(8);
+    expect(hours).toHaveAttribute('aria-invalid', 'true');
+    expect(hours).toHaveAccessibleDescription(hoursIssue.message);
+    expect(screen.getByLabelText('每日開始時間')).not.toHaveAttribute('aria-invalid');
+
+    fireEvent.change(hours, { target: { value: '7.5' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務資料' }));
+    await screen.findByText('服務時間與每日時數已儲存並完成回讀。');
+    expect(previewTerms).toHaveBeenCalledWith(caseNo, startDate, 20, expect.objectContaining({ proposedServiceTime: repairedTime }));
+
+    rerender(<OrderIntakeRepairPanel caseNo={caseNo} registry repairServiceTime issues={[dateIssue]} />);
+    expect(screen.queryByText(hoursIssue.message)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('每日服務時數')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/約定服務開始日/)).toHaveAccessibleDescription(dateIssue.message);
   });
 
   it.each([false, true])('名冊補齊時間後用新版本完成進件；回讀失敗時保留收據及離開限制（回讀失敗=%s）', async (failReadback) => {

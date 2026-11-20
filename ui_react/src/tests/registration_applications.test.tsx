@@ -15,6 +15,7 @@ const response = (data: unknown) => ({ ok: true, status: 200, statusText: 'OK',
 
 const sourceDetail: ClientRegistryDetail = {
   case_no: '115000001',
+  import_field_issues: [],
   client: { client_id: 8, version: 1, field_capabilities: {}, values: {
     name: '來源客戶', gender: '女', phone: '0912345678', city: '新竹市', address: '測試地址',
     residence_type: '電梯大樓', delivery_type: '自然產', baby_info: '單胞胎', notes: '來源備註',

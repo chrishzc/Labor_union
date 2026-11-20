@@ -61,6 +61,7 @@ const mockPricing: CasePricing = {
 function registryBirthCount(value: '單胞胎' | '雙胞胎' | null, editable = true): ClientRegistryDetail {
   return {
     case_no: mockPricing.case_no,
+    import_field_issues: [],
     client: {
       client_id: 1,
       version: 0,

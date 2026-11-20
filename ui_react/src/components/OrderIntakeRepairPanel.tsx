@@ -1,3 +1,4 @@
+import type { ImportFieldIssue } from '../api/case_import/import_field_issues';
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
@@ -48,9 +49,12 @@ export interface OrderIntakeRepairPanelProps {
   summaryHref?: string;
   registry?: boolean;
   focusMissing?: boolean;
+  issues?: readonly ImportFieldIssue[];
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
   onNeedsRepair?: (needed: boolean) => void;
 }
+
+type OrderTermsIssueField = 'planned_start_date' | 'service_days' | 'service_hours_per_day';
 
 type IntakeOperation = 'name-preview' | 'name-apply' | 'terms-preview' | 'terms-apply' | 'completion-apply' | null;
 type IntakeReadback = {
@@ -91,6 +95,7 @@ export function OrderIntakeRepairPanel({
   summaryHref,
   registry = false,
   focusMissing = false,
+  issues = [],
   onEditStateChange,
   onNeedsRepair,
 }: OrderIntakeRepairPanelProps) {
@@ -333,6 +338,7 @@ export function OrderIntakeRepairPanel({
         preserveReadbackOnly(state, '案件已切換；保留收據，只能重新讀取補件結果。');
         return;
       }
+      setReason('');
       const readback = await refresh(controller.signal, command.operation === 'client_name');
       if (controller.signal.aborted || !isActive(request, caseNo)) {
         preserveReadbackOnly(state, '案件已切換；保留收據，只能重新讀取補件結果。');
@@ -486,7 +492,7 @@ export function OrderIntakeRepairPanel({
       return;
     }
     const repairingTime = repairServiceTime && completion?.current_service_time != null
-      && Object.values(completion.current_service_time).some((value) => value === null);
+      && (Object.values(completion.current_service_time).some((value) => value === null) || issueFor('service_hours_per_day').length > 0);
     if (repairingTime && (!startTime || !endTime || !Number.isFinite(Number(serviceHours))
       || Number(serviceHours) <= 0 || Number(serviceHours) > 24 || !Number.isInteger(Number(serviceHours) * 2))) {
       setError('請補齊服務起訖時間，並填寫以半小時為單位的每日服務時數。');
@@ -540,11 +546,14 @@ export function OrderIntakeRepairPanel({
   const termsRepairEligible = completion !== null
     && (completion.current_status === '待補件' || completion.current_status === '洽談中')
     && completion.blockers.every((blocker) => blocker === 'order_intake_completion_status_not_eligible');
-  const missingStartDate = completion?.missing_fields.includes('start_date') ?? false;
-  const missingServiceDays = completion?.missing_fields.includes('service_days') ?? false;
+  const issueFor = (field: OrderTermsIssueField) => issues.filter((issue) => issue.field === field);
+  const issueProps = (field: OrderTermsIssueField) => issueFor(field).length ? { 'aria-invalid': true as const, 'aria-describedby': `intake-${field}-issue` } : {};
+  const issueMessage = (field: OrderTermsIssueField) => issueFor(field).length > 0 && <small id={`intake-${field}-issue`} className="source-issue">{issueFor(field).map((issue) => issue.message).join('；')}</small>;
+  const missingStartDate = (completion?.missing_fields.includes('start_date') ?? false) || issueFor('planned_start_date').length > 0;
+  const missingServiceDays = (completion?.missing_fields.includes('service_days') ?? false) || issueFor('service_days').length > 0;
   const missingTerms = missingStartDate || missingServiceDays;
   const missingServiceTime = repairServiceTime && completion?.current_service_time != null
-    && Object.values(completion.current_service_time).some((value) => value === null);
+    && (Object.values(completion.current_service_time).some((value) => value === null) || issueFor('service_hours_per_day').length > 0);
   const termsRepairAllowed = termsRepairEligible && (missingTerms || editingTerms || missingServiceTime);
   const visibleCompletionBlockers = completion?.blockers.filter(
     (blocker) => !(termsRepairEligible && blocker === 'order_intake_completion_status_not_eligible'),
@@ -719,18 +728,21 @@ export function OrderIntakeRepairPanel({
                     const hours = calculateDailyServiceHours(startTime, endTime, offset);
                     if (hours !== null) setServiceHours(String(hours));
                   }}><option value="0">同日</option><option value="1">隔日</option></select></label>
-                  <label>每日服務時數<input type="number" min="0.5" max="24" step="0.5" value={serviceHours} disabled={controlsLocked} onChange={(event) => { setServiceHours(event.target.value); setTermsPreview(null); }} /></label>
+                  <label>每日服務時數<input {...issueProps('service_hours_per_day')} type="number" min="0.5" max="24" step="0.5" value={serviceHours} disabled={controlsLocked} onChange={(event) => { setServiceHours(event.target.value); setTermsPreview(null); }} /></label>
+                  {issueMessage('service_hours_per_day')}
                 </div>
                 <small>時數會依起訖時間試算；若含另行協調的休息時間，可修正為約定的實際服務時數。</small>
               </div>}
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '8px', minWidth: 0 }}>
                 {(missingStartDate || editingTerms) && <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
                   約定服務開始日
-                  <input data-intake-field="start_date" type="date" value={startDate} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
+                  <input {...issueProps('planned_start_date')} data-intake-field="start_date" type="date" value={startDate} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); }} />
+                  {issueMessage('planned_start_date')}
                 </label>}
                 {(missingServiceDays || editingTerms) && <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', minWidth: 0 }}>
                   服務天數
-                  <input data-intake-field="service_days" type="number" min="1" value={serviceDays} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
+                  <input {...issueProps('service_days')} data-intake-field="service_days" type="number" min="1" value={serviceDays} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
+                  {issueMessage('service_days')}
                 </label>}
               </div>
               {<button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>

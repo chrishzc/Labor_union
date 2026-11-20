@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol
 
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+from domains.case_import.import_field_issues import ImportFieldIssue
 from subsystems.client_profile.registry_filters import (
     FIELD_KINDS, RegistryColumnFilter, RegistryFilterField, RegistryFilterOptions,
     normalize_column_filters,
@@ -101,6 +102,7 @@ class ClientRegistryDetail:
     service_type: str | None = None
     order_dates: Mapping[str, object] | None = None
     identity_change_available: bool = False
+    import_field_issues: tuple[ImportFieldIssue, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,9 +135,14 @@ class ClientRegistryRepository(Protocol):
     def load_change_history(self, case_no: str) -> tuple[Mapping[str, Any], ...]: ...
 
 
+class ImportFieldIssuesQueryPort(Protocol):
+    def query_case(self, case_no: str) -> tuple[ImportFieldIssue, ...]: ...
+
+
 class ClientRegistryQueryApplication:
-    def __init__(self, repository: ClientRegistryRepository) -> None:
+    def __init__(self, repository: ClientRegistryRepository, import_field_issues: ImportFieldIssuesQueryPort | None = None) -> None:
         self._repository = repository
+        self._import_field_issues = import_field_issues
 
     def list(
         self,
@@ -274,6 +281,7 @@ class ClientRegistryQueryApplication:
             service_type=_nullable_text(row.get("service_type")),
             order_dates=row.get("order_dates"),
             identity_change_available=bool(row.get("identity_change_available")),
+            import_field_issues=self._import_field_issues.query_case(identity) if self._import_field_issues is not None else (),
         )
 
     def history(self, case_no: str) -> tuple[ClientRegistryChangeHistoryItem, ...]:

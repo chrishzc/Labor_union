@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Drawer } from '../../../../../../../components/Drawer';
 
@@ -26,6 +26,25 @@ afterEach(() => {
 });
 
 describe('Drawer 無障礙互動', () => {
+  it('子元件開啟時指定欄位焦點，初始動畫影格不會把焦點移到關閉按鈕', async () => {
+    function FocusedField() {
+      const inputRef = useRef<HTMLInputElement>(null);
+      useEffect(() => inputRef.current?.focus(), []);
+      return <input ref={inputRef} aria-label="指定欄位" />;
+    }
+
+    render(
+      <Drawer isOpen onClose={() => undefined} title="指定欄位抽屜">
+        <FocusedField />
+      </Drawer>,
+    );
+
+    const input = screen.getByRole('textbox', { name: '指定欄位' });
+    expect(input).toHaveFocus();
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+    expect(input).toHaveFocus();
+  });
+
   it('開啟時鎖定背景與移入焦點，Escape 關閉後把焦點還給觸發按鈕', async () => {
     render(<DrawerHarness />);
     const trigger = screen.getByRole('button', { name: '開啟抽屜' });

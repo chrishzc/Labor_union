@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import Any
+from domains.case_import.refund_account import normalize_refund_field
 
 from domains.case_import.client_import_validation import (
     VALID_CITIES,
@@ -18,6 +19,9 @@ from domains.case_import.client_import_validation import (
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 BANK_BRANCH_PATTERN = re.compile(r"^\d{7}$")
+REPAIRABLE_CLIENT_BECLASS_FIELDS = frozenset({
+    "Email", "縣市", "補助款退款:銀行代號+分行代號", "銀行帳號",
+})
 
 CLIENT_BECLASS_REQUIRED_HEADERS = frozenset({
     "查詢序號", "報名時間", "姓名", "Email", "出生年", "月", "日", "行動電話",
@@ -72,26 +76,30 @@ def validate_client_beclass_row(row: dict[str, Any]) -> dict[str, str]:
 
     email = row.get("Email")
     if not _is_blank(email) and not EMAIL_PATTERN.match(str(email).strip()):
-        errors["Email"] = f"格式不正確：{email}"
+        errors["Email"] = "格式不正確"
 
     city = row.get("縣市")
     if not _is_blank(city) and str(city).strip() not in VALID_CITIES:
-        errors["縣市"] = f"不在縣市清單中：{city}"
+        errors["縣市"] = "不在縣市清單中"
 
     if not _has_resolvable_birth_date(row):
         errors["出生年"] = "出生年/月/日不可空值，且需能解析成合法日期"
 
-    refund_account = row.get("銀行帳號")
-    if not _is_blank(refund_account):
-        refund_bank_code = row.get("補助款退款:銀行代號+分行代號")
-        if not _is_blank(refund_bank_code):
-            digits = re.sub(r"\D", "", str(refund_bank_code))
-            if not BANK_BRANCH_PATTERN.match(digits):
-                errors["補助款退款:銀行代號+分行代號"] = (
-                    f"值需為7碼數字（3碼銀行代碼+4碼分行代號）：{refund_bank_code}"
-                )
+    for field, bank in (("補助款退款:銀行代號+分行代號", True), ("銀行帳號", False)):
+        value = row.get(field)
+        if _is_blank(value):
+            continue
+        try:
+            normalize_refund_field(value, bank=bank)
+        except ValueError:
+            errors[field] = "需為7碼數字" if bank else "需為數字文字且不超過50碼"
 
     return errors
+
+
+def blocking_client_beclass_errors(row: dict[str, Any]) -> dict[str, str]:
+    return {field: message for field, message in validate_client_beclass_row(row).items()
+            if field not in REPAIRABLE_CLIENT_BECLASS_FIELDS}
 
 
 __all__ = ["validate_client_beclass_row", "fallback_case_key", "EXCEL_TO_DB_COLUMN"]

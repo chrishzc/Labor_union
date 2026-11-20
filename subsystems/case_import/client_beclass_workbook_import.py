@@ -17,7 +17,8 @@ import pandas as pd
 from shared_kernel.workbook_resource_limits import validate_workbook
 from shared_kernel.xls_workbook import excel_engine
 
-from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRED_HEADERS, validate_client_beclass_row
+from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRED_HEADERS, validate_client_beclass_row, blocking_client_beclass_errors, REPAIRABLE_CLIENT_BECLASS_FIELDS
+from domains.case_import.refund_account import normalize_refund_field
 from domains.case_import.client_beclass_binding import (
     ClientBeClassCaseUnavailableReason,
     ClientCaseBindingStatus,
@@ -304,7 +305,7 @@ class ClientBeClassWorkbookImportService:
             for row_number, case_no in pairings:
                 selections.setdefault(row_number, []).append(case_no)
             if selections and not selections.keys() <= {
-                row_number for row_number, row in workbook.rows if not validate_client_beclass_row(row)
+                row_number for row_number, row in workbook.rows if not blocking_client_beclass_errors(row)
             }:
                 raise ValueError("client_beclass_manual_pairing_row_invalid")
             request_fingerprint = workbook.digest
@@ -403,7 +404,7 @@ class ClientBeClassWorkbookImportService:
                 if not pending or (
                     len(pending) == len(selected_bindings)
                     and len({item.client_id for item, _, _ in pending}) == 1
-                    and self._write_manual_bindings(payload, pending, actor, correlation_id)
+                    and self._write_manual_bindings(payload, pending, actor, correlation_id, workbook, row_number, row)
                 ):
                     unit_of_work.commit()
                     bindings.extend(selected_bindings)
@@ -411,7 +412,8 @@ class ClientBeClassWorkbookImportService:
         issues.append(_case_unavailable_issue(row_number, payload["query_no"], reason))
         return "existing_conflict"
 
-    def _write_manual_bindings(self, payload, pending, actor, correlation_id) -> bool:
+    def _write_manual_bindings(self, payload, pending, actor, correlation_id, workbook, row_number, row) -> bool:
+        review_identity = self._record_field_warnings(workbook, row_number, row, payload)
         for index, (case, source_identity, fingerprint) in enumerate(pending):
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
             root_id = self._repository.create_bound_source_if_absent(
@@ -422,7 +424,7 @@ class ClientBeClassWorkbookImportService:
                 return False
             self._reconciliation.reconcile(case.case_no)
             self._repository.save_row_receipt(
-                source_identity, fingerprint, root_id, "created", None, actor
+                source_identity, fingerprint, root_id, "created", review_identity, actor
             )
         return True
 
@@ -431,7 +433,7 @@ class ClientBeClassWorkbookImportService:
         row_number: int,
         row: dict[str, Any],
     ) -> tuple[str, ClientBeClassWorkbookRowIssue | None]:
-        errors = validate_client_beclass_row(row)
+        errors = blocking_client_beclass_errors(row)
         payload = _normalized_payload(row)
         if errors:
             return "review_required", ClientBeClassWorkbookRowIssue(
@@ -490,7 +492,7 @@ class ClientBeClassWorkbookImportService:
                 unit_of_work.commit()
                 return "exact_replay"
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
-            errors = validate_client_beclass_row(row)
+            errors = blocking_client_beclass_errors(row)
             if errors:
                 if row_issues is not None:
                     row_issues.append(ClientBeClassWorkbookRowIssue(row_number, payload.get("query_no"), tuple(sorted(errors)), _client_validation_issue_codes(errors)))
@@ -573,9 +575,23 @@ class ClientBeClassWorkbookImportService:
                 unit_of_work.commit()
                 return outcome
             self._reconciliation.reconcile(str(bound_root["case_no"]))
-            self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", None, actor)
+            review_identity = self._record_field_warnings(workbook, row_number, row, payload)
+            self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", review_identity, actor)
             unit_of_work.commit()
             return "created"
+
+    def _record_field_warnings(self, workbook, row_number, row, payload):
+        warnings = {field: message for field, message in validate_client_beclass_row(row).items()
+                    if field in REPAIRABLE_CLIENT_BECLASS_FIELDS}
+        if not warnings:
+            return None
+        return self._persist_review(
+            self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
+            source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
+            source_row=row_number, identifier=str(payload["query_no"]),
+            source_payload=_safe_review_payload(payload),
+            issue_codes=_client_validation_issue_codes(warnings),
+        )
 
     def _save_review_outcome(
         self, workbook, row_number, payload, source_identity, fingerprint, actor,
@@ -731,7 +747,16 @@ def _case_unavailable_issue(
 
 def _normalized_payload(row: dict[str, Any]) -> dict[str, object]:
     details = {key: _text(value) for key, value in row.items() if key not in {"項次", "查詢序號", "報名時間", "姓名", "Email", "行動電話", "市話", "分機", "縣市", "郵遞區號", "地址", "補助款退款:銀行代號+分行代號", "銀行帳號", "管理者註記事項", "出生年", "月", "日"} and not str(key).startswith("Unnamed") and _text(value)}
-    return {"query_no": _text(row.get("查詢序號")), "created_at": _text(row.get("報名時間")), "name": _text(row.get("姓名")), "email": _text(row.get("Email")), "phone": _phone(row.get("行動電話")), "tel": _text(row.get("市話")), "ext": _text(row.get("分機")), "city": _text(row.get("縣市")), "zip_code": _text(row.get("郵遞區號")), "address": _text(row.get("地址")), "refund_bank_code": _digits(row.get("補助款退款:銀行代號+分行代號")), "refund_account_no": _digits(row.get("銀行帳號")), "admin_notes": _text(row.get("管理者註記事項")), "birth_date": _birth_date(row), "survey_details": json.dumps(details, ensure_ascii=False, sort_keys=True, separators=(",", ":"))}
+    return {"query_no": _text(row.get("查詢序號")), "created_at": _text(row.get("報名時間")), "name": _text(row.get("姓名")), "email": None if "Email" in validate_client_beclass_row(row) else _text(row.get("Email")), "phone": _phone(row.get("行動電話")), "tel": _text(row.get("市話")), "ext": _text(row.get("分機")), "city": None if "縣市" in validate_client_beclass_row(row) else _text(row.get("縣市")), "zip_code": _text(row.get("郵遞區號")), "address": _text(row.get("地址")), "refund_bank_code": _refund_value(row.get("補助款退款:銀行代號+分行代號"), bank=True), "refund_account_no": _refund_value(row.get("銀行帳號"), bank=False), "admin_notes": _text(row.get("管理者註記事項")), "birth_date": _birth_date(row), "survey_details": json.dumps(details, ensure_ascii=False, sort_keys=True, separators=(",", ":"))}
+
+
+def _refund_value(value: object, *, bank: bool) -> str | None:
+    if _text(value) is None:
+        return None
+    try:
+        return normalize_refund_field(value, bank=bank)
+    except ValueError:
+        return None
 
 
 def _safe_review_payload(payload: dict[str, object]) -> dict[str, object]:

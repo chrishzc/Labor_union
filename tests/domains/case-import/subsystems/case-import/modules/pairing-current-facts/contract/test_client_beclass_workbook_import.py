@@ -889,3 +889,63 @@ def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
         assert duplicate.value.args[0] == 1062
     finally:
         connection.close()
+
+
+@pytest.mark.parametrize("bank, account, expected_bank, expected_account, warning_fields", [
+    ("中文0041234", "00123456789", None, "00123456789", ("補助款退款:銀行代號+分行代號",)),
+    ("0041234", "中文001234", "0041234", None, ("銀行帳號",)),
+    ("銀行", "帳號", None, None, ("補助款退款:銀行代號+分行代號", "銀行帳號")),
+    ("００４-１２３４", "００１-２３４", "0041234", "001234", ()),
+    ("0041234", "", "0041234", None, ()),
+    ("", "001234", None, "001234", ()),
+    ("", "", None, None, ()),
+])
+def test_repairable_bank_fields_import_independently_and_keep_created_receipt(
+    monkeypatch, bank, account, expected_bank, expected_account, warning_fields,
+):
+    class WarningRepository(_Repository):
+        def save_row_receipt(self, key, fingerprint, root_id, outcome, review_identity, actor):
+            result = super().save_row_receipt(key, fingerprint, root_id, outcome, review_identity, actor)
+            self.rows[key]["review_identity"] = review_identity
+            return result
+
+    repository = WarningRepository()
+    row = {**_valid_row(), "補助款退款:銀行代號+分行代號": bank, "銀行帳號": account}
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(row))
+    reviews = []
+    monkeypatch.setattr(intake, "record_invalid_beclass_row", lambda *args, **kwargs: reviews.append(kwargs) or "review:warning")
+    service = _service(repository)
+    preview = service.preview("ignored.xlsx")
+    assert (preview.create_count, preview.review_required_count, preview.row_issues) == (1, 0, ())
+    receipt = service.apply("ignored.xlsx", "repairable-bank", preview.preview_fingerprint, "admin", "corr")
+    assert (receipt.created_count, receipt.review_required_count, receipt.row_issues) == (1, 0, ())
+    assert repository.created[0]["refund_bank_code"] == expected_bank
+    assert repository.created[0]["refund_account_no"] == expected_account
+    saved = next(iter(repository.rows.values()))
+    assert saved["outcome"] == "created"
+    assert saved["root_id"] == 1
+    assert saved["review_identity"] == ("review:warning" if warning_fields else None)
+    if warning_fields:
+        assert reviews[0]["identifier"] == "CASE-1"
+        assert set(reviews[0]["issue_codes"]) == {"client_field_invalid:" + field for field in warning_fields}
+        assert "refund_account_no" not in reviews[0]["source_payload"]
+        assert "refund_bank_code" not in reviews[0]["source_payload"]
+    replay = service.apply("ignored.xlsx", "repairable-bank", preview.preview_fingerprint, "admin", "corr")
+    assert replay.replayed_workbook
+    assert len(repository.created) == 1
+
+
+def test_repairable_email_city_do_not_bypass_identity_or_source_conflicts(monkeypatch):
+    repository = _Repository()
+    row = {**_valid_row("CHANGED-1"), "Email": "invalid", "縣市": "unknown", "銀行帳號": "中文00123"}
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(row))
+    service = _service(repository)
+    preview = service.preview("ignored.xlsx")
+    assert (preview.create_count, preview.existing_conflict_count) == (0, 1)
+    assert preview.row_issues[0].issue_codes == ("client_beclass_source_payload_conflict",)
+    missing_identity = {**row, "查詢序號": "", "姓名": "", "行動電話": ""}
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(missing_identity))
+    preview = service.preview("ignored.xlsx")
+    assert preview.review_required_count == 1
+    assert set(preview.row_issues[0].fields) == {"查詢序號", "姓名", "行動電話"}
+    assert not repository.created

@@ -129,6 +129,29 @@ class MySqlHcmResubmissionRepository:
             )
         return event_identity
 
+    def query_current_field_issues(self, case_no: str):
+        """Reuse the current review/root and skip rules without historical fallbacks."""
+        from domains.case_import.import_field_issues import current_hcm_field_issue
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT r.review_identity FROM case_import_hcm_review_rows r "
+                "JOIN case_import_hcm_review_case_bindings b ON b.review_row_id=r.id "
+                "WHERE b.case_no=%s AND NOT EXISTS (SELECT 1 FROM case_import_hcm_review_rows newer "
+                "JOIN case_import_hcm_review_case_bindings nb ON nb.review_row_id=newer.id "
+                "WHERE nb.case_no=b.case_no AND newer.id>r.id) ORDER BY r.id DESC LIMIT 1", (case_no,),
+            )
+            review = cursor.fetchone()
+        if review is None:
+            return ()
+        row = self._load_review_row(str(review["review_identity"]))
+        codes = json.loads(row["issue_codes"]) if isinstance(row["issue_codes"], str) else row["issue_codes"]
+        fields = tuple(sorted({code.split(":", 1)[1] for code in codes
+                               if code.startswith(("hcm_field_missing:", "hcm_field_invalid:"))}))
+        unresolved = self._unresolved_fields(fields, row)
+        return tuple(current_hcm_field_issue(field, code) for field in unresolved for code in codes
+                     if code in {"hcm_field_missing:" + field, "hcm_field_invalid:" + field})
+
     def query_current_reviews(self, *, limit: int, before_id: int | None):
         # Paginate the current owner predicate, never a downloaded first page.
         items = []

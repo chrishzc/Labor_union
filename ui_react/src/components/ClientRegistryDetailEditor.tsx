@@ -33,6 +33,11 @@ type Section = 'profile' | 'identity' | 'beclass' | 'care';
 const sections: readonly Section[] = ['profile', 'identity', 'beclass', 'care'];
 type Scalar = string | boolean | number | null;
 type Draft = Record<string, Scalar>;
+type RefundField = 'refund_bank_code' | 'refund_account_no';
+const canConfirmRefundBlank = (detail: ClientRegistryDetail, field: RefundField, value: Scalar | undefined) =>
+  detail.beclass.status === 'ready' && detail.beclass.source_kind === 'imported' &&
+  detail.beclass.field_capabilities[field]?.editable === true && (value === '' || value == null) &&
+  (detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.source === 'client_beclass' && issue.field === field);
 type Action = { preview: RegistryMutationPreview | null; changes: Draft; message: string; loading: boolean; key: string | null; applied: boolean; unknown: boolean };
 const idle = (): Action => ({ preview: null, changes: {}, message: '', loading: false, key: null, applied: false, unknown: false });
 const labels = { profile: profileLabels, identity: identityLabels, beclass: beclassLabels, care: careLabels };
@@ -103,6 +108,7 @@ interface Props {
 export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField = '', onRefresh, onStateChange, onOpenServiceArrangement }) => {
   const [drafts, setDrafts] = useState<Record<Section, Draft>>(() => ({ profile: { ...source(detail, 'profile') }, identity: { ...source(detail, 'identity') }, beclass: { ...source(detail, 'beclass') }, care: { ...source(detail, 'care') } }));
   const [actions, setActions] = useState<Record<Section, Action>>({ profile: idle(), identity: idle(), beclass: idle(), care: idle() });
+  const [confirmedBlankRefunds, setConfirmedBlankRefunds] = useState<RefundField[]>([]);
   const [termsState, setTermsState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [intakeNeeded, setIntakeNeeded] = useState(true);
   const [intakeState, setIntakeState] = useState<RegistryEditState>({ dirty: false, busy: false });
@@ -119,13 +125,16 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   useEffect(() => {
     const old = previous.current;
     previous.current = detail;
+    if (old.case_no !== detail.case_no || old.beclass.record_id !== detail.beclass.record_id ||
+      (old.beclass.version !== detail.beclass.version && !actions.beclass.loading && !actions.beclass.applied && !actions.beclass.unknown)) setConfirmedBlankRefunds([]);
+    else if (!actions.beclass.loading && !actions.beclass.applied && !actions.beclass.unknown) setConfirmedBlankRefunds(current => current.filter(field => canConfirmRefundBlank(detail, field, drafts.beclass[field])));
     setDrafts((current) => Object.fromEntries(sections.map((section) => {
       const oldValues = source(old, section);
       const nextValues = source(detail, section);
       return [section, { ...nextValues, ...Object.fromEntries(Object.keys(labels[section]).filter((field) =>
         (current[section][field] ?? null) !== (oldValues[field] ?? null)).map((field) => [field, current[section][field]])) }];
     })) as Record<Section, Draft>);
-    const invalidate = (action: Action): Action => ({
+    const invalidate = (action: Action): Action => action.loading || action.applied || action.unknown ? action : ({
       ...action, preview: null, changes: {}, key: null,
       message: action.preview && !action.loading && !action.applied && !action.unknown ? '資料版本已更新，請重新預覽。' : action.message,
     });
@@ -139,7 +148,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   useEffect(() => {
     if (focusField) (document.getElementById(`registry-profile-${focusField}`) ?? document.getElementById(`registry-identity-${focusField}`) ?? document.getElementById(`registry-beclass-${focusField}`) ?? document.getElementById(`registry-care-${focusField}`))?.focus();
   }, [detail.case_no, focusField]);
-  const changes = useMemo(() => ({ profile: diff(drafts.profile, source(detail, 'profile'), 'profile'), identity: diff(drafts.identity, source(detail, 'identity'), 'identity'), beclass: diff(drafts.beclass, source(detail, 'beclass'), 'beclass'), care: diff(drafts.care, source(detail, 'care'), 'care') }), [drafts, detail]);
+  const changes = useMemo(() => ({ profile: diff(drafts.profile, source(detail, 'profile'), 'profile'), identity: diff(drafts.identity, source(detail, 'identity'), 'identity'), beclass: { ...diff(drafts.beclass, source(detail, 'beclass'), 'beclass'), ...Object.fromEntries(confirmedBlankRefunds.filter(field => canConfirmRefundBlank(detail, field, drafts.beclass[field])).map(field => [field, null])) }, care: diff(drafts.care, source(detail, 'care'), 'care') }), [drafts, detail, confirmedBlankRefunds]);
   const pending = Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || repairState.busy || staffState.busy || intakeState.busy || accountState.busy || pricingState.busy;
   const dirty = Object.values(changes).some((value) => Object.keys(value).length > 0) || termsState.dirty || repairState.dirty || staffState.dirty || intakeState.dirty || accountState.dirty || pricingState.dirty;
   useEffect(() => { onStateChange({ dirty, busy: pending || termsState.busy }); }, [dirty, pending, termsState.busy, onStateChange]);
@@ -153,6 +162,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     }
   } });
   const update = (section: Section, field: string, value: Scalar) => {
+    if (section === 'beclass') setConfirmedBlankRefunds(current => current.filter(confirmed => confirmed !== field));
     setDrafts((current) => ({ ...current, [section]: { ...current[section], [field]: value } }));
     setActions((current) => ({ ...current, [section]: idle() }));
   };
@@ -160,6 +170,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     try {
       const result = await onRefresh();
       if (!alive.current || sequence !== request.current) return;
+      if (section === 'beclass') setConfirmedBlankRefunds([]);
       setDrafts((current) => ({ ...current, [section]: { ...source(result, section) } }));
       setActions((current) => ({ ...current, [section]: { ...idle(), message: `${title[section]}已儲存。` } }));
       return result;
@@ -170,7 +181,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   const apply = async (section: Section, preparePreview = true, currentDetail = detail) => {
     let approved = actions[section];
     const expectedVersion = section === 'profile' ? currentDetail.client.version : currentDetail.beclass.version ?? 0;
-    if (preparePreview && approved.preview?.current_version !== expectedVersion) approved = idle();
+    if (preparePreview && !approved.unknown && approved.preview?.current_version !== expectedVersion) approved = idle();
     if (approved.loading || ((!approved.preview || !approved.key) && !preparePreview)) return;
     const sequence = ++request.current;
     let applyStarted = false;
@@ -211,7 +222,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       <h3>{title[section]}</h3>
       <small>資料來源：{section === 'profile' ? '客戶主檔' : detail.beclass.source_kind === 'admin_manual' ? '後台人工補登（無 BeClass 匯入紀錄）' : 'BeClass 有效修正資料；保留原始匯入內容'}</small>
       {section === 'profile' && <p className="registry-section-note">基本資料空白時帶入報名資料，儲存後更新主檔。</p>}
-      {section === 'profile' && !detail.client.field_capabilities.identity_status?.editable && <dl className="registry-information-fields"><div><dt>補助身分（唯讀）</dt><dd>{display(detail.client.values.identity_status)}</dd></div></dl>}
+      {section === 'profile' && !detail.client.field_capabilities.identity_status?.editable && <dl className="registry-information-fields"><div><dt>補助身分（唯讀）</dt><dd className={(detail.import_field_issues ?? []).some(issue => issue.owner === 'client_profile' && issue.field === 'identity_status') ? 'source-issue' : undefined}>{display(detail.client.values.identity_status)}{(detail.import_field_issues ?? []).filter(issue => issue.owner === 'client_profile' && issue.field === 'identity_status').map(issue => <small key={`${issue.source}-${issue.code}`}> {issue.message}</small>)}</dd></div></dl>}
       {section === 'beclass' && <><p>退款帳戶：{detail.beclass.status !== 'ready' ? '來源待確認' : detail.beclass.values?.refund_account_status === 'complete' ? '已登錄' : '待補齊'}</p>{!detail.beclass.full_refund_account_visible && <p>目前帳號：{detail.beclass.values?.refund_account_no ?? '待補齊'}</p>}<p>{!detail.beclass.full_refund_account_visible && '退款帳號顯示末四碼；更正時請完整輸入。'}缺少銀行或帳號時為待補，儲存不會更動既有退款快照。</p><p>生日（唯讀）：{display(detail.beclass.values?.birth_date)}</p></>}
       {unavailable ? <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，請先處理綁定異常。' : '此案件尚無可編輯的 BeClass 資料。'}</p> : <>
         {section === 'care' && <p className="registry-section-note">樓層費總額請在下方訂單條件登錄。</p>}
@@ -222,18 +233,22 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
           const options = capability?.options;
           const disabled = pending || termsState.busy || capability?.editable === false;
           const id = `registry-${section === 'care' ? 'care' : owner(section)}-${field}`;
+          const issues = (detail.import_field_issues ?? []).filter((issue) => issue.owner === (section === 'profile' ? 'client_profile' : 'client_beclass') && issue.field === field);
+          const issueProps = issues.length ? { 'aria-invalid': true as const, 'aria-describedby': `${id}-issue` } : {};
+          const refundField = section === 'beclass' && (field === 'refund_bank_code' || field === 'refund_account_no') ? field : null;
+          const confirmBlank = refundField !== null && canConfirmRefundBlank(detail, refundField, value);
           const textAgreement = field === 'stair_floor_fee_mode';
-          const control = field === 'holiday_double_pay' ? <select id={id} disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value || null)}><option value="">未登錄</option><option value="是">是</option><option value="否">否</option></select> : options ? <select id={id} disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value)}>
+          const control = field === 'holiday_double_pay' ? <select {...issueProps} id={id} disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value || null)}><option value="">未登錄</option><option value="是">是</option><option value="否">否</option></select> : options ? <select {...issueProps} id={id} disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value)}>
             <option value="" disabled>請選擇</option>{value && !options.includes(String(value)) && <option value={String(value)} disabled>{String(value)}{field !== 'identity_status' && '（既有值，待修正）'}</option>}{options.map((option) => <option key={option}>{option}</option>)}
-          </select> : typeof source(detail, section)[field] === 'boolean' && !textAgreement ? <select id={id} value={value === '' || value === null ? '' : String(value)} disabled={disabled} onChange={(event) => update(section, field, event.target.value === '' ? null : event.target.value === 'true')}><option value="">未登錄</option><option value="true">是</option><option value="false">否</option></select>
-            : typeof source(detail, section)[field] === 'number' && !textAgreement ? <input id={id} type="number" disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value === '' ? null : Number(event.target.value))} />
+          </select> : typeof source(detail, section)[field] === 'boolean' && !textAgreement ? <select {...issueProps} id={id} value={value === '' || value === null ? '' : String(value)} disabled={disabled} onChange={(event) => update(section, field, event.target.value === '' ? null : event.target.value === 'true')}><option value="">未登錄</option><option value="true">是</option><option value="false">否</option></select>
+            : typeof source(detail, section)[field] === 'number' && !textAgreement ? <input {...issueProps} id={id} type="number" disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value === '' ? null : Number(event.target.value))} />
             : section === 'care' || ['notes', 'admin_notes', 'reject_reason'].includes(field)
-              ? <textarea id={id} disabled={disabled} rows={2} maxLength={field === 'reject_reason' ? 500 : 2000} value={textAgreement && typeof value !== 'string' ? display(value) : String(value)} onChange={(event) => update(section, field, event.target.value)} />
-              : <input id={id} disabled={disabled} autoComplete={field === 'refund_account_no' ? 'off' : undefined} type={field === 'refund_account_no' && !detail.beclass.full_refund_account_visible ? 'password' : field === 'email' ? 'email' : field === 'due_month' ? 'date' : 'text'} maxLength={field === 'email' || field === 'service_type' ? 100 : undefined} value={String(value)} onChange={(event) => update(section, field, event.target.value)} />;
-          return <label key={field} htmlFor={id}>{label}{control}{capability?.editable === false && <small>{capability.reason === 'multi_birth_count_locked_after_service_start' ? '服務已開始，胎數會影響費率，不能在此直接修改。' : '此欄位目前不可修改。'}</small>}{section === 'care' && detail.order_information.field_issues[field] && <small className="source-issue">來源內容無法判定，請核對後補登。</small>}{field === 'identity_status' && <small>儲存後會依一般市民身分重算客戶應付、月嫂薪資及補助。</small>}</label>;
-        })}{section === 'profile' && <label htmlFor="registry-identity-id_number">身分證字號<input id="registry-identity-id_number" autoComplete="off" maxLength={10} value={String(drafts.identity.id_number ?? '')} disabled={pending || termsState.busy || detail.beclass.status !== 'ready' || detail.beclass.field_capabilities.id_number?.editable === false} onChange={event => update('identity', 'id_number', event.target.value)} />{detail.beclass.status !== 'ready' && <small>報名來源尚未確認，暫時無法修改身分證字號。</small>}</label>}</div>
+              ? <textarea {...issueProps} id={id} disabled={disabled} rows={2} maxLength={field === 'reject_reason' ? 500 : 2000} value={textAgreement && typeof value !== 'string' ? display(value) : String(value)} onChange={(event) => update(section, field, event.target.value)} />
+              : <input {...issueProps} id={id} disabled={disabled} autoComplete={field === 'refund_account_no' ? 'off' : undefined} type={field === 'refund_account_no' && !detail.beclass.full_refund_account_visible ? 'password' : field === 'email' ? 'email' : field === 'due_month' ? 'date' : 'text'} maxLength={field === 'email' || field === 'service_type' ? 100 : undefined} value={String(value)} onChange={(event) => update(section, field, event.target.value)} />;
+          return <label key={field} htmlFor={id}>{label}{control}{issues.length > 0 && <small id={`${id}-issue`} className="source-issue">{issues.map((issue) => issue.message).join('；')}</small>}{confirmBlank && refundField !== null && <button type="button" aria-label="確認此欄留空" disabled={disabled} aria-pressed={confirmedBlankRefunds.includes(refundField)} onClick={() => { setConfirmedBlankRefunds(current => current.includes(refundField) ? current.filter(confirmed => confirmed !== refundField) : [...current, refundField]); setActions(current => ({ ...current, beclass: idle() })); }}>確認此欄留空</button>}{capability?.editable === false && <small>{capability.reason === 'multi_birth_count_locked_after_service_start' ? '服務已開始，胎數會影響費率，不能在此直接修改。' : '此欄位目前不可修改。'}</small>}{section === 'care' && detail.order_information.field_issues[field] && <small className="source-issue">來源內容無法判定，請核對後補登。</small>}{field === 'identity_status' && <small>儲存後會依一般市民身分重算客戶應付、月嫂薪資及補助。</small>}</label>;
+        })}{section === 'profile' && <label htmlFor="registry-identity-id_number">身分證字號<input aria-invalid={(detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.field === 'id_number') || undefined} aria-describedby={(detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.field === 'id_number') ? 'registry-identity-id_number-issue' : undefined} id="registry-identity-id_number" autoComplete="off" maxLength={10} value={String(drafts.identity.id_number ?? '')} disabled={pending || termsState.busy || detail.beclass.status !== 'ready' || detail.beclass.field_capabilities.id_number?.editable === false} onChange={event => update('identity', 'id_number', event.target.value)} />{(detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.field === 'id_number') && <small id="registry-identity-id_number-issue" className="source-issue">{(detail.import_field_issues ?? []).filter(issue => issue.owner === 'client_beclass' && issue.field === 'id_number').map(issue => issue.message).join('；')}</small>}{detail.beclass.status !== 'ready' && <small>報名來源尚未確認，暫時無法修改身分證字號。</small>}</label>}</div>
         <div className="registry-actions">
-          <button type="button" disabled={pending || termsState.busy} onClick={() => { setDrafts((current) => ({ ...current, [section]: { ...source(detail, section) }, ...(section === 'profile' ? { identity: { ...source(detail, 'identity') } } : {}) })); setActions((current) => ({ ...current, [section]: idle(), ...(section === 'profile' ? { identity: idle() } : {}) })); }}>取消變更</button>
+          <button type="button" disabled={pending || termsState.busy} onClick={() => { if (section === 'beclass') setConfirmedBlankRefunds([]); setDrafts((current) => ({ ...current, [section]: { ...source(detail, section) }, ...(section === 'profile' ? { identity: { ...source(detail, 'identity') } } : {}) })); setActions((current) => ({ ...current, [section]: idle(), ...(section === 'profile' ? { identity: idle() } : {}) })); }}>取消變更</button>
           <button type="button" disabled={pending || termsState.busy} onClick={() => void (section === 'profile' ? saveProfile() : apply(section))}>儲存</button>
           {action.applied && !action.loading && <button type="button" onClick={() => { const sequence = ++request.current; setActions((current) => ({ ...current, [section]: { ...current[section], loading: true } })); void refresh(section, sequence); }}>重新讀取已儲存資料</button>}
           {action.unknown && !action.loading && <button type="button" onClick={() => void apply(section)}>確認同一筆儲存結果</button>}
@@ -262,7 +277,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     {renderSection('profile')}
     {renderSection('beclass')}{renderSection('care')}
     <section id="registry-order-terms" className="registry-editor"><h3>目前訂單條件</h3><dl className="registry-information-fields">{Object.entries({planned_start_date: '整案預計開始日', planned_end_date: '整案預計結束日', actual_start_date: '整案實際開始日', actual_end_date: '整案實際結束日'}).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{detail.order_dates?.[field as keyof NonNullable<typeof detail.order_dates>] ?? '尚未登錄'}</dd></div>)}</dl><p>服務方式（排班參考）：{detail.service_type ?? '尚未登錄'}</p>
-      <fieldset disabled={pending && !intakeState.busy} className="registry-terms-fieldset">{intakeOpened ? <OrderIntakeRepairPanel caseNo={detail.case_no} repairServiceTime registry focusMissing={focusField === 'intake'} onChanged={refreshIntake} onEditStateChange={setIntakeState} onNeedsRepair={setIntakeNeeded} /> : detail.order_terms.status === 'ready' && detail.order_terms.data
+      <fieldset disabled={pending && !intakeState.busy} className="registry-terms-fieldset">{intakeOpened ? <OrderIntakeRepairPanel caseNo={detail.case_no} repairServiceTime registry issues={(detail.import_field_issues ?? []).filter((issue) => issue.owner === 'order_terms')} focusMissing={focusField === 'intake'} onChanged={refreshIntake} onEditStateChange={setIntakeState} onNeedsRepair={setIntakeNeeded} /> : detail.order_terms.status === 'ready' && detail.order_terms.data
         ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} fromRegistry onObserved={refreshRelated} onEditStateChange={setTermsState} />
         : <OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} />}
       </fieldset>{bootstrapRequired && (!intakeOpened || !intakeNeeded) && <fieldset disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || intakeState.busy || accountState.busy || pricingState.busy} className="registry-terms-fieldset"><CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={async () => { await onRefresh(); }} onEditStateChange={setRepairState} /></fieldset>}

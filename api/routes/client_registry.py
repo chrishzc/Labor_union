@@ -312,6 +312,7 @@ def get_client_registry(
             }
         payload = {
             "case_no": detail.case_no,
+            "import_field_issues": [issue.as_dict() for issue in detail.import_field_issues],
             "order_dates": detail.order_dates,
             "service_type": detail.service_type,
             "client": {

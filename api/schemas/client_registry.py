@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.schemas.order_terms import OrderTermsQueryView
+from api.schemas.import_field_issues import ImportFieldIssueView
 
 
 class _StrictModel(BaseModel):
@@ -195,6 +196,7 @@ class RegistryOrderDatesView(_StrictModel):
 
 
 class ClientRegistryDetailView(_StrictModel):
+    import_field_issues: tuple[ImportFieldIssueView, ...] = ()
     order_dates: RegistryOrderDatesView | None = None
     case_no: str = Field(min_length=1, max_length=50)
     service_type: str | None = None

@@ -5,6 +5,7 @@ Description: 提供桌面與 LIFF 共用的唯讀通知待辦分頁與單筆操�
 from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from api.dependencies.admin_auth import require_admin, admin_actor_context, has_required_capability
+from api.dependencies.import_field_issues import build_import_field_issues_query
 from api.dependencies.line_identity import get_line_identity_application, get_line_identity_review_application
 from api.dependencies.staff_profile_change import staff_profile_change_staging
 from api.dependencies.line_runtime import get_line_order_group_query_application, get_line_delivery_task_admin_application
@@ -46,6 +47,7 @@ SOURCES = {
     Source.CUSTOMER_BINDING: ('客戶綁定人工提醒', 'review', Cap.IDENTITY_BINDING_READ),
     Source.STAFF_BINDING: ('月嫂綁定人工提醒', 'review', Cap.IDENTITY_BINDING_READ),
     Source.STAFF_PROFILE: ('月嫂資料異動', 'review', 'data_browser.write'),
+    Source.IMPORT_FIELDS: ('進件資料待修正', 'review', 'data_browser.read'),
     Source.FOLLOWUP: ('月嫂回覆待跟進', 'review', Cap.MATCHING_READ),
     Source.RECOMMENDATION: ('推薦確認與簽約', 'review', Cap.MATCHING_READ),
     Source.SERVICE_START: ('開工、順延與代班', 'review', Cap.MATCHING_OVERRIDE),
@@ -64,10 +66,15 @@ def _allowed(principal, source):
     return capability is None or has_required_capability(principal, str(capability))
 
 
+_DESKTOP_ONLY_SOURCES = frozenset({Source.STAFF_PROFILE, Source.IMPORT_FIELDS})
+
+
 def _catalog(principal, *, mobile=False):
     return [NotificationSourceView(source=key, label=value[0], group=value[1])
             for key, value in SOURCES.items()
-            if key != Source.RUNTIME and not (mobile and key == Source.STAFF_PROFILE) and _allowed(principal, key)]
+            if key != Source.RUNTIME
+            and not (mobile and key in _DESKTOP_ONLY_SOURCES)
+            and _allowed(principal, key)]
 
 
 def _item(source, identity, title, summary, reason, **kwargs):
@@ -146,6 +153,20 @@ def _read_source(source, cursor, principal):
                        '請核對異動前後內容。', reference_id=row['id'],
                        person=f"月嫂 #{row['staff_id']}", expected_version=row['version']) for row in rows]
         return NotificationPage(items=items, next_cursor=next_cursor)
+    elif source == Source.IMPORT_FIELDS:
+        connection = get_connection()
+        try:
+            result = build_import_field_issues_query(connection).query_page(page=page, page_size=SIZE)
+            items = [
+                _item(source, entry.case_no, '進件資料待修正', f'{len(entry.issues)} 項欄位問題待修正。',
+                      '請至客戶名冊核對同案欄位。', case_no=entry.case_no,
+                      import_field_issues=[issue.as_dict() for issue in entry.issues])
+                for entry in result.items
+            ]
+            return NotificationPage(items=items, total=result.total,
+                                    next_cursor=result.next_page - 1 if result.next_page is not None else None)
+        finally:
+            connection.close()
     elif source == Source.FOLLOWUP:
         result = query_manual_followups(get_connection, now, page=page, limit=SIZE)
         total = result.total
@@ -267,7 +288,7 @@ def source_page(source: Source, cursor: NotificationCursor=0, principal=Depends(
 @router.post('/api/v1/line/mobile-admin/notification-tasks/{source}', response_model=BaseResponse[NotificationPage])
 def mobile_source_page(source: Source, body: MobileNotificationQuery):
     from api.routes.line_mobile_admin import _mobile_admin_context
-    if source == Source.STAFF_PROFILE:
+    if source in _DESKTOP_ONLY_SOURCES:
         raise typed_http_error(404, 'not_found', 'notification_source_not_found',
                                '請由後台通知事項處理。', 'notification-workbench')
     retired_capabilities = {

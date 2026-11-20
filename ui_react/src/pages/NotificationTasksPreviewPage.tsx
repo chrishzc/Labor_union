@@ -10,6 +10,7 @@ import {
   RefreshCw, Search, Send, ShieldCheck, TriangleAlert, Wallet, X,
 } from 'lucide-react';
 import { notificationTasksClient as client, notificationFailure, notifyNotificationTasksChanged, type NotificationItem, type NotificationPage, type NotificationSource, type NotificationCatalog } from '../api/line_notifications/notification_tasks_client';
+import { importFieldIssueHref } from '../api/case_import/import_field_issues';
 import { NotificationTaskActions, notificationHref } from '../components/NotificationTaskActions';
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { formatTaipeiDateTime } from '../shared/taipeiTime';
@@ -25,7 +26,7 @@ const TASK_GROUPS = [
 const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
 const PRIMARY:Record<NotificationSource,string> = {
   registration:'查看申請',identity:'審核身分綁定',
-  staff_profile:'審核月嫂資料異動',
+  staff_profile:'審核月嫂資料異動',import_fields:'前往客戶名冊修正',
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
   followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',
   deposit:'發送繳費提醒',payment_receipt:'前往帳務確認',group:'查看建群指令',overdue:'發送提醒',
@@ -98,6 +99,7 @@ export function NotificationTasksPage() {
   const currentPage=Math.min(page,pages);
   const visible=filtered.slice((currentPage-1)*PAGE_SIZE,currentPage*PAGE_SIZE);
   const selected=visible.find(item=>item.id===selectedId) ?? visible[0];
+  const selectedCaseNo=selected?.case_no;
   const scopedSources=catalog.filter(s=>group==='all'||s.group===group);
   const pendingMore=scopedSources.filter(s=>pools[s.source]?.next_cursor!=null);
   const failedSources=scopedSources.filter(s=>failures[s.source]);
@@ -162,7 +164,7 @@ export function NotificationTasksPage() {
           const Icon = item.tone === 'danger' ? TriangleAlert : item.group === 'review' ? ClipboardCheck : item.group === 'reminder' ? Bell : MessageCircle;
           return <button type="button" key={item.id} data-notification-id={item.id} className={`notification-preview-row${selected?.id === item.id ? ' selected' : ''}`} aria-pressed={selected?.id === item.id} onClick={() => select(item)}>
             <span className={`notification-preview-item-icon ${item.tone ?? ''}`}><Icon size={19} aria-hidden="true" /></span>
-            <span className="notification-preview-row-content"><span className="notification-preview-row-title"><strong>{item.title}</strong><span className={`np-tag ${item.tone ?? ''}`}>{item.tag}</span></span><span className="notification-preview-row-subject">{item.caseLabel}<span>·</span>{item.person}</span><span className="notification-preview-row-summary">{item.summary}</span><span className="notification-preview-row-time"><Clock3 size={12} aria-hidden="true" />{item.time}</span></span>
+            <span className="notification-preview-row-content"><span className="notification-preview-row-title"><strong>{item.title}</strong><span className={`np-tag ${item.tone ?? ''}`}>{item.tag}</span></span><span className="notification-preview-row-subject">{item.caseLabel}{item.person && <><span>·</span>{item.person}</>}</span><span className="notification-preview-row-summary">{item.summary}</span>{item.time && <span className="notification-preview-row-time"><Clock3 size={12} aria-hidden="true" />{item.time}</span>}</span>
             <ChevronRight className="notification-preview-row-arrow" size={17} aria-hidden="true" />
           </button>;
         })}</div> : <div className="notification-preview-empty"><Inbox size={34} aria-hidden="true" /><h2>{emptyTitle}</h2><p>{emptyMessage}</p>
@@ -177,8 +179,14 @@ export function NotificationTasksPage() {
           <div className="notification-preview-detail-heading"><span>事項詳細內容</span><span className={`np-tag ${selected.tone ?? ''}`}>{selected.tag}</span></div>
           <h2>{selected.title}</h2>
           <p className="notification-preview-detail-summary">{selected.summary}</p>
-          <dl className="notification-preview-facts"><div><dt>案件／申請</dt><dd>{selected.caseLabel}</dd></div><div><dt>{selected.personLabel}</dt><dd>{selected.person}</dd></div><div><dt>時間</dt><dd>{selected.time || '未提供'}</dd></div></dl>
+          <dl className="notification-preview-facts"><div><dt>案件／申請</dt><dd>{selected.caseLabel}</dd></div>{selected.source !== 'import_fields' && <><div><dt>{selected.personLabel}</dt><dd>{selected.person}</dd></div><div><dt>時間</dt><dd>{selected.time || '未提供'}</dd></div></>}</dl>
           <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />處理原因</h3><p>{selected.reason}</p></section>
+          {selected.source === 'import_fields' && selectedCaseNo && <section className="notification-preview-reason">
+            <h3>待修正欄位</h3>
+            <ul>{selected.import_field_issues?.map(issue => <li key={JSON.stringify([issue.source, issue.owner, issue.field, issue.source_field, issue.code])}>
+              <a href={importFieldIssueHref(selectedCaseNo, issue)}>{issue.message}</a>
+            </li>)}</ul>
+          </section>}
           {selected.recipient && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>
             <div className="notification-preview-message-bubble">{selected.message ?? '請在下方原流程查看通知內容與寄送結果。'}</div>
           </section>}

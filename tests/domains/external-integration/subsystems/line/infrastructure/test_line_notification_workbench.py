@@ -172,7 +172,7 @@ def test_pending_manual_replay_is_a_typed_state_conflict(monkeypatch):
 
 
 @pytest.mark.parametrize('source',[source for source in NotificationSource if source not in {
-    NotificationSource.LEAVE, NotificationSource.LOG, NotificationSource.STAFF_PROFILE,
+    NotificationSource.LEAVE, NotificationSource.LOG, NotificationSource.STAFF_PROFILE, NotificationSource.IMPORT_FIELDS,
 }])
 def test_desktop_and_verified_liff_use_same_projection_and_cursor(monkeypatch,source):
     cursor='original-owner-cursor' if source == NotificationSource.NOTIFICATION_FAILURE else 1
@@ -202,6 +202,94 @@ def test_staff_profile_review_reminder_is_desktop_only(monkeypatch):
     with pytest.raises(HTTPException) as failure:
         query.mobile_source_page(source, query.MobileNotificationQuery(line_id_token='synthetic'))
     assert failure.value.status_code == 404
+
+
+def test_import_fields_projects_current_case_issues_and_preserves_empty_candidate_page(monkeypatch):
+    from domains.case_import.import_field_issues import ImportFieldIssue
+    from subsystems.case_import.current_import_field_issues import CurrentImportFieldIssuesQuery
+
+    first = ImportFieldIssue('client_beclass', 'client_profile', 'email', 'Email',
+                             'client_field_invalid:Email', 'Email來源資料有誤，請補正此欄位。')
+    second = ImportFieldIssue('hcm', 'order_terms', 'service_days', '希望服務天數',
+                              'field_invalid:希望服務天數', '希望服務天數尚未完成。')
+    current = {'CASE-1': (first, second)}
+    candidates = ('CASE-1', *(f'CASE-{index}' for index in range(2, query.SIZE + 1)), 'CASE-NEXT')
+    current['CASE-NEXT'] = (second,)
+    repository = SimpleNamespace(
+        candidate_case_nos=lambda *, offset, limit, case_no: candidates[offset:offset + limit],
+        query_case=lambda case_no: current.get(case_no, ()),
+    )
+    closed = []
+    monkeypatch.setattr(query, 'get_connection', lambda: SimpleNamespace(close=lambda: closed.append(True)))
+    monkeypatch.setattr(query, 'build_import_field_issues_query', lambda _: CurrentImportFieldIssuesQuery(repository))
+    monkeypatch.setattr(query, 'has_required_capability', lambda _, cap: cap == 'data_browser.read')
+    app = FastAPI()
+    app.include_router(query.router)
+    app.dependency_overrides[require_admin] = lambda: PRINCIPAL
+
+    with TestClient(app) as client:
+        source_path = '/api/v1/line/notification-tasks/import_fields'
+        page = client.get(source_path).json()['data']
+        assert len(page['items']) == 1
+        todo = page['items'][0]
+        assert (todo['id'], todo['case_no'], todo['group']) == ('import_fields:CASE-1', 'CASE-1', 'review')
+        assert todo['import_field_issues'] == [first.as_dict(), second.as_dict()]
+        assert todo['recipient'] is None and todo['message'] is None and todo['person'] == ''
+        assert page['total'] is None and page['next_cursor'] == 1
+
+        current['CASE-1'] = (second,)
+        partial = client.get(source_path).json()['data']['items']
+        assert len(partial) == 1 and partial[0]['id'] == todo['id']
+        assert partial[0]['import_field_issues'] == [second.as_dict()]
+
+        del current['CASE-1']
+        assert client.get(source_path).json()['data'] == {'items': [], 'total': None, 'next_cursor': 1}
+        next_page = client.get(source_path, params={'cursor': 1}).json()['data']
+        assert [item['id'] for item in next_page['items']] == ['import_fields:CASE-NEXT']
+        assert next_page['next_cursor'] is None
+    assert len(closed) == 4
+
+
+def test_import_fields_is_catalogued_for_desktop_roster_readers_only(monkeypatch):
+    allowed = {'data_browser.read'}
+    monkeypatch.setattr(query, 'has_required_capability', lambda _, cap: cap in allowed)
+    monkeypatch.setattr(line_mobile_admin, '_mobile_admin_context', lambda *_: (PRINCIPAL, None))
+    monkeypatch.setattr(query, 'get_connection', lambda: pytest.fail('inaccessible source opened a connection'))
+    app = FastAPI()
+    app.include_router(query.router)
+    app.dependency_overrides[require_admin] = lambda: PRINCIPAL
+
+    with TestClient(app) as client:
+        desktop = '/api/v1/line/notification-tasks'
+        mobile = '/api/v1/line/mobile-admin/notification-tasks'
+        body = {'line_id_token': 'synthetic-token'}
+        descriptor = {'source': 'import_fields', 'label': '進件資料待修正', 'group': 'review'}
+        assert descriptor in client.get(desktop).json()['data']
+        assert descriptor not in client.post(mobile, json=body).json()['data']
+        assert client.post(f'{mobile}/import_fields', json=body).status_code == 404
+        allowed.clear()
+        assert descriptor not in client.get(desktop).json()['data']
+        response = client.get(f'{desktop}/import_fields')
+        assert response.status_code == 403
+        assert response.json()['detail']['error']['code'] == 'notification_source_forbidden'
+
+
+def test_import_fields_owner_error_closes_connection_and_returns_typed_unavailable(monkeypatch):
+    closed = []
+    monkeypatch.setattr(query, 'has_required_capability', lambda _, cap: cap == 'data_browser.read')
+    monkeypatch.setattr(query, 'get_connection', lambda: SimpleNamespace(close=lambda: closed.append(True)))
+
+    def fail(**_kwargs):
+        raise RuntimeError('private raw owner error')
+
+    monkeypatch.setattr(query, 'build_import_field_issues_query', lambda _: SimpleNamespace(query_page=fail))
+    with pytest.raises(HTTPException) as failure:
+        query.query_source(NotificationSource.IMPORT_FIELDS, 0, PRINCIPAL)
+    assert failure.value.status_code == 503
+    assert failure.value.detail['error']['code'] == 'notification_source_unavailable'
+    assert failure.value.detail['error']['retryable'] is True
+    assert 'private raw owner error' not in str(failure.value.detail)
+    assert closed == [True]
 
 
 def test_liff_unbound_admin_stops_before_any_pending_query(monkeypatch):

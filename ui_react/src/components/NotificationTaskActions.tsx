@@ -1,11 +1,13 @@
 /** Notification links and guidance for work performed outside this system. */
 import { useRef, useState } from 'react';
+import { importFieldIssueHref } from '../api/case_import/import_field_issues';
 import { notificationTasksClient, notificationFailure, type NotificationItem } from '../api/line_notifications/notification_tasks_client';
 export function notificationHref(item:NotificationItem):string | null {
   const caseNo = encodeURIComponent(item.case_no ?? '');
   switch(item.source) {
     case 'registration': return `#clients?tab=applications&registration=${item.reference_id}`;
     case 'staff_profile': return `#staff?profile_request=${item.reference_id}`;
+    case 'import_fields': return item.case_no ? importFieldIssueHref(item.case_no, item.import_field_issues?.[0]) : null;
     case 'service_start': return `#scheduling?tab=coordination&case_no=${caseNo}&request=${item.reference_id}`;
     case 'delivery': return `#line-management?tab=delivery&task=${item.reference_id}`;
     case 'payment_receipt': return '#finance?'+new URLSearchParams({tab:'accounting-warnings',case_no:item.case_no??'',

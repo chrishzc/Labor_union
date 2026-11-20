@@ -1,3 +1,4 @@
+import { loadCurrentImportFieldIssuesForCases, type ImportFieldIssueCase } from '../api/case_import/import_field_issues';
 /**
  * File: ClientRosterPage.tsx
  * Description: 呈現客戶名冊清單，支援分頁、Excel 式篩選、可調欄距與自訂顯示凍結欄位。
@@ -87,6 +88,16 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [appliedFilters, setAppliedFilters] = useState<RosterFilters>(defaultFilters);
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
   const [pageOffset, setPageOffset] = useState(0);
+  const [listIssues, setListIssues] = useState<ReadonlyMap<string, ImportFieldIssueCase>>(new Map());
+  const [listIssuesError, setListIssuesError] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    setListIssues(new Map()); setListIssuesError(false);
+    void loadCurrentImportFieldIssuesForCases((page?.items ?? []).map(item => item.case_no), { signal: controller.signal })
+      .then(items => { if (!controller.signal.aborted) setListIssues(new Map(items.map(item => [item.case_no, item]))); })
+      .catch(() => { if (!controller.signal.aborted) setListIssuesError(true); });
+    return () => controller.abort();
+  }, [page]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
@@ -364,6 +375,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     {exportMessage && <p role="status" className="client-roster-message">{exportMessage}</p>}
     {exportError && <p role="alert" className="client-roster-message">{exportError}</p>}
     {error && <p role="alert" className="client-roster-message">{error}</p>}
+    {listIssuesError && <p role="alert" className="client-roster-message">進件欄位問題讀取失敗，請重新整理名冊。</p>}
     {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
     {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
     {(page || error) && <div className="client-roster-table-frame">
@@ -396,7 +408,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           const tdProps = tableLayout.getTdProps(col.id);
           const content = renderCellContent(item, col.id);
           const cellTitle = typeof content === 'string' && content ? content : typeof content === 'number' ? String(content) : undefined;
-          return <td key={col.id} className={tdProps.className} style={tdProps.style} title={cellTitle}>{content}</td>;
+          const issues = (listIssues.get(item.case_no)?.issues ?? []).filter(issue => issue.field === col.id && issue.owner !== 'order_terms');
+          return <td key={col.id} className={tdProps.className} style={tdProps.style} title={cellTitle}>{content}{issues.length > 0 && <small className="source-issue"> {issues.map(issue => issue.message).join('；')}</small>}</td>;
         })}
       </tr>)}</tbody>
     </table></div>}
@@ -435,7 +448,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       {(onReturnToCase || (canManageOrder && detail && (canReopen || !isCancellationTerminalStatus(selectedOrderStatus)))) && selectedCaseNo && <div className="registry-return-row">
       {onReturnToCase && <button type="button" disabled={editState.busy || deletionBusy} onClick={() => {
         if (editState.busy || deletionBusy) return;
-        onReturnToCase(selectedCaseNo);
+        requestLeave(() => onReturnToCase(selectedCaseNo));
       }}>返回案件處理 →</button>}
       {canReopen && detail?.case_no === selectedCaseNo &&
         <button type="button" disabled={editState.busy || deletionBusy}

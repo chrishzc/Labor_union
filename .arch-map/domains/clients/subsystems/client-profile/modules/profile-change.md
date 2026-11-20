@@ -5,6 +5,7 @@
 - subsystem: `client-profile`
 
 ## Implementation
+- `subsystems/client_profile/registry_query.py` — 注入Case Import typed Query，詳情fresh組合import_field_issues，不保存問題狀態。
 - `ui_react/src/components/ClientRegistryAccountingSummary.tsx` — 唯讀組合原 finance typed case Query，歷史辨識與人工設定分開。
 - 客戶補助身分限服務開始前由補助市民或原住民改一般市民，沿既有帳務計價 writer 同交易重算；BeClass 生日／整案日期為唯讀；客戶主檔行政註記沿管理端 Client Profile Preview／Apply，可清空；退款欄位沿 BeClass correction writer，名冊表格使用可聚焦的有界捲動區。
 - `domains/clients/profile.py`

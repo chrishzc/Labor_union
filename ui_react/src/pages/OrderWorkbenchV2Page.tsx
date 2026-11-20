@@ -18,7 +18,7 @@ import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import { WorkbenchCaseStatistics } from '../components/WorkbenchCaseStatistics';
-import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
+import { loadCurrentImportFieldIssuesForCases, importFieldIssueHref, type ImportFieldIssueCase } from '../api/case_import/import_field_issues';
 import {
   orderCoreStageProjectionClient,
   type OrderCoreStageProjectionQueryParams,
@@ -67,7 +67,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   );
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryQueryFailed, setSummaryQueryFailed] = useState(false);
-  const [intakeReviews, setIntakeReviews] = useState<ReadonlyMap<string, HcmCurrentReview>>(new Map());
+  const [intakeReviews, setIntakeReviews] = useState<ReadonlyMap<string, ImportFieldIssueCase>>(new Map());
   const [intakeReviewsError, setIntakeReviewsError] = useState(false);
   const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(null);
   const [search, setSearch] = useState('');
@@ -80,7 +80,9 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   } | null>(null);
   const requestSequence = useRef(0);
   const [caseLink, setCaseLink] = useState(() => window.location.hash);
-  const caseLinkParams = new URLSearchParams(caseLink.split('?')[1]);
+  const caseLinkParams = new URLSearchParams(
+    caseLink.startsWith('#order-workbench-v2?') ? caseLink.split('?')[1] : '',
+  );
   const requestedCase = caseLinkParams.get('case') ?? '';
   const requestedSubstitute = caseLinkParams.get('substitute');
   const openUpcomingStaffing = caseLinkParams.get('staffing') === 'upcoming';
@@ -219,8 +221,8 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
     const controller = new AbortController();
     setIntakeReviews(new Map());
     setIntakeReviewsError(false);
-    const caseNos = (view?.items ?? []).filter((item) => item.lifecycleStatus === '待補件').map((item) => item.id);
-    void loadCurrentHcmReviewsForCases(caseNos, { signal: controller.signal })
+    const caseNos = (view?.items ?? []).map((item) => item.id);
+    void loadCurrentImportFieldIssuesForCases(caseNos, { signal: controller.signal })
       .then((reviews) => {
         if (!controller.signal.aborted) setIntakeReviews(new Map(reviews.map((review) => [review.case_no, review])));
       })
@@ -367,7 +369,9 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
             const primaryNotice = item.blockers[0] ?? item.warnings[0] ?? null;
             const entryDisabled = refreshing || error !== null;
             const openWork = () => {
-              if (!entryDisabled) setSelectedDrawer({ caseNo: item.id, branchType: item.branchType });
+              if (entryDisabled) return;
+              if (stage?.code === 'intake_validation') window.location.hash = importFieldIssueHref(item.id, intakeReviews.get(item.id)?.issues[0]);
+              else setSelectedDrawer({ caseNo: item.id, branchType: item.branchType });
             };
             return (
               <tr
@@ -405,11 +409,11 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
                   {intakeReviews.get(item.id) && (
                     <div className="order-v2-notice warning">
                       <strong>進件欄位待修正</strong>
-                      <span>{intakeReviews.get(item.id)!.fields.join('、')}</span>
-                      <small>可至客戶名冊修正資料。</small>
+                      <span>{intakeReviews.get(item.id)!.issues.map((issue) => issue.source_field).join('、')}</span>
+                      <a href={importFieldIssueHref(item.id, intakeReviews.get(item.id)?.issues[0])} onClick={(event) => event.stopPropagation()}>修正資料</a>
                     </div>
                   )}
-                  {intakeReviewsError && item.lifecycleStatus === '待補件' && (
+                  {intakeReviewsError && (
                     <div className="order-v2-notice warning" role="status">原始進件欄位問題讀取失敗，請重新讀取案件。</div>
                   )}
                   {primaryNotice && (
@@ -419,7 +423,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
                       {item.blockers.length + item.warnings.length > 1 && <small>另有 {item.blockers.length + item.warnings.length - 1} 項，請在案件工作中查看。</small>}
                     </div>
                   )}
-                  {!intakeReviews.get(item.id) && !(intakeReviewsError && item.lifecycleStatus === '待補件') && !primaryNotice && <span className="order-v2-row-meta">—</span>}
+                  {!intakeReviews.get(item.id) && !intakeReviewsError && !primaryNotice && <span className="order-v2-row-meta">—</span>}
                 </td>
                 <td>
                   <button type="button" className="order-v2-open-case" disabled={entryDisabled}

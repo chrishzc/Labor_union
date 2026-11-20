@@ -10,6 +10,8 @@ import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { historicalAdoptionEvidenceClient } from '../../../../../../../api/orders/historical_adoption_evidence_client';
 import { accountingPricingClient } from '../../../../../../../api/client_finance/accounting_pricing_client';
+import { historicalServiceAccountingClient } from '../../../../../../../api/orders/historical_service_accounting_client';
+import { HistoricalServiceAccountingWorkbench } from '../../../../../../../components/HistoricalServiceAccountingWorkbench';
 
 vi.mock('../../../../../../../components/CaseArchitectureBootstrapRepairPanel', () => ({
   CaseArchitectureBootstrapRepairPanel: ({ caseNo }: { caseNo: string }) => <div aria-label="案件初始資料修復">{caseNo}</div>,
@@ -121,6 +123,33 @@ const detail = {
 };
 
 describe('Client registry owner editing', () => {
+  const importedRefundDetail = () => ClientRegistryDetailSchema.parse({
+    ...detail,
+    beclass: {
+      ...detail.beclass,
+      values: { ...detail.beclass.values, refund_bank_code: null, refund_account_no: null },
+      field_capabilities: { ...detail.beclass.field_capabilities,
+        refund_bank_code: { owner: 'client_beclass', editable: true, reason: null, options: null },
+        refund_account_no: { owner: 'client_beclass', editable: true, reason: null, options: null },
+      },
+    },
+    import_field_issues: ['refund_bank_code', 'refund_account_no'].map(field => ({ source: 'client_beclass', owner: 'client_beclass', field, source_field: field, code: 'invalid', message: `${field} 來源資料有誤，請補正此欄位。` })),
+  });
+
+  it('以正式 owner 和欄位標記來源問題，回讀後只清除已解除的欄位', () => {
+    const issue = (field: string, message: string) => ({ source: 'hcm' as const, owner: 'client_profile' as const, field, source_field: field, code: 'invalid', message });
+    const first = ClientRegistryDetailSchema.parse({ ...detail, import_field_issues: [issue('email', 'Email 格式不正確'), issue('delivery_type', '請確認生產方式')] });
+    const { rerender } = render(<ClientRegistryDetailEditor detail={first} onRefresh={async () => first} onStateChange={() => undefined} />);
+    expect(screen.getByLabelText(/^Email/)).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText('Email 格式不正確')).toBeInTheDocument();
+    const next = { ...first, import_field_issues: [issue('delivery_type', '請確認生產方式')] };
+    rerender(<ClientRegistryDetailEditor detail={next} onRefresh={async () => next} onStateChange={() => undefined} />);
+    expect(screen.getByLabelText(/^Email/)).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByText('請確認生產方式')).toBeInTheDocument();
+    rerender(<ClientRegistryDetailEditor detail={{ ...next, import_field_issues: [] }} onRefresh={async () => next} onStateChange={() => undefined} />);
+    expect(screen.queryByText('請確認生產方式')).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     window.location.hash = '';
     Object.values(mocks).forEach((mock) => mock.mockReset());
@@ -854,6 +883,180 @@ describe('Client registry owner editing', () => {
     expect(within(beclass).getByRole('button', { name: '儲存' })).toBeEnabled();
     fireEvent.click(within(beclass).getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { admin_notes: '報名註記草稿' }, 4));
+  });
+
+  it('leaves an untouched imported case while its historical accounting query is still pending', async () => {
+    let rejectRead!: (error: Error) => void;
+    const pendingRead = new Promise<never>((_resolve, reject) => { rejectRead = reject; });
+    const query = vi.spyOn(historicalServiceAccountingClient, 'query').mockReturnValue(pendingRead);
+    const imported = ClientRegistryDetailSchema.parse({ ...detail,
+      beclass: { ...detail.beclass, values: { ...detail.beclass.values, refund_bank_code: null, refund_account_no: null } },
+      import_field_issues: ['refund_bank_code', 'refund_account_no'].map(field => ({ source: 'client_beclass', owner: 'client_beclass', field, source_field: field, code: 'invalid', message: '銀行帳號來源資料有誤，請補正此欄位。' })),
+    });
+    mocks.query.mockResolvedValue(imported);
+    window.location.hash = '#clients?case=CASE-001&field=refund_bank_code&from=workbench';
+    render(<StrictMode><UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider></StrictMode>);
+    const bank = await screen.findByLabelText(/^退款銀行及分行代碼/);
+    await waitFor(() => expect(query).toHaveBeenCalledWith('CASE-001'));
+    await waitFor(() => expect(bank).toHaveFocus());
+    expect(bank).toHaveAttribute('aria-invalid', 'true');
+    expect(bank).toHaveValue('');
+    expect(screen.getByRole('button', { name: '重新查詢服務帳務' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument();
+    await act(async () => { rejectRead(new ApiHttpError(404, 'not_found', '此案件沒有歷史帳務')); await pendingRead.catch(() => undefined); });
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
+  it('sends only an explicitly confirmed blank refund field and preserves the other imported issue', async () => {
+    let stored = importedRefundDetail();
+    mocks.query.mockImplementation(async () => structuredClone(stored));
+    mocks.apply.mockImplementation(async (_case, _owner, submitted, version, fingerprint, _reason, key) => {
+      stored = { ...stored, beclass: { ...stored.beclass, version: version + 1, values: { ...stored.beclass.values!, ...submitted } },
+        import_field_issues: stored.import_field_issues.filter(issue => !Object.hasOwn(submitted, issue.field)),
+      };
+      return { resulting_version: version + 1, changed_fields: Object.keys(submitted), preview_fingerprint: fingerprint, idempotency_key: key, replayed: false, readback: submitted };
+    });
+    window.location.hash = '#clients?case=CASE-001';
+    render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
+    const bank = await screen.findByRole('textbox', { name: /^退款銀行及分行代碼/ });
+    const account = screen.getByLabelText(/^退款帳號（文字/, { selector: 'input' });
+    const registration = bank.closest('section')!;
+    expect(bank).toHaveValue('');
+    expect(account).toHaveValue('');
+    expect(bank).toHaveAttribute('aria-invalid', 'true');
+    expect(account).toHaveAttribute('aria-invalid', 'true');
+    expect(mocks.preview).not.toHaveBeenCalled();
+
+    fireEvent.change(within(registration).getByLabelText(/^三節假日雙薪意願/), { target: { value: '是' } });
+    fireEvent.click(within(registration).getByRole('button', { name: '儲存' }));
+    await screen.findByText('報名問卷資料（BeClass）已儲存。');
+    expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { holiday_double_pay: '是' }, 3);
+    expect(bank).toHaveAttribute('aria-invalid', 'true');
+    expect(account).toHaveAttribute('aria-invalid', 'true');
+
+    const confirmBank = within(bank.closest('label')!).getByRole('button', { name: '確認此欄留空' });
+    fireEvent.click(confirmBank);
+    expect(confirmBank).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(registration).getByRole('button', { name: '儲存' }));
+    await waitFor(() => expect(bank).not.toHaveAttribute('aria-invalid'));
+    expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { refund_bank_code: null }, 4);
+    expect(mocks.apply.mock.calls[1][2]).toEqual({ refund_bank_code: null });
+    expect(account).toHaveAttribute('aria-invalid', 'true');
+    expect(within(bank.closest('label')!).queryByRole('button', { name: '確認此欄留空' })).not.toBeInTheDocument();
+    expect(within(account.closest('label')!).getByRole('button', { name: '確認此欄留空' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('cancels explicit blank intent without clearing source issues or adding nulls to unrelated changes', async () => {
+    const imported = importedRefundDetail();
+    mocks.query.mockResolvedValue(imported);
+    window.location.hash = '#clients?case=CASE-001';
+    render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
+    const bank = await screen.findByRole('textbox', { name: /^退款銀行及分行代碼/ });
+    const registration = bank.closest('section')!;
+    const confirmBank = within(bank.closest('label')!).getByRole('button', { name: '確認此欄留空' });
+    fireEvent.click(confirmBank);
+    fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
+    const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    fireEvent.click(within(warning).getByRole('button', { name: '繼續編輯' }));
+    fireEvent.click(within(registration).getByRole('button', { name: '取消變更' }));
+    expect(confirmBank).toHaveAttribute('aria-pressed', 'false');
+    expect(bank).toHaveAttribute('aria-invalid', 'true');
+    fireEvent.change(within(registration).getByLabelText(/^報名註記/), { target: { value: '只更新註記' } });
+    fireEvent.click(within(registration).getByRole('button', { name: '儲存' }));
+    await screen.findByText('報名問卷資料（BeClass）已儲存。');
+    expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { admin_notes: '只更新註記' }, 3);
+    expect(mocks.apply.mock.calls[0][2]).toEqual({ admin_notes: '只更新註記' });
+    expect(bank).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText(/^退款帳號（文字/, { selector: 'input' })).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('keeps blank refund intent and the same operation when a newer version arrives after an unknown Apply', async () => {
+    const initial = importedRefundDetail();
+    const updated = { ...initial, beclass: { ...initial.beclass, version: 4 } };
+    const saved = { ...updated, import_field_issues: updated.import_field_issues.filter(issue => issue.field !== 'refund_bank_code') };
+    const onRefresh = vi.fn().mockRejectedValueOnce(new Error('回讀中斷')).mockResolvedValue(saved);
+    mocks.apply.mockRejectedValueOnce(new ApiTimeoutError(10000)).mockResolvedValueOnce({ changed_fields: ['refund_bank_code'] });
+    const { rerender } = render(<ClientRegistryDetailEditor detail={initial} onRefresh={onRefresh} onStateChange={() => undefined} />);
+    const bank = screen.getByRole('textbox', { name: /^退款銀行及分行代碼/ });
+    const registration = bank.closest('section')!;
+    const confirmBank = within(bank.closest('label')!).getByRole('button', { name: '確認此欄留空' });
+    fireEvent.click(confirmBank);
+    fireEvent.click(within(registration).getByRole('button', { name: '儲存' }));
+    await screen.findByRole('button', { name: '確認同一筆儲存結果' });
+    rerender(<ClientRegistryDetailEditor detail={updated} onRefresh={onRefresh} onStateChange={() => undefined} />);
+    expect(confirmBank).toHaveAttribute('aria-pressed', 'true');
+    expect(confirmBank).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '確認同一筆儲存結果' }));
+    await screen.findByText(/已儲存，但最新資料讀取失敗/);
+    expect(mocks.apply.mock.calls[0]).toEqual(mocks.apply.mock.calls[1]);
+    expect(mocks.preview).toHaveBeenCalledOnce();
+    expect(confirmBank).toBeDisabled();
+    expect(confirmBank).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取已儲存資料' }));
+    await screen.findByText('報名問卷資料（BeClass）已儲存。');
+    expect(mocks.apply).toHaveBeenCalledTimes(2);
+    expect(confirmBank).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('keeps real edits guarded during a read-only query and preserves them when leaving is cancelled', async () => {
+    let rejectRead!: (error: Error) => void;
+    const pendingRead = new Promise<never>((_resolve, reject) => { rejectRead = reject; });
+    const query = vi.spyOn(historicalServiceAccountingClient, 'query').mockReturnValue(pendingRead);
+    window.location.hash = '#clients?case=CASE-001';
+    render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
+    const notes = await screen.findByLabelText('客戶備註（主檔）');
+    await waitFor(() => expect(query).toHaveBeenCalledWith('CASE-001'));
+    fireEvent.change(notes, { target: { value: '尚未儲存的真實編輯' } });
+    fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
+    const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    expect(within(warning).getByRole('cell', { name: '尚未儲存的真實編輯' })).toBeInTheDocument();
+    expect(within(warning).getByRole('button', { name: '捨棄變更並離開' })).toBeEnabled();
+    fireEvent.click(within(warning).getByRole('button', { name: '繼續編輯' }));
+    expect(notes).toHaveValue('尚未儲存的真實編輯');
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
+    await act(async () => { rejectRead(new ApiHttpError(404, 'not_found', '此案件沒有歷史帳務')); await pendingRead.catch(() => undefined); });
+    expect(notes).toHaveValue('尚未儲存的真實編輯');
+    fireEvent.click(within(notes.closest('section')!).getByRole('button', { name: '取消變更' }));
+    fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument();
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('ignores a late historical query from the previous case without unlocking the current query (rejected: %s)', async (rejected) => {
+    type Facts = Awaited<ReturnType<typeof historicalServiceAccountingClient.query>>;
+    let resolveFirst!: (facts: Facts) => void;
+    let rejectFirst!: (error: Error) => void;
+    let resolveCurrent!: (facts: Facts) => void;
+    const first = new Promise<Facts>((resolve, reject) => { resolveFirst = resolve; rejectFirst = reject; });
+    const current = new Promise<Facts>(resolve => { resolveCurrent = resolve; });
+    const query = vi.spyOn(historicalServiceAccountingClient, 'query').mockImplementation(caseNo => caseNo === 'CASE-A' ? first : current);
+    const facts: Facts = {
+      case_no: 'CASE-B', lifecycle_status: '已完成', lifecycle_version: 1, adoption_receipt_id: 1,
+      adoption_source_identity: 'historical:CASE-B', historical_day_revision: 0,
+      client_finance_version: 1, payroll_version: 1, contracted_service_days: 20,
+      service_hours_per_day: 8, contractual_floor_fee_ntd: 0, client_identity_status: '一般',
+      assignments: [{ assignment_identity: 'assignment:B', staff_id: 9, staff_name: '目前案件月嫂', policy_version: '1', policy_kind: 'citizen', hourly_rate_ntd: 300 }],
+    };
+    const { rerender } = render(<HistoricalServiceAccountingWorkbench caseNo="CASE-A" />);
+    await waitFor(() => expect(query).toHaveBeenCalledWith('CASE-A'));
+    rerender(<HistoricalServiceAccountingWorkbench caseNo="CASE-B" />);
+    await waitFor(() => expect(query).toHaveBeenCalledWith('CASE-B'));
+    await act(async () => {
+      if (rejected) rejectFirst(new Error('前一案件讀取失敗'));
+      else resolveFirst({ ...facts, case_no: 'CASE-A', lifecycle_status: '舊案件狀態' });
+      await first.catch(() => undefined);
+    });
+    expect(screen.queryByText(/舊案件狀態|前一案件讀取失敗/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新查詢服務帳務' })).toBeDisabled();
+    await act(async () => { resolveCurrent(facts); await current; });
+    expect(screen.getByRole('spinbutton')).toHaveValue(null);
+    expect(screen.getByRole('button', { name: '重新查詢服務帳務' })).toBeEnabled();
+    expect(screen.getByText(/目前狀態：已完成/)).toBeInTheDocument();
   });
 
   it('shows changes before discarding drafts from the drawer or tabs', async () => {

@@ -37,6 +37,7 @@ from api.routes import (
     assignment_schedule_rest_dates,
     beclass_import_review,
     client_beclass_import,
+    import_field_issues,
     client_registry,
     legacy_virtual_account_import,
     case_virtual_account,
@@ -391,6 +392,7 @@ app.include_router(file_settings.router)
 app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)
+app.include_router(import_field_issues.router)
 app.include_router(client_registry.router)
 app.include_router(legacy_virtual_account_import.router)
 app.include_router(case_virtual_account.router)

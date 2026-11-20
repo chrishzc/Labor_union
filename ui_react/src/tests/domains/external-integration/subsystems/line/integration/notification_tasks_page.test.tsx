@@ -4,10 +4,24 @@ import { NotificationTasksPage } from '../../../../../../pages/NotificationTasks
 import { notificationTasksClient as client, notificationFailure, type NotificationItem } from '../../../../../../api/line_notifications/notification_tasks_client';
 import { lineDeliveryQueryClient } from '../../../../../../api/line_delivery/line_delivery_query_client';
 import { ApiHttpError } from '../../../../../../api/shared/typed_errors';
+import { transport } from '../../../../../../api/shared/transport';
+import { sessionClient } from '../../../../../../api/auth/session_client';
 
 const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'overdue:deposit',source:'overdue',group:'reminder',title:'訂金逾期未清',case_no:'116000001',reference_id:null,
   person:'',summary:'本期未繳 NT$ 3,000',reason:'各期獨立判斷',time:'2026-10-24',tag:'待處理',recipient:'客戶私人聊天室',message:'目前訂金餘額',unavailable_reason:'客戶尚未綁定 LINE',expected_version:null,
   delivery_status:null,payment:{case_no:'116000001',payment_stage:'deposit',obligation_identity:'case1:deposit',projection_version:1,obligation_event_id:10,due_date:'2026-10-24',remaining_amount_ntd:3000},log:null,...patch});
+const importSource = {source:'import_fields', label:'進件資料待修正', group:'review'} as const;
+const importTodo = (caseNo:string) => item({
+  id:`import_fields:${caseNo}`, source:importSource.source, group:importSource.group,
+  title:importSource.label, case_no:caseNo, summary:'2 項欄位問題待修正。',
+  reason:'請至客戶名冊核對同案欄位。', recipient:null, message:null, payment:null, unavailable_reason:null, time:'',
+  import_field_issues:[
+    {source:'client_beclass', owner:'client_profile', field:'email', source_field:'Email',
+      code:'client_field_invalid:Email', message:'Email來源資料有誤，請補正此欄位。'},
+    {source:'hcm', owner:'order_terms', field:'service_days', source_field:'希望服務天數',
+      code:'field_invalid:希望服務天數', message:'希望服務天數尚未完成。'},
+  ],
+});
 beforeEach(()=>{
   window.matchMedia=vi.fn().mockReturnValue({matches:false}) as unknown as typeof matchMedia;
   vi.spyOn(client,'catalog').mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'}]);
@@ -16,6 +30,45 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();window.history.replaceState(null,'','/');});
 describe('通知事項實際接線',()=>{
+  it('進件資料待修正在審核與協調逐欄定位同案正式入口',async()=>{
+    vi.mocked(client.catalog).mockResolvedValue([importSource]);
+    vi.mocked(client.list).mockResolvedValue({items:[importTodo('CASE-1')],total:null,next_cursor:null});
+    const send=vi.spyOn(client,'send');
+    render(<NotificationTasksPage/>);
+    await screen.findByRole('heading',{name:importSource.label});
+    fireEvent.click(screen.getByRole('button',{name:/款項與群組/}));
+    expect(screen.queryByRole('heading',{name:importSource.label})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:/審核與協調/}));
+    expect(screen.getByRole('link',{name:/Email來源資料有誤/})).toHaveAttribute('href','#clients?case=CASE-1&field=email&from=workbench');
+    expect(screen.getByRole('link',{name:/希望服務天數尚未完成/})).toHaveAttribute('href','#clients?case=CASE-1&field=intake&from=workbench');
+    fireEvent.click(screen.getByRole('button',{name:'前往客戶名冊修正'}));
+    expect(window.location.hash).toBe('#clients?case=CASE-1&field=email&from=workbench');
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('進件資料讀取失敗保持未確認，讀回成功後才顯示零筆',async()=>{
+    vi.mocked(client.catalog).mockResolvedValue([importSource]);
+    vi.mocked(client.list).mockRejectedValue(new ApiHttpError(503,'notification_source_unavailable','此類事項暫時無法讀取，請重新整理。'));
+    render(<NotificationTasksPage/>);
+    await screen.findByRole('heading',{name:'目前無法完整讀取事項'});
+    expect(screen.getByRole('alert')).toHaveTextContent('進件資料待修正');
+    expect(screen.queryByRole('heading',{name:'目前沒有待辦事項'})).not.toBeInTheDocument();
+    vi.mocked(client.list).mockResolvedValue({items:[],total:null,next_cursor:null});
+    fireEvent.click(screen.getByRole('button',{name:'重試進件資料待修正'}));
+    await screen.findByRole('heading',{name:'目前沒有待辦事項'});
+  });
+  it('進件資料頂部總數解析共用欄位 schema 並跨頁每案只計一筆',async()=>{
+    vi.mocked(client.catalog).mockResolvedValue([importSource]);
+    vi.mocked(client.list).mockRestore();
+    vi.spyOn(sessionClient,'getToken').mockReturnValue('synthetic-session');
+    const first = importTodo('CASE-1');
+    const get=vi.spyOn(transport,'get')
+      .mockResolvedValueOnce({data:{items:[first],total:null,next_cursor:1}})
+      .mockResolvedValueOnce({data:{items:[first,importTodo('CASE-2')],total:null,next_cursor:null}});
+
+    await expect(client.pendingCount()).resolves.toBe(2);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenLastCalledWith('/api/v1/line/notification-tasks/import_fields', expect.objectContaining({params:{cursor:1}}));
+  });
   it('推薦待跟進開啟案件工作區，無客服通知入口',async()=>{
     vi.mocked(client.catalog).mockResolvedValue([{source:'recommendation',label:'推薦確認',group:'review'}]);
     vi.mocked(client.list).mockResolvedValue({items:[item({id:'recommendation:7:reply_reminder',source:'recommendation',title:'推薦確認待跟進',payment:null,unavailable_reason:null})],total:1,next_cursor:null});

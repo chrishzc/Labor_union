@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from api.dependencies.import_field_issues import build_import_field_issues_query
+
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
 from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
 from infrastructure.mysql.client_registry_query_repository import MySqlClientRegistryQueryRepository
@@ -19,7 +21,7 @@ from subsystems.client_profile.case_inspection_export import ClientRegistryCaseI
 def get_client_registry_query_application():
     connection = get_connection()
     try:
-        yield ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection))
+        yield ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection), build_import_field_issues_query(connection))
     finally:
         connection.close()
 

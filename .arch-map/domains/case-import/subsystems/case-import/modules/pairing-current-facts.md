@@ -8,7 +8,14 @@
 只承認HCM case、Client BeClass source、review lineage、row receipt與`bound_case_no`，不以姓名／電話相似度配對，且不建立 anomaly recheck。
 
 ## Implementation
+- `domains/case_import/client_beclass_validation.py` — Client BeClass 識別欄位與可補正欄位的匯入驗證。
 - `domains/case_import/client_beclass_binding.py` — 客戶與案件的唯一配對分類及 BeClass 案件不可綁定原因型別。
+- `domains/case_import/import_field_issues.py` — 去敏欄位問題型別及BeClass current owner逐欄重驗。
+- `subsystems/case_import/current_import_field_issues.py` — HCM／成功BeClass共同問題Query，有界candidate分頁與逐案去重。
+- `infrastructure/mysql/import_field_issues_repository.py` — created receipt root_id／review_identity與accepted bound_case_no關聯；失敗重匯不附掛舊案件。
+- `api/dependencies/import_field_issues.py` — 共用Query組成，供名冊與通知工作台使用。
+- `api/routes/import_field_issues.py` — 管理員唯讀 GET /api/v1/case-import/field-issues。
+- `api/schemas/import_field_issues.py` — 共用問題與分頁HTTP型別。
 - `domains/case_import/refund_account.py` — 共用退款欄位正規化、typed有效來源及遮蔽。
 - `infrastructure/mysql/beclass_refund_account.py` — 一般／補助退款快照委派的唯一有效帳戶Query，無寫入。
 - `scripts/repair_registration_refund_accounts.py` — 預設唯讀採納預覽，唯一bound原問卷才可由原correction Q/P/A補正；真實Apply須另行授權，不重寫原問卷或既有金融快照。

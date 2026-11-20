@@ -109,3 +109,5 @@
 @media (max-width: 560px) { .client-roster-page { padding: 16px; } .client-roster-filters { grid-template-columns: 1fr; } .client-roster-pagination { justify-content: space-between; } .client-roster-page-count { display: none; } }
 .client-roster-page button:not(:where(th button, .client-roster-filter-chip button)):hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 .client-roster-page button:not(:where(th button, .client-roster-filter-chip button)):disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+
+.client-roster-table-wrap .source-issue { display: block; color: #b42318; }

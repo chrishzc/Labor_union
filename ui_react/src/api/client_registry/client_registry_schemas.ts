@@ -1,3 +1,4 @@
+import { ImportFieldIssueSchema } from '../case_import/import_field_issues';
 import { z } from 'zod';
 import { OrderTermsSchema } from '../orders/order_query_schemas';
 
@@ -101,6 +102,7 @@ export const ClientRegistryChangeHistoryItemSchema = z.strictObject({
 });
 export const ClientRegistryChangeHistorySchema = z.array(ClientRegistryChangeHistoryItemSchema);
 export const ClientRegistryDetailSchema = z.strictObject({
+  import_field_issues: z.array(ImportFieldIssueSchema).default([]),
   order_dates: z.strictObject({planned_start_date: nullableText, planned_end_date: nullableText, actual_start_date: nullableText, actual_end_date: nullableText}).nullable().optional(),
   case_no: z.string().min(1),
   service_type: nullableText.optional(),
