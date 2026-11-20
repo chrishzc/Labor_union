@@ -118,7 +118,7 @@ def signing_qualification():
 
 
 @pytest.fixture
-def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification):
+def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification, request):
     source = "lu_test_interrupted_signing"
     release = "labor-union-registry-case-deletion-signing-2026-11-20-v1"
     qualification = signing_qualification
@@ -134,6 +134,13 @@ def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification):
             if m._local_classify_statement(statement) == "create_trigger":
                 row = m._registry_signing_recovery_trigger(statement)
                 predecessor[row["trigger_name"]] = row
+    rendering = getattr(request, "param", "canonical")
+    if rendering == "restored_crlf":
+        for row in predecessor.values():
+            row["action_statement"] = row["action_statement"].replace("\n", "\r\n")
+    elif rendering == "restored_spacing":
+        for row in predecessor.values():
+            row["action_statement"] = row["action_statement"].replace("BEGIN\n", "BEGIN  \n")
     baseline = {"columns": [], "indexes": [], "triggers": [predecessor[name] for name in sorted(predecessor)],
                 "constraints": [], "key_columns": [], "foreign_keys": [], "show_create_tables": {}, "views": []}
     baseline_sha = m._sha256_bytes(m._canonical_json(baseline))
@@ -145,7 +152,15 @@ def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification):
     backup_path = tmp_path / "fast_additive" / f"{source}.{release}.backup.receipt.json"
     backup_path.parent.mkdir()
     dump = backup_path.with_suffix(".sql")
-    dump.write_bytes(m.MYSQL_DUMP_MARKER + f"\n-- Database: {source}\n".encode())
+    dump_text = m.MYSQL_DUMP_MARKER.decode() + f"\n-- Database: {source}\nDELIMITER ;;\n"
+    for row in predecessor.values():
+        dump_text += (
+            "/*!50003 CREATE*/ /*!50017 DEFINER=`fixture`@`%`*/ /*!50003 TRIGGER "
+            f"`{row['trigger_name']}` {row['action_timing']} {row['event_manipulation']} "
+            f"ON `{row['event_object_table']}` FOR EACH ROW {row['action_statement']} */;;\n"
+        )
+    dump_text += "DELIMITER ;\n"
+    dump.write_bytes(dump_text.replace("\n", "\r\n").encode())
     qualification = {**qualification, "metadata_backup": {**qualification["metadata_backup"], "data_row_counts": {}}}
     backup = {"kind": "local_additive_source_backup", "release_id": release, **identity,
               "schema_sha256": baseline_sha, "sha256": m._sha256_file(dump), **rows}
@@ -163,6 +178,8 @@ def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification):
             replayed.pop(statement.split("`")[1])
         else:
             row = m._registry_signing_recovery_trigger(statement)
+            if rendering != "canonical":
+                row["action_statement"] = row["action_statement"].replace("\n", "\r\n")
             replayed[row["trigger_name"]] = row
         previous = m._local_append_event(tmp_path, source, release, "statement_verified", previous, outcome="applied", **fields)
     current = {**baseline, "triggers": [replayed[name] for name in sorted(replayed)]}
@@ -181,9 +198,31 @@ def test_interrupted_signing_source_admits_only_hash_bound_prefix_and_original_b
     assert current == saved
 
 
+@pytest.mark.parametrize("interrupted_signing_source", ["restored_crlf", "restored_spacing"], indirect=True)
+def test_interrupted_signing_source_uses_original_backup_rendering(interrupted_signing_source):
+    source, _, current, root, _, _ = interrupted_signing_source
+    saved = deepcopy(current)
+    evidence = m.qualify_registry_signing_source_recovery(None, source, current, receipt_root=root)
+    assert evidence["verified_prefix_length"] == 29
+    assert current == saved
+
+
+def test_signing_backup_trigger_parser_preserves_version_comments_inside_literals(tmp_path):
+    name = "trg_fixture_before_delete"
+    body = "BEGIN SET @message = 'literal /*!50003 CREATE*/ and */;;'; END"
+    dump = tmp_path / "original.sql"
+    dump.write_text(
+        "/*!50003 CREATE*/ /*!50017 DEFINER=`fixture`@`%`*/ /*!50003 TRIGGER "
+        f"`{name}` BEFORE DELETE ON `fixture` FOR EACH ROW {body} */;;\n",
+        encoding="utf-8",
+    )
+    assert m._registry_signing_backup_triggers(dump, {name})[name]["action_statement"] == body
+
+
 @pytest.mark.parametrize("fault", ["missing_journal", "tampered_journal", "foreign_source", "uncertain_ddl",
     "schema_drift", "noncanonical_progress", "missing_backup", "wrong_host", "wrong_server", "wrong_release",
-    "wrong_baseline", "tampered_dump", "changed_rows"])
+    "wrong_baseline", "tampered_dump", "changed_rows", "missing_backup_triggers", "duplicate_backup_trigger",
+    "backup_trigger_drift"])
 def test_interrupted_signing_source_rejects_unproven_recovery(interrupted_signing_source, monkeypatch, fault):
     source, release, current, root, backup_path, statements = interrupted_signing_source
     journal = m._local_journal_path(root, source, release)
@@ -211,6 +250,21 @@ def test_interrupted_signing_source_rejects_unproven_recovery(interrupted_signin
             handle.write(b"changed")
     elif fault == "changed_rows":
         monkeypatch.setattr(m, "_local_capture_backup_rows", lambda *_: {"data_row_counts": {"unexpected": 1}, "data_fingerprints": {}, "data_fingerprint_sha256": "f" * 64})
+    elif fault in {"missing_backup_triggers", "duplicate_backup_trigger", "backup_trigger_drift"}:
+        dump = backup_path.with_suffix(".sql")
+        content = dump.read_bytes()
+        if fault == "missing_backup_triggers":
+            content = m.MYSQL_DUMP_MARKER + f"\n-- Database: {source}\n".encode()
+        elif fault == "duplicate_backup_trigger":
+            start = content.index(b"/*!50003 CREATE*/")
+            end = content.index(b" */;;", start) + len(b" */;;")
+            content += b"\r\n" + content[start:end] + b"\r\n"
+        else:
+            content = content.replace(b"FOR EACH ROW BEGIN", b"FOR EACH ROW BEGIN SET @untrusted = 1;", 1)
+        dump.write_bytes(content)
+        backup = json.loads(backup_path.read_text(encoding="utf-8"))
+        backup["sha256"] = m._sha256_file(dump)
+        backup_path.write_text(json.dumps(backup), encoding="utf-8")
     else:
         backup = json.loads(backup_path.read_text(encoding="utf-8"))
         key = {"wrong_host": "host", "wrong_server": "server", "wrong_release": "release_id", "wrong_baseline": "schema_sha256"}[fault]

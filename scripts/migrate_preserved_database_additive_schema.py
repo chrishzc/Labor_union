@@ -5108,6 +5108,34 @@ def _registry_signing_recovery_trigger(statement: str) -> dict[str, str]:
     return match.groupdict()
 
 
+def _registry_signing_backup_triggers(path: Path, names: set[str]) -> dict[str, dict[str, str]]:
+    prefix = re.compile(
+        r"/\*!\d+ CREATE\*/ /\*!\d+ DEFINER=`(?:``|[^`])+`@`(?:``|[^`])+`\*/ "
+        r"/\*!\d+ TRIGGER "
+    )
+    triggers: dict[str, dict[str, str]] = {}
+    block: list[str] = []
+    with path.open(encoding="utf-8", newline="") as stream:
+        for line in stream:
+            if not block and not prefix.match(line):
+                continue
+            block.append(line)
+            if not re.search(r" \*/;;(?:\r?\n)?$", line):
+                continue
+            statement = prefix.sub("CREATE TRIGGER ", "".join(block), count=1)
+            statement = re.sub(r" \*/;;(?:\r?\n)?$", "", statement)
+            block = []
+            row = _registry_signing_recovery_trigger(statement)
+            name = row["trigger_name"]
+            if name in names:
+                if name in triggers:
+                    raise UpgradeBlocked("registry signing recovery backup has duplicate triggers")
+                triggers[name] = row
+    if block or set(triggers) != names:
+        raise UpgradeBlocked("registry signing recovery backup trigger inventory differs")
+    return triggers
+
+
 def qualify_registry_signing_source_recovery(
     config: Any, source: str, snapshot: Mapping[str, Any], *, receipt_root: Path,
 ) -> dict[str, Any]:
@@ -5166,11 +5194,26 @@ def qualify_registry_signing_source_recovery(
     }
     if set(predecessor) != set(successor):
         raise UpgradeBlocked("registry signing recovery trigger inventory differs")
+    backup_receipt = Path(receipt_root) / "fast_additive" / f"{source}.{release_id}.backup.receipt.json"
+    backup = _local_validate_backup(
+        config, source, qualification, baseline_sha,
+        backup_dump_path=backup_receipt.with_suffix(".sql"), backup_receipt_path=backup_receipt,
+    )
+    if events[0].get("data_fingerprint_sha256") != backup["data_fingerprint_sha256"]:
+        raise UpgradeBlocked("registry signing recovery journal backup rows differ")
+    original = _registry_signing_backup_triggers(Path(backup["dump_path"]), set(predecessor))
     payload = {key: value for key, value in snapshot.items() if key != "sha256"}
     unrelated = {row["trigger_name"]: row for row in snapshot["triggers"] if row["trigger_name"] not in predecessor}
-    baseline_triggers = {**unrelated, **predecessor}
-    payload["triggers"] = [baseline_triggers[name] for name in sorted(baseline_triggers)]
-    if _sha256_bytes(_canonical_json(payload)) != baseline_sha:
+    # Windows mysqldump may add a carriage return to every emitted newline.
+    for backup_triggers in (original, {
+        name: {**row, "action_statement": row["action_statement"].replace("\r\n", "\n")}
+        for name, row in original.items()
+    }):
+        baseline_triggers = {**unrelated, **backup_triggers}
+        payload["triggers"] = [baseline_triggers[name] for name in sorted(baseline_triggers)]
+        if _sha256_bytes(_canonical_json(payload)) == baseline_sha:
+            break
+    else:
         raise UpgradeBlocked("registry signing recovery baseline schema differs")
     baseline_snapshot = {**payload, "sha256": baseline_sha}
     _local_verify_prerequisite_metadata(baseline_snapshot, qualification)
@@ -5185,17 +5228,16 @@ def qualify_registry_signing_source_recovery(
             replayed.pop(match[1], None)
         else:
             row = _registry_signing_recovery_trigger(statement)
-            replayed[row["trigger_name"]] = row
+            name = row["trigger_name"]
+            current = next((item for item in snapshot["triggers"] if item["trigger_name"] == name), None)
+            if current is None or {
+                **current, "action_statement": _registry_guard_action(current["action_statement"]),
+            } != {**row, "action_statement": _registry_guard_action(row["action_statement"])}:
+                raise UpgradeBlocked("registry signing recovery current trigger differs from verified prefix")
+            replayed[name] = current
     payload["triggers"] = [replayed[name] for name in sorted(replayed)]
     if _sha256_bytes(_canonical_json(payload)) != snapshot["sha256"]:
         raise UpgradeBlocked("registry signing recovery current schema does not match verified prefix")
-    backup_receipt = Path(receipt_root) / "fast_additive" / f"{source}.{release_id}.backup.receipt.json"
-    backup = _local_validate_backup(
-        config, source, qualification, baseline_sha,
-        backup_dump_path=backup_receipt.with_suffix(".sql"), backup_receipt_path=backup_receipt,
-    )
-    if events[0].get("data_fingerprint_sha256") != backup["data_fingerprint_sha256"]:
-        raise UpgradeBlocked("registry signing recovery journal backup rows differ")
     states = _upgrade_admission_states(snapshot)
     related = {"1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT,
                _LINE_DELIVERY_RETENTION_ARTIFACT, artifact_name}
