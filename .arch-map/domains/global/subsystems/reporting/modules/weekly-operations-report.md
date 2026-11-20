@@ -60,6 +60,20 @@
   target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^noncitizen-statistics-20261029'
 ```
 
+### 週報取消原因的讀取與輸出 ^reporting-weekly-cancel-reason
+
+[需求書 §2.2「案件受理總表的取消原因」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#weekly-case-cancel-reason) 定義顯示條件。由 `weekly_operations_report_query_adapter.py` 依該案目前生效的 cancellation control 找到 Orders 取消事件；現行 adapter 以 `COALESCE(cancellation.reason, o.cancel_reason)` 讀取可用原因。接著 `WeeklyOperationsReportQuery._case_row` 只在訂單狀態為「訂單取消」時保留值，其他返回 `None`。這是週報明細投影，不是待辦看板的統計欄位。
+
+`api/routes/operations_reports.py` 僅在 `operations-report.v5` 的案件明細輸出 `cancel_reason`（字串或 `null`），`v3`／`v4` 省略欄位。`OperationsReportsWorkspace.tsx` 對 `null` 留空；`weekly_operations_report_export.py` 同樣消費該明細值，寫入案件受理總表第 25 欄，原因存為純文字，不求值為 Excel 公式。
+
+驗證定位：`tests/test_weekly_operations_report_contract.py::test_weekly_report_projects_order_cancellation_reasons_in_v5_and_excel` 檢查合成明細的 v5 文本／null、v3/v4 省略及 XLSX 文本／空白。它替代資料來源，不能證明 MySQL 查找或歷史回退已測。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-weekly-cancel-reason
+  target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^weekly-case-cancel-reason'
+```
+
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
