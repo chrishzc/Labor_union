@@ -44,14 +44,16 @@
 
 ### 3.2 `AutoCompleteOrderService` 與完工後日期更正
 
-- **完工時刻與鎖定**：
+- **完工時刻與鎖定**：以最後正式服務日（`actual_end_date`）為基準，依訂單記錄的跨日偏移和服務結束時間，算出台北時間的完工時刻。
   ```text
   completion_instant = actual_end_date + service_end_day_offset + service_end_time  # Asia/Taipei
   ```
+  - **未達時刻**：一筆服務中的訂單已符合其他自動完工條件，最後正式服務日的班次為 21:00 至次日 05:00。系統在次日 04:59 評估時，該次評估不會將訂單轉為「訂單完成」，也不會建立完工服務資料鎖。
+  - **達到時刻**：同一案件在次日 05:00 或之後接受系統評估，且無完工阻擋時，訂單轉為「訂單完成」，服務日期、時數、服務單價與樓層費同時鎖定。承辦人不需在工作台另行確認完工。
 - **唯一正式持久化入口**：`AutoCompleteOrderService` 於單一 outer UoW 鎖定 lifecycle aggregate、effective Scheduling generation、assignment-owned 正式服務日、`actual_end_date`、完整時段 tuple 與 active controls，當 `evaluation_at >= completion_instant` 且無 `auto_complete` blocker（與 Scheduling 請假代班原子序列化 CAS Orders version），轉為 `訂單完成` 並立即建立 `order_service_data_locks` 凍結服務日期、時數、服務單價與樓層費（非財務聯絡個資仍可獨立更正）。完工 outbox 保留 `line_service_completion_notification=true` 標記。LINE 投遞依 [Gateway 正式規格](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。
 - **完工帳務交接**：同一交易先同步正式月嫂應付，再由原帳務規則檢查已確認的補助方案。轉付月嫂承接有效補助分期，先墊後退須有客戶實際墊款才建立正式退款，政府直付或方案未確認時不建立客戶補助退款。
 - **唯讀狀態查詢**：`GET /api/v1/orders/{case_no}/service-completion` 回報權威完成時刻與目前進度，不設一般工作台人工「辦理完工確認」步驟（由背景 durable discovery 委派 canonical handler 自動評估）。
-- **完工後服務日更正（`official-service-dates`）**：僅限已完成案件，在不涉及調整、補助退還等價格變動前提下，依守恆天數經 Scheduling replacement 更新各 assignment 服務日並推進 `actual_end_date`（保留原 completion event 與 `order_service_data_locks`，零新建金融義務）。
+- **完工後服務日更正（`official-service-dates`）**：已完成案件若只需更正服務日期，且服務天數不變、不涉及調整、補助退還等價格變動，可走正式服務日更正。Scheduling 以 replacement 更新各 assignment 的服務日並推進 `actual_end_date`，不解除原資料鎖、不改寫原完工事件，也不新增金融義務。
 - **服務人員或區段更正**。見 [Scheduling 多月嫂調整](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction)。歷史結清狀態依 [歷史帳務完成投影](27_歷史訂單生命週期與服務天數帳務正式規格.md#7-帳務完成投影) 處理。
 
 ### 3.3 訂金 Reversal 與開工重認
