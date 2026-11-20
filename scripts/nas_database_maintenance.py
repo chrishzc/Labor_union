@@ -311,15 +311,26 @@ def is_nas_destination(path):
     return windows.is_absolute() and bool(server) and server.casefold() not in local_names
 
 
+def is_nas_maintenance_target(settings):
+    if (settings.get("settings_file", Path()).is_file()
+            and settings.get("values", {}).get("NAS_EXPECTED_HOST")):
+        return True
+    host = settings["host"].casefold().rstrip(".")
+    try:
+        return not ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return host != "localhost"
+
+
 def destination_ready(settings, *, writable=False, create=False):
     root = settings["backup_root"]
-    is_strict_nas = settings.get("settings_file", Path()).is_file() and settings.get("values", {}).get("NAS_EXPECTED_HOST")
-    if is_strict_nas:
+    requires_nas_storage = is_nas_maintenance_target(settings)
+    if requires_nas_storage:
         require(is_nas_destination(root), "備份位置不是正式 NAS 共用資料夾，已停止；不會改存本機。")
     require(not root.is_symlink() and not root.is_junction(), "NAS 備份根目錄不能是符號連結或本機轉接點。")
     if writable or create:
         parent = root.parent
-        if is_strict_nas:
+        if requires_nas_storage:
             require(root.name == BACKUP_FOLDER and is_nas_destination(parent), "NAS 備份區目前無法讀取，請確認 NAS 根目錄設定。")
             require(not parent.is_symlink() and not parent.is_junction(), "NAS 根目錄不能是符號連結或本機轉接點。")
             require(FileSystemControlledFileStorage(parent).readiness().ready,
@@ -840,12 +851,12 @@ def upgrade(settings):
     from scripts import update_local_database as updater
 
     has_tools = bool(resolve_client_tool("mysql") and resolve_client_tool("mysqldump"))
-    is_strict_nas = settings.get("settings_file", Path()).is_file() and settings.get("values", {}).get("NAS_EXPECTED_HOST")
+    is_nas_target = is_nas_maintenance_target(settings)
     is_local_nas_test = (
-        settings["host"].casefold().rstrip(".") in {"localhost", "127.0.0.1", "::1"}
+        not is_nas_target
         and settings["database"].startswith("lu_nas_")
     )
-    if not (is_strict_nas or is_local_nas_test):
+    if not (is_nas_target or is_local_nas_test):
         print("執行直連結構升級（Additive Migration）...", flush=True)
         result = updater.update_local_database(
             environment_file=settings["environment_file"],
@@ -863,6 +874,9 @@ def upgrade(settings):
         return directory
 
     require(has_tools, "安全升級需要 mysql 與 mysqldump。")
+    if is_nas_target:
+        require(is_nas_destination(settings["backup_root"]),
+                "備份位置不是正式 NAS 共用資料夾，已停止；不會改存本機。")
     source = settings["database"]
     read = reader(settings)
     candidate = new_candidate("upgrade")
@@ -875,8 +889,13 @@ def upgrade(settings):
     original_env_digest = digest(settings["environment_file"])
     config = migration.SeparateDatabaseConfig(migration.DatabaseDescriptor("source-read", source, read),
               migration.DatabaseDescriptor("candidate-write", candidate, write))
-    plan = migration.build_plan(config, source, candidate)
+    plan = migration.build_plan(config, source, candidate,
+                                source_recovery_root=updater.DEFAULT_RECEIPT_ROOT)
     require(plan["status"] == "ready" and not plan["candidate_exists"], "升級預檢未通過，原資料庫不變。")
+    if plan.get("source_recovery") is not None:
+        print("已核對 1080 中斷紀錄，將在新副本完成升級，原資料庫保留。", flush=True)
+    if plan.get("source_recovery") is not None:
+        print("已核對 1080 中斷紀錄，將在新副本完成升級，原資料庫保留。", flush=True)
     if is_local_nas_test:
         source_objects = plan["source_objects"]
         if migration._candidate_schema_is_exact(source_objects):
@@ -903,7 +922,8 @@ def upgrade(settings):
     migration.restore_candidate(config, source, candidate, archive, directory / "backup.receipt.json", operation)
     schema_inventory(write, candidate, (source,), reject_source_references=True)
     print("備份已完成，正在升級副本並核對資料；請勿關閉視窗。", flush=True)
-    migration.apply_schema(config, source, candidate, directory / "plan.json", operation)
+    migration.apply_schema(config, source, candidate, directory / "plan.json", operation,
+                           source_recovery_root=updater.DEFAULT_RECEIPT_ROOT)
     print("正在進行最後的完整資料驗證。", flush=True)
     result = migration.verify_candidate(config, source, candidate, operation)
     require(result.get("status") == "verified", "副本驗證未通過，未切換資料庫。")

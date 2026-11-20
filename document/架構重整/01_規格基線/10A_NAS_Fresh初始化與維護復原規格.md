@@ -41,8 +41,9 @@
 - **系統架構定位**：Windows 工會電腦執行應用與管理腳本，NAS 僅執行 Docker MySQL 與共用檔案儲存；**三項入口一律透過加密 TLS MySQL 連線與受控 NAS 路徑執行，絕不啟用 SSH、遠端修改容器設定或放寬 `.env` 保護**。
 - **入口收斂**：獨立批處理 `backup_nas_database.bat`、`initialize_nas_schema.bat`（安全升級，不提供清空重建）、`restore_nas_database.bat` 與根目錄 `Windows管理.bat`（選項 `6 備份`、`7 安全升級`、`8 復原備份`）統一委派 `scripts/nas_database_maintenance.py`；選項 7／8 偵測同一 installation 尚有受管 runtime 運作時即停止並要求先停止服務。
 - `Windows管理.bat` 選項 `11 管理 root 帳號` 見 [Access Control 的 Windows 主機離線管理](17_External_Integration_LINE_Access正式規格.md#34-windows-主機離線管理-root-帳號)。
-- **設定邊界**：讀取獨立 `.env.nas-maintenance` Fixed target NAS host／port（拒絕 `localhost`／開發庫及 process env override），`--dry-run` 零連線零寫入；備份儲存路徑唯一取自 `.env` `CONTROLLED_FILE_STORAGE_ROOT` 下的 `05_資料庫冷備份 (db_backups)`（僅接受 NAS UNC 且禁止 symlink／junction）。
+- **設定邊界**：`.env.nas-maintenance` 提供固定 NAS host／port 時，沿用 opt-in、拒絕 `localhost`／開發庫及 process env override 的檢查。缺少此檔案不改變遠端升級流程。依 `.env` 的主機判定遠端 NAS，選項 7 仍執行備份與副本升級，不使用本機直連快速升級。`--dry-run` 零連線零寫入；遠端備份儲存路徑唯一取自 `.env` `CONTROLLED_FILE_STORAGE_ROOT` 下的 `05_資料庫冷備份 (db_backups)`，僅接受 NAS UNC 且禁止 symlink／junction。
 - **Windows 本機 NAS 測試部署**：`.env` 指向 loopback 的 `lu_nas_*` 測試庫時，選項 7 與正式遠端 NAS 共用保留資料的副本預檢。預檢列出待套用的遷移檔案，再備份、建立副本並升級；直連升級回條僅用於直連升級。若來源已通過正常啟動使用的現行版本檢查，結束而不建立備份或副本。副本通過相同的啟動版本檢查後才可切換。此部署沿用該安裝的測試備份位置。
+- **1080 直連中斷的副本恢復**：既有原庫若因直連 DDL 逾時停在 1080 的已驗證前綴，選項 7 只讀核對原 `fast_additive` journal、升級前備份、資料指紋及目前完整結構。僅 hash-bound 的 canonical 前綴可進入副本恢復；修復 DDL 由原 runner 在新副本執行，原庫與原紀錄不改寫。缺少備份、紀錄或結構不符，以及 DDL 結果未明時，停止且保留現況，不在原庫盲目續跑。
 
 | 維護操作 | 核心契約與失敗保護 |
 |---|---|
@@ -91,3 +92,13 @@ Windows 選項 7／8 切換後暫留原庫，供本次維護驗收與必要回�
    - **T**：維護人員在同一次維護中升級副本至現行版本並啟動系統。
    - **A**：執行選項 7，核對備份、來源與副本的資料、設定切換及啟動檢查，再對新庫重跑選項 7。以結構不符或啟動版本檢查失敗的副本驗證切換保護。
    - **R**：正向情境產生一份來源備份，原庫結構及資料保留，只切換 `DB_DATABASE`，且新庫通過啟動檢查。重跑不新增備份或副本。負向情境不切換資料庫。
+5. **未提供固定目標檔的遠端 NAS 升級**
+   - **S**：`.env` 指向遠端 NAS，來源停在 1079，已設定可用的 NAS UNC 備份根目錄，未提供 `.env.nas-maintenance`。
+   - **T**：維護人員透過 Windows 選項 7 安全升級資料庫。
+   - **A**：確認停止操作後執行升級；另以缺少 MySQL 工具、非 UNC 備份位置及未知結構驗證失敗處理。
+   - **R**：正向情境沿完整備份、副本升級與驗證流程，不呼叫本機原庫直連快速升級。負向情境不寫入來源、不切換設定，也不建立本機備份退路；中斷紀錄及原庫保留供核對。
+6. **1080 直連逾時後的部分結構恢復**
+   - **S**：原 journal 已驗證至 1080 第 29 條 DROP，對應 trigger 尚未重建，原始備份與資料指紋完整。
+   - **T**：維護人員保留原庫，將新副本恢復至現行版本。
+   - **A**：執行選項 7；另以錯誤來源、缺少備份、改動 journal、非 canonical 結構及未確認完成的 DDL 驗證拒絕行為。
+   - **R**：只有完整身分及雜湊核對通過時才備份與建立新副本，副本由原 runner 完成並驗證；原庫、journal 與升級前備份不變。負向情境不建立副本或切換設定。

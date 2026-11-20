@@ -1,5 +1,6 @@
 """Root case guard migration must recognize only complete, exact definitions."""
 from copy import deepcopy
+import json
 import pytest
 from scripts import migrate_preserved_database_additive_schema as m
 from scripts.compact_fresh_schema import load_compact_plan
@@ -108,3 +109,166 @@ def test_signing_guard_recognizes_predecessors_and_preserves_historical_classifi
     drift["triggers"][0]["action_statement"] += " unsafe"
     assert m._registry_guard_snapshot(drift, SIGNING_ARTIFACT)[1] == "drift"
     assert m._registry_guard_snapshot(drift, ARTIFACT)[1] == "drift"
+
+
+@pytest.fixture(scope="module")
+def signing_qualification():
+    return m._local_discover_qualification(
+        release_id="labor-union-registry-case-deletion-signing-2026-11-20-v1", artifact_name=SIGNING_ARTIFACT)
+
+
+@pytest.fixture
+def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification):
+    source = "lu_test_interrupted_signing"
+    release = "labor-union-registry-case-deletion-signing-2026-11-20-v1"
+    qualification = signing_qualification
+    monkeypatch.setattr(m, "_local_discover_qualification", lambda **_: qualification)
+    monkeypatch.setattr(m, "_local_verify_prerequisite_metadata", lambda *_: None)
+    related = (ARTIFACT, m._LINE_GROUP_HISTORY_DELETE_ARTIFACT, m._LINE_DELIVERY_RETENTION_ARTIFACT, SIGNING_ARTIFACT)
+    monkeypatch.setattr(m, "_upgrade_admission_states", lambda snap: {
+        part: m._registry_guard_snapshot(snap, part)[1] for part in related
+    })
+    predecessor = {}
+    for part in related[:-1]:
+        for statement in m.split_sql((m.ROOT / "db/schema_parts" / part).read_text(encoding="utf-8")):
+            if m._local_classify_statement(statement) == "create_trigger":
+                row = m._registry_signing_recovery_trigger(statement)
+                predecessor[row["trigger_name"]] = row
+    baseline = {"columns": [], "indexes": [], "triggers": [predecessor[name] for name in sorted(predecessor)],
+                "constraints": [], "key_columns": [], "foreign_keys": [], "show_create_tables": {}, "views": []}
+    baseline_sha = m._sha256_bytes(m._canonical_json(baseline))
+    statements = m.split_sql((m.ROOT / "db/schema_parts" / SIGNING_ARTIFACT).read_text(encoding="utf-8"))
+    rows = {"data_row_counts": {}, "data_fingerprints": {}, "data_fingerprint_sha256": m._local_data_fingerprint({})}
+    monkeypatch.setattr(m, "_local_capture_backup_rows", lambda *_: rows)
+    identity = {"database": source, "server": "fixture-server", "host": "fixture.invalid", "port": 3306}
+    monkeypatch.setattr(m, "server_identity", lambda *_: identity)
+    backup_path = tmp_path / "fast_additive" / f"{source}.{release}.backup.receipt.json"
+    backup_path.parent.mkdir()
+    dump = backup_path.with_suffix(".sql")
+    dump.write_bytes(m.MYSQL_DUMP_MARKER + f"\n-- Database: {source}\n".encode())
+    qualification = {**qualification, "metadata_backup": {**qualification["metadata_backup"], "data_row_counts": {}}}
+    backup = {"kind": "local_additive_source_backup", "release_id": release, **identity,
+              "schema_sha256": baseline_sha, "sha256": m._sha256_file(dump), **rows}
+    backup_path.write_text(json.dumps(backup), encoding="utf-8")
+    previous = m._local_append_event(tmp_path, source, release, "baseline_captured",
+        source_database=source, source_schema_sha256=baseline_sha,
+        statement_hashes=[m._local_digest(s.encode()) for s in statements],
+        data_fingerprint_sha256=rows["data_fingerprint_sha256"])
+    replayed = dict(predecessor)
+    for ordinal, statement in enumerate(statements[:29], 1):
+        fields = {"source_database": source, "source_schema_sha256": baseline_sha, "ordinal": ordinal,
+                  "statement_sha256": m._local_digest(statement.encode()), "classification": m._local_classify_statement(statement)}
+        previous = m._local_append_event(tmp_path, source, release, "statement_started", previous, **fields)
+        if ordinal % 2:
+            replayed.pop(statement.split("`")[1])
+        else:
+            row = m._registry_signing_recovery_trigger(statement)
+            replayed[row["trigger_name"]] = row
+        previous = m._local_append_event(tmp_path, source, release, "statement_verified", previous, outcome="applied", **fields)
+    current = {**baseline, "triggers": [replayed[name] for name in sorted(replayed)]}
+    current["sha256"] = m._sha256_bytes(m._canonical_json(current))
+    return source, release, current, tmp_path, backup_path, statements
+
+
+def test_interrupted_signing_source_admits_only_hash_bound_prefix_and_original_backup(interrupted_signing_source):
+    source, _, current, root, _, _ = interrupted_signing_source
+    saved = deepcopy(current)
+    evidence = m.qualify_registry_signing_source_recovery(None, source, current, receipt_root=root)
+    assert evidence["verified_prefix_length"] == 29
+    assert evidence["source_schema_sha256"] == current["sha256"]
+    assert SIGNING_ARTIFACT in evidence["allowed_partial_artifacts"]
+    assert "trg_case_payroll_policy_snapshots_before_delete" not in {r["trigger_name"] for r in current["triggers"]}
+    assert current == saved
+
+
+@pytest.mark.parametrize("fault", ["missing_journal", "tampered_journal", "foreign_source", "uncertain_ddl",
+    "schema_drift", "noncanonical_progress", "missing_backup", "wrong_host", "wrong_server", "wrong_release",
+    "wrong_baseline", "tampered_dump", "changed_rows"])
+def test_interrupted_signing_source_rejects_unproven_recovery(interrupted_signing_source, monkeypatch, fault):
+    source, release, current, root, backup_path, statements = interrupted_signing_source
+    journal = m._local_journal_path(root, source, release)
+    if fault == "missing_journal":
+        journal.unlink()
+    elif fault == "tampered_journal":
+        journal.write_text(journal.read_text(encoding="utf-8").replace('"applied"', '"unknown"', 1), encoding="utf-8")
+    elif fault == "foreign_source":
+        source += "_foreign"
+    elif fault == "uncertain_ddl":
+        previous = m._local_read_events(root, source, release)[-1]
+        m._local_append_event(root, source, release, "statement_started", previous,
+            source_database=source, source_schema_sha256=previous["source_schema_sha256"], ordinal=30,
+            statement_sha256=m._local_digest(statements[29].encode()), classification="create_trigger")
+    elif fault in {"schema_drift", "noncanonical_progress"}:
+        if fault == "schema_drift":
+            current["views"].append({"table_name": "foreign_view", "view_definition": "select 1"})
+        else:
+            current["triggers"][0]["action_statement"] += " changed"
+        current["sha256"] = m._sha256_bytes(m._canonical_json({k: v for k, v in current.items() if k != "sha256"}))
+    elif fault == "missing_backup":
+        backup_path.unlink()
+    elif fault == "tampered_dump":
+        with backup_path.with_suffix(".sql").open("ab") as handle:
+            handle.write(b"changed")
+    elif fault == "changed_rows":
+        monkeypatch.setattr(m, "_local_capture_backup_rows", lambda *_: {"data_row_counts": {"unexpected": 1}, "data_fingerprints": {}, "data_fingerprint_sha256": "f" * 64})
+    else:
+        backup = json.loads(backup_path.read_text(encoding="utf-8"))
+        key = {"wrong_host": "host", "wrong_server": "server", "wrong_release": "release_id", "wrong_baseline": "schema_sha256"}[fault]
+        backup[key] = "foreign"
+        backup_path.write_text(json.dumps(backup), encoding="utf-8")
+    with pytest.raises((m.UpgradeBlocked, m.LocalAdditiveBlocked)):
+        m.qualify_registry_signing_source_recovery(None, source, current, receipt_root=root)
+
+
+def test_interrupted_signing_plan_evidence_is_fingerprint_bound():
+    plan = {"source_recovery": {"journal_event_digest": "original"}}
+    plan["plan_fingerprint"] = m._sha256_bytes(m._canonical_json(plan))
+    fresh = {**plan, "source_recovery": {"journal_event_digest": "changed"}}
+    with pytest.raises(m.UpgradeBlocked, match="source_recovery"):
+        m._validate_plan_integrity(plan, fresh)
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_clean_predecessor_and_completed_signing_plan_do_not_require_recovery(
+    interrupted_signing_source, monkeypatch, completed,
+):
+    source, _, current, root, _, statements = interrupted_signing_source
+    selected = {}
+    parts = [ARTIFACT, m._LINE_GROUP_HISTORY_DELETE_ARTIFACT, m._LINE_DELIVERY_RETENTION_ARTIFACT]
+    for part in parts:
+        for statement in m.split_sql((m.ROOT / "db/schema_parts" / part).read_text(encoding="utf-8")):
+            if m._local_classify_statement(statement) == "create_trigger":
+                row = m._registry_signing_recovery_trigger(statement)
+                selected[row["trigger_name"]] = row
+    if completed:
+        selected = {row["trigger_name"]: row for statement in statements
+                    if m._local_classify_statement(statement) == "create_trigger"
+                    for row in (m._registry_signing_recovery_trigger(statement),)}
+    current["triggers"] = [selected[name] for name in sorted(selected)]
+    current["sha256"] = m._sha256_bytes(m._canonical_json({k: v for k, v in current.items() if k != "sha256"}))
+    monkeypatch.setattr(m, "_schema_snapshot", lambda *_: current)
+    monkeypatch.setattr(m, "database_exists", lambda *_: False)
+    monkeypatch.setattr(m, "_table_evidence", lambda *_: {})
+    monkeypatch.setattr(m, "_legacy_knowledge_rebuild_plan", lambda *_: {"eligible": False})
+    monkeypatch.setattr(m, "qualify_registry_signing_source_recovery", lambda *_args, **_kwargs:
+                        pytest.fail("canonical source does not need interrupted-source authority"))
+    plan = m.build_plan(None, source, "lu_nas_upgrade_fixture", source_recovery_root=root)
+    assert plan["status"] == "ready" and "source_recovery" not in plan
+
+
+def test_recovery_apply_revalidates_original_files_before_candidate_ddl(interrupted_signing_source, monkeypatch):
+    source, _, current, root, _, _ = interrupted_signing_source
+    monkeypatch.setattr(m, "_schema_snapshot", lambda *_: current)
+    monkeypatch.setattr(m, "database_exists", lambda *_: False)
+    monkeypatch.setattr(m, "_table_evidence", lambda *_: {})
+    monkeypatch.setattr(m, "_legacy_knowledge_rebuild_plan", lambda *_: {"eligible": False})
+    plan = m.build_plan(None, source, "lu_nas_upgrade_fixture", source_recovery_root=root)
+    plan_path, operation_path = root / "plan.json", root / "operation.json"
+    m.write_receipt(plan_path, plan)
+    m.write_receipt(operation_path, {"status": "restored"})
+    with pytest.raises(m.UpgradeBlocked, match="requires fresh"):
+        m.apply_schema(None, source, "lu_nas_upgrade_fixture", plan_path, operation_path)
+    m._local_journal_path(root, source, plan["source_recovery"]["release_id"]).unlink()
+    with pytest.raises(m.UpgradeBlocked, match="original journal"):
+        m.apply_schema(None, source, "lu_nas_upgrade_fixture", plan_path, operation_path,
+                       source_recovery_root=root)

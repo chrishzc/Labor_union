@@ -55,6 +55,18 @@ def settings(tmp_path, monkeypatch):
     return result
 
 
+@pytest.fixture
+def unpinned_remote_settings(settings, tmp_path):
+    runtime = settings["environment_file"]
+    runtime.write_text(runtime.read_text(encoding="utf-8").replace(
+        "nas.invalid", "192.168.1.239").replace(
+        '"union_db"', '"lu_nas_restore_20261117032757_4ad2acd6"'), encoding="utf-8")
+    loaded = nas.load_settings(runtime, tmp_path / "absent-maintenance-settings")
+    loaded["backup_root"] = settings["backup_root"]
+    assert not loaded["settings_file"].exists()
+    return loaded
+
+
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "127.0.0.2", "::1", "0.0.0.0", "::"])
 def test_local_development_targets_rejected_before_connection(settings, host, monkeypatch):
     path = settings["environment_file"]
@@ -576,13 +588,19 @@ def test_candidate_config_refuses_source_connection_and_keeps_tls(settings, monk
     assert calls[0]["ssl"]["check_hostname"] is True
 
 
-@pytest.mark.parametrize(("local_test", "verified"), [(False, False), (True, False), (True, True), (False, True)])
+@pytest.mark.parametrize("deployment", ["pinned_remote", "unpinned_remote", "local_test"])
+@pytest.mark.parametrize("verified", [False, True])
 def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedures_fail(
-    settings, monkeypatch, tmp_path, local_test, verified,
+    settings, monkeypatch, tmp_path, request, deployment, verified,
 ):
     from scripts import update_local_database as updater
 
     steps = []
+    local_test = deployment == "local_test"
+    if deployment == "unpinned_remote":
+        settings = request.getfixturevalue("unpinned_remote_settings")
+    monkeypatch.setattr(updater, "update_local_database", lambda **_:
+                        pytest.fail("NAS upgrade must not alter the configured source"))
     monkeypatch.setattr(nas, "protect_account_receipts", lambda *_args, **_kwargs: 0)
     if local_test:
         settings.update(host="127.0.0.1", database="lu_nas_fixture", settings_file=tmp_path / "absent")
@@ -594,13 +612,20 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
 
     monkeypatch.setattr(updater, "build_additive_preview", candidate_preview)
     monkeypatch.setattr(nas.shutil, "which", lambda name: name)
-    monkeypatch.setattr(nas.migration, "build_plan", lambda *_: steps.append("plan") or {
+    def plan(*_args, **kwargs):
+        assert kwargs["source_recovery_root"] == updater.DEFAULT_RECEIPT_ROOT
+        steps.append("plan")
+        return {
         "status": "ready", "candidate_exists": False, "source_objects": {"fixture.sql": "absent"},
-    })
+        }
+    monkeypatch.setattr(nas.migration, "build_plan", plan)
     monkeypatch.setattr(nas, "backup", lambda *_: steps.append("backup") or tmp_path)
     monkeypatch.setattr(nas, "validate_backup", lambda *_: {"created_at": "fixture", "server": "fixture", "sha256": "a", "size": 1})
     monkeypatch.setattr(nas.migration, "restore_candidate", lambda *_: steps.append("restore"))
-    monkeypatch.setattr(nas.migration, "apply_schema", lambda *_: steps.append("apply"))
+    def apply(*_args, **kwargs):
+        assert kwargs["source_recovery_root"] == updater.DEFAULT_RECEIPT_ROOT
+        steps.append("apply")
+    monkeypatch.setattr(nas.migration, "apply_schema", apply)
     monkeypatch.setattr(nas, "schema_inventory", lambda *_args, **_kw: {})
     monkeypatch.setattr(nas.migration, "verify_candidate", lambda *_: steps.append("verify") or {
         "status": "verified" if verified else "failed",
@@ -633,12 +658,53 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
     assert settings["environment_file"].read_bytes() == before
 
 
+@pytest.mark.parametrize("missing", ["mysql", "mysqldump"])
+def test_unpinned_remote_upgrade_requires_native_tools_before_database_access(
+    unpinned_remote_settings, monkeypatch, missing,
+):
+    from scripts import update_local_database as updater
+
+    monkeypatch.setattr(nas, "resolve_client_tool", lambda name: None if name == missing else name)
+    monkeypatch.setattr(nas, "reader", lambda *_: pytest.fail("tools must be checked before connection"))
+    monkeypatch.setattr(updater, "update_local_database", lambda **_: pytest.fail("no direct upgrade"))
+    with pytest.raises(nas.MaintenanceBlocked, match="mysql 與 mysqldump"):
+        nas.upgrade(unpinned_remote_settings)
+
+
+def test_unpinned_remote_upgrade_rejects_local_backup_before_database_access(
+    unpinned_remote_settings, monkeypatch,
+):
+    monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
+    monkeypatch.setattr(nas, "is_nas_destination", lambda _: False)
+    monkeypatch.setattr(nas, "reader", lambda *_: pytest.fail("backup path must be checked before connection"))
+    with pytest.raises(nas.MaintenanceBlocked, match="不會改存本機"):
+        nas.upgrade(unpinned_remote_settings)
+    with pytest.raises(nas.MaintenanceBlocked, match="不會改存本機"):
+        nas.destination_ready(unpinned_remote_settings, writable=True)
+
+
+@pytest.mark.parametrize("state", ["partial", "drift"])
+def test_unpinned_remote_upgrade_stops_at_source_preflight_without_backup_or_writes(
+    unpinned_remote_settings, monkeypatch, state,
+):
+    from scripts import update_local_database as updater
+
+    monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
+    def blocked_plan(*_args, **_kwargs):
+        raise nas.migration.UpgradeBlocked(f"source contains {state} owned objects")
+    monkeypatch.setattr(nas.migration, "build_plan", blocked_plan)
+    monkeypatch.setattr(nas, "backup", lambda *_: pytest.fail("blocked source must be retained"))
+    monkeypatch.setattr(updater, "update_local_database", lambda **_: pytest.fail("no direct retry"))
+    with pytest.raises(nas.migration.UpgradeBlocked, match=state):
+        nas.upgrade(unpinned_remote_settings)
+
+
 def test_current_local_test_database_does_not_create_candidate(settings, monkeypatch, tmp_path):
     from scripts import update_local_database as updater
 
     settings.update(host="127.0.0.1", database="lu_nas_fixture", settings_file=tmp_path / "absent")
     monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
-    monkeypatch.setattr(nas.migration, "build_plan", lambda *_: {
+    monkeypatch.setattr(nas.migration, "build_plan", lambda *_args, **_kwargs: {
         "status": "ready", "candidate_exists": False, "source_objects": {
             "fixture.sql": "exact", "1031_weekly_report_batches.sql": "absent",
         },

@@ -58,6 +58,7 @@
   - Journal identity 綁定 `source_database + release_id`（不混用先前 release 鏈）；每次 Apply 前須建立該機器專屬之 release-scoped mysqldump 與 local backup receipt（缺原始備份／身分不符回 `backup_required`；schema 已 exact 但既有同 release journal 未完成回 `verification_incomplete`）。
   - **計時與逾時保護**：前置驗證上限 `300` 秒、更新後驗證上限 `300` 秒、單條 DDL 上限 `30` 秒、等鎖上限 `5` 秒、單次 socket 上限 `30` 秒；local receipt 與 completed journal 紀錄 `phase_timings`，超時回 `preparation_duration_exceeded`／`blocked_duration_exceeded`／`verification_duration_exceeded`（DDL 結果未明須先核對而不盲目重跑）。
   - schema-only fast path 限 `localhost` development／validation 非 MySQL 系統 schema，遠端與 production 一律拒絕。
+  - Windows 遠端 NAS 曾誤入 fast path 而中斷 1080 時，僅接受原 journal 的連續已驗證 canonical 前綴及完整原始備份。唯讀重建 canonical 1079 基線與該前綴，須分別符合原基線及現況完整 schema SHA，並核對 source／server／host／port、dump 與全部資料指紋。此證明只授權該次新副本恢復實際受影響的 guard parts，納入原 plan fingerprint 並於 Apply fresh-plan 再驗；不得改寫原庫或歷史紀錄、隱藏其他 partial／drift，或略過結果未明的 DDL。
 - **Candidate Backfill／Validation／Switch**：Backfill 先 dry-run 驗證 affected rows 與 before／after fingerprint；不可唯一轉換者進 bounded `legacy_unresolved`；Switch 使用 `SwitchStateReconciler` 核對 before／after `.env` hash 決定 crash window 狀態。
 
 ## 5. Commands、Stable Errors 與交易邊界

@@ -5096,11 +5096,128 @@ def _upgrade_admission_states(snapshot: Mapping[str, Any]) -> dict[str, str]:
     return states
 
 
+def _registry_signing_recovery_trigger(statement: str) -> dict[str, str]:
+    match = re.fullmatch(
+        r"CREATE TRIGGER `(?P<trigger_name>[A-Za-z0-9_]+)` "
+        r"(?P<action_timing>BEFORE|AFTER) (?P<event_manipulation>DELETE|INSERT|UPDATE) "
+        r"ON `(?P<event_object_table>[A-Za-z0-9_]+)` FOR EACH ROW (?P<action_statement>.+)",
+        statement, re.DOTALL,
+    )
+    if match is None:
+        raise UpgradeBlocked("registry signing recovery canonical trigger is invalid")
+    return match.groupdict()
+
+
+def qualify_registry_signing_source_recovery(
+    config: Any, source: str, snapshot: Mapping[str, Any], *, receipt_root: Path,
+) -> dict[str, Any]:
+    """Prove an interrupted 1080 source without executing or resuming its DDL."""
+    artifact_name = _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT
+    release_id = "labor-union-registry-case-deletion-signing-2026-11-20-v1"
+    qualification = _local_discover_qualification(
+        release_id=release_id, artifact_name=artifact_name,
+    )
+    _local_verify_hashes(qualification)
+    artifact = qualification["_canonical_artifact"]
+    statements = split_sql((ROOT / artifact["relative_path"]).read_text(encoding="utf-8"))
+    hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
+    events = _local_read_events(receipt_root, source, release_id)
+    if not events:
+        raise UpgradeBlocked("interrupted registry signing source requires its original journal")
+    baseline_sha, verified = _local_resume_context(events, release_id, source, hashes, str(snapshot["sha256"]))
+    _local_verified_ordinals(events, release_id, source, baseline_sha)
+    if not verified or len(verified) >= len(statements) or events[-1].get("state") != "statement_verified":
+        raise UpgradeBlocked("registry signing source has no verified interrupted DDL prefix")
+    next_ordinal = 1
+    pending_ordinal = None
+    for event in events:
+        if event.get("source_schema_sha256") != baseline_sha:
+            raise UpgradeBlocked("registry signing recovery journal baseline differs")
+        state = event.get("state")
+        if state not in {"baseline_captured", "preparation_verified", "maintenance_lock_acquired",
+                         "statement_started", "statement_verified"}:
+            raise UpgradeBlocked("registry signing recovery journal state is invalid")
+        if state in {"statement_started", "statement_verified"}:
+            ordinal = event["ordinal"]
+            if (event.get("statement_sha256") != hashes[ordinal - 1]
+                    or event.get("classification") != _local_classify_statement(statements[ordinal - 1])):
+                raise UpgradeBlocked("registry signing recovery statement classification differs")
+            if state == "statement_started":
+                if ordinal != next_ordinal or pending_ordinal is not None:
+                    raise UpgradeBlocked("registry signing recovery statement order differs")
+                pending_ordinal = ordinal
+            else:
+                if ordinal != pending_ordinal or event.get("outcome") != "applied":
+                    raise UpgradeBlocked("registry signing recovery DDL outcome is unverified")
+                pending_ordinal = None
+                next_ordinal += 1
+
+    predecessor: dict[str, dict[str, str]] = {}
+    for part in ("1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT, _LINE_DELIVERY_RETENTION_ARTIFACT):
+        for statement in split_sql((ROOT / "db/schema_parts" / part).read_text(encoding="utf-8")):
+            if _local_classify_statement(statement) == "create_trigger":
+                row = _registry_signing_recovery_trigger(statement)
+                predecessor[row["trigger_name"]] = row
+    successor = {
+        row["trigger_name"]: row
+        for statement in statements
+        if _local_classify_statement(statement) == "create_trigger"
+        for row in (_registry_signing_recovery_trigger(statement),)
+    }
+    if set(predecessor) != set(successor):
+        raise UpgradeBlocked("registry signing recovery trigger inventory differs")
+    payload = {key: value for key, value in snapshot.items() if key != "sha256"}
+    unrelated = {row["trigger_name"]: row for row in snapshot["triggers"] if row["trigger_name"] not in predecessor}
+    baseline_triggers = {**unrelated, **predecessor}
+    payload["triggers"] = [baseline_triggers[name] for name in sorted(baseline_triggers)]
+    if _sha256_bytes(_canonical_json(payload)) != baseline_sha:
+        raise UpgradeBlocked("registry signing recovery baseline schema differs")
+    baseline_snapshot = {**payload, "sha256": baseline_sha}
+    _local_verify_prerequisite_metadata(baseline_snapshot, qualification)
+    if _blocking_schema_states(_upgrade_admission_states(baseline_snapshot), frozenset()):
+        raise UpgradeBlocked("registry signing recovery predecessor is partial or drift")
+    replayed = dict(baseline_triggers)
+    for statement in statements[:len(verified)]:
+        if _local_classify_statement(statement) == "drop_trigger_if_exists":
+            match = re.fullmatch(r"DROP TRIGGER IF EXISTS `([A-Za-z0-9_]+)`", statement)
+            if match is None or match[1] not in predecessor:
+                raise UpgradeBlocked("registry signing recovery canonical drop is invalid")
+            replayed.pop(match[1], None)
+        else:
+            row = _registry_signing_recovery_trigger(statement)
+            replayed[row["trigger_name"]] = row
+    payload["triggers"] = [replayed[name] for name in sorted(replayed)]
+    if _sha256_bytes(_canonical_json(payload)) != snapshot["sha256"]:
+        raise UpgradeBlocked("registry signing recovery current schema does not match verified prefix")
+    backup_receipt = Path(receipt_root) / "fast_additive" / f"{source}.{release_id}.backup.receipt.json"
+    backup = _local_validate_backup(
+        config, source, qualification, baseline_sha,
+        backup_dump_path=backup_receipt.with_suffix(".sql"), backup_receipt_path=backup_receipt,
+    )
+    if events[0].get("data_fingerprint_sha256") != backup["data_fingerprint_sha256"]:
+        raise UpgradeBlocked("registry signing recovery journal backup rows differ")
+    states = _upgrade_admission_states(snapshot)
+    related = {"1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT,
+               _LINE_DELIVERY_RETENTION_ARTIFACT, artifact_name}
+    allowed = frozenset(name for name in related if states.get(name) == "partial")
+    if _blocking_schema_states(states, allowed):
+        raise UpgradeBlocked("registry signing recovery contains unrelated partial or drift objects")
+    return {
+        "contract": "registry-signing-interrupted-source-recovery/v1",
+        "release_id": release_id, "artifact": artifact_name,
+        "baseline_schema_sha256": baseline_sha, "source_schema_sha256": snapshot["sha256"],
+        "verified_prefix_length": len(verified), "journal_event_digest": events[-1]["event_digest"],
+        "backup_sha256": backup["sha256"], "data_fingerprint_sha256": backup["data_fingerprint_sha256"],
+        "allowed_partial_artifacts": sorted(allowed),
+    }
+
+
 def build_plan(
     config: DatabaseConfig,
     source: str,
     candidate: str,
     allowed_partial_artifacts: frozenset[str] = frozenset(),
+    *, source_recovery_root: Path | None = None,
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
     source_identity = server_identity(config, source)
@@ -5109,6 +5226,13 @@ def build_plan(
     blocking_states = _blocking_schema_states(
         source_objects, allowed_partial_artifacts
     )
+    source_recovery = None
+    if blocking_states and source_recovery_root is not None:
+        source_recovery = qualify_registry_signing_source_recovery(
+            config, source, source_snapshot, receipt_root=source_recovery_root,
+        )
+        allowed_partial_artifacts = allowed_partial_artifacts.union(source_recovery["allowed_partial_artifacts"])
+        blocking_states = _blocking_schema_states(source_objects, allowed_partial_artifacts)
     if blocking_states:
         raise UpgradeBlocked(
             f"source contains partial/drift owned objects: {blocking_states}"
@@ -5162,6 +5286,8 @@ def build_plan(
             else "ready"
         ),
     }
+    if source_recovery is not None:
+        plan["source_recovery"] = source_recovery
     plan["plan_fingerprint"] = _sha256_bytes(_canonical_json(plan))
     return plan
 
@@ -5259,6 +5385,7 @@ def _validate_plan_integrity(
         "schema_artifacts",
         "backfills",
         "phase_order",
+        "source_recovery",
     ):
         if plan.get(key) != fresh.get(key):
             raise UpgradeBlocked(f"plan artifact changed after planning: {key}")
@@ -8637,6 +8764,7 @@ def apply_schema(
     *,
     mysql_container: str | None = None,
     allowed_partial_artifacts: frozenset[str] = frozenset(),
+    source_recovery_root: Path | None = None,
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
     operation_receipt = read_receipt(operation_receipt_path)
@@ -8653,6 +8781,8 @@ def apply_schema(
     plan = read_receipt(plan_path)
     if plan.get("status") != "ready":
         raise UpgradeBlocked("plan is not ready")
+    if plan.get("source_recovery") is not None and source_recovery_root is None:
+        raise UpgradeBlocked("source recovery requires fresh original journal and backup verification")
     existing_receipt = read_receipt(operation_receipt_path)
     schema_artifacts = plan.get("schema_artifacts") or []
     artifact_names = [
@@ -8682,11 +8812,18 @@ def apply_schema(
             mysql_container=mysql_container,
         )
     fresh = (
+        build_plan(config, source, candidate, allowed_partial_artifacts,
+                   source_recovery_root=source_recovery_root)
+        if source_recovery_root is not None else
         build_plan(config, source, candidate, allowed_partial_artifacts)
         if allowed_partial_artifacts
         else build_plan(config, source, candidate)
     )
     _validate_plan_integrity(plan, fresh)
+    if fresh.get("source_recovery") is not None:
+        allowed_partial_artifacts = allowed_partial_artifacts.union(
+            fresh["source_recovery"]["allowed_partial_artifacts"]
+        )
     if fresh["source_schema_sha256"] != plan.get("source_schema_sha256"):
         raise UpgradeBlocked("source schema changed after planning")
     if fresh["source_data"] != plan.get("source_data"):
