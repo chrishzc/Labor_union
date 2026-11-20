@@ -5136,6 +5136,29 @@ def _registry_signing_backup_triggers(path: Path, names: set[str]) -> dict[str, 
     return triggers
 
 
+def _registry_signing_recovery_trigger_order(
+    config: Any, source: str, current_names: list[str], baseline_names: set[str],
+) -> list[str]:
+    if len(current_names) != len(set(current_names)) or not set(current_names) <= baseline_names:
+        raise UpgradeBlocked("registry signing recovery current trigger inventory differs")
+    missing = sorted(baseline_names - set(current_names))
+    query = "SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=%s"
+    query += " UNION ALL SELECT %s" * len(missing)
+    query += " ORDER BY trigger_name"
+    connection = config.connect(source)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (source, *missing))
+            names = [str(_normalized_row(row)["trigger_name"]) for row in cursor.fetchall()]
+    finally:
+        connection.close()
+    if len(names) != len(baseline_names) or set(names) != baseline_names:
+        raise UpgradeBlocked("registry signing recovery ordered trigger inventory differs")
+    if [name for name in names if name in set(current_names)] != current_names:
+        raise UpgradeBlocked("registry signing recovery current trigger order changed")
+    return names
+
+
 def qualify_registry_signing_source_recovery(
     config: Any, source: str, snapshot: Mapping[str, Any], *, receipt_root: Path,
 ) -> dict[str, Any]:
@@ -5204,13 +5227,17 @@ def qualify_registry_signing_source_recovery(
     original = _registry_signing_backup_triggers(Path(backup["dump_path"]), set(predecessor))
     payload = {key: value for key, value in snapshot.items() if key != "sha256"}
     unrelated = {row["trigger_name"]: row for row in snapshot["triggers"] if row["trigger_name"] not in predecessor}
+    current_names = [row["trigger_name"] for row in snapshot["triggers"]]
+    baseline_order = _registry_signing_recovery_trigger_order(
+        config, source, current_names, set(unrelated) | set(predecessor),
+    )
     # Windows mysqldump may add a carriage return to every emitted newline.
     for backup_triggers in (original, {
         name: {**row, "action_statement": row["action_statement"].replace("\r\n", "\n")}
         for name, row in original.items()
     }):
         baseline_triggers = {**unrelated, **backup_triggers}
-        payload["triggers"] = [baseline_triggers[name] for name in sorted(baseline_triggers)]
+        payload["triggers"] = [baseline_triggers[name] for name in baseline_order]
         if _sha256_bytes(_canonical_json(payload)) == baseline_sha:
             break
     else:
@@ -5235,7 +5262,9 @@ def qualify_registry_signing_source_recovery(
             } != {**row, "action_statement": _registry_guard_action(row["action_statement"])}:
                 raise UpgradeBlocked("registry signing recovery current trigger differs from verified prefix")
             replayed[name] = current
-    payload["triggers"] = [replayed[name] for name in sorted(replayed)]
+    if set(replayed) != set(current_names):
+        raise UpgradeBlocked("registry signing recovery current trigger inventory differs from verified prefix")
+    payload["triggers"] = [replayed[name] for name in current_names]
     if _sha256_bytes(_canonical_json(payload)) != snapshot["sha256"]:
         raise UpgradeBlocked("registry signing recovery current schema does not match verified prefix")
     states = _upgrade_admission_states(snapshot)

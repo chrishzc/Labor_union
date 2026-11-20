@@ -134,6 +134,11 @@ def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification, req
             if m._local_classify_statement(statement) == "create_trigger":
                 row = m._registry_signing_recovery_trigger(statement)
                 predecessor[row["trigger_name"]] = row
+    mysql_first = "trg_caregiver_availability_locks_before_delete"
+    python_first = "trg_caregiver_availability_lock_days_before_delete"
+    baseline_order = sorted(predecessor)
+    first_index, second_index = baseline_order.index(python_first), baseline_order.index(mysql_first)
+    baseline_order[first_index], baseline_order[second_index] = mysql_first, python_first
     rendering = getattr(request, "param", "canonical")
     if rendering == "restored_crlf":
         for row in predecessor.values():
@@ -141,7 +146,7 @@ def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification, req
     elif rendering == "restored_spacing":
         for row in predecessor.values():
             row["action_statement"] = row["action_statement"].replace("BEGIN\n", "BEGIN  \n")
-    baseline = {"columns": [], "indexes": [], "triggers": [predecessor[name] for name in sorted(predecessor)],
+    baseline = {"columns": [], "indexes": [], "triggers": [predecessor[name] for name in baseline_order],
                 "constraints": [], "key_columns": [], "foreign_keys": [], "show_create_tables": {}, "views": []}
     baseline_sha = m._sha256_bytes(m._canonical_json(baseline))
     statements = m.split_sql((m.ROOT / "db/schema_parts" / SIGNING_ARTIFACT).read_text(encoding="utf-8"))
@@ -182,15 +187,31 @@ def interrupted_signing_source(monkeypatch, tmp_path, signing_qualification, req
                 row["action_statement"] = row["action_statement"].replace("\n", "\r\n")
             replayed[row["trigger_name"]] = row
         previous = m._local_append_event(tmp_path, source, release, "statement_verified", previous, outcome="applied", **fields)
-    current = {**baseline, "triggers": [replayed[name] for name in sorted(replayed)]}
+    current = {**baseline, "triggers": [replayed[name] for name in baseline_order if name in replayed]}
     current["sha256"] = m._sha256_bytes(m._canonical_json(current))
-    return source, release, current, tmp_path, backup_path, statements
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, query, arguments):
+            assert query == ("SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=%s"
+                             " UNION ALL SELECT %s ORDER BY trigger_name")
+            assert arguments == (source, "trg_case_payroll_policy_snapshots_before_delete")
+        def fetchall(self): return [{"trigger_name": name} for name in config.ordered_names]
+    class Config:
+        ordered_names = baseline_order.copy()
+        def connect(self, database):
+            assert database == source
+            return self
+        def cursor(self): return Cursor()
+        def close(self): pass
+    config = Config()
+    return source, release, current, tmp_path, backup_path, statements, config
 
 
 def test_interrupted_signing_source_admits_only_hash_bound_prefix_and_original_backup(interrupted_signing_source):
-    source, _, current, root, _, _ = interrupted_signing_source
+    source, _, current, root, _, _, config = interrupted_signing_source
     saved = deepcopy(current)
-    evidence = m.qualify_registry_signing_source_recovery(None, source, current, receipt_root=root)
+    evidence = m.qualify_registry_signing_source_recovery(config, source, current, receipt_root=root)
     assert evidence["verified_prefix_length"] == 29
     assert evidence["source_schema_sha256"] == current["sha256"]
     assert SIGNING_ARTIFACT in evidence["allowed_partial_artifacts"]
@@ -198,11 +219,37 @@ def test_interrupted_signing_source_admits_only_hash_bound_prefix_and_original_b
     assert current == saved
 
 
+def test_interrupted_signing_source_preserves_mysql_trigger_order(interrupted_signing_source):
+    source, _, current, root, _, _, config = interrupted_signing_source
+    names = [row["trigger_name"] for row in current["triggers"]]
+    assert names != sorted(names)
+    saved = deepcopy(current)
+    evidence = m.qualify_registry_signing_source_recovery(config, source, current, receipt_root=root)
+    assert evidence["verified_prefix_length"] == 29
+    assert evidence["source_schema_sha256"] == saved["sha256"]
+    assert current == saved
+
+
+@pytest.mark.parametrize("fault", ["missing", "extra", "duplicate", "changed_order"])
+def test_interrupted_signing_source_rejects_changed_order_query_inventory(interrupted_signing_source, fault):
+    source, _, current, root, _, _, config = interrupted_signing_source
+    if fault == "missing":
+        config.ordered_names.pop()
+    elif fault == "extra":
+        config.ordered_names.append("trg_unknown_extra")
+    elif fault == "duplicate":
+        config.ordered_names[-1] = config.ordered_names[0]
+    else:
+        config.ordered_names.reverse()
+    with pytest.raises(m.UpgradeBlocked, match="trigger inventory differs|trigger order changed"):
+        m.qualify_registry_signing_source_recovery(config, source, current, receipt_root=root)
+
+
 @pytest.mark.parametrize("interrupted_signing_source", ["restored_crlf", "restored_spacing"], indirect=True)
 def test_interrupted_signing_source_uses_original_backup_rendering(interrupted_signing_source):
-    source, _, current, root, _, _ = interrupted_signing_source
+    source, _, current, root, _, _, config = interrupted_signing_source
     saved = deepcopy(current)
-    evidence = m.qualify_registry_signing_source_recovery(None, source, current, receipt_root=root)
+    evidence = m.qualify_registry_signing_source_recovery(config, source, current, receipt_root=root)
     assert evidence["verified_prefix_length"] == 29
     assert current == saved
 
@@ -224,7 +271,7 @@ def test_signing_backup_trigger_parser_preserves_version_comments_inside_literal
     "wrong_baseline", "tampered_dump", "changed_rows", "missing_backup_triggers", "duplicate_backup_trigger",
     "backup_trigger_drift"])
 def test_interrupted_signing_source_rejects_unproven_recovery(interrupted_signing_source, monkeypatch, fault):
-    source, release, current, root, backup_path, statements = interrupted_signing_source
+    source, release, current, root, backup_path, statements, config = interrupted_signing_source
     journal = m._local_journal_path(root, source, release)
     if fault == "missing_journal":
         journal.unlink()
@@ -271,7 +318,7 @@ def test_interrupted_signing_source_rejects_unproven_recovery(interrupted_signin
         backup[key] = "foreign"
         backup_path.write_text(json.dumps(backup), encoding="utf-8")
     with pytest.raises((m.UpgradeBlocked, m.LocalAdditiveBlocked)):
-        m.qualify_registry_signing_source_recovery(None, source, current, receipt_root=root)
+        m.qualify_registry_signing_source_recovery(config, source, current, receipt_root=root)
 
 
 def test_interrupted_signing_plan_evidence_is_fingerprint_bound():
@@ -286,7 +333,7 @@ def test_interrupted_signing_plan_evidence_is_fingerprint_bound():
 def test_clean_predecessor_and_completed_signing_plan_do_not_require_recovery(
     interrupted_signing_source, monkeypatch, completed,
 ):
-    source, _, current, root, _, statements = interrupted_signing_source
+    source, _, current, root, _, statements, _ = interrupted_signing_source
     selected = {}
     parts = [ARTIFACT, m._LINE_GROUP_HISTORY_DELETE_ARTIFACT, m._LINE_DELIVERY_RETENTION_ARTIFACT]
     for part in parts:
@@ -311,18 +358,18 @@ def test_clean_predecessor_and_completed_signing_plan_do_not_require_recovery(
 
 
 def test_recovery_apply_revalidates_original_files_before_candidate_ddl(interrupted_signing_source, monkeypatch):
-    source, _, current, root, _, _ = interrupted_signing_source
+    source, _, current, root, _, _, config = interrupted_signing_source
     monkeypatch.setattr(m, "_schema_snapshot", lambda *_: current)
     monkeypatch.setattr(m, "database_exists", lambda *_: False)
     monkeypatch.setattr(m, "_table_evidence", lambda *_: {})
     monkeypatch.setattr(m, "_legacy_knowledge_rebuild_plan", lambda *_: {"eligible": False})
-    plan = m.build_plan(None, source, "lu_nas_upgrade_fixture", source_recovery_root=root)
+    plan = m.build_plan(config, source, "lu_nas_upgrade_fixture", source_recovery_root=root)
     plan_path, operation_path = root / "plan.json", root / "operation.json"
     m.write_receipt(plan_path, plan)
     m.write_receipt(operation_path, {"status": "restored"})
     with pytest.raises(m.UpgradeBlocked, match="requires fresh"):
-        m.apply_schema(None, source, "lu_nas_upgrade_fixture", plan_path, operation_path)
+        m.apply_schema(config, source, "lu_nas_upgrade_fixture", plan_path, operation_path)
     m._local_journal_path(root, source, plan["source_recovery"]["release_id"]).unlink()
     with pytest.raises(m.UpgradeBlocked, match="original journal"):
-        m.apply_schema(None, source, "lu_nas_upgrade_fixture", plan_path, operation_path,
+        m.apply_schema(config, source, "lu_nas_upgrade_fixture", plan_path, operation_path,
                        source_recovery_root=root)
