@@ -109,7 +109,7 @@
   4. Effective generation 與 assignments（`assignment_id` 升冪）
   5. Schedules / waiting locks / buffer facts（日期與 row id 排序）
   6. Payroll / Client Finance obligations（aggregate identity 排序）
-- 複雜排班變更（如 `ApplyAssignmentPlan`、`ApplyLeaveSubstitutionBatch`）支援回傳 `202 Accepted` Durable Job 並由 worker 在單一交易完成全部鎖定與提交。
+- 複雜排班變更（如 `ApplyAssignmentPlan`、`ApplyLeaveSubstitutionBatch`）可回 `202 Accepted` 與工作識別。這只表示受理，不表示班表已生效。以工作識別查詢結果，取得成功收據並重新讀到同次正式班表，才算完成。若工作仍待處理或結果不明，不顯示已生效；若最終拒絕，依原錯誤判斷，班表不留部分寫入。背景工作仍在同一交易完成全部鎖定與提交。
 - **異常決策矩陣（`SCHEDULE-002 / 003 / 006`）**：只以 `Preview/ApplyAssignmentPlan`（尚未有實際服務日時）或 `Preview/ApplyLeaveSubstitutionBatch`（已有實際服務日時）修復 lineage 斷裂、同月嫂重疊或日數總量違規；成功後於同交易寫入 `anomaly.recheck` intent 並在 fresh authoritative readback 後刪除異常。
 
 ### 3.6 Typed Commands、Ports、Errors 與 Writer Exit
