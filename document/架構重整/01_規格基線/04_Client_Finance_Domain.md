@@ -97,6 +97,7 @@
 ### 3.4 不可變帳本、補助退還分離、調整單與釋放確認
 
 - **收款統計與禁止連環沖正**：收款工作區「已收款」依 `entry_type=receipt` 計 `receipt_entry_count`（不含調整、退款、沖正）。原交易永不 UPDATE；嚴禁 `reversal-of-reversal`，疑似錯誤沖正僅能於警示核查後由 Preview／Apply 建立新調整單。
+  - **已收款筆數例**：在相同查詢條件下，帳本有 2 筆收款，另有 1 筆調整、1 筆退款及 1 筆沖正。查看收款工作區時，「已收款」的筆數為 2，不是 5。
 - **一般退款與補助退還業務線嚴格分離**：
 
 | 業務線 | payout entry | return／reversal entry | obligation projection |
