@@ -13,7 +13,7 @@ Preliminary caregiver information may read a quantity-only estimate using these 
 ## Implementation
 - `domains/payroll/calculation.py`
 - `domains/payroll/tiered_rates.py`
-- `domains/payroll/estimate.py` — quantity-only preliminary staff quote; reuses Payroll tiers and funding dates without creating assignments, service dates or obligations.
+- `domains/payroll/estimate.py` — quantity-only preliminary staff quote; reuses Payroll tiers and funding dates without creating assignments, service dates or obligations. 未提供預計迄日時，初估可回傳金額，但不填分期付款日。
 - `domains/payroll/installments.py`
 - `infrastructure/mysql/payroll_installments.py`
 - 方案一共同核銷沿規格16 §2.4.1，以 `confirmed_subsidy_installments` 及 insert-only `establish_confirmed_subsidy_installments` 承接單一既有應付的缺席來源分期；自備款保留原日期、補助沿既有+2月15日政策。借用 Staff Payables outer UoW，沒有新增薪資或自行 commit，不覆寫既有分期／付款。

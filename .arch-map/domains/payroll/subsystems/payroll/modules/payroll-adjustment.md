@@ -25,7 +25,7 @@
 ## Verification
 - integration_root: `tests/domains/payroll/subsystems/payroll/integration/test_payroll_amount_correction_mysql.py`
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/payroll-adjustment/`
-- integration_root: `tests/domains/payroll/subsystems/payroll/integration/test_payroll_adjustment_workflow.py`
+- integration_root: `tests/domains/payroll/subsystems/payroll/integration/test_payroll_adjustment_workflow.py` — 既有合成案例確認薪資版本過期時回報衝突，且不寫入。
 
 ## Provenance
 - Existing implementation and read response contract — `source_observed` — current repository.
