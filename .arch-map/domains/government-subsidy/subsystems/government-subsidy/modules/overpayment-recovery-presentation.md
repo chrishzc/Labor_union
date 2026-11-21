@@ -17,7 +17,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/government_overpayment_recovery_workbench.test.tsx`
+- test_root: `ui_react/src/tests/government_overpayment_recovery_workbench.test.tsx` — 既有模擬案例核對舊預覽失效時重新查詢並清除舊預覽，不自動再次套用。
 - test_root: `ui_react/src/tests/government_overpayment_recovery_client.test.ts`
 - routing: `.arch-map/tests/domains/government-subsidy/subsystems/government-subsidy/modules/overpayment-recovery-presentation.md`
 
