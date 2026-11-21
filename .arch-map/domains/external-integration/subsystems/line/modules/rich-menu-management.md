@@ -53,6 +53,7 @@
 - test_root: `ui_react/src/tests/line_flex_design_preview.test.tsx`
 - integration_root: `ui_react/src/tests/line_management_page_real_data.test.tsx`
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_rich_menu_local_preview.test.tsx`
+- test_root: `ui_react/src/tests/line_rich_menu_draft_client.test.ts` — 既有草稿 transport、Session、版本與錯誤映射測試。
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/rich-menu-management.md`
 
 - Rich Menu 草稿、設定、發布與重試依 Global §2.4 一次點擊送出；reason 為選填備註，空白可保存。人工預覽／確認門檻移除，保留內部 Preview／Apply、版本、冪等與正式回讀；版面效果預覽仍可使用。
@@ -61,5 +62,3 @@
 Reconcile when role menu draft editability, publication state gating, Preview／Apply／Queue flow, management presentation or focused verification paths change.
 
 Management presentation opens the editor directly, with 發布 beside the common draft save action and one-click publication; the Drawer tracks queued status without another confirmation; publication history has no UI entry or list query. Appearance and button fields share one in-memory definition; button names are edited only in the button editor. The common save action verifies a fresh server Query after Apply. Queued publication status and retryable failures remain in the publication Drawer.
-
-- test_root: `ui_react/src/tests/line_rich_menu_draft_client.test.ts` — 既有草稿 transport、Session、版本與錯誤映射測試。
