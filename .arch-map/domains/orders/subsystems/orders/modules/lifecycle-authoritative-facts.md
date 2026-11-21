@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-鎖定並組成 Orders lifecycle／自動完成的 authoritative facts，包含有效正式服務日、actual end 與 completion instant；缺少完整 service-time tuple 時，依 Orders contract 以最後正式服務日的台北日終完成。
+鎖定並組成 Orders lifecycle／自動完成的 authoritative facts，包含有效正式服務日、actual end 與 completion instant；服務時間三欄皆未設定、且實際迄日與最後正式服務日一致時，依 Orders contract 採台北日終；若只缺其中一部分，則阻擋自動完工。
 
 ## Implementation
 - primary:
