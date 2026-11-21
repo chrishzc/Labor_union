@@ -16,7 +16,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/line_identity_review_workbench.test.tsx`
+- test_root: `ui_react/src/tests/line_identity_review_workbench.test.tsx` — 既有模擬案例確認預覽失敗時顯示一般錯誤訊息，不顯示型別代碼或後端細節。
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/line-identity-review-presentation.md`
 
 ## Change triggers
