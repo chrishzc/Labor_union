@@ -35,7 +35,10 @@ cutover 必須依序滿足下列驗收：
 1. 明確 target／operator／window／rollback authorization 與唯讀 preflight。
 2. fresh 與 preserve-data MySQL evidence，並在 target 前確認 canonical release、owned-object descriptor 與 no-drift baseline。
 3. 真實 MySQL concurrent row-lock、stale-version 與 outbox partial-failure 驗收。
-4. browser-level「帳號建立 → 本人 enrollment → MFA login → 跨頁 → logout」以及所有既有管理頁 Bearer-only、同權驗收；帳號中心另驗證 root-only。已登入 React 人員 request 若以目前 Bearer 收到 401，必須清除同一 token 並立即卸載受保護 shell、返回登入頁；晚到 401、未帶 token 的登入挑戰、403、network／5xx 與不同 service token 不得清除目前人員 Session。
+4. **瀏覽器與 Session 同一驗收關卡**：
+   - browser-level「帳號建立 → 本人 enrollment → MFA login → 跨頁 → logout」以及所有既有管理頁 Bearer-only、同權驗收；帳號中心另驗證 root-only。
+   - 已登入 React 人員 request 若以目前 Bearer 收到 401，必須清除同一 token 並立即卸載受保護 shell、返回登入頁。
+   - 晚到 401、未帶 token 的登入挑戰、403、network／5xx 與不同 service token 不得清除目前人員 Session。
 5. keyring backup／restore rehearsal、clock synchronization、兩位人員 enrollment，以及 production profile 拒絕 bypass。
 6. 只在維護窗內執行 deployment、schema release、登入與高權限 smoke；結果與 rollback evidence 必須寫入去敏 release receipt。
 
