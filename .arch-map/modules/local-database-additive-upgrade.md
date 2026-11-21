@@ -14,6 +14,9 @@ Apply 重播遇到 exact schema 但同 release journal 尚未 completed，回 ve
 
 ## Verification
 - integration_root: `tests/test_local_database_additive_runner.py`
+- `test_slow_readonly_phases_do_not_consume_ddl_budget`：在模擬的前置和更新後驗證各耗至少 90 秒時，DDL 仍在獨立 30 秒預算內完成。完成事件與成功收據記錄同一份階段計時。
+- `test_validation_deadline_stops_without_success_receipt`：前置、更新後驗證各自逾時時，回傳對應的 `preparation_duration_exceeded` 或 `verification_duration_exceeded`，不產生成功收據或完成事件。前置逾時不執行 DDL；後驗逾時不抹去先前執行的 DDL。
+- `test_exact_schema_after_verification_timeout_is_not_a_successful_replay`：更新後驗證逾時，後續讀回結構雖然已符合，直接 runner 和 updater 都仍回傳 `verification_incomplete`，不額外執行 DDL，也不產生成功收據。
 
 ## Provenance
 - Existing flat test is a higher-boundary migration/developer-upgrade contract — `architecture_declared` — `.arch-map/index.md` verification routing.
