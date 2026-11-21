@@ -13,7 +13,7 @@
 
 1. 外部平台 Adapter 僅驗證、正規化並保存事件；外部 payload、URL、actor、case mapping 與 provider status 一律視為不受信任輸入，絕不直接寫入 Orders status、服務日期、排班、金額或付款狀態。
 2. Ingress 先寫入無敏感 raw payload 的 request-level security receipt（驗簽失敗只入隔離／頻率指標）；驗簽與格式通過後立 durable inbox event，由獨立 consumer 轉呼 owning Domain typed command。
-3. Egress 僅經已提交 outbox／durable delivery task 發送（HTTP request 或畫面渲染不得直呼外部 provider；專員申請即時回覆僅限當次 LINE Reply API，遇 HTTP 5xx 回傳 `line_reply_outcome_uncertain`，嚴禁自動重試或回退補發 Push）。
+3. Egress 僅經已提交 outbox／durable delivery task 發送（HTTP request 或畫面渲染不得直呼外部 provider；專員申請即時回覆僅限當次 LINE Reply API，遇 HTTP 5xx 只能回報結果未確認（`line_reply_outcome_uncertain`），不當成已送達或已確定失敗，也不得自動重試或回退補發 Push）。
 4. Provider event 與下游 Domain command 使用獨立 idempotency identity（同 key＋同 payload 為 exact replay，同 key＋異 payload 固定 409 quarantine）。
 5. Consumer 採固定 `SystemPrincipal`（僅含固定服務識別、版本能力與來源 event identity；禁止由 UI／webhook 指定），不可覆寫需要人工裁決的 blocker。
 
@@ -74,7 +74,7 @@
 
 - **責任與邊界**：擁有 FAQ／政策來源、content digest、版本與核准索引 freshness；嚴禁修改業務根事實或讓無來源模型輸出充當業務命令、報價與法律依據。
 - **狀態機與分權核准**：Knowledge Item 為 `draft → reviewed → published → retired`；**內容建立者不得自審或自發發布（必須經他人覆核發布）**，僅 `published` 條目可進入檢索；來源異動立即標示 index `stale` 並於查詢明確降級轉人工，禁止無 citation 回答。
-- **Query／Commands／Errors**：Query 回傳安全摘要、source URI、content digest、published version、index version 與強制 `authoritative=false`。Commands：`IngestKnowledgeSource`、`SubmitKnowledgeReview`、`PublishKnowledgeItem`、`RetireKnowledgeItem`、`RequestKnowledgeIndexBuild`、`RetryKnowledgeJob`、`QueryKnowledge*`。Errors：`knowledge_source_invalid`、`knowledge_review_required`、`knowledge_index_stale`、`knowledge_index_unavailable`、`knowledge_answer_unsupported`。
+- **Query／Commands／Errors**：Query 回傳安全摘要、source URI、content digest、published version、index version，並固定回傳 `authoritative=false`。摘要附來源不代表它是業務根事實，也不授權改寫任何業務資料。Commands：`IngestKnowledgeSource`、`SubmitKnowledgeReview`、`PublishKnowledgeItem`、`RetireKnowledgeItem`、`RequestKnowledgeIndexBuild`、`RetryKnowledgeJob`、`QueryKnowledge*`。Errors：`knowledge_source_invalid`、`knowledge_review_required`、`knowledge_index_stale`、`knowledge_index_unavailable`、`knowledge_answer_unsupported`。
 
 ## 5. 驗收標準
 
