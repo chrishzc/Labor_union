@@ -66,7 +66,7 @@
 - integration_root: `tests/test_staff_summary_query.py` — 既有 bounded summary projection 契約。
 - integration_root: `tests/test_staff_summary_routes.py` — 既有 authenticated cursor route 契約。
 - integration_root: `ui_react/src/tests/staff_directory_adapter.test.ts`
-- integration_root: `ui_react/src/tests/staff_directory_client.test.ts`
+- integration_root: `ui_react/src/tests/staff_directory_client.test.ts` — 既有模擬案例核對分頁游標未前進時拒絕結果，不自動重試。
 
 ## Change triggers
 Reconcile when Staff personal-profile or bank-account fields, complete-value boundary, authenticated entrypoint, UI consumer, or test roots change.
