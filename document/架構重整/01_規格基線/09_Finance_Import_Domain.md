@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：Finance Import Domain（`domains/finance_import/`、`subsystems/finance_import/`）
-- 單一負責範圍：銀行來源檔規格驗證與正規化、不可變 `finance_import_batches`／`finance_import_rows`／`finance_import_occurrences`／`finance_import_ingestion_attempts` 與 `finance_import_classification_events`、跨檔去重 fingerprint、銀行流水交易分類與 typed dispatch intent、Reprocess Preview／Apply、`finance_import_manual_review`、`IMPORT-006` 異常投影、React 單鍵匯入 terminal receipt 與來源取代（`FI-DEC-001～003`）。
+- 單一負責範圍：銀行來源檔規格驗證與正規化、不可變 `finance_import_batches`／`finance_import_rows`／`finance_import_occurrences`／`finance_import_ingestion_attempts` 與 `finance_import_classification_events`、跨檔去重 fingerprint、銀行流水交易分類與 typed dispatch intent、Reprocess Preview／Apply、`finance_import_manual_review`、React 單鍵匯入 terminal receipt 及未核銷誤匯來源排除（`FI-DEC-001～003`）。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Staff Payables / Export Domain](05_Staff_Payables_Export_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[Government Subsidy Domain](14_Government_Subsidy_Domain.md)、[Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md)、[銀行流水對帳與手動補登](22_銀行流水匯入與帳務異常處理正式規格.md)、[案件帳務三方案與補助流向](22A_案件帳務三方案與補助流向正式規格.md)、[帳務差額處置與工作台 UI](22B_帳務差額處置與工作台UI正式規格.md)。
 
 ## 2. 核心不變量與資料模型（SSOT）
@@ -20,18 +20,16 @@
 | classification | `finance_import_classification_events` 之 current projection | derived, monotonic |
 | reconciliation | owning Finance Domain 正式 ledger／allocation | cross-Domain root result |
 | reprocess receipt | `finance_import_reprocess_runs` | append-only audit |
-| import-review alert | Anomalies current projection | rebuildable derived state |
 
 - **嚴格禁止覆寫**：canonical raw columns、`fingerprint + fingerprint_version`、occurrence、ledger reference、classification event 與 reprocess run 一律禁止 `UPDATE／DELETE`。主機絕對路徑僅為診斷資訊，不得進入公開 manifest；姓名、金額、列號、相似備註皆非 identity SSOT。
 - **跨 Domain 分責**：Finance Import 不擁有客戶應收／退款、月嫂薪資／實付、政府期間核銷、Orders lifecycle 或 Alert workflow；Client Finance／Staff Payables／Government Subsidy 僅透過 ports 消費銀行事實與 typed intent。
 
-### 2.1 五個正交狀態軸與重複來源邊界
+### 2.1 四個正交狀態軸與重複來源邊界
 
 1. **Batch lifecycle**：`staged → completed | failed`（失敗批次僅由主交易外之 `FinanceImportAttempt` 留存）。
 2. **Occurrence outcome**：`inserted | skipped_existing`。
 3. **Classification**：`pending → business classification | non_business_review`；歷史重分類僅允許符合資格者 `non_business_review → business classification`，不得自動倒退。
 4. **Reconciliation**：唯一以 owning Domain 正式 ledger／allocation 為準（相容欄位 `pending → reconciled` 不作第二套 SSOT）；正式退匯／沖正／調整不將核銷軸改回 `pending`。
-5. **Current issue projection**：僅 `IMPORT-006` active predicate 成立時存在，無 `open／claimed／resolved／reopen` lifecycle。
 
 - **同批與跨批的重複交易**（判定方式見[銀行流水去重規則](22_銀行流水匯入與帳務異常處理正式規格.md#32-重複排除與去重規則bank-04)）：以銀行交易指紋判定是否為同一筆交易。同一交易在本批首次入庫時，只建立一筆銀行原始交易（canonical bank fact），保留同批各來源列位置（occurrence），重複列記為 `skipped_existing`。如果該交易已在先前批次入庫，本次只計入回執的重複筆數；不新增來源位置、分類或待核銷項目，也不改原交易的核銷狀態。
   - **同批例**：經辦匯入一份銀行明細，首次入庫的同一筆交易出現在第 17、18 列。核對匯入結果時，應只有一筆原始交易，保留兩個來源列位置，第 18 列記為重複。
@@ -59,24 +57,24 @@
 ### 3.3 正常匯入邊界（`FI-DEC-001～003`）與 React 單鍵匯入
 
 - **`FI-DEC-001`（Preview 與稽核）**：File Watcher 偵測 `downloads/bank/*.xlsx` 後僅負責驗證穩定檔案並觸發受控匯入指令，禁止直接連 DB 或修改業務投影。Preview 須列出新增數、重複數、預計 dispatch 類型與整數金額、待分類／`business_pending`／blocked 數、判定證據與 `plan_fingerprint`。
-- **`FI-DEC-002`（修改分流）**：禁止直接編輯 canonical row。銀行檔錯誤走重新匯入＋`SourceSuperseded`（作廢舊事實）；主檔缺漏回 owning Domain 補齊再重預覽；分類歧義經 Correction Workbench 補 `evidence`（必填）與 `reason`（選填）；已入帳錯配回 owning Domain 走 `reversal／adjustment／refund`。
+- **`FI-DEC-002`（修改分流）**：禁止直接編輯 canonical row。未核銷的誤匯流水，由具權限的系統管理員填寫原因，依[銀行流水規格 §3.2](22_銀行流水匯入與帳務異常處理正式規格.md#32-重複排除與去重規則bank-04)排除；保留原始列與指紋，不再列為待核對、重配或核銷。正確來源依正常流程匯入；主檔缺漏回 owning Domain 補齊再重預覽；分類歧義經 Correction Workbench 補 `evidence`（必填）與 `reason`（選填）；已入帳錯配回 owning Domain 走 `reversal／adjustment／refund`。
 - **`FI-DEC-003`（整批與合格候選範圍）**：通過驗證之 candidates 一次 Apply；`non_business_review` 與 `business_pending` 留待處理；integrity／collision／stale／formal conflict 阻擋整批 Apply。客戶補助退款預檢於 Preview 階段即檢查擬建／沿用退款與接續核銷資格（缺資金／墊款資格轉 `business_pending` 並明確標示，不阻擋同批其他合法款）。禁止未經稽核的勾選略過機制。
 - **React 單鍵匯入 Terminal Receipt**：使用者選檔後直接點擊一次「匯入銀行交易明細」，畫面不提供入帳原因欄。系統依序執行 `Upload/Ingest → 內部 Preview → 符合 apply_allowed 且有候選時自動 Durable Apply → terminal receipt`。受理 `202 Accepted` 非完成態；僅當 batch job `succeeded` 且從 `finance_import_apply_receipts` 讀回 `resulting_batch_version`、`reconciled_count`、`existing_count`、`pending_count` 後始可顯示入帳完成；結果未明以原鍵重查。
 
-### 3.4 Owner Review（`finance_import_manual_review`）與 `IMPORT-006`
+### 3.4 匯入檢核與業務人工核對
 
-- **`finance_import_manual_review`**：綁定唯一 canonical bank fact（`source_id = <finance_import_row_id>`），呈現遮蔽帳號、分類與核對候選；`CorrectAndPostFinanceImportRow` 於單一 outer UoW 鎖定 row、review 與 target obligations，寫入 manual classification event、owning ledger／allocation、reconciliation receipt、outbox 與 current-issue recheck intent；任何一步失敗全批回滾。已有 Client Finance 正式 receipt 之列一律自待確認清單排除。
-- **`IMPORT-006`（Batch Integrity Current Alert）**：每 batch 最多一筆（`case_key = finance-import-batch:<batch_id>`），Strictly Privacy-bounded（禁止完整帳號、姓名、raw payload），由 `active = owner_readback_incomplete OR structural_ambiguity OR (integrity_inconsistent_count > 0 AND no_terminal_correction_successor)` 決定存在性；post-commit projector 僅做 bounded fresh upsert／delete，存在完整 `SourceSuperseded` successor 或不一致數歸零後直接刪除。
+- **`finance_import_manual_review`**：綁定唯一 canonical bank fact（`source_id = <finance_import_row_id>`），呈現遮蔽帳號、分類與核對候選；`CorrectAndPostFinanceImportRow` 於單一 outer UoW 鎖定 row、review 與 target obligations，寫入 manual classification event、owning ledger／allocation、reconciliation receipt 及 outbox；任何一步失敗全批回滾。若已有相符的舊警示，可追加解除紀錄，不新建警示。已有 Client Finance 正式 receipt 之列一律自待確認清單排除。
+- **來源檢核與歷史邊界**：來源格式問題由 Finance Import 保存並在該批的來源檢核結果讀回，和待人工配對或確認的業務明細分開。`IMPORT-006` 已退役，不再產生批次警示，也不提供舊異常更正工作台；歷史核對與驗證邊界見 [Anomalies Domain](06_Anomalies_Domain.md) §3.3。
 
 ### 3.5 Typed Commands、Errors、交易與 Live Writer Exit
 
-- **Commands**：`NormalizeFinanceWorkbook`、`PreviewFinanceImport`、`ApplyFinanceImport`、`PreviewFinanceReprocess`、`ApplyFinanceReprocess`、`PreviewFinanceImportCorrection`、`ApplyFinanceImportCorrection`、`CorrectAndPostFinanceImportRow`、`ScanFinanceImportReviewAlerts`、`QueryFinanceImportBatch`、`QueryFinanceImportRun`。
-- **Stable Errors**：`invalid_source_file`、`unsupported_bank_format`、`invalid_canonical_row`、`strict_decode_failed`、`batch_not_found`、`batch_not_completed`、`batch_too_large`、`stale_preview`、`idempotency_conflict`、`classification_conflict`、`manual_evidence_required`、`source_superseded`、`source_supersession_conflict`、`reconciliation_invariant_violation`、`dispatch_rejected`、`downstream_unavailable`、`transaction_failed`。僅 `downstream_unavailable`／deadlock／transient storage error 得依原 idempotency key 做 bounded retry。
-- **交易模型**：Normalization 無交易；Preview 零寫入；Apply／Reprocess／Correction 於單一 outer UoW 提交；Alert projector 於 outbox post-commit 獨立執行，不回滾正式銀行事實。Query 永遠唯讀（整庫明細匯出規範見 [銀行成功明細整庫匯出](22_銀行流水匯入與帳務異常處理正式規格.md#33-成功明細整庫匯出bank-03)）。
+- **Commands**：`NormalizeFinanceWorkbook`、`PreviewFinanceImport`、`ApplyFinanceImport`、`PreviewFinanceReprocess`、`ApplyFinanceReprocess`、`PreviewFinanceImportCorrection`、`ApplyFinanceImportCorrection`、`CorrectAndPostFinanceImportRow`、`QueryFinanceImportBatch`、`QueryFinanceImportRun`。
+- **Stable Errors**：`invalid_source_file`、`unsupported_bank_format`、`invalid_canonical_row`、`strict_decode_failed`、`batch_not_found`、`batch_not_completed`、`batch_too_large`、`stale_preview`、`idempotency_conflict`、`classification_conflict`、`manual_evidence_required`、`reconciliation_invariant_violation`、`dispatch_rejected`、`downstream_unavailable`、`transaction_failed`。僅 `downstream_unavailable`／deadlock／transient storage error 得依原 idempotency key 做 bounded retry。
+- **交易模型**：Normalization 無交易；Preview 零寫入；Apply／Reprocess／Correction 於單一 outer UoW 提交；Outbox 在正式交易提交後處理，其派送不回滾已提交的銀行事實。Query 永遠唯讀（整庫明細匯出規範見 [銀行成功明細整庫匯出](22_銀行流水匯入與帳務異常處理正式規格.md#33-成功明細整庫匯出bank-03)）。
 - **Writer Exit**：runtime 僅保留 `domains/finance_import/` 與 `subsystems/finance_import/`；不得重新建立 `services/finance_cancellation_code.py`、`services/finance_import_states.py`、`services/finance_import_dispatch.py` 等相容路徑，File Watcher 亦嚴禁直連 DB 或自寫 Alert。
 
 ## 4. 驗收標準
 
 1. Unit／Module 驗證 Legacy、Sinopac、Taishin 原生格式解析、deterministic fingerprint、分類詞彙、plan fingerprint 與 typed error mapping 正確無缺。
-2. Subsystem 驗證同批重複留 `1` canonical ＋ 多 occurrences、跨批重複僅計 receipt 數而不重複建待核銷成員、dry-run 零寫入、reprocess exact replay 與 stale 拒絕、`IMPORT-006` 隱私邊界。
+2. Subsystem 驗證同批重複留 `1` canonical ＋ 多 occurrences、跨批重複僅計 receipt 數而不重複建待核銷成員、dry-run 零寫入、reprocess exact replay 與 stale 拒絕。
 3. Global E2E（real-format XLSX ＋ isolated MySQL）驗證 Finance Import → Client Finance（三階段收款、多筆補款合計、取消補退）／Staff Payables（0～100 元手續費、P永/P台）／Government Subsidy／Orders 訂金推進／React terminal receipt 與全批失敗原子回滾。
