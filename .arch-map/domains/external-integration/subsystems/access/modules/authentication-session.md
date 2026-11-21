@@ -52,7 +52,7 @@ Owns admin authentication/session persistence orchestration, including the absol
 
 - layout_status: `custom_current`
 - layout_basis: Existing Access public account contract remains in the canonical subsystem `contract/` root; it verifies the API projection/request boundary together with the shared authentication policy. Session lifecycle integration remains in the existing sibling `integration/` root.
-- `tests/domains/external-integration/subsystems/access/integration/test_access_session_expiry_policy.py`
+- test_root: `tests/domains/external-integration/subsystems/access/integration/test_access_session_expiry_policy.py` — 以合成資料驗證閒置不會改變絕對到期時間、更新工作階段也維持原期限。不等同實際環境登入驗收。
 - test_root: `tests/domains/external-integration/subsystems/access/contract/test_access_account_center_public_contract.py` — account request boundaries, safe public projection and shared password policy.
 - test_root: `tests/domains/external-integration/subsystems/access/contract/test_root_account_maintenance.py` — offline authorization, commits, failure recovery and terminal boundaries.
 - test_root: `tests/domains/external-integration/subsystems/access/regression/test_access_account_command_safety.py` — account commands, keyed receipt replay and password policy regressions.
