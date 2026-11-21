@@ -17,5 +17,5 @@
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.5
 
 ## Verification
-- LINE consumer and handoff oracle remain at tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/test_terminal_closure_restore.py.
+- LINE consumer and handoff oracle remain at tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/test_terminal_closure_restore.py. 既有合成案例核對相同事件重送不新增第二筆交接意圖，也不再次提交。
 - No schema or release-chain change is part of this Module.
