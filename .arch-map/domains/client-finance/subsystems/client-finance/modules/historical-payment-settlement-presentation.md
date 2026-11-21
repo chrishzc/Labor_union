@@ -38,6 +38,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/historical_client_payment_workbench.test.tsx`
+- 模擬 UI 案例（上列測試 L43–74）：以替身提供 owner Query、Preview、Apply 與讀回；選定義務後儲存並離開，斷言只呼叫一次 Apply、顯示重新讀取的結果，離開回呼只觸發一次。此案例不涵蓋全部失敗分支或實際財務操作。
 - test_root: `ui_react/src/tests/finance_query_transport_identity.test.ts`
 - test_root: `ui_react/src/tests/finance_query_clients.test.ts`
 - test_root: `ui_react/src/tests/finance_request_lifecycle.test.tsx`
