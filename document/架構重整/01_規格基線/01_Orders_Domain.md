@@ -38,23 +38,29 @@
 4. 訂金有效核銷 ∨ 有效訂金未付人工放行 → **訂單成立**（不代表已簽回，亦不單獨授權 execution conversion）
 5. 其餘 → **洽談中**（缺進件欄位則維持 `待補件`）
 
-- **`case_terminal_closure` 交接**：案件進入終局閉環時，Orders 在同一 outer UoW 寫入 `case_terminal_closure` event（含 `case_no`、`terminal_kind`、resulting version、nullable `source_subject` 與 idempotency identity）並發布 outbox；由 [LINE 身分管理 §7.2](23_LINE身分管理與解除正式規格.md#72-orders-terminal-closure-auto-restore) 檢查該人員全部案件是否皆已終局以觸發預設選單恢復（未綁定客戶依 skip receipt 略過）。
+- **`case_terminal_closure` 交接**：上列判定的是訂單狀態，不是 LINE 選單是否恢復。案件進入終局閉環時，Orders 在同一 outer UoW 寫入 `case_terminal_closure` event（含 `case_no`、`terminal_kind`、resulting version、nullable `source_subject` 與 idempotency identity）並發布 outbox。由 [LINE 身分管理 §7.2](23_LINE身分管理與解除正式規格.md#72-orders-terminal-closure-auto-restore) 核對來源身分、版本與能力。只有該 LINE 帳號的 staff 綁定仍有效、該帳號所有有效客戶角色案件均經各自負責方回讀確認已終局，且事件未處理、版本一致，才建立一次預設選單恢復工作與收據；這不等於選單已恢復。核對來源後，一般客戶沒有 staff 綁定時依該節保存 `noop_not_staff` 收據，例如來源身分為空且案件客戶未綁 LINE。案件客戶已綁 LINE 卻缺少來源身分時，屬身分不符，不寫入。
+  - **正例**：同一 LINE 帳號的 staff 綁定有效，有兩件有效客戶角色案件。兩件回讀皆已終局，且其餘交接條件符合時，才建立一次該事件的恢復工作與收據。
+  - **反例**：同一帳號的其中一件有效客戶角色案件已終局，但另一件尚未終局，其餘交接條件皆符合。這次交接不建立恢復工作，記下 `blocked_active_client_case`。
 
 ### 3.2 `AutoCompleteOrderService` 與完工後日期更正
 
-- **完工時刻與鎖定**：
+- **完工時刻與鎖定**：以最後正式服務日（`actual_end_date`）為基準，依訂單記錄的跨日偏移和服務結束時間，算出台北時間的完工時刻。
   ```text
   completion_instant = actual_end_date + service_end_day_offset + service_end_time  # Asia/Taipei
   ```
+  - **未達時刻**：一筆服務中的訂單已符合其他自動完工條件，最後正式服務日的班次為 21:00 至次日 05:00。系統在次日 04:59 評估時，該次評估不會將訂單轉為「訂單完成」，也不會建立完工服務資料鎖。
+  - **達到時刻**：同一案件在次日 05:00 或之後接受系統評估，且無完工阻擋時，訂單轉為「訂單完成」，服務日期、時數、服務單價與樓層費同時鎖定。承辦人不需在工作台另行確認完工。
 - **唯一正式持久化入口**：`AutoCompleteOrderService` 於單一 outer UoW 鎖定 lifecycle aggregate、effective Scheduling generation、assignment-owned 正式服務日、`actual_end_date`、完整時段 tuple 與 active controls，當 `evaluation_at >= completion_instant` 且無 `auto_complete` blocker（與 Scheduling 請假代班原子序列化 CAS Orders version），轉為 `訂單完成` 並立即建立 `order_service_data_locks` 凍結服務日期、時數、服務單價與樓層費（非財務聯絡個資仍可獨立更正）。完工 outbox 保留 `line_service_completion_notification=true` 標記。LINE 投遞依 [Gateway 正式規格](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。
 - **完工帳務交接**：同一交易先同步正式月嫂應付，再由原帳務規則檢查已確認的補助方案。轉付月嫂承接有效補助分期，先墊後退須有客戶實際墊款才建立正式退款，政府直付或方案未確認時不建立客戶補助退款。
 - **唯讀狀態查詢**：`GET /api/v1/orders/{case_no}/service-completion` 回報權威完成時刻與目前進度，不設一般工作台人工「辦理完工確認」步驟（由背景 durable discovery 委派 canonical handler 自動評估）。
-- **完工後服務日更正（`official-service-dates`）**：僅限已完成案件，在不涉及調整、補助退還等價格變動前提下，依守恆天數經 Scheduling replacement 更新各 assignment 服務日並推進 `actual_end_date`（保留原 completion event 與 `order_service_data_locks`，零新建金融義務）。
+- **完工後服務日更正（`official-service-dates`）**：已完成案件若只需更正服務日期，且服務天數不變、不涉及調整、補助退還等價格變動，可走正式服務日更正。Scheduling 以 replacement 更新各 assignment 的服務日並推進 `actual_end_date`，不解除原資料鎖、不改寫原完工事件，也不新增金融義務。
 - **服務人員或區段更正**。見 [Scheduling 多月嫂調整](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction)。歷史結清狀態依 [歷史帳務完成投影](27_歷史訂單生命週期與服務天數帳務正式規格.md#7-帳務完成投影) 處理。
 
 ### 3.3 訂金 Reversal 與開工重認
 
-- 訂金有效性唯一衍生自 Client Finance（每次核銷或沖正於同一 UoW 送出 `deposit_reconciled | deposit_reversed` 並附 `deposit_settlement_identity`）：尚未開始服務時沖正阻擋進入服務；已服務／已完工後沖正僅重開帳務義務與異常，不倒退狀態或解鎖服務資料；若於原 `actual_start_date` 後補繳且 identity 不同，須重新確認 actual start。
+- **訂金沖正與服務狀態**：訂金是否有效，以 Client Finance 為準。每次核銷或沖正，都在同一工作單元（UoW）送出 `deposit_reconciled` 或 `deposit_reversed`，並附 `deposit_settlement_identity`。尚未開始服務的案件，訂金沖正後不可進入服務。已開始服務或已完工的案件，沖正只重開帳務義務並列為異常，不倒退服務狀態，也不解鎖服務資料。若在原 `actual_start_date` 之後補繳，且新一筆的 `deposit_settlement_identity` 不同，須重新確認實際開工。
+  - **開工前例**：某已成立但未開工的案件，有一筆 NT$2,000 訂金已核銷。經辦沖正後，該筆應收重開 NT$2,000，訂金列為未核銷，案件不可進入服務。
+  - **開工後例**：另一筆已在服務中的案件也沖正訂金。案件列為帳務異常，但仍為「服務中」，不得因沖正退回未開工。
 
 ### 3.4 Order Terms Preview／Apply 與時段／下廚契約
 
@@ -62,27 +68,38 @@
 - **Pre-assignment vs Formal Apply**：
   - Preview 輸出 before/after、排班重建形狀是否變動、`planned/actual end`、hours、樓層費、實際受影響未核銷帳務差額、`requires_formal_apply`、`fingerprint` 與版本（Terms 畫面計算每日時數時 `4h` 班不扣休息、`8.5h` 班如 `08:30～17:00` 扣 30 分鐘休息計 `service_hours_per_day = 8`）。
   - **普通保存（`requires_formal_apply=false`）**：不影響 Scheduling／confirmed dates／Finance／Payroll／lifecycle 時，僅更新 Orders Terms 與 version（無須 reason／idempotency key 或永久 receipt；結果未明由 Query 比對版本）。
-  - **正式 Apply（`requires_formal_apply=true`）**：沿用正式變更的原因欄與 idempotency key，依實際影響委派 Client Finance／Payroll／Scheduling。僅金額／計薪時數／下廚等變更且排班形狀相同時，保留現行 generation 與 assignment identity，`scheduling_command_receipt_id = NULL`。已有確認日期或排班而改總天數時，同一 Apply 須附完整 `replacement_service_dates`，已有排班時亦須附逐段 `replacement_allocations.service_days`。
+  - **正式 Apply（`requires_formal_apply=true`）**：沿用正式變更的原因欄，且須附 idempotency key。開工後「解除鎖定並修改」仍走正式 Apply，但原因可留白，適用條件見下段。依實際影響委派 Client Finance／Payroll／Scheduling。僅金額／計薪時數／下廚等變更且排班形狀相同時，保留現行 generation 與 assignment identity，`scheduling_command_receipt_id = NULL`。已有確認日期或排班而改總天數時，同一 Apply 須附完整 `replacement_service_dates`，已有排班時亦須附逐段 `replacement_allocations.service_days`。
 - **開工後的服務條件鎖定與單次解除**。一般「服務中」案件已有實際開始日與正式排班時，預設鎖定總服務天數、每日服務時數、每日時段及全案日期替換。Terms Query 以 `service_quantity_lock_reason` 回傳 `service_started`（一般服務中）、`service_started_replacement_blocked`（其他已開始分支維持原日期替換限制）或 null。一般服務中、無完工服務資料鎖且無有效取消的案件，具有既有 Terms 管理權限者可選「解除鎖定並修改」。Preview 與 Apply 均須帶 `allow_started_service_change=true`，變更原因選填，並以正式 Preview／確認／Apply 保存。此選擇限本次變更，存檔後恢復鎖定。約定開始日、下廚、樓層費及人員名單不納入此解鎖操作，完工資料鎖與其他權限及衝突檢查仍適用。
 - **開工後全案影響**。畫面在解除與確認前顯示，新條件會套用到全案，包含已服務日期的有效排班及統計，並可能重算客戶應付與月嫂薪資。由承辦人先核對影響並選擇是否儲存。Query 提供已確認的 `actual_start_date`，新班表首日須與原實際開始日相同。沿用 [Scheduling 世代](02_Assignments_Scheduling_Domain.md#2-核心不變量與資料模型ssot) 及既有 Finance／Payroll 差額規則，保留舊排班及收付紀錄。日期或時段改變時才依排班形狀重建。未提供解鎖、資料或檔期衝突、版本過期、帳務阻擋均不得留下部分寫入。
 - **月曆分配**。解鎖後可開啟重新排班，改總天數時必須完成。直接在月曆選取新班表日期，保留原實際開工日。初始沿用現行正式日期，縮減天數時預先取原班表最早的對應天數，增加天數時由承辦人補選。畫面顯示首日、末日與已選天數，每個既有指派以一張月曆顯示負責日期，並預填仍在新班表中的現行分配。點選可將日期分配給該指派，包含把已分配的日期轉給另一既有指派。單一指派承接全部日期。解鎖替換須在每筆 `replacement_allocations` 帶入 `service_dates`，每個替代服務日恰分配一次、每段至少一日，筆數與該段服務天數一致。未啟用解鎖的既有按天數分配契約可繼續使用。解鎖後未選擇替換日期時，沿用各指派的現行正式服務日。
-- **已結案漏填樓層費更正**。具 `order_service_data_locks` 或符合 [規格 27 §6.3](27_歷史訂單生命週期與服務天數帳務正式規格.md#63-人工發起服務天數更正與已結案樓層費個案計價更正) 的已完成案件，以 `floor_fee_correction=true` 發起更正。Query 回報 `floor_fee_correction_available`。Apply 保留服務鎖、日期與排班 generation。歷史已完成案件的訂金更正由 Orders 與 Client Finance 同交易完成。一般訂單結案後的樓層費更正由 Finance 與 Payroll 在同一交易承接各自差額。
-- **每日服務時間與下廚需求**：時段三欄必須「全空或全有」（新案於 waiting lock 或訂金核銷前必須完整；修改時段須一次完整傳遞）。每日服務時數可直接輸入，以 0.5 小時為單位且不得超過 24 小時。調整起訖時段只更新畫面的建議時數，承辦人可採用建議或保留輸入值，畫面同時顯示兩者。選取常用班次時明確填入時段與時數。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
+- **已結案漏填樓層費更正**：具完工服務資料鎖（`order_service_data_locks`）或符合 [規格 27 §6.3](27_歷史訂單生命週期與服務天數帳務正式規格.md#63-人工發起服務天數更正與已結案樓層費個案計價更正) 的已完成案件，可發起樓層費更正（`floor_fee_correction=true`；Query 回報 `floor_fee_correction_available`）。正式儲存後保留服務鎖、服務日期與原排班 generation。適用規格 27 的歷史案件，由 Orders 與 Client Finance 在同一交易把樓層費差額反映到客戶訂金應收；儲存後，承辦人可在客戶名冊查到更正後的正式訂金應收總額，原收款與核銷紀錄仍保留。一般訂單結案後的樓層費更正，由 Finance 與 Payroll 在同一交易承接各自差額。
+- **每日服務時間與下廚需求**：每日服務時段由開始時間、結束時間與是否跨日三欄共同表示。三欄可全空或全有；修改時段須一次填齊。新案進入等待鎖定（waiting lock）或訂金核銷前，三欄必須完整。每日服務時數可直接輸入，以 0.5 小時為單位且不得超過 24 小時。調整起訖時段只更新畫面的建議時數，承辦人可採用建議或保留輸入值，畫面同時顯示兩者。選取常用班次時明確填入時段與時數。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
+  - **正例**：承辦人設定當晚 21:00 到隔天 05:00 的班次，填 21:00、05:00 並明示跨日。訂單條件接受這組時段，班次於次日 05:00 結束。
+  - **反例**：只填 21:00 和 05:00，未填是否跨日。系統拒絕這次時段變更，不自行推定為跨日。
 - **已簽 PDF 歸檔與完約**。依 [簽約正式規格 §3.4](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#34-分開文件回收手工證明與本機測試跳過)，Orders 在歸檔交易登記 `contract_completed`，並依訂金核銷事實投影成立狀態。服務時段、承諾服務日與期款資格由各自 owner 判定。
 
 ### 3.5 Actual Start Preview／Apply
 
 - 首次確認與更正皆須 Preview／Apply（正常案件開工與代班流程依 [Scheduling §3.3 SSTART-01～08](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 自動同步並保存群組結果日曆；禁止以 `planned_start` 或預設日 fallback）。
 - **尚無有效正式 assignment（日期-only 路徑）**：僅更新 `actual_start_date` 與 `lifecycle_version`（Finance／Payroll／Scheduling 不存在時傳 `NULL`，不建空事件或假排班；此狀態不代表已開始服務）；若 Preview 後已有有效排班則回 typed conflict 關閉重取。
+  - **正例**：案件尚無有效正式排班，其他檢查皆通過。承辦人輸入實際開始日，預覽後確認儲存；再查案件時可看到新日期，但不新增正式排班，也不因此把案件標為「服務中」。
+  - **反例**：承辦人預覽日期後、確認儲存前，另一筆操作已建立有效正式排班。舊預覽不能套用，這次確認不會改寫實際開始日。承辦人須關閉舊預覽，重新讀取案件並預覽逐段排班。
 - **已有有效正式 assignment**：須顯示逐段重建預覽，單一 Apply 同交易重建 assignments、正式服務日、`actual_end_date` 與 lifecycle，並由 Payroll adapter 一對一原值搬移 source assignment rate snapshot（source 缺漏回 integrity blocker）；過期日期與新確認日間不補造服務日；歷史重啟案依 [規格 27 §8](27_歷史訂單生命週期與服務天數帳務正式規格.md#8-重啟正常流程) 免除訂金／簽約前置直接進入服務中。
+  - **正例**：案件已有 8 月 1 至 3 日的舊排班，尚未確認實際開始日。承辦人首次確認 8 月 8 日。若重算後逐段預覽列出 8 月 8、11、12 日，其他檢查通過並確認儲存後，正式服務日依預覽重建，實際結束日為 8 月 12 日。
+  - **反例**：同一案件不能僅憑舊排班，把 8 月 1 至 7 日補成已服務。這些日期不列入本次預覽或重建的正式服務日。
 
 ### 3.6 Cancellation 與 Controlled Reopen
 
 - **Cancellation（未完整履約前適用）**：
-  - Preview 鎖定 Taipei 業務日，對已開始服務者預填截至當日之實際排定日＋月嫂（供確認增減並允許 0 日完全未履約取消），並由具權限工會人員逐案輸入取消違約金（不收為 `0`，收取輸入正整數 NTD＋必填原因；一般取消原因選填）。
-  - Preview 明確列示服務應付 `S`、違約金 `F`、淨實收 `R`、應退／應補收與 Client Finance 必填 `direction`（`refund_due | additional_charge_due | no_finance_change`）＋ `direction_amount_ntd`。
-  - Apply 在單一 outer transaction 保存取消事件、解除等待鎖、更新實際服務 assignments 與雙邊義務。取消結算通知依 [LINE 客服與月嫂自助服務 §4.5](20_LINE客服與月嫂自助服務正式規格.md#45-月嫂薪資明細查詢與訂單異動通知)。
-- **Controlled Reopen**：管理端入口位於客戶名冊的「訂單取消」案件詳情上方。僅受理尚未發生取消正式退款、沖正或結算之取消案；備註選填（空白則系統稽核補記「系統記錄受控重開訂單」）；追加 reopen event、不刪取消歷史、不恢復舊排班／等待鎖／分期（已有退款、沖正或結算須另建新案）。重開後的候選詢問、重新推薦與資格核對遵循 [媒合開放資格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
+  - 取消預覽固定以臺北業務日為取消日。已開始服務的案件，先列出截至該日的排定服務日期及各日的月嫂，供承辦人依實際履約增減。若確認完全未履約，可將實際服務日確認為 `0` 天；取消日之後的日期不得列為已服務日。具權限的工會人員逐案輸入取消違約金（不收為 `0`，收取輸入正整數 NTD＋必填原因；一般取消原因選填）。
+    - **正例**：案件已記錄開工但實際尚未服務，也未完成或鎖定。承辦人在取消預覽移除所有預填服務日，可取得 `0` 日的取消預覽，原排班不計入實際服務日。
+    - **反例**：相同案件的取消預覽若填入臺北業務日的次日作為已服務日，系統拒絕該次預覽，不會產生可確認的取消結果。
+    - **違約金正例**：具權限的工會人員開啟一筆可取消且有客戶帳務的案件，勾選「收取違約金」，輸入 500 元及收取原因。其他檢查通過時，預覽列出違約金 500 元，一般取消原因可留白。
+    - **違約金反例**：同一案件已勾選收取並輸入 500 元，但只填一般取消原因，收取原因留白。系統提示填寫正整數金額及收取原因，不產生取消預覽。
+  - Preview 只顯示試算，不保存取消事件，也不建立正式退款或補收義務。列示服務應付 `S`、違約金 `F`、淨實收 `R`及應退／應補收。最後應付依 Client Finance 以 `S + F` 計算。有 Client Finance 帳務影響時，每筆必填 `direction`（`refund_due | additional_charge_due | no_finance_change`）與 `direction_amount_ntd`，畫面不靠金額正負推定方向。結算依 [Client Finance §3.2](04_Client_Finance_Domain.md#client-cancellation-settlement)。
+  - Apply 在單一 outer transaction 保存取消事件、解除等待鎖、更新實際服務 assignments 與雙邊義務。正式提交成功後，案件狀態才轉為「訂單取消」；如需退款或補收，所建立的是待處理義務，不表示已退款或已收款。取消結算通知依 [LINE 客服與月嫂自助服務 §4.5](20_LINE客服與月嫂自助服務正式規格.md#45-月嫂薪資明細查詢與訂單異動通知)。
+- **Controlled Reopen**：管理端入口位於客戶名冊的「訂單取消」案件詳情上方。重開檢查只受理已取消、且尚未因該次取消發生正式退款、沖正或結算的案件。一旦已有這類正式帳務紀錄，舊案不得重開；若仍需安排服務，另建新案。備註選填（空白則系統稽核補記「系統記錄受控重開訂單」）；追加 reopen event、不刪取消歷史、不恢復舊排班／等待鎖／分期。重開後的候選詢問、重新推薦與資格核對遵循 [媒合開放資格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
+  - **可觀察結果**：具權限的工會人員預覽並確認已取消案件；該次取消未留下正式退款、沖正或結算，且其他重開檢查通過時，可重開，取消歷史仍可查，舊排班與等待鎖不恢復。若該次取消已正式退還客戶款項，重開預覽即拒絕，案件不會因這次操作重開。
 
 ### 3.7 Typed Endpoints、Errors、純函式 Modules 與 Writer Exit
 
@@ -95,4 +112,6 @@
 
 1. 涵蓋全生命週期狀態轉移、`service_time_terms` 三欄缺漏 fail closed、跨日 offset 拒絕猜測、訂金於開工前後沖正之差異行為、已鎖定案退款不解鎖，以及完工後 `floor_fee_correction` 與 `official-service-dates` 守恆。
    服務中以每日 4 小時、30 天的測試案件驗證預設鎖定、逐次解除、直接改為每日 8 小時、調整總天數與替代班表、確認保存與回讀。核對有效日期、工時、客戶應付、月嫂薪資及既有收付紀錄，並涵蓋未解鎖、無權限、已完工、檔期或版本衝突的拒絕。
+   對照條款：生命週期見 §3.1；時段三欄、跨日偏移、服務中條件與樓層費更正見 §3.4；訂金沖正見 §3.3；完工鎖及正式服務日更正見 §2 與 §3.2。
 2. 驗證 `AutoCompleteOrderService` 與 `leave-substitution` 搶鎖 CAS 衝突零部分寫入、取消與違約金全案結算及 `direction` enum 一致、代班不重開簽約與不影響原月嫂合法薪資。
+   對照條款：完工與代班競爭見 §3.2；取消、違約金及帳務方向見 §3.6；代班的簽約與原月嫂薪資邊界見 [Scheduling §3.4](02_Assignments_Scheduling_Domain.md#leave-substitution) 與其下 §3.4.1。

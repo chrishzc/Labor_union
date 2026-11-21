@@ -44,7 +44,9 @@
     - S：同一案件有兩筆不同期間的指派，且另一筆列在查詢結果前面。T：確認各指派的區段。A：查看兩段位置、日期與明細，再以缺少精確指派資料的回應重查。R：各段使用自己的指派日期，缺少時各自回到班次日期。
   - **訂單狀態回歸**。以 [訂單工作分類](01A_訂單看板與事前日期及歷史採納規格.md#22-未完成清單與-beta-看板wb-state-0105) 的十種狀態逐一核對區塊、日期來源與位置。待補件或洽談案沒有排班或檔期鎖時只參與符合條件的排查。取消案不得恢復已解除的保留。歷史服務中、服務完成或帳務完成僅在具可顯示的歷史指派時出現歷史區塊。
   - Calendar「可進行出勤精算案件」下拉選單採單一批次 `GET .../staff/{staff_id}/assignment-schedules` 交集 Orders 摘要（禁止 N+1 或 `orders.staff_id` fallback）。
-  - 開案主責唯讀投影（`resolve_opening_primary_staff`）：取第一有效 segment 人員（追溯同人 generation 與首日代班原主責；服務前整案替換轉由新人，服務中換人保留原開案主責）。
+  - **開案主責（`resolve_opening_primary_staff`）**：查詢從第一個有效服務區段判定開案主責。同一人員的排班版本重建，或首日由他人代班，仍追溯原開案主責；服務前整案換人則由接任月嫂擔任開案主責。服務中換人不改原開案主責。此查詢不修改班表。
+    - **首日代班例**：甲是原開案主責，首日由乙代班。即使之後重建乙的該次代班版本，查詢開案主責仍得到甲，不把代班的乙當成主責。
+    - **整案替換例**：案件尚未開工，經辦將整案由甲換為乙。查詢開案主責時應得到乙，不再沿用甲。
 
 ### 3.2 Waiting Deposit Lock、Assignment Plan 與 Actual Start 重算
 
@@ -107,7 +109,7 @@
   4. Effective generation 與 assignments（`assignment_id` 升冪）
   5. Schedules / waiting locks / buffer facts（日期與 row id 排序）
   6. Payroll / Client Finance obligations（aggregate identity 排序）
-- 複雜排班變更（如 `ApplyAssignmentPlan`、`ApplyLeaveSubstitutionBatch`）支援回傳 `202 Accepted` Durable Job 並由 worker 在單一交易完成全部鎖定與提交。
+- 複雜排班變更（如 `ApplyAssignmentPlan`、`ApplyLeaveSubstitutionBatch`）可回 `202 Accepted` 與工作識別。這只表示受理，不表示班表已生效。以工作識別查詢結果，取得成功收據並重新讀到同次正式班表，才算完成。若工作仍待處理或結果不明，不顯示已生效；若最終拒絕，依原錯誤判斷，班表不留部分寫入。背景工作仍在同一交易完成全部鎖定與提交。
 - **異常決策矩陣（`SCHEDULE-002 / 003 / 006`）**：只以 `Preview/ApplyAssignmentPlan`（尚未有實際服務日時）或 `Preview/ApplyLeaveSubstitutionBatch`（已有實際服務日時）修復 lineage 斷裂、同月嫂重疊或日數總量違規；成功後於同交易寫入 `anomaly.recheck` intent 並在 fresh authoritative readback 後刪除異常。
 
 ### 3.6 Typed Commands、Ports、Errors 與 Writer Exit
