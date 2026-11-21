@@ -52,7 +52,7 @@
 
 ## Verification
 - layout_status: custom_current
-- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/`
+- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/` — 既有模擬案例核對正式讀回案件不符時，不試算、不預覽，也不套用。
 - static:
   - `git diff --check`
 - test_root: `tests/domains/orders/subsystems/orders/modules/service-date-confirmation/`
