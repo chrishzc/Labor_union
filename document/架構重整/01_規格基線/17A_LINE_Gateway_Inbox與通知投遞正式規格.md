@@ -69,7 +69,7 @@
 - `needs_attention` 由目前 owner facts、來源適用性、投遞結果及有效人工結清共同決定。原失敗次數、未解決來源 ID 與 attempt 紀錄屬證據，不能單獨覆蓋人工結清判定。通知事項、寄送異常清單、詳情、數量及 Anomalies consumer 使用同一判定；待辦移除不立即刪除寄送紀錄；完整內容與嘗試明細的六個月保存依 §4.4，必要處理憑證另外保留。
 - `allowed_actions` 由後端依目前狀態、來源是否啟用及人員原有 capability 計算；前端依此顯示按鈕，Apply 仍 fresh-read 並重新驗權。無可執行操作時顯示原因及核對入口，不以缺少按鈕代替原因。退役來源禁止重試或補送，但已失敗或尚未送出的工作仍可依 §4.2 結清。
 - 共用範圍僅為 LINE 異常的判定與操作契約；重用既有 Delivery、manual replay、人工略過、audit、receipt 與 outer Unit of Work。各業務通知資格仍由原 owner 提供，不建立管理全部提醒的 generic failure root、通用業務狀態機或第二套 retry／fallback。
-- Query 零寫入、零排送；讀回失敗或不完整須明示，不能當成零筆、已解決或可安全結清。清單的數量與分頁都以相同目前資格計算；有後頁但本頁零筆時仍可繼續讀取。
+- Query 零寫入、零排送；讀回失敗或不完整須明示，不能當成零筆、已解決或可安全結清。清單的數量與分頁都以相同目前資格計算。正常讀回但本頁零筆且仍有後頁，可以繼續查下一頁；這與讀回失敗或不完整不同。
 
 ### 4.2 不再寄送與結清
 
@@ -78,7 +78,7 @@
 - `pending`／`retryable_failed` 可取消；`failed` 可由人員結清並轉為 `cancelled`。取消只改工作生命週期，保留既有失敗時間、嘗試次數、attempt 結果及稽核，不改成 `sent`，不重做核銷、排班或案件狀態。`sent` 只留寄送紀錄，不提供以結清撤回訊息的操作。
 - `processing` 或 provider 結果不明時，一般結清不得回報已安全停送；保留待核對結果與阻擋原因，沿既有租約回收及正式結果核對流程處理後，再依目前狀態結清。worker 與 Apply 同時執行時，依目前租約與狀態驗證，不能把已發生或效果未明的外部呼叫當作未送出。
 - 通知異常結清涵蓋 Preview 明示之原來源及其目前未送出重試／manual replay 後繼工作。Apply 在同一 LINE outer Unit of Work 鎖定並 fresh 驗證目前來源與工作；如已進入發送、結果不明或範圍變動，回 typed conflict，不能只隱藏一部分待辦。確認可結清後先取消相關未送出工作，再以取消後的 authoritative readback 保存有效處置及收據，提交後 bounded recheck；不可用本操作自身造成的版本變化製造 stale 或重新開啟待辦。
-- 結清後，同一已處置來源不得由排程、retry 或 replay 自動重建寄送工作；送出前亦須核對目前處置。新的業務事件或後續 owner facts 形成新的適用通知時，依正式資格重新判斷，不受前次處置永久封鎖。不能僅因本次取消改變任務結果便視為新的業務事件。
+- 結清後，同一已處置來源不得由排程、retry 或 replay 自動重建寄送工作；送出前亦須核對目前處置。新的業務事件或後續 owner facts 形成新的適用通知時，依正式資格重新判斷，不受前次處置永久封鎖。不得僅憑本次取消造成的任務狀態變化認定有新業務事件，或據此重建寄送工作。
 - 批次處理先以明確環境、篩選及分頁預覽固定候選目標，再由人員選定；不按「全部失敗」直接清資料。依 canonical 處理目標去重，每個目標維持原單一 outer commit，回報各項成功、衝突或失敗；重試只接續未成功項目，保留已成功的收據。結清本身不刪除業務資料、來源、attempt、投遞歷史或核銷證據；其後到期整理僅依 §4.4，不刪除核銷及停送憑證。
 
 ### 4.3 結清驗收
@@ -97,7 +97,7 @@
 ### 4.4 寄送紀錄六個月滾動保存
 
 - 使用者核定完整寄送內容與嘗試明細滾動保留六個月。以目前時間轉 Asia/Taipei 後向前六個日曆月計算 cutoff，月末不存在同日則取該月最後一日，保留時分秒；轉 UTC 與資料庫比較。嚴格早於 cutoff 才到期，恰在邊界仍保留。
-- 只有 `sent`／`cancelled` 且最後更新時間與所有 attempt 完成時間均早於 cutoff、所有租約欄位空、寄送結果已確認者可整理。`pending`／`processing`／`retryable_failed`／未解決 `failed`、目前或最後 attempt 尚有 `line_reply_outcome_uncertain`、linked intent 尚未到相符終態及未來時間一律保留。單純建立時間久遠不構成到期。
+- 只有 `sent`／`cancelled` 且最後更新時間與所有 attempt 完成時間均早於 cutoff、所有租約欄位空、寄送結果已確認者可整理。`pending`／`processing`／`retryable_failed`／未解決 `failed`、目前或最後 attempt 尚有 `line_reply_outcome_uncertain`、linked intent 尚未到相符終態及未來時間一律保留。例如一筆待重試工作即使已建立超過六個月，也仍保留；只有符合本段全部條件才可整理，不只看建立時間。
 - 到期同交易刪除該工作 attempt 明細，將 task 與所有 linked notification intent 完整 payload 替換為明確 `_retention_expired=true` 標記，移除 task 長錯誤說明。不得僅隱藏 UI 而保留相同正文副本。line inbox 的入站內容、業務來源與其他 Domain facts 不屬本次寄送紀錄清理範圍。
 - task 精簡主列保留原 ID、recipient/source 身分、原 payload fingerprint、idempotency/correlation key、終態、時間與累計嘗試數，供既有 source linkage、付款已通知及防重送核對；不變更原 fingerprint 或原最後更新時間。LINE command receipts、audit、人工結清原因、綁定誤報消除及來源停送憑證不刪除。這些是必要操作證據，不能當成可復原完整內容的歷史。
 - 清理屬 LINE owner 維護工作，沿 canonical worker 的 additional worker 接線，每輪有界最多 25 筆候選，每筆 fresh lock task、attempt 與 intent，由一個 outer UoW 保存精確 task/cutoff 清理憑證、執行刪除與去內容化、提交；失敗 rollback 該筆，不產生 provider call。舊資料庫須先套正式 additive guard migration，禁止關閉既有 append-only trigger。
