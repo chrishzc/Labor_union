@@ -116,6 +116,8 @@ Client Finance lock deposit obligation + ledger
 
 服務前 reversal 阻擋進入服務；已開始／完成後不倒退服務狀態、不取消 assignment、不解除服務資料鎖。reversal 後的新核銷使用新 settlement identity，不能重放原 actual-start reconfirmation。
 
+既有測試定位：`tests/test_g14_deposit_reversal_disposable_mysql_e2e.py` L93–108 的服務前沖正案例，以同一請求重試後讀回同一收據，確認只新增一筆對原收據的沖正，並核對原訂金義務重開的金額、狀態與版本。這是既有斷言，未在本次文件核對執行。
+
 ### 3.4 Cancellation Apply
 
 只適用於全部約定服務完成前：
