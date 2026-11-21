@@ -38,7 +38,7 @@
 | 概念 | 唯一權威 |
 |---|---|
 | 付款條款與到期日 | `PaymentTerms` root facts（`client_payment_terms`） |
-| 專屬虛擬帳號 | Client Finance（§8 定義；Finance Import 消費同一 typed 結果） |
+| 專屬虛擬帳號 | Client Finance（[§3.5 定義](#35-專屬虛擬帳號與單案修改99781699va-0106)；Finance Import 消費同一 typed 結果） |
 | 應收／退款／補助退還義務 | append-only obligation events（`client_obligations` projection） |
 | 收款／退款／adjustment／reversal | immutable `client_ledger_entries` |
 | 核銷分配 | append-only `M:N` allocations |
