@@ -12,5 +12,5 @@ closed unresolved evidence與migration readback；不寫Anomalies projection、�
 - Scheduling transaction／validation modules仍是live owner invariants的authority；不存在Anomalies consumer。
 
 ## Verification
-- `tests/domains/scheduling/subsystems/scheduling/integration/test_historical_baseline_scheduling_owner_adapter.py`
+- `tests/domains/scheduling/subsystems/scheduling/integration/test_historical_baseline_scheduling_owner_adapter.py` — 既有合成案例核對確認日期筆數不一致時，回傳具類型的不可用結果。
 - 無獨立`current-anomaly-facts` test root；退役碼correctness留在既有Scheduling owner module／integration邊界。

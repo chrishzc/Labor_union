@@ -33,7 +33,7 @@
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/attendance-schedule-precision/`
 - layout_status: `custom_current`
 - higher_boundary:
-  - `tests/domains/scheduling/subsystems/scheduling/integration/test_service_end_date_calculation_correctness.py`
+  - `tests/domains/scheduling/subsystems/scheduling/integration/test_service_end_date_calculation_correctness.py` — 既有案例核對明確指定休息星期時，優先於服務方式的預設休息星期。
 
 ## Provenance
 - Scheduling owns attendance-date calculation — `architecture_declared` — current Scheduling formal spec。

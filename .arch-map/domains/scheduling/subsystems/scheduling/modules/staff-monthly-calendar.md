@@ -39,7 +39,7 @@
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/staff-monthly-calendar/`
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/staff_monthly_schedule_client.test.ts`
+- test_root: `ui_react/src/tests/staff_monthly_schedule_client.test.ts` — 既有模擬案例拒絕將歷史列標為正式工作日；同一歷史指派在缺日期處不合併區段。
 - test_root: `ui_react/src/tests/scheduling_current_page.test.tsx`
 - higher_boundary:
   - `tests/domains/scheduling/subsystems/scheduling/integration/`
