@@ -36,7 +36,7 @@ Compose monthly, quarterly and annual read-only staff performance. Credit each c
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: Reporting tests use module roots; React mirrors the same owner in the existing Vitest runtime.
-- test_root: `tests/domains/global/subsystems/reporting/modules/staff-performance/`
+- test_root: `tests/domains/global/subsystems/reporting/modules/staff-performance/` — 既有合成案例核對缺正式開工日仍保留服務時數，案件數與金額標待確認。
 - test_root: `ui_react/src/tests/domains/global/subsystems/reporting/modules/staff-performance/`
 - routing: `.arch-map/tests/domains/global/subsystems/reporting/modules/staff-performance.md`
 
