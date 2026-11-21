@@ -41,7 +41,7 @@ Append-only trigger 例外要求同案 pending claim 與 row ownership。connect
 - layout_basis: 共用 coordinator／UI 的 root 與交易 oracle 歸 Global；Case canonical Client binding oracle 留在 Client Profile 模組。
 - test_root: `tests/domains/global/subsystems/registry-deletion/modules/registry-deletion/`
 - test_root: `ui_react/src/tests/domains/global/subsystems/registry-deletion/modules/registry-deletion/`
-- integration_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_case_registry_deletion.py`
+- integration_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_case_registry_deletion.py` — 既有合成案例核對客戶版本不符時不寫入、不提交；協調器也核對案件版本。
 
 ## Change triggers
 Reconcile when authority、deletion targets、relation guards、entrypoints、receipt or verification roots change.

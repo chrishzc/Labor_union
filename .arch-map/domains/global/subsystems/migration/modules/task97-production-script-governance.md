@@ -14,6 +14,7 @@
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/task97-production-script-governance/`
+- 清冊核對分別檢查項目數與指紋，任一不符時回報差異。
 
 ## Provenance
 - Task 97 production-script inventory ownership — `architecture_declared` — current Task 97 governance package and generator source.

@@ -19,7 +19,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `tests/test_controlled_file_repository.py`
+- test_root: `tests/test_controlled_file_repository.py` — 既有合成案例核對回執快照不含儲存定位，且寫入不自行提交。
 - test_root: `tests/domains/global/subsystems/controlled-files/modules/file-persistence/`
 - provenance: Existing maintained repository tests cover SQL mapping, lock/CAS, command identity and zero hidden commit; no test relocation.
 

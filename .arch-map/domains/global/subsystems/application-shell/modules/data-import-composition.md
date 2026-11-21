@@ -26,7 +26,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- integration_root: `ui_react/src/tests/case_workbook_adapters.test.ts`
+- integration_root: `ui_react/src/tests/case_workbook_adapters.test.ts` — 既有模擬案例核對檢視標記不重複計入已採用列，並拒絕來源總列數不守恆的回執。
 - integration_root: `ui_react/src/tests/data_import_case_workbooks_preview_flow.test.tsx`
 - integration_root: `ui_react/src/tests/data_import_entry_cutover.test.tsx`
 - integration_root: `ui_react/src/tests/data_import_hcm_result_page.test.tsx`
