@@ -18,4 +18,4 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `tests/test_multi_caregiver_schedule_read.py`
+- test_root: `tests/test_multi_caregiver_schedule_read.py` — 既有合成案例核對同一人有多筆指派時，只回傳指定指派的班次。
