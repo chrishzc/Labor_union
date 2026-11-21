@@ -24,6 +24,6 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/modules/subsidy-advance-recovery-workbench/`
-- integration_root: `tests/test_client_subsidy_advance.py` — 既有純政策入口保留，所有月份到期規則更新；舊 recovery helper 僅歷史證據。
+- integration_root: `tests/test_client_subsidy_advance.py` — 既有純政策入口保留，所有月份到期規則更新；舊 recovery helper 僅歷史證據。L23–28 的合成首季月份案例確認第二個後續月份的 15 日為到期日，且當日判為 `READY`；此處的日期判定不代表實際出款或恢復逐案銷帳。
 - presentation_test_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/subsidy-advance-recovery-workbench/`
 - cross-owner current oracle routes to Government Subsidy `period-reconciliation`; that owner retains its integration tests.

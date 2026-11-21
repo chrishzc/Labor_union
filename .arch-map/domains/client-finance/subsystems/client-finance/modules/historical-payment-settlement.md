@@ -28,6 +28,7 @@
 - test_root: `tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement/`
 - higher_boundary:
   - existing `api/main.py` composition includes the owning `client_payments` router.
+- 靜態來源（`subsystems/client_finance/historical_payment_settlement.py` L117–161）：同一命令重播且指紋相符時回原收據；指紋不符、候選過期或受阻時，不到達寫入呼叫。成功路徑在同一外層 UoW 依序呼叫事件、義務連結、投影、來源 outbox 及收據寫入後才提交。此處不證明真實資料庫原子性、授權或實際結算。
 
 ## Provenance
 - Owner-specific public operations and boundary — `architecture_declared` — 2026-08-31 latest explicit user adjudication.

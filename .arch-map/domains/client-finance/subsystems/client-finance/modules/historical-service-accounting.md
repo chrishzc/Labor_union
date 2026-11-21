@@ -16,6 +16,7 @@
 
 ## Verification
 - test_root: `tests/domains/client-finance/subsystems/client-finance/modules/historical-service-accounting/`
+- 靜態來源（`domains/client_finance/historical_obligation_calculation.py` L35–101）：驗證服務天數、每日工時及費率，按補助身分分支計算服務應收，再加上傳入的歷史樓層費以產生候選。此處不證明上游樓層費分攤、快照保存、正式更正或實際結算。
 
 ## Change triggers
 Reconcile when historical service-volume pricing, subsidy/self-pay split, correction direction or owner-version contract changes.

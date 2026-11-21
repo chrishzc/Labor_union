@@ -21,7 +21,7 @@
 - primary:
   - `domains/client_finance/reconciliation.py`
   - `subsystems/client_finance/reconciliation_workflow.py`
-  - `subsystems/client_finance/virtual_account_resolution.py`
+  - `subsystems/client_finance/virtual_account_resolution.py` — 案件允許讀取匯入對照時先查匯入來源；多筆或無法唯一反查回本案時維持待處理。案件若必須使用匯入對照而該對照缺失，不改用公式；其他案件在無匯入對照且規則允許時才考慮公式，候選仍須能唯一反查回本案。
   - `infrastructure/mysql/client_receipt_reconciliation_repository.py`
   - `subsystems/client_finance/first_payment_query.py`、`infrastructure/mysql/first_payment_query_repository.py` — typed current first-stage settlement Query; exact-zero, marked committed receipt, allocation and reversal checks, no writes.
   - `subsystems/client_finance/second_payment_query.py` — typed required-stage／settlement query；LINE 不重算入帳根事實。

@@ -24,6 +24,7 @@
 
 ## Verification
 - test_root: `tests/domains/client-finance/subsystems/client-finance/modules/client-subsidy-return-query/`
+- 靜態來源（`subsystems/client_finance/subsidy_return_query.py` L57–78）：應用層呼叫 `query_facts` 後，以正式退款資訊等 facts 產生投影、回傳 `is_estimate`，並在指定月份時依到期月份篩選；這段未呼叫 repository 寫入。此處不驗證 adapter、HTTP 端點或實際退款。
 
 ## Change triggers
 案件資格、正式／預估金額來源、日期來源、GET contract、分頁或寫入邊界改變時重核。

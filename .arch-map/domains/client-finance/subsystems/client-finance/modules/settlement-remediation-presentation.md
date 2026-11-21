@@ -24,7 +24,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/client_settlement_remediation.test.tsx`
+- test_root: `ui_react/src/tests/client_settlement_remediation.test.tsx` — L97–108 的替身案例以 fresh owner Query 回讀無同碼逾期義務，斷言 `onResolved` 呼叫一次並顯示「已無這類逾期未清義務」。
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/modules/settlement-remediation-presentation.md`
 
 ## Change triggers
