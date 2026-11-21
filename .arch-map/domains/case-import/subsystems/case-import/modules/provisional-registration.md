@@ -60,6 +60,7 @@
 - integration_root: `tests/domains/case-import/subsystems/case-import/integration/test_non_citizen_registration_mysql.py` — 年度配號的 fresh、並行、回滾及 dump／candidate preserve 真實 MySQL 驗證。
 - LINE coordination 的跨 owner atomicity 驗證由 LINE Subsystem 的既有 integration routing 承接，不歸本 leaf。
 - routing: current Case Import subsystem verification root declared by the parent index; the focused file is the bounded current test placement for this owner.
+- 靜態來源（`domains/case_import/provisional_registration.py` L187–210）：選填證號欄位交由共用正規化；正規化遇到 `ValueError` 時，轉成 `INVALID_ROOT_FACTS` 領域錯誤。此段僅說明欄位驗證，不代表已驗證 Apply、核准、持久化或 LINE 流程。
 
 ## Provenance
 - owner and persistence flow — `source_observed` — current repository。
