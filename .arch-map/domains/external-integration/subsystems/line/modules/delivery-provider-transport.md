@@ -8,7 +8,7 @@
 定義已提交 LINE delivery task 共用的 typed provider outcome，並將 Push／Reply 請求轉接至 LINE Messaging API。此模組不建立 delivery task、不選擇業務收件者。Webhook 在業務交易提交後使用當次短效 Reply token，背景執行 Push。
 
 ## Implementation
-- primary: `subsystems/line/delivery_contracts.py`
+- primary: `subsystems/line/delivery_contracts.py` — provider 回應區分 `success`、`rate_limited`、`rejected`、`unavailable` 和 `timeout`。
 - provider adapter: `infrastructure/line/messaging_api_adapter.py`
 - shared HTTP outcome mapping: `infrastructure/line/http_outcomes.py`
 

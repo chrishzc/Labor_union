@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-協調 canonical LINE worker 的單次工作週期與等待迴圈，並將成功或失敗 heartbeat 投影為可辨識的 runtime health observation。週期失敗必須留下錯誤類型後再向 caller 傳播；監控分開判斷 heartbeat 過期與最新週期失敗，不執行 provider effect 或改寫 delivery outcome。
+協調 canonical LINE worker 的單次工作週期與等待迴圈，並將成功或失敗 heartbeat 投影為可辨識的 runtime health observation。週期失敗時先嘗試把錯誤類型寫入 heartbeat，再向呼叫方傳回原始錯誤；即使 heartbeat 無法寫入，也不以寫入錯誤取代原始錯誤。監控分開判斷 heartbeat 過期與最新週期失敗，不執行 provider effect 或改寫 delivery outcome。
 
 ## Implementation
 - primary:

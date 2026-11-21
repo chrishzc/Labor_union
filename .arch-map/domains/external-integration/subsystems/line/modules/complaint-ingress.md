@@ -34,7 +34,7 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 
 ## Current flow and readback
 
-- 已結案（`resolved`）工單永不重開，新訊息固定建立新工單；`waiting → handling → resolved` 不可逆轉；`start_handling_for_escalation()` 與 `_append_event()` 皆僅接受 `waiting | handling`，`resolved` 工單不允許直接接手或附加事件。
+- 已結案（`resolved`）工單永不重開，新訊息固定建立新工單；`waiting` 可進入 `handling` 或直接成為 `resolved`，`handling` 只可進入 `resolved`，而 `resolved` 無後續轉移；`start_handling_for_escalation()` 與 `_append_event()` 皆僅接受 `waiting | handling`，`resolved` 工單不允許直接接手或附加事件。
   補助分類澄清使用 `一般市民（最高40小時）`／`補助市民（最高120小時）`。
 - 2026-10-22 人工裁決取消群組告警。客服告警只擷取唯一啟用管理員個人對象；沒有或多個管理員不任選一人。新 intent 不選群組，歷史 group intent 拒絕投遞；provider 前亦拒絕既有群組告警工作。
 - 告警投遞來源為 `customer_service_escalation` 與 `escalation:<id>`，terminal

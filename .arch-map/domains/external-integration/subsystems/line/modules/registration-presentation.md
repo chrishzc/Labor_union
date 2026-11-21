@@ -30,7 +30,7 @@
 - Apply 成功呈現待工會核准及申請編號；未核准時 client／beclass IDs 為 null，不宣稱完成綁定或已建立正式客戶。
 
 ## Verification
-- test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py`
+- test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py` — 既有靜態案例核對初始化失敗分支會顯示錯誤，並停用表單所有控制項。
 
 ## Change triggers
 Reconcile when registration page、local input validation、Preview／Apply entrypoint、LIFF identity boundary 或 focused static contract test changes。

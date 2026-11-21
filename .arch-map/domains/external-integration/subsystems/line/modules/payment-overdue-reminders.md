@@ -68,4 +68,4 @@
 - ui_test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/payment-overdue-reminders/`
 - layout_basis: 沿用 LINE 現有 module unit／React mirror 與 native MySQL cross-owner infrastructure 驗證邊界。
 
-- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_payment_receipt_notifications_mysql.py` — isolated native manual-only receipt queue, concurrency, reversal／binding guards and no automatic send.
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_payment_receipt_notifications_mysql.py` — isolated native manual-only receipt queue, concurrency, reversal／binding guards and no automatic send. — 既有案例核對指定案件與期別精確命中；期別不符或案件不存在時回傳空結果，不替用其他案件或期別。

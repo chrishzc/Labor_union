@@ -64,7 +64,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/notification-rules-presentation/`
-- test_root: `ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx`
+- test_root: `ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx` — 既有模擬案例確認檢查失敗時不儲存；畫面顯示一般錯誤訊息，不顯示原始錯誤代碼或後端文字。
 - contract_test: `tests/domains/external-integration/subsystems/line/subsystems/test_line_notification_rule_api.py`
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_message_preview.py`
 - integration_test: `tests/domains/scheduling/subsystems/scheduling/integration/test_staff_leave_inquiry_transaction.py`

@@ -19,7 +19,7 @@
 
 ## Verification
 - test_root: `tests/domains/external-integration/subsystems/line/modules/customer-service-reminders/`
-- UI integration coverage: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_customer_service_reminders.test.tsx`
+- UI integration coverage: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_customer_service_reminders.test.tsx` — 既有模擬案例確認舊工單連結轉到「身分與授權」；頁面不顯示歷史工單入口，也不發出客服查詢。
 
 ## Boundaries
 退役的工單查閱 API 不讀取紀錄。工單 API 的切換結案持續履行版本驗證、原狀態與解除暫停證據檢核。

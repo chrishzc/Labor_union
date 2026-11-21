@@ -36,7 +36,7 @@
 - outbound: LINE delivery task owner — committed task 與 provider 前 fresh cancellation gate。
 
 ## Contracts
-- [LINE 客服與月嫂自助服務 §4.3](../../../../../document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md) — 缺漏催繳退役。
+- [LINE 客服與月嫂自助服務 §4.3](../../../../../../document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md) — 缺漏催繳退役。
 
 ## Verification
 - layout_status: `custom_current`

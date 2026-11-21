@@ -26,7 +26,7 @@ React 身分綁定、待審核、待配對三任務工作區；只呈現 owner-b
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/line_identity_client.test.ts` — 既有 typed identity transport 的嚴格契約、Session、版本、原因選填與錯誤映射。
-- UI coverage: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_identity_workbench.test.tsx`；沿用上層 LINE integration 歸屬。
+- UI coverage: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_identity_workbench.test.tsx`；沿用上層 LINE integration 歸屬。 — 既有模擬案例確認載入中或查詢失敗時不顯示無紀錄，只有成功回傳空清單才顯示無紀錄。
 - Parent regression: `ui_react/src/tests/line_management_page_real_data.test.tsx`。
 
 ## Boundaries
