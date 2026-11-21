@@ -27,7 +27,7 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `ui_react/src/pages/AccountingParametersPage.css`
 - `ui_react/src/components/CasePricingAdjustmentPanel.tsx`
 - `ui_react/src/components/AccountingParametersCard.tsx`
-- AccountingParametersCard 僅顯示正式 CasePricing terms／impact 及傳入 owner 金額；讀取失敗或缺來源時維持待確認，不補 0 小時、160 小時、預設費率或在瀏覽器重算總額。
+- AccountingParametersCard 僅顯示正式 CasePricing terms／impact 及傳入 owner 金額；讀取失敗或缺來源時維持待確認，不補 0 小時、160 小時、預設費率或在瀏覽器重算總額。應繳與應付金額各自優先顯示傳入的正式帳務金額；該欄未傳入時才顯示已提供的 CasePricing impact 對應金額。缺 CasePricing 時顯示計價依據待確認，已傳入的正式金額仍照常顯示。
 - `ui_react/src/components/AccountingParametersBar.tsx`
 - `ui_react/src/components/AccountingParametersDrawer.tsx`
 - `ui_react/src/components/AccountingParameters.css`
