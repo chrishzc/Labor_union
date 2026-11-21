@@ -47,7 +47,7 @@
   - `db/migration_releases/labor_union_2026_08_28_service_before_replacement_v1.json`
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/`
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/service_before_replacement_actions.test.tsx`
+- test_root: `ui_react/src/tests/service_before_replacement_actions.test.tsx` — 既有模擬案例核對切換案件時中止舊查詢，晚到的舊回應不覆蓋目前案件。
 - higher_boundary:
   - tests/integration/ (shared legacy higher-boundary root)
 - cross_owner:
