@@ -19,11 +19,11 @@
 ### 2.2 Payout Reconciliation Preview／Apply
 
 - **Commands**：`PreviewStaffPayout`、`ApplyStaffPayout`、`PreviewStaffPayoutReturn`、`ApplyStaffPayoutReturn`、`PreviewStaffPayoutReversal`、`ApplyStaffPayoutReversal`、`PreviewStaffPayoutDifference`、`ApplyStaffPayoutDifference`、`PreviewStaffOverpaymentRecovery`、`ApplyStaffOverpaymentRecovery`。
-- **Apply 共用交易步驟**：依 canonical staff mutex order 加鎖 → 鎖定 version、bank facts、帳號快照與義務 → 重建並驗證 fingerprint 與 expected version → 依事件別 guard 驗證 → append ledger event 與 links → 更新 projection、version、outbox 與 receipt → outer UoW 單次提交（Apply route 回 `202 JobAccepted` 僅代表排入 durable command，完成須由 job／root 讀回確認）。
+- **Apply 共用交易步驟**：依 canonical staff mutex order 加鎖 → 鎖定 version、bank facts、該流水適用的帳號快照與義務（`P永` 不以帳號覆核已確認對象） → 重建並驗證 fingerprint 與 expected version → 依事件別 guard 驗證 → append ledger event 與 links → 更新 projection、version、outbox 與 receipt → outer UoW 單次提交（`202 JobAccepted` 只代表排入 durable command。經辦用工作識別查 job 結果，取得成功收據，並重新讀取正式根資料（root）確認已核銷，才算完成；待處理或結果未明不得顯示已核銷）。
 - **事件別 Guard**：
   - **一般 payout（含 0～100 元手續費）**：收款對象＋交易日月份唯一匹配，且 `0 <= (選定義務剩餘合計 - 銀行實付) <= 100` 時，動態計算 `transfer_fee_ntd = remaining_total - bank_outflow`（可為 `0`～`100`），直接核銷結清為 `completed`（`remaining = 0`），保留原應付、實付與手續費。
   - **payout difference**：用於 `差額 > 100` 部分付款或 `實付 > 應付` 超付追償。
-  - **return／reversal**：指向有效 payout；`return` 須綁銀行退匯入款，`reversal` 須人工原因與 capability，均不得超過尚未重開額。
+  - **return／reversal**：指向有效 payout；`return` 須綁銀行退匯入款，`reversal` 須具備 capability 並指向有效原付款，對應 owner 要求的必要業務證據仍須具備；人工自由文字原因依 [Global 共同契約](00_Global_共同契約.md) §2.4 選填。兩者均不得超過尚未重開額。
 - 手動補登之銀行對象條件依 [手動補登規格](22_銀行流水匯入與帳務異常處理正式規格.md#6-案件帳務手動補登與自動銷帳)，不要求補造帳號快照。
 
 <a id="staff-payout-scheme1-and-differences"></a>
@@ -33,11 +33,13 @@
 - **待核對頁直接確認方案一**（核銷選項「補助方案一：核銷自備款，補助款保留待付」）：
   - 適用範圍：已確認同一案件、同一月嫂及單筆原應付的永豐出款（即使尚未保存方案或尚無正式分期）。以 Payroll 有效應付 `T` 與 Government Subsidy `S` 為權威來源（不接受前端傳入或差額反推；`S` 不明、`S >= T`、已有衝突方案或客戶補助退款時拒絕）。
   - Preview 零寫入顯示 `T`、`S`、自備待付、實付、手續費與補助待付；缺分期時由 [Payroll Domain](03_Payroll_Domain.md#21-核心計價與費率政策) 承接 `T - S`（原應付日）與 `S`（服務結束月 `+ 2` 月 15 日）。
-  - Apply 在單一 outer UoW 內鎖訂單身分、補助來源與付款事實，原子提交方案事件 split、缺席分期與自備款核銷（同鍵重播回原結果、來源變動 409）。單獨於案件頁設定方案不執行本入口之自備款核銷。
+  - Apply 在單一 outer UoW 內鎖訂單身分、補助來源與付款事實，原子提交方案事件 split、缺席分期與自備款核銷（首次套用前來源已變動，回 409、不提交；已成功的同鍵同指令重播回原結果，不重複入帳）。單獨於案件頁設定方案不執行本入口之自備款核銷。
 - **方案一分來源核銷**：永豐 `P永` 核銷自備款分期，台新 `P台` 核銷補助款分期，金額依各自來源餘額。兩筆分期均清償後才結清整筆應付。`P台` 自動配對使用原補助分期月份或原預檢擬建的補助分期月份；六碼已確認歸屬的跨月交易由人員依[單筆人工核對規則](22_銀行流水匯入與帳務異常處理正式規格.md#taishin-staff-case-match)確認，正式預檢與套用重驗原始備註、月嫂、案件及款項資格。
 - **少付超過 100 元部分付款（`ApplyStaffPayoutDifference(mode=underpayment)`）**：
   - 銀行對帳「核對交易」可選「足額核銷本次款項（含 100 元內手續費）」、「付款不足，先核銷實付」、「付款超額，另列追收」及上述永豐方案一選項。
   - 在單一 UoW 內依義務 ID 順序寫入 payout event 與 allocation，計算 `remaining = obligation_amount - net_valid_payout`（> 0 轉 `partially_paid`），下期清冊僅列 `remaining`，不改變 Payroll 原始應付或重複建單；後續新補款繼續對同一義務結清。退匯／沖正僅重開指定來源付款額。
+
+  - **少付邊界例**：已確認原應付為 NT$10,000。若實付 NT$9,900，符合正式配對條件時，以 NT$100 手續費結清。若實付 NT$9,899，不能以手續費結清；經辦選「付款不足，先核銷實付」後，原義務只核銷 NT$9,899，保留 NT$101 待付，無須另建應付單。
 
 ### 2.4 超額付款與追償（`staff_overpayment_recovery`）
 
@@ -67,8 +69,9 @@
 ### 3.3 Refund／Reversal Preview、Apply、手續費與超退追償
 
 - **Queries／Commands**：`QueryClientRefundReversal`、`Preview/ApplyClientRefund`、`Preview/ApplyClientSubsidyReturn`、`Preview/ApplyClientReceiptReversal`、`Preview/ApplyClientRefundReturn`、`Preview/ApplyClientRefundReversal`。
-- **Apply 八步與差額規則**：檢查 idempotency → 加鎖 account、bank facts、obligations／reversal targets → 重建驗證 expected version 與 fingerprint → append ledger 與 allocations → 重算 remaining → 更新 projection／outbox／receipt → 單次提交。
-  - **0～100 元手續費直接結清**：`R永` 驗帳號快照，`R台` 依[台新備註辨識](22_銀行流水匯入與帳務異常處理正式規格.md#taishin-subsidy-memo)以原始六碼或客戶姓名定位案件。`R台` 的同名客戶依交易月份與補助退款月份配對，人工核銷仍重驗月份，免驗帳號快照。符合對象及日期條件且 `0 <= 應退餘額 - 銀行實付 <= 100` 時，動態計算 `transfer_fee_ntd` 結清為 `refunded`。
+- **Apply 與差額規則**：檢查 idempotency → 加鎖案件帳務帳戶（非退款銀行帳號）、bank facts、obligations／reversal targets → 重建驗證 expected version 與 fingerprint → append ledger 與 allocations → 重算 remaining → 更新 projection／outbox／receipt → 單次提交。
+  - **0～100 元手續費直接結清**：`R永` 依[永豐備註及人工配對規則](22_銀行流水匯入與帳務異常處理正式規格.md#42-永豐備註六碼定位案件規則與非市民-a-案件)確認同案客戶，六碼只定位案件；匯入、候選及核銷均不讀取或比對退款帳號。正式核銷必須有同案未清退款義務，提交時重驗案件。`R台` 依[台新備註辨識](22_銀行流水匯入與帳務異常處理正式規格.md#taishin-subsidy-memo)以原始六碼或客戶姓名定位案件。`R台` 的同名客戶依交易月份與補助退款月份配對，人工核銷仍重驗月份，免驗帳號快照。符合對象及日期條件且 `0 <= 應退餘額 - 銀行實付 <= 100` 時，動態計算 `transfer_fee_ntd` 結清為 `refunded`。
+  - **永豐退款例**：原備註明確寫退訂金且六碼只對到一案，沒有可辨識姓名時仍可辨識一般退款用途；若原備註另有可辨識客戶姓名，須與該案一致。尚無同案未清退款義務時，交易可辨識用途，但不得正式核銷；經辦重新確認同案有效義務後才可依原條款提交。
   - **少退超過 100 元**：須人員明確選取部分退款模式，核銷實付並轉 `partially_refunded` 保留餘額；同案同對象同銀行同月多筆明確合併補助退款應逐筆檢驗原資格與日期。
   - **超退（`銀行實付 > 應退餘額`）**：由 `ApplyClientRefundWithOverage` 在原義務額內結清，並將超額建立獨立 `client_over_refund_recovery`。`R台` 沿同一備註案件辨識與整期資金驗證，多筆合併僅立一筆追償。
 
