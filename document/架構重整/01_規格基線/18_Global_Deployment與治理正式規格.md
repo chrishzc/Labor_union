@@ -51,7 +51,7 @@ Current source 位於 `ui_react/`。Production artifact 必須具備：immutable
 
 標準本機 topology：FastAPI `127.0.0.1:8000`、React/Vite `127.0.0.1:5173/admin/`、runtime monitor、durable job worker、incident worker 及依設定啟用的 LINE／knowledge workers。統一採 `local_auth` profile。
 
-Windows 開發環境可使用主機 npm 或 Docker Vite；無主機 npm 時，`supervise_local_runtime.ps1` 將 Docker Vite 發布於動態 `127.0.0.1` port 並啟動 `scripts.launchers.local_react_gateway` 轉送 `/api`、`/line-`、`/webhook` 與 Vite WebSocket。`--dry-run` 只檢查 dependencies；`--smoke-test` 建立 owned process 執行 GET-only readiness 後清理。
+Windows 開發環境可使用主機 npm 或 Docker Vite；無主機 npm 時，`supervise_local_runtime.ps1` 將 Docker Vite 發布於動態 `127.0.0.1` port 並啟動 `scripts.launchers.local_react_gateway` 轉送 `/api`、`/line-`、`/webhook` 與 Vite WebSocket。`--dry-run` 只檢查 dependencies，不啟動供 readiness 使用的程序。`--smoke-test` 則建立本次管理的程序（owned process），執行 GET-only readiness，測完只清理該批程序。
 
 ## 5. Windows 遠端入口、獨立換版與統一管理
 
@@ -83,7 +83,7 @@ prepared → preflight_passed → execution_approved → backup_verified
 
 任一步驟失敗轉 `failed`；`switched` 後失敗轉 `recovery_required → recovered | escalated`。Release manifest 須記錄 release version、Git ref、artifact digest、schema release identity／digest、source／candidate DB identity、backup／restore evidence、operator、window、correlation identity、required secret 名稱（不含值）與 rollback contract。
 
-Preflight 強制檢核 target identity、secret、DB principal、schema drift／pending migration、backup／restore tool、FastAPI/React/worker/schema compatibility 與 approval 效期；Switch 必須原子並保留 before／after readback。
+Preflight 強制檢核 target identity、secret、DB principal、schema drift／pending migration、backup／restore tool、FastAPI/React/worker/schema compatibility 與 approval 效期；Switch 必須原子並保留 before／after readback。`switched` 只表示已切換，不等於 `released`；仍須通過 `restart_verified`。
 
 ### 6.2 Runtime supervision
 
@@ -108,7 +108,7 @@ Preflight 強制檢核 target identity、secret、DB principal、schema drift／
 
 ### 8.1 高風險操作授權邊界
 
-production deployment、schema／data migration、backup restore／target switch、provider publication、credential 操作、付費資源異動與實際 destructive cleanup，均須取得針對精確 target 的最新人工明確授權；本機測試或 rehearsal 通過不構成執行授權。
+production deployment、schema／data migration、backup restore／target switch、provider publication、credential 操作、付費資源異動與實際 destructive cleanup，均須取得針對精確 target 的最新人工明確授權；本機測試或 rehearsal 的通過結果只作驗證證據，不構成任何執行授權。
 
 ### 8.2 驗收標準
 
