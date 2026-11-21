@@ -18,7 +18,6 @@
   - `api/schemas/operations_reports.py`
   - `db/schema_parts/218_weekly_report_metrics.sql`
   - `db/schema_parts/1035_weekly_report_metrics.sql`
-  - `scripts/generate_entrypoint_review_queue.py`
   - `ui_react/src/pages/ReportsPage.tsx` — 營運案件／工時與原完整 workbook，補助連結導向 Finance。
   - `ui_react/src/components/reports/OperationsReportsWorkspace.tsx` — 共用既有報表欄位與 Query／XLSX；帳務端唯一補助畫面（週報補助統計／季度／年度），案件編號使用原案件抽屜 callback。
   - `ui_react/src/components/FinanceGovernmentSubsidyList.tsx` — Finance presentation 接線，無第二套報表或 CSV。
@@ -130,8 +129,8 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 - integration_root: `ui_react/src/tests/fixtures/reports/weekly_operations_report_contract_fixtures.ts`
 
 ## Provenance
-- Global Reporting擁有跨Domain營運報表composition，business formula仍由各owner提供 — `architecture_declared` — 正式規格§15.1；現行source差異見上節。
-- flat Python contract path由entrypoint review generator直接消費且本身證明cross-domain API／XLSX boundary — `source_observed` — `scripts/generate_entrypoint_review_queue.py`。
+- Global Reporting擁有跨Domain營運報表composition，business formula仍由各owner提供 — `architecture_declared` — [營運報表與統計口徑正式規格](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md) §1；現行source差異見上節。
+- 週報 API／XLSX 契約的既有測試定位 — `source_observed` — [日期與篩選拒絕測試](../../../../../../tests/test_weekly_operations_report_contract.py#L116-L139) 與 [JSON／XLSX 歷史分組測試](../../../../../../tests/test_weekly_operations_report_contract.py#L142-L162)（替身資料，不是正式環境或 MySQL 結果）。
 
 ## Change triggers
 Reconcile when報表期間／annual_ytd、補助期間、三分頁schema、owner fact dependency、public GET/export、批次POST／PATCH、writer／commit boundary、正式契約或Reports presentation test path改變。
