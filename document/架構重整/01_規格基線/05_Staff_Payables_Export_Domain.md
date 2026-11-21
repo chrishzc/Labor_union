@@ -32,7 +32,7 @@ return／reversal                              → 依剩餘有效淨實付重�
 
 - 月嫂義務可由永豐一般出款（`P永`）、台新補助轉交（`P台`）及多次部分付款合計清償，合計不得超出案件總額 `T`；補助來源不額外增加薪資權利。
 - `R永`／`R台` 屬於 [Client Finance](04_Client_Finance_Domain.md)，不得用以清償月嫂應付。
-- 一般核銷依 [銀行流水對帳規則](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation) 處理 `0 <= (應付 - 實付) <= 100` 內扣手續費並直接結清；超過 100 元之不足額保留原應付與實付差額繼續待付，超付轉入追償（`staff_overpayment_recovery`），詳細操作流程見 [Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md)。
+- 一般核銷依 [銀行流水對帳規則](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation) 處理 `0 <= (應付 - 實付) <= 100` 內扣手續費並直接結清；超過 100 元之不足額保留原應付與實付差額繼續待付，超付先留待核對；只在依正式超付處置確認並套用後，原應付才結清，超付另立追償（`staff_overpayment_recovery`），不把待核對當成功核銷。詳細操作流程見 [Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md)。
 
 ### 2.2 Payout Ledger 資料模型
 
@@ -62,7 +62,7 @@ staff_payout_obligation_links
 
 ### 3.2 Payout Preview 與 Apply
 
-- **Preview（零寫入）**：驗證所有銀行列為 outgoing debit、同一月嫂且無重複 raw fact。永豐及其他帳號路徑要求帳戶 owner 唯一；台新 `P台` 依 [台新辨識契約](22_銀行流水匯入與帳務異常處理正式規格.md#43-台新補助出款備註辨識taishin-memo-0105) 重新讀取原始備註月嫂姓名唯一確認月嫂，不要求交易收款帳號或主要帳戶，且姓名須與所選義務一致。
+- **Preview（零寫入）**：驗證所有銀行列為 outgoing debit、同一月嫂且無重複 raw fact。使用帳號辨識的路徑要求帳戶 owner 唯一；`P永` 可依[永豐出款辨識規則](22_銀行流水匯入與帳務異常處理正式規格.md#42-永豐備註六碼定位案件規則與非市民-a-案件) 不以交易收款帳號作為必填證據。台新 `P台` 依 [台新辨識契約](22_銀行流水匯入與帳務異常處理正式規格.md#43-台新補助出款備註辨識taishin-memo-0105) 重新讀取原始備註月嫂姓名唯一確認月嫂，不要求交易收款帳號或主要帳戶，且姓名須與所選義務一致。
 - **Apply（單一 outer UoW）**：fresh-read 來源、銀行事實、義務及版本，寫入 `staff_payout_events`、`staff_payout_obligation_links`、狀態投影與 outbox；重送 same-key 回傳原收據，絕不重複配對或修改原應付金額。
 
 ### 3.3 Historical Payout Evidence／Settlement
@@ -73,7 +73,7 @@ staff_payout_obligation_links
 
 ### 3.4 Payable Anomaly Facts 與 Accounts Payable Export 不變量
 
-- Anomaly 投影輸出：`PAYOUT-001`（到期未匯）、`PAYOUT-002`（應付於原基準日後始形成或變動）、`PAYOUT-003`（銀行主檔不完整）及 ownership／共享帳戶／金額衝突。人工 resolve 警示僅記錄處置，不變更義務或實付。
+- Payable Anomaly 投影輸出：`PAYOUT-001`（到期未匯）、`PAYOUT-003`（銀行主檔不完整）及 ownership／共享帳戶／金額衝突。人工 resolve 警示僅記錄處置，不變更義務或實付。應付於原基準日後始形成或變動的 `PAYOUT-002` 依 [Payroll §3.6](03_Payroll_Domain.md#36-payout-002-晚到義務處置) 處置，不進 [Anomalies runtime current issues](06_Anomalies_Domain.md#33-退役代碼歸屬對照不進-runtime-current-issues)。
 - **Accounts Payable Export（唯讀快照管道）**：
   ```text
   一致性 read transaction 讀取當下 payable
@@ -96,6 +96,6 @@ staff_payout_obligation_links
 
 1. 同月嫂同月兩筆訂單且付款日、出款銀行、收款帳戶一致時：維持兩筆獨立義務、匯出為一列合併，且單筆銀行支出可完整分配至兩筆；永豐一般款與台新補助款分開呈列。
 2. `completed` 與 `anomaly` 義務不進入 AP 匯出；`return`／`reversal`（僅限歷史證據或已允許之有效沖正路徑）可重開 `payable`。
-3. 混用不同月嫂或對象不唯一時拒絕建立 payout；台新 `P台` 僅需原始備註姓名唯一且同人即不阻擋缺帳號；0～100 元轉帳手續費依對帳規則結清。
+3. 混用不同月嫂或對象不唯一時拒絕建立 payout；台新 `P台` 依 §3.2 以原始備註確認唯一且與所選義務一致的月嫂；符合核銷條件時，不因交易收款帳號缺漏而阻擋。0～100 元轉帳手續費依對帳規則結清。
 4. 同日多次匯出各自保留不可變檔案，archive bytes 與 HTTP response bytes 完全一致；archive 失敗時絕不回傳半份檔案。
 5. 完整履約之月嫂義務不因後續客戶爭議或取消而被縮減；same-key 重送不重複建立事件或 links。
