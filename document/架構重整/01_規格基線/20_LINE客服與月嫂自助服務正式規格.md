@@ -62,7 +62,11 @@ LINE 流程圖按觸發方式標示自動推播、人工發送或聊天室回覆
   - **新增「我的不接案日期」專區**：月嫂可自訂個人無法接案的日期區間（開始日 `unavailability_start_date`、結束日 `unavailability_end_date`、事由 `unavailability_reason`，如返鄉休息、個人休假、回診），登記後排班月曆即時以「🚫 不接案（正式不可服務）」紫色醒目標示，工會排班與媒合系統自動避開派案。本專區僅限個人排班查詢頁面呈現，雙方合意延期專屬模式完全隔離隱藏。
 - **案件服務群組「月嫂專屬小幫手選單」（純 `line_webhook_reply`，0 Push 額度消耗）**：
   - 月嫂於案件群組輸入「工會」或「小幫手」時，系統以免費 `replyToken` 即時回覆選單卡片，所有互動步驟嚴禁使用 Push 額度：
-    1. **【確認開工日】**：月嫂或客戶任一方皆可由原生日期滾輪選定約定開工日發起提議（卡片依發起方動態標示「月嫂已發起，請客戶確認」或「客戶已發起，請月嫂確認」），系統以免費 ReplyToken 回覆「開工日期確認單」卡片；由對方點選同意後依 [`02_Assignments_Scheduling_Domain.md`](02_Assignments_Scheduling_Domain.md) `SSTART-01`～`08` 單一 UoW 自動完成排班並 Reply 文案（提示可查看【服務排程】）。自提自審防護：提案方若誤點同意按鍵，系統靜默不反應以維持聊天室整潔；點擊【日期有誤，重新選擇】時系統以 ReplyToken 發布「{角色}已取消本次提議，雙方可再次點選小幫手重新選擇日期」。**正式開工後，選單自動隱藏此選項**。
+    1. **【確認開工日】**：
+       - **發起**：月嫂或客戶任一方可用原生日期滾輪選定約定開工日。卡片依發起方顯示「月嫂已發起，請客戶確認」或「客戶已發起，請月嫂確認」，系統以免費 ReplyToken 回覆「開工日期確認單」卡片。
+       - **同意**：由對方點選同意，依 [`02_Assignments_Scheduling_Domain.md`](02_Assignments_Scheduling_Domain.md) `SSTART-01`～`08` 單一 UoW 自動完成排班並 Reply，提示可查看【服務排程】。自提自審防護：提案方若誤點同意按鍵，系統靜默不反應。
+       - **重新選擇**：點擊【日期有誤，重新選擇】時，系統以 ReplyToken 發布「{角色}已取消本次提議，雙方可再次點選小幫手重新選擇日期」。
+       - **正式開工後**：選單自動隱藏【確認開工日】。
     2. **【服務排程】**：以 7 欄排班日曆卡片呈現（標註多月嫂區段與固定排休日顏色圖例，精簡直觀不輸出冗長日期列表）。開工前點選提示預期排程或請雙方先確認開工日；正式開工後保留此選項，供雙方查閱已服務天數、剩餘天數與固定排休日。
     3. **【案件資訊】**：顯示確認月嫂時之服務條件與費用約定。以 LINE 原生高對比 Flex 卡片呈現三大完整約定區塊：①「服務約定」（案件編號、服務人員姓名、客戶名稱、預計服務起訖日、每日服務時段、每日服務時數、服務方式、希望服務天數、服務地址、下廚需求、胎數）、②「客戶付款約定」（訂金金額／預計繳款日、第一期款金額／預計繳款日、第二期款金額／預計繳款日、樓層費／預計繳款日、客戶應付總額）、③「其他約定」（特殊休假日、注意事項備註）。內容與正式推薦確認單一致，客戶、月嫂或工會人員皆可於群組小幫手選單點選按鈕查閱（不開放訊息文字指令觸發），純 `line_webhook_reply`，0 Push 額度消耗。
     4. **【雙方合意延期】**：請見 §4.2。
@@ -197,8 +201,12 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 
 - **`line-mobile-admin`**：統一行動審核入口，包含 `staff_review`、`order_tracking` 與 `dashboard` 三個視圖。舊 `customer_service` 連結導向待辦工作台。原獨立群組／主管異常推播已退役，管理員改從 `line-mobile-admin?target=staff_review` 頂端可收合系統狀態摘要卡（`retired_admin_alert` 狀態）查閱告警總覽。
 - **LIFF 設定唯一來源與 DB 版本控管**：
-  - 服務申請入口（`gateway.html`）、需求調查（`register.html`）、帳號綁定（`bind.html`）、非市民申請頁（`/line-non-citizen-registration`）及管理端設定統一讀寫 MySQL 之版本化 `LIFF` 設定（`LineConfigurationKind.LIFF`）。[`config/liff_settings.json`](../../../config/liff_settings.json) 僅於資料庫尚未建立 LIFF 設定（`revision = 0`）時供明確 fresh bootstrap，執行中禁止 fallback 讀檔；設定缺失、格式錯誤或資料庫不可用回 `503`，頁面不存在或停用回 `404`。
-  - 公開與管理端沿用既有 `/api/config/liff`、`/api/config/liff/runtime`、`/api/config/liff/state`、主題／頁面／欄位設定（`/api/config/liff/theme`、`/api/config/liff/pages/{page_id}` 與欄位新增／修改／刪除）、版本歷史（`GET /api/config/liff/history`）與還原（`POST /api/config/liff/rollback/{revision}`），並共用 `LiffSettingsConfig` typed validation。`ETag`／`If-Match` 採資料庫 revision 執行樂觀併發檢查，讀取後遭並行更新回 `409`；還原於目前 revision 新增一版且不覆寫或刪除既有版本，所有設定異動僅留存版本與稽核，不建立訊息投遞或選單發布工作。
+  - 服務申請入口（`gateway.html`）、需求調查（`register.html`）、帳號綁定（`bind.html`）、非市民申請頁（`/line-non-citizen-registration`）及管理端設定統一讀寫 MySQL 之版本化 `LIFF` 設定（`LineConfigurationKind.LIFF`）。
+    - **初次建立**：[`config/liff_settings.json`](../../../config/liff_settings.json) 僅於資料庫尚未建立 LIFF 設定（`revision = 0`）時供明確 fresh bootstrap。
+    - **執行期間**：禁止 fallback 讀檔。設定缺失、格式錯誤或資料庫不可用回 `503`；頁面不存在或停用回 `404`。
+  - 公開與管理端沿用既有 `/api/config/liff`、`/api/config/liff/runtime`、`/api/config/liff/state`、主題／頁面／欄位設定（`/api/config/liff/theme`、`/api/config/liff/pages/{page_id}` 與欄位新增／修改／刪除）、版本歷史（`GET /api/config/liff/history`）與還原（`POST /api/config/liff/rollback/{revision}`），並共用 `LiffSettingsConfig` typed validation。
+    - **並行更新**：`ETag`／`If-Match` 採資料庫 revision 執行樂觀併發檢查，讀取後遭並行更新回 `409`。
+    - **還原與副作用**：還原於目前 revision 新增一版，不覆寫或刪除既有版本。所有設定異動僅留存版本與稽核，不建立訊息投遞或選單發布工作。
 - **入口分流與非市民 LIFF 設定契約**：
   - `/line-gateway` 的正式畫面與後台預覽依 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 呈現兩步分流。市民已登記與非市民已建案共用 `/line-bind`，各自依 §2 處理核對不到或資料不完整的結果。既有直接連結仍到原目的地。一般需求問卷使用 `/line-registration`。非市民專用合併表單固定由 `/line-non-citizen-registration`（後端於 `<body>` 注入 `data-registration-kind="non_citizen"`）開啟，管理端表單工作室則透過同源 `/api/v1/line/identity/studio-preview/gateway` 與 `/api/v1/line/identity/studio-preview/non-citizen-registration` 渲染唯讀預覽，且頁面內執行期設定查詢依當前預覽前綴解析 `/api/config/liff/runtime`。
   - 既有站台透過 `PUT /api/config/liff/pages/gateway` 直接更新導流頁版型、四個選項與對應網址。只調整需要變更的 LIFF 頁面，保留相容自訂文案、其他設定及歷史版本。後端非市民申請設定 API 維持提供 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（首次初始化）與 `PUT /api/config/liff/non-citizen` 供版本化查詢與寫入；前台 `#line-interface` 之「非市民服務申請」僅顯示唯讀互動預覽，不內嵌頁面欄位編輯表單。各項設定共用 `If-Match` 衝突控制。新站台的初始設定包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
