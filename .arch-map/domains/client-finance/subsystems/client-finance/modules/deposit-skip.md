@@ -26,6 +26,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_deposit_skip.py`
+- 既有 repository 替身案例（上列測試 L168–193）：同一命令重播沿用原放行結果並標記為重播，保留操作者與原因；放行後原應收金額不變，實收仍為零。此案例不涵蓋真實資料庫、授權或結算。
 - presentation_test_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/deposit-skip/`
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`
 
