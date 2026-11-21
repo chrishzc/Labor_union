@@ -5,7 +5,7 @@
 - subsystem: `access`
 
 ## Responsibility
-呈現管理帳號清冊、安全操作確認與驗證器動態碼說明。UI只收集對象與操作原因；權限、version及idempotency由既有Access client與owner驗證，不以按鈕可見性授權。
+帳號中心只有兩個分頁：「內部人員帳號列表」和「驗證器動態碼（說明）」。保留帳號安全操作確認；此頁不顯示或查詢稽核紀錄與背景工作。UI 只收集對象與操作原因；權限、version 及 idempotency 由既有 Access client 與 owner 驗證，不以按鈕可見性授權。
 
 ## Implementation
 - primary: `ui_react/src/pages/AccountManagementPage.tsx`
