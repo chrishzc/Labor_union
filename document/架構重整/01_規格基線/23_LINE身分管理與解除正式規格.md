@@ -121,7 +121,7 @@ Orders 在其 lifecycle aggregate outer UoW 提交 terminal closure event／rece
 
 1. 同一 LINE User ID 可同時建立獨立的 `customer` 與 `staff` bindings；同 type 衝突與 admin 互斥 fail closed；雙角色未選角色不得越權，聊天室切換角色 replay 冪等。
 2. 解除建立後專屬 API 立即拒絕該身分；default menu 成功套用前 owner projection 不清除；成功後 binding 轉 `revoked` 且 owner projection 為 NULL。
-3. 綁定連續失敗僅記錄上限 2 筆 streak，不自動開單或告警；只有明確「呼叫專員」才建客服單。
+3. 每個 LINE User ID 最多保留一筆目前的綁定失敗紀錄，失敗次數上限為 2。綁定失敗不自動開單或告警；在失敗畫面，只有使用者明確點選「呼叫專員」才建客服單。官方聊天室的人工協助入口仍依 §4.3。
 4. Staff retirement 與 staff-role 解除同一 commit 提交並保留 customer role；Orders 結案自動回復嚴格驗證全部 active client case 皆 terminal，replay 回原 decision receipt。
 5. 管理工作區搜尋／分頁由 server 執行，角色隔離、replace candidate 查詢零寫入，且不預選核准或於未知結果時盲目重送。
 6. 以隔離替身驗證 link 200 後讀回一致／不一致、逾時已生效、429／5xx 恢復、永久錯誤、次數／期限耗盡、重啟及租約回收、舊工作晚到及 A→B→A 切換。後台同步狀態以讀回證據為準。
