@@ -35,7 +35,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `tests/test_staff_qualification_master.py`
+- test_root: `tests/test_staff_qualification_master.py` — 既有合成案例核對排班來源未就緒時，整體可服務性保持未知。
 - test_root: `ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-qualification-master/`
 - routing: `.arch-map/tests/domains/staff/subsystems/staff/modules/staff-qualification-master.md`
 
