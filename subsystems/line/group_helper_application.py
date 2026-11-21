@@ -886,21 +886,10 @@ class LineGroupHelperApplication:
                 ),
                 enqueue_group_schedule=False,
             )
+            if view.status == "substitute_required":
+                raise ServiceStartConflict("service_start_coordination_retired", "請從原案件的多月嫂排班調整。")
         except ServiceStartConflict as error:
             self._reply_text(inbox, unit_of_work, group_id, f"開工確認未完成：{error.message}", "confirm-start-error")
-            return
-
-        if view.status == "substitute_required":
-            save_group_helper_proposal(
-                unit_of_work, _FAMILY_START_PROPOSAL, ctx["case_no"], inbox.event.event_id.value, {"cleared": True}
-            )
-            self._reply_text(
-                inbox,
-                unit_of_work,
-                group_id,
-                f"⚠️ 案件 {ctx['case_no']} 偵測到月嫂排程檔期衝突，已為您轉交工會專員協助調整或安排代班。",
-                "confirm-start-conflict",
-            )
             return
 
         if view.status != "applied":
@@ -1290,21 +1279,13 @@ class LineGroupHelperApplication:
                 ),
                 enqueue_group_schedule=False,
             )
+            if view.status == "substitute_required":
+                raise ServiceStartConflict("service_start_coordination_retired", "請從原案件的多月嫂排班調整。")
         except ServiceStartConflict as error:
             self._reply_text(inbox, unit_of_work, group_id, f"延期補班未完成：{error.message}", "postpone-error")
             return
 
         self._clear_postponement(inbox, unit_of_work, ctx["case_no"])
-        if view.status == "substitute_required":
-            self._reply_text(
-                inbox,
-                unit_of_work,
-                group_id,
-                "⚠️ 偵測到月嫂該日檔期衝突，原排班與補助天數尚未變更；請重新與月嫂協調其他補班日期，或由工會協助。",
-                "postpone-apply-conflict",
-            )
-            return
-
         completed = configured_payload(
             unit_of_work,
             "helper-postponement-completed",

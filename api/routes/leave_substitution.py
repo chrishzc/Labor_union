@@ -185,7 +185,7 @@ def preview_customer_leave_defer(
     principal: AdminPrincipal = Depends(require_system_admin),
     application: LeaveSubstitutionApplication = Depends(get_leave_substitution_application),
 ):
-    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請使用月嫂協調結果的順延或代班待辦。'})
+    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請由月嫂在原案件群組提議雙方合意延期。'})
 
 
 @router.post(
@@ -204,7 +204,7 @@ def apply_customer_leave_defer(
     principal: AdminPrincipal = Depends(require_system_admin),
     application: LeaveSubstitutionApplication = Depends(get_leave_substitution_application),
 ):
-    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請使用月嫂協調結果的順延或代班待辦。'})
+    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請由月嫂在原案件群組提議雙方合意延期。'})
 
 
 def _customer_defer_preview_command(application, case_no, body, correlation_id):
@@ -357,6 +357,8 @@ def _call_endpoint(command, message, correlation_id):
 
 
 def _raise_typed_error(error: TypedError) -> None:
+    if error.code == "legacy_leave_coordination_retired":
+        raise _http_error(410, error)
     status_code = {
         ErrorCategory.VALIDATION: 422,
         ErrorCategory.FORBIDDEN: 403,

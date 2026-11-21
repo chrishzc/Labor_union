@@ -4,93 +4,66 @@ import {ServiceStartSubstituteWorkbench} from '../../../../../../../components/S
 import {SchedulingPage} from '../../../../../../../pages/SchedulingPage';
 import {serviceStartClient,type ServiceStartView} from '../../../../../../../api/scheduling/service_start_client';
 import {ApiHttpError} from '../../../../../../../api/shared/typed_errors';
+import {sessionClient} from '../../../../../../../api/auth/session_client';
 import {ordersQueryClient} from '../../../../../../../api/orders/order_query_client';
-const item:ServiceStartView={handover_dates:[],workflow_kind:"service_start",leave_dates:[],conflict_message:null,request_id:8,case_no:'CASE',staff_id:1,staff_name:'原月嫂',segment_id:3,order_version:2,version:4,status:'substitute_required',requested_start_date:null,selected_staff_id:2,selected_staff_name:'代班月嫂',willingness:'willing',invitation_status:'sent',joined:true,proposed_start_date:'2027-01-05',proposed_end_date:'2027-02-03',result:null};
+const item:ServiceStartView={handover_dates:["2027-01-05"],workflow_kind:"handover",leave_dates:[],conflict_message:null,request_id:8,case_no:'CASE',staff_id:1,staff_name:'原月嫂',segment_id:3,order_version:2,version:4,status:'substitute_required',requested_start_date:null,selected_staff_id:2,selected_staff_name:'代班月嫂',willingness:'willing',invitation_status:'sent',joined:true,proposed_start_date:'2027-01-05',proposed_end_date:'2027-02-03',result:null};
 beforeEach(()=>{
  vi.spyOn(ordersQueryClient,'getAssignmentPlan').mockImplementation(async()=>({case_no:'CASE',order_version:3,scheduling_version:2,scheduling_generation:1,client_finance_version:1,payroll_version:1,contracted_service_days:1,service_hours_per_day:8,service_started:false,
   assignments:[{assignment_id:7,candidate_key:null,staff_id:2,sequence:1,assigned_start_date:'2027-01-05',assigned_end_date:'2027-01-05',official_service_dates:['2027-01-05'],actual_hours:null,lineage_source_assignment_ids:[]}]}));
 });
-afterEach(()=>{sessionStorage.clear();vi.restoreAllMocks();});
-it('同一案件的首次排班仍可儲存，延期代班待辦連到多月嫂排班',async()=>{
- const leave={...item,request_id:9,workflow_kind:'leave' as const,leave_dates:[{original_date:'2027-01-05',new_date:'2027-02-10'}]};
- vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[item,leave],total:2,page:1,page_size:25});
- vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
- const command=vi.spyOn(serviceStartClient,'command').mockResolvedValue({...item,status:'applied',result:{actual_start_date:'2027-01-05',actual_end_date:'2027-01-05',order_version:3,first_payment_due_date:'2027-01-05',group_record_queued:true,assignments:[{staff_id:2,staff_name:'代班月嫂',service_dates:['2027-01-05']}]}});
- const completed=vi.fn(async()=>{});
- render(<ServiceStartSubstituteWorkbench caseNo="CASE" useScheduleSaveLabel onCompleted={completed}/>);
- const save=await screen.findByRole('button',{name:'儲存班表'});
- const workbench=screen.getByRole('region',{name:'服務開始、延期與代班待辦'});
- expect(workbench).toContainElement(save);
- expect(workbench).toContainElement(screen.getByRole('link',{name:'前往多月嫂排班'}));
- fireEvent.click(save);
- await screen.findByText('正式排班已完成');
- expect(command).toHaveBeenCalledTimes(1);
- expect(completed).toHaveBeenCalledTimes(1);
-});
+afterEach(()=>{sessionClient.clearSession();sessionStorage.clear();window.history.replaceState(null,'','/');vi.restoreAllMocks();});
 it('通知深連結在正式排班頁只讀指定需求，不受第一頁清單影響',async()=>{
  window.location.hash='#scheduling?tab=coordination&case_no=CASE&request=8';
  const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(item);
  const todos=vi.spyOn(serviceStartClient,'todos');const command=vi.spyOn(serviceStartClient,'command');
  vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
- render(<SchedulingPage/>);await screen.findByRole('button',{name:'儲存並更新排班'});
+ render(<SchedulingPage/>);await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'});
  expect(detail).toHaveBeenCalledWith(8);expect(todos).not.toHaveBeenCalled();expect(command).not.toHaveBeenCalled();
  window.history.replaceState(null,'','/');
 });
 it('指定需求屬於別案時停止呈現，不改開其他需求',async()=>{
  vi.spyOn(serviceStartClient,'detail').mockResolvedValue({...item,case_no:'OTHER'});
  const todos=vi.spyOn(serviceStartClient,'todos');const command=vi.spyOn(serviceStartClient,'command');
- render(<ServiceStartSubstituteWorkbench caseNo="CASE" requestId={8}/>);
- await screen.findByText('指定需求與案件不一致，請從通知事項重新開啟。');
- expect(screen.queryByRole('button',{name:'儲存並更新排班'})).not.toBeInTheDocument();expect(todos).not.toHaveBeenCalled();expect(command).not.toHaveBeenCalled();
+ window.history.replaceState(null, '', '#scheduling?tab=coordination&case_no=CASE&request=8');
+ render(<SchedulingPage/>);
+ await screen.findByRole('alert');
+ expect(screen.getByRole('alert')).toHaveTextContent('無法確認案件或排班權限');
+ expect(screen.queryByRole('button',{name:'儲存交接日並更新排班與帳務'})).not.toBeInTheDocument();expect(todos).not.toHaveBeenCalled();expect(command).not.toHaveBeenCalled();
 });
 it('結果未明時重送相同操作識別，正式結果回讀後才解除凍結',async()=>{
  vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[item],total:1,page:1,page_size:25});
  vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
  const command=vi.spyOn(serviceStartClient,'command').mockRejectedValueOnce(new Error('network interrupted')).mockResolvedValueOnce({...item,status:'applied',result:{actual_start_date:'2027-01-05',actual_end_date:'2027-02-03',order_version:3,first_payment_due_date:'2027-01-05',group_record_queued:true,assignments:[{staff_id:2,staff_name:'代班月嫂',service_dates:['2027-01-05']}]}});
- render(<ServiceStartSubstituteWorkbench/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
+ render(<ServiceStartSubstituteWorkbench initial={item}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'}));
  await screen.findByRole('button',{name:'確認原操作結果'});
- expect(screen.getByRole('button',{name:'儲存並更新排班'})).toBeDisabled();
+ expect(screen.getByRole('button',{name:'儲存交接日並更新排班與帳務'})).toBeDisabled();
  fireEvent.click(screen.getByRole('button',{name:'確認原操作結果'}));
  await screen.findByText('正式排班已完成');
  expect(command.mock.calls[0]).toEqual(command.mock.calls[1]);
  await waitFor(()=>expect(sessionStorage.getItem('service-start-command:8')).toBeNull());
 });
 it('尚未願意或加入時沒有填日期與邀請旁路',async()=>{
- vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[{...item,willingness:'pending',joined:false}],total:1,page:1,page_size:25});
  vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
- render(<ServiceStartSubstituteWorkbench/>);await screen.findByText(/等待月嫂回覆/);
- expect(screen.queryByRole('button',{name:'儲存並更新排班'})).not.toBeInTheDocument();
+ render(<ServiceStartSubstituteWorkbench initial={{...item,willingness:'pending',joined:false}}/>);
+ await screen.findByText(/等待月嫂回覆/);
+ expect(screen.queryByRole('button',{name:'儲存交接日並更新排班與帳務'})).not.toBeInTheDocument();
  expect(screen.queryByRole('button',{name:'寄送本案群組邀請連結'})).not.toBeInTheDocument();
 });
 
-it('延期衝突帶入原案件及指定待辦，不在待辦送出班表',async()=>{
- const leave={...item,workflow_kind:'leave' as const,leave_dates:[{original_date:'2027-01-05',new_date:'2027-02-10'}],
-   conflict_message:'提出的日期有排程衝突，原排班尚未變更',selected_staff_id:null,selected_staff_name:null,willingness:null,joined:false};
- vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[leave],total:1,page:1,page_size:25});
- const options=vi.spyOn(serviceStartClient,'options');
+it.each(['service_start','leave'] as const)('舊 %s 需求導向已核對案件的多月嫂排班，開頁零寫入',async(workflow_kind)=>{
+ sessionClient.setSession('synthetic-token', {id:1,username:'fixture',display_name:'Fixture',role:'system_admin',capabilities:['system.administration']});
+ window.history.replaceState(null, '', '#scheduling?tab=coordination&case_no=CASE&request=8');
+ const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue({...item,workflow_kind,joined:false});
+ const ask=vi.spyOn(serviceStartClient,'options');
  const command=vi.spyOn(serviceStartClient,'command');
- render(<ServiceStartSubstituteWorkbench/>);
- const link=await screen.findByRole('link',{name:'前往多月嫂排班'});
- expect(link).toHaveAttribute('href','#order-workbench-v2?case=CASE&work=service&substitute=8');
- expect(screen.getByText('原服務日：2027-01-05')).toBeInTheDocument();
- expect(screen.getByText(leave.conflict_message)).toBeInTheDocument();
- expect(screen.queryByRole('button',{name:'儲存順延日期並更新排班'})).not.toBeInTheDocument();
- expect(screen.queryByRole('button',{name:'詢問該月嫂意願'})).not.toBeInTheDocument();
- expect(options).not.toHaveBeenCalled();
- expect(command).not.toHaveBeenCalled();
-});
-
-it('代班月嫂尚未入群時，指定待辦仍可開啟多月嫂排班',async()=>{
- const leave={...item,case_no:'CASE&1',workflow_kind:'leave' as const,joined:false,leave_dates:[{original_date:'2027-01-05',new_date:null}]};
- const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(leave);
- const command=vi.spyOn(serviceStartClient,'command');
- render(<ServiceStartSubstituteWorkbench caseNo="CASE&1" requestId={8}/>);
- const link=await screen.findByRole('link',{name:'前往多月嫂排班'});
- expect(link).toHaveAttribute('href','#order-workbench-v2?case=CASE%261&work=service&substitute=8');
- expect(screen.queryByRole('button',{name:'寄送本案群組邀請連結'})).not.toBeInTheDocument();
+ render(<SchedulingPage/>);
+ await waitFor(()=>expect(window.location.hash).toBe('#order-workbench-v2?case=CASE&work=service&staffing=upcoming'));
  expect(detail).toHaveBeenCalledWith(8);
+ expect(ordersQueryClient.getAssignmentPlan).toHaveBeenCalledWith('CASE', expect.anything());
+ expect(ask).not.toHaveBeenCalled();
  expect(command).not.toHaveBeenCalled();
+ expect(screen.queryByRole('button',{name:'儲存交接日並更新排班與帳務'})).not.toBeInTheDocument();
 });
 
 function complete():ServiceStartView {
@@ -106,12 +79,12 @@ it.each(['case','person','request'] as const)('完成回應的 %s 不符時不�
  if(kind==='case')result.case_no='OTHER';
  if(kind==='person')result.selected_staff_id=999;
  if(kind==='request')result.request_id=999;
- const command=installCommand(result);const onCompleted=vi.fn().mockResolvedValue(undefined);
- render(<ServiceStartSubstituteWorkbench caseNo='CASE' onCompleted={onCompleted}/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
+ const command=installCommand(result);
+ render(<ServiceStartSubstituteWorkbench initial={item}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('尚未確認最新排班結果。');
  expect(screen.queryByText('正式排班已完成')).not.toBeInTheDocument();
- expect(onCompleted).not.toHaveBeenCalled();expect(command).toHaveBeenCalledOnce();
+ expect(command).toHaveBeenCalledOnce();
  expect(ordersQueryClient.getAssignmentPlan).not.toHaveBeenCalled();
  expect(JSON.parse(sessionStorage.getItem('service-start-command:8')!).observeOnly).toBe(true);
  expect(screen.getByRole('button',{name:'查詢排班結果'})).toBeEnabled();
@@ -122,37 +95,35 @@ it.each(['person','date','version'] as const)('正式 owner 的 %s 與完成回�
  if(kind==='date')plan.assignments=[{...plan.assignments[0],official_service_dates:['2027-01-06']}];
  if(kind==='version')plan.order_version=2;
  vi.mocked(ordersQueryClient.getAssignmentPlan).mockResolvedValue(plan);
- installCommand();const onCompleted=vi.fn().mockResolvedValue(undefined);
- render(<ServiceStartSubstituteWorkbench onCompleted={onCompleted}/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
+ installCommand();
+ render(<ServiceStartSubstituteWorkbench initial={item}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('尚未確認最新排班結果。');
- expect(screen.queryByText('正式排班已完成')).not.toBeInTheDocument();expect(onCompleted).not.toHaveBeenCalled();
+ expect(screen.queryByText('正式排班已完成')).not.toBeInTheDocument();
  expect(ordersQueryClient.getAssignmentPlan).toHaveBeenCalledOnce();
 });
 it.each([false,true])('收據後回讀失敗，重新開頁 %s 也只重新讀取、不重複寫入',async(remount)=>{
  const plan=await ordersQueryClient.getAssignmentPlan('CASE');vi.mocked(ordersQueryClient.getAssignmentPlan).mockClear();
  vi.mocked(ordersQueryClient.getAssignmentPlan).mockRejectedValueOnce(new ApiHttpError(503,'read_unavailable','unavailable')).mockResolvedValue(plan);
  const command=installCommand();const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(complete());
- const onCompleted=vi.fn().mockResolvedValue(undefined);
- let view=render(<ServiceStartSubstituteWorkbench caseNo='CASE' onCompleted={onCompleted}/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
- await screen.findByRole('alert');expect(onCompleted).not.toHaveBeenCalled();
- if(remount){view.unmount();vi.mocked(serviceStartClient.todos).mockResolvedValue({items:[],total:0,page:1,page_size:25});view=render(<ServiceStartSubstituteWorkbench caseNo='CASE' onCompleted={onCompleted}/>);}
+ let view=render(<ServiceStartSubstituteWorkbench initial={item}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'}));
+ await screen.findByRole('alert');
+ if(remount){view.unmount();view=render(<ServiceStartSubstituteWorkbench initial={complete()}/>);}
  const retry=await screen.findByRole('button',{name:'查詢排班結果'});fireEvent.click(retry);
- await waitFor(()=>expect(onCompleted).toHaveBeenCalledOnce());
  expect(await screen.findByText('正式排班已完成')).toBeInTheDocument();
- expect(command).toHaveBeenCalledOnce();expect(detail).toHaveBeenCalledTimes(remount?2:1);
+ expect(command).toHaveBeenCalledOnce();expect(detail).toHaveBeenCalledTimes(1);
  expect(sessionStorage.getItem('service-start-command:8')).toBeNull();
 });
-it('正式回讀尚未返回就離開，不通知另一個畫面完成且保留只讀恢復標記',async()=>{
+it('正式回讀尚未返回就離開，保留只讀恢復標記',async()=>{
  const plan=await ordersQueryClient.getAssignmentPlan('CASE');vi.mocked(ordersQueryClient.getAssignmentPlan).mockClear();
  let resolve!:(value:typeof plan)=>void;vi.mocked(ordersQueryClient.getAssignmentPlan).mockReturnValue(new Promise(done=>{resolve=done;}));
- const command=installCommand();const onCompleted=vi.fn().mockResolvedValue(undefined);
- const view=render(<ServiceStartSubstituteWorkbench onCompleted={onCompleted}/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
+ const command=installCommand();
+ const view=render(<ServiceStartSubstituteWorkbench initial={item}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'}));
  await waitFor(()=>expect(ordersQueryClient.getAssignmentPlan).toHaveBeenCalledOnce());view.unmount();
  await act(async()=>{resolve(plan);});
- expect(onCompleted).not.toHaveBeenCalled();expect(command).toHaveBeenCalledOnce();
+ expect(command).toHaveBeenCalledOnce();
  expect(JSON.parse(sessionStorage.getItem('service-start-command:8')!).observeOnly).toBe(true);
 });
 
@@ -161,18 +132,16 @@ it('結果未明後一般查詢讀到完成結果，即使正式回讀失敗也�
  vi.mocked(ordersQueryClient.getAssignmentPlan).mockRejectedValueOnce(new Error('readback unavailable')).mockResolvedValue(plan);
  const command=installCommand();command.mockRejectedValue(new Error('outcome unknown'));
  const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(complete());
- const onCompleted=vi.fn().mockResolvedValue(undefined);
- render(<ServiceStartSubstituteWorkbench onCompleted={onCompleted}/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
+ render(<ServiceStartSubstituteWorkbench initial={item}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'}));
  await screen.findByRole('button',{name:'確認原操作結果'});
  fireEvent.click(screen.getByRole('button',{name:'重新查詢加入狀態'}));
  await screen.findByText('尚未確認最新排班結果。');
- expect(onCompleted).not.toHaveBeenCalled();
+
  expect(JSON.parse(sessionStorage.getItem('service-start-command:8')!).observeOnly).toBe(true);
  fireEvent.click(screen.getByRole('button',{name:'查詢排班結果'}));
  await screen.findByText('正式排班已完成');
  expect(command).toHaveBeenCalledOnce();expect(detail).toHaveBeenCalledTimes(2);
- expect(onCompleted).toHaveBeenCalledOnce();
  expect(sessionStorage.getItem('service-start-command:8')).toBeNull();
 });
 
@@ -183,30 +152,12 @@ it('重新開頁查到完成結果時將原未明命令轉為只讀恢復',async
  vi.spyOn(serviceStartClient,'detail').mockResolvedValue(complete());
  const command=vi.spyOn(serviceStartClient,'command').mockRejectedValue(new Error('must not repeat'));
  vi.mocked(ordersQueryClient.getAssignmentPlan).mockRejectedValue(new Error('readback unavailable'));
- render(<ServiceStartSubstituteWorkbench/>);
+ render(<ServiceStartSubstituteWorkbench initial={complete()}/>);
  await screen.findByText('尚未確認最新排班結果。');
  expect(JSON.parse(sessionStorage.getItem('service-start-command:8')!).observeOnly).toBe(true);
  expect(screen.getByRole('button',{name:'查詢排班結果'})).toBeEnabled();
  expect(screen.queryByRole('button',{name:'確認原操作結果'})).not.toBeInTheDocument();
  expect(command).not.toHaveBeenCalled();
-});
-
-it('結果未明後查詢完成並核對正式排班，直接同步待辦總數而不重送',async()=>{
- const command=installCommand();command.mockRejectedValue(new Error('outcome unknown'));
- vi.mocked(serviceStartClient.todos).mockResolvedValueOnce({items:[item],total:1,page:1,page_size:25})
-  .mockResolvedValue({items:[],total:0,page:1,page_size:25});
- const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(complete());
- const onCompleted=vi.fn().mockResolvedValue(undefined);
- render(<ServiceStartSubstituteWorkbench onCompleted={onCompleted}/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
- await screen.findByRole('button',{name:'確認原操作結果'});
- fireEvent.click(screen.getByRole('button',{name:'重新查詢加入狀態'}));
- await screen.findByText('正式排班已完成');
- expect(screen.getByText('0 件待處理')).toBeInTheDocument();
- expect(command).toHaveBeenCalledOnce();expect(detail).toHaveBeenCalledOnce();
- expect(onCompleted).toHaveBeenCalledOnce();
- expect(sessionStorage.getItem('service-start-command:8')).toBeNull();
- expect(screen.queryByRole('button',{name:'確認原操作結果'})).not.toBeInTheDocument();
 });
 
 it('同案多月嫂分段及不連續服務日期與正式排班一致時可完成回讀',async()=>{
@@ -223,8 +174,8 @@ it('同案多月嫂分段及不連續服務日期與正式排班一致時可完�
   {...row,official_service_dates:['2027-01-05']},
  ]});
  installCommand(result);
- render(<ServiceStartSubstituteWorkbench/>);
- fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
+ render(<ServiceStartSubstituteWorkbench initial={item}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'儲存交接日並更新排班與帳務'}));
  await screen.findByText('正式排班已完成');
  expect(sessionStorage.getItem('service-start-command:8')).toBeNull();
 });

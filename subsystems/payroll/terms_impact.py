@@ -398,7 +398,7 @@ def _handover_root_actions(facts, root, total, key, children, change_identity, a
         actions.append(_close_unpaid_action(root))
         if key is not None:
             actions.append(PayrollTermsAction(
-                PayrollTermsActionKind.ESTABLISH, _obligation_identity("service", facts.case_no, key),
+                PayrollTermsActionKind.ESTABLISH, _obligation_identity(change_identity, facts.case_no, key),
                 None, root.source_assignment_id, key, root.staff_id, StaffObligationKind.SERVICE_PAY,
                 StaffObligationDirection.PAYABLE_TO_STAFF, total, root.due_date,
             ))

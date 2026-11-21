@@ -42,8 +42,14 @@ from domains.orders.actual_start import (
     calculate_progressive_segment_service_dates,
     date_bound_manual_overrides,
 )
-from domains.orders.terms import OrderTerms, ServiceTimeTerms
-from domains.scheduling.generation import AssignmentIdentityResolution
+from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
+from domains.scheduling.assignment_plan import StaffOccupancyFact
+from domains.scheduling.generation import (
+    AssignmentIdentityResolution,
+    EffectiveAssignmentSegment,
+    SchedulingGenerationFacts,
+)
+from shared_kernel.money import MoneyNTD
 from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
     ActualStartDateOnlyApplyRequest,
@@ -106,6 +112,7 @@ def test_optional_reason_persists_nonempty_audit_without_changing_replay_identit
     repository.replace_scheduling_generation.return_value = SimpleNamespace(scheduling_receipt_id=2)
     preview = SimpleNamespace(
         unpersisted_source_assignment_ids=(), scheduling=SimpleNamespace(),
+        after_actual_start_date=request.new_actual_start_date,
         order_version=1, fingerprint=fingerprint,
         reconfirmation=SimpleNamespace(action=ActualStartReconfirmationAction.NO_OP),
         lifecycle_impact=SimpleNamespace(after_status=OrderLifecycleStatus.IN_SERVICE),
@@ -524,6 +531,98 @@ def test_actual_start_can_replace_legacy_dates_with_recalculated_official_dates(
         date(2026, 8, 12),
     )
     assert candidate.actual_end_date == date(2026, 8, 12)
+
+
+@pytest.mark.parametrize("conflict_during_apply", [False, True])
+def test_actual_start_checks_requested_date_with_real_scheduling_candidate(
+    monkeypatch, conflict_during_apply,
+) -> None:
+    import infrastructure.mysql.order_actual_start_repository as mysql_repository
+
+    old_dates = (date(2026, 8, 3), date(2026, 8, 4), date(2026, 8, 5))
+    requested_date = date(2026, 8, 9)
+    new_dates = (date(2026, 8, 10), date(2026, 8, 11), date(2026, 8, 12))
+    service_time = ServiceTimeTerms(time(8), time(12), 0)
+    facts = TermsWorkflowFacts(
+        order=OrderAggregateFacts(
+            "CASE-1", 1,
+            OrderTerms(old_dates[0], 3, 4, MoneyNTD(0), service_time),
+            False, "municipal",
+        ),
+        scheduling=SchedulingGenerationFacts("CASE-1", 2, 1, (
+            EffectiveAssignmentSegment(11, 7, 1, 3, old_dates[0], old_dates[-1], old_dates),
+        )),
+        planned_service_dates=old_dates,
+        planned_end_date=old_dates[-1],
+        client_finance=SimpleNamespace(
+            case_no="CASE-1", account_version=3, existing_obligations=(),
+            deposit_gate_override_active=False, open_nonstage_obligation_count=0,
+            payment_terms=SimpleNamespace(deposit_service_days=0),
+        ),
+        payroll=SimpleNamespace(payroll_version=4),
+        lifecycle=OrderLifecycleRootFacts(
+            "CASE-1", OrderLifecycleStatus.ESTABLISHED, True, old_dates[0],
+            True, False, False,
+        ),
+    )
+    context = ActualStartWorkflowContext(facts, ActualStartReconfirmationFacts(
+        ActualStartReconfirmationState.NOT_REQUIRED, None, None, True,
+    ))
+    cursor = Mock()
+    cursor.__enter__ = Mock(return_value=cursor)
+    cursor.__exit__ = Mock(return_value=False)
+    cursor.fetchall.return_value = ({"id": 7, "status": "active", "lifecycle_state": "active"},)
+    mysql = MySqlOrderActualStartRepository(SimpleNamespace(cursor=lambda: cursor))
+    occupancy_calls = []
+    occupied = []
+
+    def load_occupancy(selected_cursor, staff_ids, case_no, *, lock, actual_start_date):
+        assert selected_cursor is cursor
+        assert (staff_ids, case_no) == ((7,), "CASE-1")
+        occupancy_calls.append((actual_start_date, lock))
+        return tuple(occupied), ()
+
+    monkeypatch.setattr(mysql_repository, "load_occupancy_snapshot", load_occupancy)
+    monkeypatch.setattr(mysql_repository, "load_case_service_time", lambda *_args, **_kwargs: service_time)
+    repository = Mock()
+    repository.load_for_preview.return_value = context
+    repository.load_for_apply.return_value = context
+    repository.calculate_progressive_service_dates.return_value = (new_dates, "calendar-version")
+    repository.validate_replacement_availability = mysql.validate_replacement_availability
+    repository.preflight_impacted_staff_ids.return_value = (7,)
+    repository.claim_actual_start_command.return_value = CommandClaimState.CREATED
+    repository.find_actual_start_receipt.return_value = None
+    workflow = ActualStartWorkflow(
+        repository, Mock(),
+        FixedBusinessClock(datetime(2026, 8, 1, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+    workflow._persist = Mock()
+
+    preview = workflow.preview("CASE-1", requested_date)
+
+    assert not hasattr(preview.scheduling, "new_actual_start_date")
+    assert preview.after_actual_start_date == requested_date
+    assert preview.scheduling.assignments[0].service_dates == new_dates
+    assert occupancy_calls == [(requested_date, False)]
+    workflow._persist.assert_not_called()
+    request = replace(_request(), new_actual_start_date=requested_date, preview_fingerprint=preview.fingerprint)
+    if conflict_during_apply:
+        occupied.append(StaffOccupancyFact(
+            7, new_dates[0], "OTHER", service_time, actual_start_date=new_dates[0],
+        ))
+        with pytest.raises(HTTPException) as caught:
+            _call_endpoint(
+                lambda: workflow.apply_in_current_unit_of_work(request),
+                "saved", request.correlation_id,
+            )
+        assert caught.value.status_code == 409
+        assert caught.value.detail["error"]["code"] == "actual_start_staff_schedule_conflict"
+        workflow._persist.assert_not_called()
+    else:
+        receipt = workflow.apply_in_current_unit_of_work(request)
+        assert receipt.official_service_day_count == 3
+        workflow._persist.assert_called_once()
+    assert occupancy_calls == [(requested_date, False), (requested_date, True)]
 
 
 def test_actual_start_recalculates_each_segment_from_previous_end() -> None:

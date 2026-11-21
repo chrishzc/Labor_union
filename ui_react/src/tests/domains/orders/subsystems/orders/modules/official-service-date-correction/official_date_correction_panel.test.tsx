@@ -43,7 +43,7 @@ it('makes date changes explicit and previews only the affected days before savin
       assigned_end_date: serviceDates[1], official_service_dates: serviceDates, actual_hours: null, lineage_source_assignment_ids: [] }]} />);
   expect(screen.getByText(/已分配 2／2 日/)).toBeVisible();
   expect(screen.queryByLabelText('2099-11-25 改至')).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('調整依據（必填）'), { target: { value: '電話確認' } });
+  fireEvent.change(screen.getByLabelText('調整與代班協調依據（必填）'), { target: { value: '電話確認' } });
   fireEvent.change(screen.getByLabelText('調整原因（必填）'), { target: { value: '改期' } });
   const preview = screen.getByRole('button', { name: '預覽排班與帳務' });
   expect(preview).toBeDisabled();
@@ -59,7 +59,7 @@ it('makes date changes explicit and previews only the affected days before savin
   expect(mocks.applyAttribution).not.toHaveBeenCalled();
 });
 
-it('sends a consent-backed substitute save once per click burst and retries an unknown result with the original key', async () => {
+it('saves a manual staffing change once per click burst and confirms the formal schedule with the original key', async () => {
   const date = '2099-11-25';
   const unaffectedDay = '2099-11-26';
   const source = { assignment_id: 13, staff_id: 7, candidate_key: null, sequence: 1,
@@ -73,30 +73,23 @@ it('sends a consent-backed substitute save once per click burst and retries an u
     .mockRejectedValueOnce(new ApiHttpError(503, 'unavailable', '暫時無法確認'))
     .mockResolvedValue({ scheduling_version: 2,
       effective_assignments: [{ assignment_id: 13, service_dates: [unaffectedDay] }, { assignment_id: 14, service_dates: [date] }] });
-  const assignmentReadback = vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockImplementation(async () => ({
-    case_no: 'ISSUE-346', scheduling_version: 2, order_version: 1, scheduling_generation: 2,
-    client_finance_version: null, payroll_version: null,
-    service_started: true, contracted_service_days: 2, service_hours_per_day: 8,
-    assignments: [{ ...source, official_service_dates: [unaffectedDay] }, { ...source, assignment_id: 14, staff_id: 8, official_service_dates: [date] }],
-  }));
-  let finishTaskReadback: (() => void) | undefined;
-  const taskReadbackReady = new Promise<void>(resolve => { finishTaskReadback = resolve; });
-  const taskReadback = vi.spyOn(serviceStartClient, 'detail').mockImplementation(async () => {
-    await taskReadbackReady;
+  let finishAssignmentReadback!: () => void;
+  const assignmentReadbackReady = new Promise<void>(resolve => { finishAssignmentReadback = resolve; });
+  const assignmentReadback = vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockImplementation(async () => {
+    await assignmentReadbackReady;
     return {
-      request_id: 81, version: 4, workflow_kind: 'leave', status: 'applied',
-      case_no: 'ISSUE-346', staff_id: 7, staff_name: '月嫂 7', segment_id: 13, order_version: 1,
-      requested_start_date: null, selected_staff_id: null, selected_staff_name: null, willingness: null,
-      invitation_status: null, joined: false, result: null, proposed_start_date: null, proposed_end_date: null,
-      leave_dates: [{ original_date: date, new_date: null }], conflict_message: null, handover_dates: [],
+      case_no: 'ISSUE-346', scheduling_version: 2, order_version: 1, scheduling_generation: 2,
+      client_finance_version: null, payroll_version: null,
+      service_started: true, contracted_service_days: 2, service_hours_per_day: 8,
+      assignments: [{ ...source, official_service_dates: [unaffectedDay] }, { ...source, assignment_id: 14, staff_id: 8, official_service_dates: [date] }],
     };
   });
+  const taskReadback = vi.spyOn(serviceStartClient, 'detail').mockRejectedValue(new Error('Manual staffing has no task to read'));
   try {
     const onSaved = vi.fn();
-    render(<OrderServiceAttributionPanel caseNo="ISSUE-346" segments={[source]}
-      substitute={{ id: 81, version: 3, originalDates: [date] }} onSaved={onSaved} onBusyChange={vi.fn()} />);
-    expect(screen.getByText(/已分配 1／1 日/)).toBeVisible();
-    expect(screen.queryByRole('checkbox', { name: '調整服務日期' })).not.toBeInTheDocument();
+    render(<OrderServiceAttributionPanel caseNo="ISSUE-346" segments={[source]} upcomingOnly
+      onSaved={onSaved} onBusyChange={vi.fn()} />);
+    expect(screen.getByText(/已分配 2／2 日/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '＋ 新增月嫂' }));
     fireEvent.change(screen.getByLabelText('選擇月嫂'), { target: { value: '8' } });
     fireEvent.click(within(screen.getByRole('region', { name: '月嫂 8' }))
@@ -104,23 +97,23 @@ it('sends a consent-backed substitute save once per click burst and retries an u
     fireEvent.change(screen.getByLabelText('調整原因（必填）'), { target: { value: '臨時代班' } });
     const previewButton = screen.getByRole('button', { name: '預覽排班與帳務' });
     expect(previewButton).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('代班月嫂同意的協調依據（必填）'), { target: { value: '電話確認月嫂同意代班' } });
+    fireEvent.change(screen.getByLabelText('調整與代班協調依據（必填）'), { target: { value: '電話確認月嫂同意代班' } });
     await act(async () => {
       previewButton.click();
       previewButton.click();
     });
-    expect(mocks.previewAttribution).toHaveBeenCalledOnce();
-    expect(mocks.previewAttribution).toHaveBeenCalledWith('ISSUE-346', {
-      scope: 'upcoming', evidence: '電話確認月嫂同意代班', substitute_request_id: 81, expected_substitute_request_version: 3,
+    const change = {
+      scope: 'upcoming', evidence: '電話確認月嫂同意代班',
       moves: [{ source_assignment_id: 13, source_date: date, replacement_date: date, staff_id: 8, target_assignment_id: null }],
-    });
+    };
+    expect(mocks.previewAttribution).toHaveBeenCalledExactlyOnceWith('ISSUE-346', change);
     const saveButton = await screen.findByRole('button', { name: '確認並儲存排班' });
     await act(async () => {
       saveButton.click();
       saveButton.click();
       saveButton.click();
     });
-    expect(mocks.applyAttribution).toHaveBeenCalledTimes(1);
+    expect(mocks.applyAttribution).toHaveBeenCalledExactlyOnceWith('ISSUE-346', change, preview, '臨時代班', expect.any(String), false);
     await screen.findByRole('alert');
     expect(onSaved).not.toHaveBeenCalled();
 
@@ -129,15 +122,16 @@ it('sends a consent-backed substitute save once per click burst and retries an u
       retryButton.click();
       retryButton.click();
     });
-    await waitFor(() => expect(taskReadback).toHaveBeenCalledWith(81));
+    await waitFor(() => expect(assignmentReadback).toHaveBeenCalledExactlyOnceWith('ISSUE-346'));
     expect(mocks.applyAttribution).toHaveBeenCalledTimes(2);
     expect(mocks.applyAttribution.mock.calls[1]).toEqual(mocks.applyAttribution.mock.calls[0]);
-    expect(mocks.applyAttribution.mock.calls[0][4]).toEqual(expect.any(String));
     expect(retryButton).toBeDisabled();
     expect(onSaved).not.toHaveBeenCalled();
-    await act(async () => { finishTaskReadback?.(); });
+    await act(async () => { finishAssignmentReadback(); });
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    expect(taskReadback).not.toHaveBeenCalled();
   } finally {
+    finishAssignmentReadback();
     assignmentReadback.mockRestore();
     taskReadback.mockRestore();
   }
@@ -162,7 +156,7 @@ it('adds a fourth calendar and previews transfers from multiple source blocks in
   expect(fourth.getByText('負責 2 日')).toBeVisible();
   expect(within(screen.getByRole('region', { name: '月嫂 7' })).getByText('負責 0 日')).toBeVisible();
   expect(screen.getByRole('button', { name: '＋ 新增月嫂' })).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('調整依據（必填）'), { target: { value: '電話確認' } });
+  fireEvent.change(screen.getByLabelText('調整與代班協調依據（必填）'), { target: { value: '電話確認' } });
   fireEvent.change(screen.getByLabelText('調整原因（必填）'), { target: { value: '交接' } });
   fireEvent.click(screen.getByRole('button', { name: '預覽排班與帳務' }));
   expect(await screen.findByRole('row', { name: /2099-11-25.*月嫂 7.*月嫂 10/ })).toBeVisible();

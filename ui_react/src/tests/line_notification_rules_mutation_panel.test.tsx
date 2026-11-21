@@ -780,7 +780,7 @@ describe('通知內容統一工作區', () => {
     for(const item of retiredReceiptDescriptors)expect(screen.queryByRole('button',{name:new RegExp(item.name)})).not.toBeInTheDocument();
   });
 
-  it('流程分類包括補充公版，取消結算節點與帳務指向同一則文案', async () => {
+  it('流程分類包括現行補充公版，取消結算節點與帳務指向同一則文案', async () => {
     const { Harness, previews, templates } = contentWorkbench();
     const message = (id: string, name: string) => ({
       id, name, template_id: null, format: 'text' as const, requires_case: false, requires_staff: false, builtin: true, allows_draft: false,
@@ -802,7 +802,7 @@ describe('通知內容統一工作區', () => {
     fireEvent.click(within(sidebar).getByRole('button', { name: '初步候選聯絡' }));
     expect(within(sidebar).getByRole('button', { name: '查看每週安排公版內容' })).toBeInTheDocument();
     fireEvent.click(within(sidebar).getByRole('button', { name: '開始服務' }));
-    expect(within(sidebar).getByRole('button', { name: '查看請假完成公版內容' })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole('button', { name: /請假完成公版/ })).not.toBeInTheDocument();
     fireEvent.click(within(sidebar).getByRole('button', { name: '收款與建群' }));
     expect(within(sidebar).getByRole('button', { name: '查看繳費回報受理內容' })).toBeInTheDocument();
     expect(await findFlowMessage('編輯訂金確認通知內容')).toBeInTheDocument();

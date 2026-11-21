@@ -15,8 +15,7 @@ import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibil
 import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
 import { staffLeaveInboxClient } from '../api/scheduling/staff_leave_inbox_client';
 import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
-import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
-import { LEAVE_ASSIGNMENTS } from './fixtures/scheduling/leave_substitution_contract_fixtures';
+import { sessionClient } from '../api/auth/session_client';
 import { SchedulingPage, taipeiCalendarDate } from '../pages/SchedulingPage';
 import {
   SCHEDULING_PROJECTION_EMPTY,
@@ -33,14 +32,12 @@ vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
 
 describe('SchedulingPage query-only presentation', () => {
   let observeNextPage: ReturnType<typeof vi.fn>;
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { sessionClient.clearSession(); vi.unstubAllGlobals(); });
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(serviceStartClient, 'todos').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
     vi.spyOn(serviceStartClient, 'options').mockResolvedValue({ items: [] });
     vi.spyOn(holidayClient, 'query').mockImplementation(async query => ({ planning_horizon: 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate }, source_identity: 'test-holidays', calendar_version: 'a'.repeat(64), holidays: [] }));
-    leaveSubstitutionFlowStore.clearAll();
-    vi.spyOn(leaveSubstitutionClient, 'listAssignments').mockResolvedValue([...LEAVE_ASSIGNMENTS]);
     coreStageProjectionMocks.loadAll.mockReset();
     observeNextPage = vi.fn();
     vi.stubGlobal('IntersectionObserver', class {
@@ -236,77 +233,44 @@ describe('SchedulingPage query-only presentation', () => {
     expect(holidayClient.query).toHaveBeenCalledTimes(2);
   });
 
-  it('安全解碼舊代班連結的案件編號，並帶往同案多月嫂排班', async () => {
-    window.location.hash = '#scheduling?tab=leave_sub&case_no=%20CASE-SCH-001%20';
+  it('安全解碼舊代班連結，驗證案件與權限後帶往同案多月嫂排班', async () => {
+    sessionClient.setSession('synthetic-token', {
+      id: 1, username: 'fixture', display_name: 'Fixture', role: 'system_admin',
+      capabilities: ['line.matching.override', 'system.administration'],
+    });
+    window.history.replaceState(null, '', '#scheduling?tab=leave_sub&case_no=%20CASE-SCH-001%20');
+    const plan = vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue({
+      case_no: 'CASE-SCH-001', order_version: 3, scheduling_version: 2, scheduling_generation: 1,
+      client_finance_version: 1, payroll_version: 1, contracted_service_days: 1, service_hours_per_day: 8,
+      service_started: false, assignments: [],
+    });
+    const apply = vi.spyOn(leaveSubstitutionClient, 'apply');
 
     render(<SchedulingPage />);
 
-    expect(await screen.findByRole('link', { name: '開啟本案多月嫂排班' }))
-      .toHaveAttribute('href', '#order-workbench-v2?case=CASE-SCH-001&work=service&staffing=upcoming');
-    expect(screen.queryByRole('combobox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
-    expect(document.querySelector('[data-surface-id="scheduling.tab.leave_sub"]')).toHaveClass('active');
-    expect(document.querySelector('[data-surface-id="scheduling.calendar"]')).not.toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toBe('#order-workbench-v2?case=CASE-SCH-001&work=service&staffing=upcoming'));
+    expect(plan).toHaveBeenCalledWith('CASE-SCH-001', { signal: expect.any(AbortSignal) });
+    expect(screen.queryByRole('button', { name: '代班待辦' })).not.toBeInTheDocument();
+    expect(staffLeaveInboxClient.list).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
   });
 
-  it('續辦舊假單時保留有正式排班的進行中案件，排除未排班、已完工與已取消案件', async () => {
-    vi.mocked(staffLeaveInboxClient.list).mockImplementation(async status => status === 'accepted_for_processing' ? [{
-      id: 77, staff_id: 11, staff_name: '去敏人員甲', leave_start_date: '2026-08-03',
-      leave_end_date: '2026-08-03', request_reason: '已受理舊假單',
-      request_status: 'accepted_for_processing', aggregate_version: 5,
-    }] : []);
-    const page = await ordersQueryClient.getOrderSummaries();
-    const base = page.items[0];
-    const cases = [
-      { case_no: 'CASE-PLANNED', order_status: '訂單成立', scheduled: true, inProgress: true },
-      { case_no: 'CASE-ACTIVE', order_status: '服務中', scheduled: true, inProgress: true },
-      { case_no: 'CASE-HIST-PLANNED', order_status: '歷史訂單－未服務', scheduled: true, inProgress: true },
-      { case_no: 'CASE-HIST-ACTIVE', order_status: '歷史訂單－服務中', scheduled: true, inProgress: true },
-      { case_no: 'CASE-NO-SCHEDULE', order_status: '訂單成立', scheduled: false, inProgress: true },
-      { case_no: 'CASE-NO-ASSIGNMENT', order_status: '服務中', scheduled: false, inProgress: true },
-      { case_no: 'CASE-COMPLETED', order_status: '訂單完成', scheduled: true, inProgress: false },
-      { case_no: 'CASE-HIST-COMPLETED', order_status: '歷史訂單－服務完成', scheduled: true, inProgress: false },
-      { case_no: 'CASE-HIST-SETTLED', order_status: '歷史訂單－帳務完成', scheduled: true, inProgress: false },
-      { case_no: 'CASE-CANCELLED', order_status: '訂單取消', scheduled: true, inProgress: false },
-    ];
-    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
-      ...page, items: cases.map((item) => ({ ...base, case_no: item.case_no, order_status: item.order_status })),
+  it.each([
+    ['#scheduling?tab=leave_sub', false],
+    ['#scheduling?tab=leave_sub&case_no=A&case_no=B', false],
+    ['#scheduling?tab=leave_sub&case_no=CASE-SCH-001', true],
+  ] as const)('舊連結欠缺唯一案件或操作權限時拒絕導向（%s）', async (hash, validCase) => {
+    window.history.replaceState(null, '', hash);
+    const plan = vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue({
+      case_no: 'CASE-SCH-001', order_version: 3, scheduling_version: 2, scheduling_generation: 1,
+      client_finance_version: 1, payroll_version: 1, contracted_service_days: 1, service_hours_per_day: 8,
+      service_started: false, assignments: [],
     });
-    coreStageProjectionMocks.loadAll.mockResolvedValue({
-      items: cases.filter((item) => item.inProgress).map((item) => ({
-        case_no: item.case_no, current_core_stage_ordinal: 10,
-      })),
-    });
-    vi.mocked(leaveSubstitutionClient.listAssignments).mockImplementation(async (caseNo) => {
-      if (caseNo === 'CASE-NO-ASSIGNMENT') return [];
-      return LEAVE_ASSIGNMENTS.map((assignment) => ({
-        ...assignment,
-        official_schedules: caseNo === 'CASE-NO-SCHEDULE' ? [] : assignment.official_schedules,
-      }));
-    });
-    window.location.hash = '#scheduling?tab=leave_sub&case_no=CASE-PLANNED';
-
     render(<SchedulingPage />);
-
-    fireEvent.click(screen.getByText('歷史請假紀錄'));
-    const historyStatus = screen.getByRole('combobox', { name: '狀態' });
-    await waitFor(() => expect(historyStatus).toBeEnabled());
-    fireEvent.change(historyStatus, { target: { value: 'accepted_for_processing' } });
-    fireEvent.click(await screen.findByRole('button', { name: '選取並繼續調度' }));
-    const select = screen.getByRole('combobox', { name: '請假代班訂單編號' });
-    await waitFor(() => expect(select).toHaveValue('CASE-PLANNED'));
-    expect(Array.from(select.querySelectorAll('option')).map((option) => option.value)).toEqual([
-      '', 'CASE-ACTIVE', 'CASE-HIST-ACTIVE', 'CASE-HIST-PLANNED', 'CASE-PLANNED',
-    ]);
-    expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeEnabled();
-    expect(coreStageProjectionMocks.loadAll).toHaveBeenCalledWith(
-      { workbench_scope: 'in_progress', page_size: 200 },
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    for (const item of cases.filter((item) => !item.inProgress)) {
-      expect(leaveSubstitutionClient.listAssignments).not.toHaveBeenCalledWith(
-        item.case_no, expect.anything(),
-      );
-    }
+    expect(await screen.findByRole('alert')).toHaveTextContent('無法確認案件或排班權限');
+    expect(plan).toHaveBeenCalledTimes(validCase ? 1 : 0);
+    expect(window.location.hash).toBe(hash);
+    expect(staffLeaveInboxClient.list).not.toHaveBeenCalled();
   });
 
   it('未知 deep-link tab fail closed 回到 calendar 且不預填隱藏工作區', () => {
@@ -318,7 +282,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.queryByRole('combobox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="scheduling.tab.calendar"]')).toHaveClass('active');
 
-    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
+    expect(screen.queryByRole('button', { name: '代班待辦' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '開啟本案多月嫂排班' })).not.toBeInTheDocument();
   });
 
@@ -352,11 +316,20 @@ describe('SchedulingPage query-only presentation', () => {
     ['超過 50 字', 'A'.repeat(51)],
     ['控制字元', 'CASE%00DL-003'],
   ])('不以不合法的案件編號開啟多月嫂排班：%s', async (_scenario, encodedCaseNo) => {
-    window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodedCaseNo}`;
+    const hash = `#scheduling?tab=leave_sub&case_no=${encodedCaseNo}`;
+    window.history.replaceState(null, '', hash);
+    sessionClient.setSession('synthetic-token', {
+      id: 1, username: 'fixture', display_name: 'Fixture', role: 'system_admin',
+      capabilities: ['line.matching.override', 'system.administration'],
+    });
+    const getAssignmentPlan = vi.spyOn(ordersQueryClient, 'getAssignmentPlan');
 
     render(<SchedulingPage />);
 
-    await screen.findByText('此狀態沒有歷史請假紀錄。');
+    expect(await screen.findByRole('alert')).toHaveTextContent('無法確認案件或排班權限');
+    expect(window.location.hash).toBe(hash);
+    expect(getAssignmentPlan).not.toHaveBeenCalled();
+    expect(staffLeaveInboxClient.list).not.toHaveBeenCalled();
     expect(screen.queryByRole('link', { name: '開啟本案多月嫂排班' })).not.toBeInTheDocument();
   });
 
@@ -1068,20 +1041,19 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getByRole('region', { name: '排班甘特月曆與服務人員檔期' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
+    expect(screen.queryByRole('button', { name: '代班待辦' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();
-    expect(screen.getByText(/臨時代班請從原案件/)).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.extension"]')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled());
     expect(document.querySelector('[data-control-id="scheduling.holiday.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增國定假日/ })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
-    await waitFor(() => expect(screen.getByText('此狀態沒有歷史請假紀錄。')).toBeInTheDocument());
-    expect(staffLeaveInboxClient.list).toHaveBeenCalledWith('resolved');
+    expect(screen.queryByRole('button', { name: '代班待辦' })).not.toBeInTheDocument();
+    expect(screen.queryByText('歷史請假紀錄')).not.toBeInTheDocument();
+    expect(staffLeaveInboxClient.list).not.toHaveBeenCalled();
   });
 
   it('顯示全年度 12 個月 × 上／中／下旬三等份表頭，並以底部滑軌同步捲動表頭與內容', async () => {

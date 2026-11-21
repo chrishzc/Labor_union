@@ -1,5 +1,7 @@
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_timelines';
+import { serviceStartClient } from '../api/scheduling/service_start_client';
+import { sessionClient } from '../api/auth/session_client';
 /**
  * File: OrderWorkbenchV2Page.tsx
  * Description: 待辦看板 Beta。唯讀使用正式十三核心階段 query contract，不以前端推導階段或計數。
@@ -75,7 +77,6 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
     branchType: CoreStageBranchType;
-    substituteRequestId?: number;
     openUpcomingStaffing?: boolean;
   } | null>(null);
   const requestSequence = useRef(0);
@@ -118,24 +119,38 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   useEffect(() => {
     if (!requestedCase) return;
     const controller = new AbortController();
-    let substituteRequestId: number | undefined;
+    let legacyRequestId: number | undefined;
     if (requestedSubstitute !== null) {
       const candidate = Number(requestedSubstitute);
-      if (!/^[1-9][0-9]*$/.test(requestedSubstitute) || !Number.isSafeInteger(candidate)) {
-        setCaseLinkError('代班待辦連結無效，請從待辦重新開啟。');
+      if (!/^[1-9][0-9]*$/.test(requestedSubstitute) || !Number.isSafeInteger(candidate)
+        || !sessionClient.getUser()?.capabilities.includes('system.administration')) {
+        setSelectedDrawer(null);
+        setCaseLinkError('無法確認案件，請從案件工作區開啟。');
         return;
       }
-      substituteRequestId = candidate;
+      legacyRequestId = candidate;
     }
     setCaseLinkError(null);
     void orderCoreStageProjectionClient.getCoreStageTimelines({ lifecycle_scope: 'all', case_no_search: requestedCase, page_size: 20 }, { signal: controller.signal })
-      .then((page) => {
+      .then(async (page) => {
         if (controller.signal.aborted) return;
         const exact = page.items.filter((item) => item.case_no === requestedCase);
         if (exact.length !== 1) throw new Error('無法確認要開啟的案件，請重新查詢。');
-        setSelectedDrawer({ caseNo: exact[0]!.case_no, branchType: exact[0]!.branch_type, substituteRequestId, openUpcomingStaffing });
+        if (legacyRequestId !== undefined) {
+          const request = await serviceStartClient.detail(legacyRequestId);
+          if (controller.signal.aborted) return;
+          if (request.request_id !== legacyRequestId || request.case_no !== requestedCase || request.workflow_kind !== 'leave') {
+            throw new Error('無法確認案件，請從案件工作區開啟。');
+          }
+        }
+        setSelectedDrawer({ caseNo: exact[0]!.case_no, branchType: exact[0]!.branch_type,
+          openUpcomingStaffing: openUpcomingStaffing || legacyRequestId !== undefined });
       })
-      .catch((error) => { if (!controller.signal.aborted) setCaseLinkError(error instanceof Error ? error.message : '案件讀取失敗。'); });
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setSelectedDrawer(null);
+        setCaseLinkError(error instanceof Error ? error.message : '案件讀取失敗。');
+      });
     return () => controller.abort();
   }, [requestedCase, requestedSubstitute, openUpcomingStaffing]);
 
@@ -254,11 +269,10 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
       {caseLinkError && <p role="alert">{caseLinkError}</p>}
       <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, width: '100%' }}>
         <OrderWorkbenchV2Drawer
-          key={`${selectedDrawer.caseNo}:${selectedDrawer.substituteRequestId ?? ''}:${selectedDrawer.openUpcomingStaffing ?? false}`}
+          key={`${selectedDrawer.caseNo}:${selectedDrawer.openUpcomingStaffing ?? false}`}
           homeNavigationRequest={homeNavigationRequest}
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
-          substituteRequestId={selectedDrawer.substituteRequestId}
           openUpcomingStaffing={selectedDrawer.openUpcomingStaffing}
           summary={summaryIndex.get(selectedDrawer.caseNo)}
           workbenchScope="in_progress"

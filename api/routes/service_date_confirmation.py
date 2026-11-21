@@ -473,6 +473,18 @@ def _raise_value_error(
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409
         message = "月嫂人選或分配天數與原簽約方案不同，請填寫調整原因及協調依據後重試。"
+    elif code in {
+        "office_schedule_contract_completion_blocked", "office_schedule_accepted_plan_blocked",
+        "office_schedule_signed_archive_blocked", "office_schedule_confirmed_dates_blocked",
+    }:
+        category = ErrorCategory.DOMAIN_BLOCKED
+        status_code = 409
+        message = {
+            "office_schedule_contract_completion_blocked": "請先完成本案完約與訂單成立，再儲存班表。",
+            "office_schedule_accepted_plan_blocked": "請先確認客戶已接受目前的推薦方案，再儲存班表。",
+            "office_schedule_signed_archive_blocked": "請先歸檔客戶與目前推薦月嫂的完整已簽 PDF，再儲存班表。",
+            "office_schedule_confirmed_dates_blocked": "請先保存與目前推薦方案一致的完整預計服務日期，再儲存班表。",
+        }[code]
     elif "blocked" in code:
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409

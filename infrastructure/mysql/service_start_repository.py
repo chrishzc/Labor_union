@@ -24,7 +24,7 @@ from subsystems.scheduling.service_start_workflow import ServiceStartCase, Servi
 from subsystems.line.order_group_application import group_invitation_payload
 from subsystems.line.service_start_messages import substitute_inquiry, service_date_record
 from infrastructure.mysql.leave_result_repository import (
-    leave_context, leave_cases, replay_leave, create_leave, record_leave_dates, selected_leave_case,
+    leave_context, leave_cases, replay_leave, create_leave, selected_leave_case,
 )
 from infrastructure.mysql.service_handover_repository import handover_context, load_handover, create_handover
 
@@ -60,11 +60,12 @@ class MySqlServiceStartRepository:
     def create_leave(self, submission):
         return create_leave(self, submission)
 
-    def record_leave_dates(self, request_id, dates, *, defer=False):
-        return record_leave_dates(self, request_id, dates, defer=defer)
-
-    def is_leave_request(self, request_id: int, *, lock: bool = False) -> bool:
-        return leave_context(self.request(request_id, lock=lock)) is not None
+    def require_handover_command(self, request_id: int, *, dates: bool = False) -> None:
+        request = self.request(request_id, lock=True)
+        if handover_context(request):
+            return
+        code = 'leave_substitute_dates_retired' if dates and leave_context(request) else 'service_start_coordination_retired'
+        raise ServiceStartConflict(code, '請從原案件的多月嫂排班調整。')
 
     def staff_options(self, keyword=""):
         with self.connection.cursor() as c:
@@ -133,7 +134,7 @@ class MySqlServiceStartRepository:
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (submission.case_no, submission.staff_id, subject['plan_id'], submission.segment_id,
                  subject['assignment_id'], submission.decision.value, submission.start_date, submission.expected_order_version,
-                 'substitute_required' if submission.decision.value == 'declined' else 'awaiting_peers',
+                 'awaiting_peers',
                  submission.key, self._submission_fingerprint(submission)))
             return int(c.lastrowid)
 
@@ -210,7 +211,11 @@ class MySqlServiceStartRepository:
         if page < 1 or not 1 <= page_size <= 100:
             raise ValueError('invalid page')
         with self.connection.cursor() as c:
-            where = " FROM scheduling_service_start_requests r JOIN orders o ON o.case_no=r.case_no WHERE r.status='substitute_required' AND o.status IN ('洽談中','訂單成立','服務中') AND (JSON_UNQUOTE(JSON_EXTRACT(r.execution_dates,'$.kind')) IN ('leave-v1','handover-v1') OR r.id=(SELECT MAX(latest.id) FROM scheduling_service_start_requests latest WHERE latest.case_no=r.case_no AND latest.staff_id=r.staff_id AND latest.segment_id<=>r.segment_id AND latest.assignment_id<=>r.assignment_id AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(latest.execution_dates,'$.kind')),'')NOT IN ('leave-v1','handover-v1')))"
+            where = (
+                " FROM scheduling_service_start_requests r JOIN orders o ON o.case_no=r.case_no "
+                "WHERE r.status='substitute_required' AND o.status IN ('洽談中','訂單成立','服務中') "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(r.execution_dates,'$.kind'))='handover-v1'"
+            )
             params=()
             if case_no is not None:
                 where += ' AND r.case_no=%s'
@@ -247,21 +252,13 @@ class MySqlServiceStartRepository:
         request = self.request(request_id, lock=True)
         if request['aggregate_version'] != version or request['status'] != 'substitute_required':
             raise ServiceStartConflict('service_start_stale', '這筆代班已更新，請重新查詢。')
-        if not self.is_current_request(request):
-            raise ServiceStartConflict('service_start_stale','本區段已有新的協調結果，請重新查詢。')
+        if not handover_context(request):
+            raise ServiceStartConflict('service_start_coordination_retired', '請從原案件的多月嫂排班調整。')
         with self.connection.cursor() as c:
             c.execute("SELECT case_no FROM orders WHERE case_no=%s AND status IN ('洽談中','訂單成立','服務中') FOR UPDATE",(request['case_no'],))
             if not c.fetchone():
                 raise ServiceStartConflict('service_start_case_closed','本案目前不可安排代班。')
         return request
-
-    def is_current_request(self,request):
-        if leave_context(request) or handover_context(request):
-            return request['status'] != 'applied'
-        with self.connection.cursor() as c:
-            c.execute("SELECT MAX(id) AS latest FROM scheduling_service_start_requests WHERE case_no=%s AND staff_id=%s AND segment_id<=>%s AND assignment_id<=>%s AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(execution_dates,'$.kind')),'')NOT IN ('leave-v1','handover-v1') FOR UPDATE",
-                (request['case_no'],request['staff_id'],request['segment_id'],request['assignment_id']))
-            return c.fetchone()['latest']==request['id']
 
     def inquire(self, request_id, staff_id, start_date, end_date, version, actor, key):
         self.lock_case(self.request(request_id)['case_no'],(staff_id,))
@@ -312,7 +309,7 @@ class MySqlServiceStartRepository:
             row = c.fetchone()
             if not row or row['selected_candidate_id'] != row['id'] or row['status'] != 'substitute_required':
                 return False
-            if not self.is_current_request(self.request(row['request_id'],lock=True)):
+            if not handover_context(self.request(row['request_id'], lock=True)):
                 return False
             c.execute("SELECT 1 FROM line_identity_role_bindings b JOIN staff s ON s.id=%s AND b.line_user_id=s.line_user_id "
                 "WHERE b.subject_type='staff' AND b.subject_reference=CAST(s.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
@@ -383,32 +380,13 @@ class MySqlServiceStartRepository:
     def rollback_arrangement(self):
         with self.connection.cursor() as c: c.execute('ROLLBACK TO SAVEPOINT service_start_arrangement')
 
-    def mark_substitute_required(self,request_id,error=None):
+    def mark_handover_conflict(self, request_id):
         with self.connection.cursor() as c:
-            c.execute("UPDATE scheduling_service_start_requests SET status='substitute_required',aggregate_version=aggregate_version+1 WHERE id=%s",(request_id,))
-            request = self.request(request_id, lock=True)
-            context = handover_context(request) or leave_context(request)
-            if context:
-                context['conflict_message'] = ('接任月嫂的排程有衝突，原排班與帳務尚未變更；請調整交接日或改選月嫂。'
-                    if handover_context(request) else '提出的日期有排程衝突，原排班尚未變更；請依雙方重新談妥的日期記錄，或安排代班。')
-                c.execute('UPDATE scheduling_service_start_requests SET execution_dates=%s WHERE id=%s', (_json(context), request_id))
-
-    def pending_leave_attribution(self, case_no: str, request_id: int, version: int, *,
-                                  lock: bool) -> tuple[int, tuple[date, ...]]:
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT staff_id,execution_dates FROM scheduling_service_start_requests "
-                "WHERE id=%s AND case_no=%s AND aggregate_version=%s AND status='substitute_required' "
-                "AND confirmed_version_id IS NULL"
-                + (" FOR UPDATE" if lock else ""),
-                (request_id, case_no, version),
-            )
-            row = cursor.fetchone()
-        context = leave_context(row) if row else None
-        if not context or not context.get("dates"):
-            raise ValueError("service_attribution_substitute_request_conflict")
-        dates = tuple(sorted(date.fromisoformat(item["original_date"]) for item in context["dates"]))
-        return int(row["staff_id"]), dates
+            context = handover_context(self.request(request_id, lock=True))
+            context['conflict_message'] = '接任月嫂的排程有衝突，原排班與帳務尚未變更；請調整交接日或改選月嫂。'
+            c.execute("UPDATE scheduling_service_start_requests SET status='substitute_required',"
+                      'aggregate_version=aggregate_version+1,execution_dates=%s WHERE id=%s',
+                      (_json(context), request_id))
 
     def effective_schedule_result(self, case_no: str) -> dict:
         with self.connection.cursor() as cursor:
@@ -490,6 +468,8 @@ class MySqlServiceStartRepository:
         if not row:
             return False
         request=self.request(row['request_id'],lock=True)
+        if not handover_context(request):
+            return False
         candidate=self.candidate(request,lock=True)
         with self.connection.cursor() as c:
             c.execute("SELECT 1 FROM orders o JOIN staff s ON s.id=%s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id WHERE o.case_no=%s AND o.status IN ('洽談中','訂單成立','服務中') AND s.status='active' AND COALESCE(l.lifecycle_state,'active')='active'",(candidate_id if not candidate else candidate['staff_id'],request['case_no']))
@@ -502,7 +482,6 @@ class MySqlServiceStartRepository:
                     (request['case_no'],request['assignment_id'],request['staff_id'],SystemBusinessClock().today()))
                 active=active and bool(c.fetchone())
         if (not active or not candidate or candidate['id']!=candidate_id or request['status']!='substitute_required'
-                or not self.is_current_request(request)
                 or task.request.recipient.recipient_type is not LineRecipientType.USER
                 or task.request.recipient.identity.value!=candidate['line_user_id']):
             return False

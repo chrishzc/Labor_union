@@ -30,14 +30,29 @@ def test_first_receipt_notification_is_a_stable_internal_todo_and_never_sends(mo
     assert query.query_source(NotificationSource.RECEIPT,0,PRINCIPAL).items==[]
 
 
-@pytest.mark.parametrize('name,expected', [('測試客戶','測試客戶'),(None,'未具名使用者')])
-def test_customer_service_notification_uses_owner_name_or_unnamed_label(monkeypatch,name,expected):
-    ticket=SimpleNamespace(ticket_id=7,reason='服務需求',case_no=None,client_name=name,updated_at=None)
-    monkeypatch.setattr(query,'CustomerServiceApplication',lambda _:SimpleNamespace(
-        reminders=lambda request:SimpleNamespace(items=(ticket,),total=1)))
-    result=query.query_source(NotificationSource.CUSTOMER_SERVICE,0,PRINCIPAL)
-    assert result.items[0].person==expected
-    assert result.items[0].reference_id==7
+def test_customer_service_notification_is_retired_on_desktop_and_mobile(monkeypatch):
+    source = NotificationSource.CUSTOMER_SERVICE
+    monkeypatch.setattr(query, 'has_required_capability', lambda principal, cap: True)
+    monkeypatch.setattr(query, '_read_source', lambda *args: pytest.fail('retired source read an owner'))
+    verified = []
+
+    def mobile_context(token, capability):
+        verified.append((token, capability))
+        return PRINCIPAL, None
+
+    monkeypatch.setattr(line_mobile_admin, '_mobile_admin_context', mobile_context)
+    for is_mobile in (False, True):
+        assert source not in {row.source for row in query._catalog(PRINCIPAL, mobile=is_mobile)}
+
+    with pytest.raises(HTTPException) as desktop:
+        query.source_page(source, 0, PRINCIPAL)
+    with pytest.raises(HTTPException) as mobile:
+        query.mobile_source_page(source, query.MobileNotificationQuery(line_id_token='synthetic'))
+
+    assert desktop.value.status_code == mobile.value.status_code == 410
+    assert desktop.value.detail['error']['code'] == 'customer_service_retired'
+    assert mobile.value.detail['error']['code'] == 'customer_service_retired'
+    assert verified == [('synthetic', query.Cap.CUSTOMER_SERVICE_READ)]
 
 
 def test_notification_failures_reuse_bounded_cursor_and_fresh_owner_without_writes(monkeypatch):
@@ -173,6 +188,7 @@ def test_pending_manual_replay_is_a_typed_state_conflict(monkeypatch):
 
 @pytest.mark.parametrize('source',[source for source in NotificationSource if source not in {
     NotificationSource.LEAVE, NotificationSource.LOG, NotificationSource.STAFF_PROFILE, NotificationSource.IMPORT_FIELDS,
+    NotificationSource.CUSTOMER_SERVICE,
 }])
 def test_desktop_and_verified_liff_use_same_projection_and_cursor(monkeypatch,source):
     cursor='original-owner-cursor' if source == NotificationSource.NOTIFICATION_FAILURE else 1
@@ -360,24 +376,58 @@ await window.happyDOM.abort();
     assert result.returncode == 0, result.stderr
 
 
-def test_only_current_contact_request_uses_ticket_identity_not_signing_or_later_followup(monkeypatch):
+def test_recommendation_notifications_use_owner_page_and_plan_status_identity(monkeypatch):
     from contextlib import nullcontext
     from subsystems.scheduling.matching_notification_contracts import CustomerRecommendationFollowup
-    records=tuple(CustomerRecommendationFollowup('116000001',1,status,None,7) for status in ('contact_requested','awaiting_signing','reply_reminder'))
-    owner=SimpleNamespace(customer_recommendation_followup_count=lambda now:3,
-        customer_recommendation_followups=lambda now,**kwargs:records)
-    monkeypatch.setattr(query,'open_line_unit_of_work',lambda:nullcontext(SimpleNamespace(matching_notifications=owner)))
-    result=query._read_source(NotificationSource.RECOMMENDATION,0,PRINCIPAL)
-    assert result.items[0].id=='customer_service:7' and result.items[0].reference_id==7
-    assert result.items[1].reference_id is None and result.items[1].tag=='待簽約'
-    assert result.items[2].reference_id is None
+
+    records = (
+        CustomerRecommendationFollowup('CASE-1', 1, 'response_failed', None, None, '回覆處理異常'),
+        CustomerRecommendationFollowup('CASE-2', 2, 'awaiting_signing', None, None),
+        CustomerRecommendationFollowup('CASE-3', 3, 'reply_reminder', None, None),
+    )
+    tail = tuple(CustomerRecommendationFollowup('CASE-4', plan, 'reply_reminder', None, None)
+                 for plan in range(4, query.SIZE + 2))
+    all_records = records + tail
+    read_pages = []
+
+    def followups(now, *, limit, offset):
+        read_pages.append((limit, offset))
+        return all_records[offset:offset + limit]
+
+    owner = SimpleNamespace(customer_recommendation_followup_count=lambda now: len(all_records),
+                            customer_recommendation_followups=followups)
+    monkeypatch.setattr(query, 'open_line_unit_of_work', lambda: nullcontext(SimpleNamespace(matching_notifications=owner)))
+    source = NotificationSource.RECOMMENDATION
+    first = query.query_source(source, 0, PRINCIPAL)
+    last = query.query_source(source, first.next_cursor, PRINCIPAL)
+
+    assert read_pages == [(query.SIZE, 0), (query.SIZE, query.SIZE)]
+    assert first.total == last.total == query.SIZE + 1
+    assert first.next_cursor == 1 and last.next_cursor is None
+    assert len(first.items) == query.SIZE and len(last.items) == 1
+    assert [(item.id, item.case_no, item.tag) for item in first.items[:3]] == [
+        ('recommendation:1:response_failed', 'CASE-1', '待跟進'),
+        ('recommendation:2:awaiting_signing', 'CASE-2', '待簽約'),
+        ('recommendation:3:reply_reminder', 'CASE-3', '待跟進'),
+    ]
+    assert first.items[0].summary == '回覆處理異常'
+    assert all(item.source == source and item.reference_id is None for item in first.items + last.items)
 
 
 def test_catalog_does_not_grant_inaccessible_source(monkeypatch):
     monkeypatch.setattr(query,'has_required_capability',lambda principal,cap:cap=='line.task.read')
-    assert {r.source for r in query._catalog(PRINCIPAL)}=={NotificationSource.REGISTRATION,NotificationSource.DEPOSIT,NotificationSource.DELIVERY}
+    assert {r.source for r in query._catalog(PRINCIPAL)}=={NotificationSource.REGISTRATION,NotificationSource.DEPOSIT}
     with pytest.raises(HTTPException) as failure:query.query_source(NotificationSource.OVERDUE,0,PRINCIPAL)
     assert failure.value.status_code==403
+
+
+def test_catalog_excludes_delivery_and_notification_failure_from_todo(monkeypatch):
+    monkeypatch.setattr(query, 'has_required_capability', lambda principal, cap: True)
+    desktop_sources = {r.source for r in query._catalog(PRINCIPAL)}
+    mobile_sources = {r.source for r in query._catalog(PRINCIPAL, mobile=True)}
+    for excluded in (NotificationSource.DELIVERY, NotificationSource.NOTIFICATION_FAILURE, NotificationSource.RUNTIME):
+        assert excluded not in desktop_sources
+        assert excluded not in mobile_sources
 
 
 @pytest.mark.parametrize('source,role,label', [
@@ -436,25 +486,26 @@ def test_invalid_source_cursor_and_unknown_command_fields_are_rejected():
         assert response.status_code==404
 
 
-def test_mobile_ticket_read_ignores_a_removed_card_without_touching_its_replacement():
-    from pathlib import Path
+def test_mobile_legacy_customer_service_target_opens_staff_review_without_ticket_actions():
     import subprocess
-    # Real asynchronous handler, with a delayed read and navigation before completion.
-    source=Path('line/static/mobile_admin.html').read_text(encoding='utf-8')
-    start=source.index('async function loadTicketDetail(')
-    handler=source[start:source.index('\n}\n',start)+2]
-    script="""
-import vm from 'node:vm';import assert from 'node:assert/strict';
-let complete;let oldWrites=0,newWrites=0;
-const oldRoot={isConnected:true,replaceChildren(){oldWrites++;}};
-const replacement={isConnected:true,replaceChildren(){newWrites++;}};
-const ctx=vm.createContext({oldRoot,document:{getElementById:()=>replacement},postJson:()=>new Promise(resolve=>{complete=resolve;})});
-vm.runInContext(HANDLER,ctx);
-const pending=vm.runInContext('loadTicketDetail(1,oldRoot)',ctx);
-oldRoot.isConnected=false;complete({events:[]});await pending;
-assert.equal(oldWrites,0);assert.equal(newWrites,0);
-""".replace('HANDLER',__import__('json').dumps(handler))
-    subprocess.run(['node','--input-type=module','-e',script],check=True,capture_output=True,text=True)
+
+    script = r'''
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+const html=fs.readFileSync('line/static/mobile_admin.html','utf8');
+const ctx=vm.createContext({URLSearchParams,location:{search:''},document:{getElementById:id=>({id})}});
+const start=html.indexOf('const panes =');
+const end=html.indexOf('function targetForIdentityRedirect(',start);
+assert(start>=0 && end>start);
+vm.runInContext(html.slice(start,end),ctx);
+for (const search of ['?target=customer_service','?liff.state=%3Ftarget%3Dcustomer_service']) {
+  ctx.location.search=search;
+  assert.equal(vm.runInContext('panes[targetFromUrl()].id',ctx),'reviewPane');
+}
+assert(!vm.runInContext('supportedTargets.includes("customer_service")',ctx));
+assert.doesNotMatch(html,/loadTicketDetail|ticket_q|\/customer-service(?:\/|['"])/);
+'''
+    result = subprocess.run(['node', '--input-type=module', '-e', script], capture_output=True, text=True, timeout=25)
+    assert result.returncode == 0, result.stderr
 
 
 def test_legacy_leave_is_not_a_current_source_and_both_queries_are_retired(monkeypatch):
@@ -511,20 +562,19 @@ const calls=[];let finish;let returned=0;
 const ctx=vm.createContext({document,console,navigator:{clipboard:{writeText:async value=>calls.push(['copy',value])}},
  notificationText:(tag,value)=>{const node=document.createElement(tag);node.textContent=value;return node},
  notificationButton:(label,action)=>{const button=document.createElement('button');button.textContent=label;button.action=action;return button},
- ticketCard:ticket=>{const node=document.createElement('article');node.dataset.ticket=String(ticket.id);return node},
  reviewCard:review=>{const node=document.createElement('article');node.dataset.review=String(review.request_id);return node},
  switchPane:name=>calls.push(['pane',name]),
- postJson:async(url,body)=>{calls.push([url,body]);if(url.includes('/identity/'))return {request_id:999,status:'pending'};
+ postJson:async(url,body)=>{calls.push([url,body]);if(url.includes('/identity/999/query'))return {request_id:999,status:'pending'};
   if(url.includes('/notification-tasks/followup'))return {items:[{id:'followup:8',source:'followup',reference_id:8,case_no:'PUBLIC',summary:'待跟進'}]};
   return new Promise(resolve=>{finish=resolve})},
  });
 vm.runInContext("let notificationSequence=0,notificationSelection=null;const notificationParents=new Map();let target='staff_review';",ctx);
 for(const header of ['function restoreNotificationPanels(','function focusNotificationItems(','async function openNotificationItem('])vm.runInContext(extract(header),ctx);
 ctx.loadReviewWorkbench=async()=>{returned++;vm.runInContext('++notificationSequence;restoreNotificationPanels()',ctx)};
-const opening=vm.runInContext("openNotificationItem({source:'customer_service',reference_id:7,title:'舊客服',reason:''},0)",ctx);
+const opening=vm.runInContext("openNotificationItem({source:'identity',reference_id:7,title:'身分重綁',reason:''},0)",ctx);
 await document.querySelector('button').action();assert.equal(returned,1);
-finish({ticket:{id:7}});await opening;
-assert.equal(document.querySelectorAll('[data-ticket]').length,0,'late ticket reappeared after return');
+finish({request_id:7,status:'pending'});await opening;
+assert.equal(document.querySelectorAll('[data-review]').length,0,'late identity detail reappeared after return');
 await vm.runInContext("openNotificationItem({source:'identity',reference_id:999,title:'指定審核',reason:''},3)",ctx);
 assert(document.querySelector('[data-review="999"]'));
 assert(calls.some(([url])=>url==='/api/v1/line/mobile-admin/notification-task-actions/identity/999/query'));

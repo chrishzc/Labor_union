@@ -29,14 +29,12 @@ import { OrderAssignmentPlanPanel } from './OrderAssignmentPlanPanel';
 import { OrderServiceAttributionPanel } from './OrderServiceAttributionPanel';
 import { OrderAttributionFundingReview } from './OrderAttributionFundingReview';
 import { HistoricalServiceAttributionPanel } from './HistoricalServiceAttributionPanel';
-import { ServiceStartSubstituteWorkbench } from './ServiceStartSubstituteWorkbench';
 import { OrderCandidateContactStatusPanel } from './OrderCandidateContactStatusPanel';
 import { OrderCandidateQueryPanel } from './OrderCandidateQueryPanel';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { defaultMatchingFilterPolicy, type MatchingFilterPolicy } from '../api/scheduling/matching_candidate_workflow_client';
 import { matchingPlanCommunicationClient } from '../api/scheduling/matching_plan_communication_client';
 import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
-import { serviceStartClient } from '../api/scheduling/service_start_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { OrderFormalRecommendationPanel } from './OrderFormalRecommendationPanel';
 import { OrderIntakeRepairPanel } from './OrderIntakeRepairPanel';
@@ -55,7 +53,6 @@ interface OrderWorkbenchV2DrawerProps {
   summary?: OrderSummaryCardViewModel;
   workbenchScope?: OrderWorkbenchScope;
   homeNavigationRequest?: number;
-  substituteRequestId?: number;
   openUpcomingStaffing?: boolean;
   onClose: () => void;
   onObserved?: () => void;
@@ -142,7 +139,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   summary,
   workbenchScope = 'in_progress',
   homeNavigationRequest = 0,
-  substituteRequestId,
   openUpcomingStaffing = false,
   onClose,
   onObserved,
@@ -165,7 +161,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   );
   const [historicalRestart, setHistoricalRestart] = useState<HistoricalRestartState>({ status: 'idle', message: null });
   const [selectedGroup, setSelectedGroup] = useState<WorkGroup | null>(() => {
-    if (substituteRequestId !== undefined || openUpcomingStaffing) return 'service';
+    if (openUpcomingStaffing) return 'service';
     const requested = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('work');
     return WORK_GROUPS.find(group => group.id === requested)?.id ?? null;
   });
@@ -191,29 +187,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [operationBusy, setOperationBusy] = useState(false);
   const [editingCompletedDates, setEditingCompletedDates] = useState(false);
   const [attributionOpenOverride, setAttributionOpenOverride] = useState<boolean | null>(null);
-  const [substitute, setSubstitute] = useState<ReadState<{ id: number; version: number; originalDates: string[] }>>(
-    () => substituteRequestId === undefined ? { status: 'skipped' } : { status: 'loading' },
-  );
-  useEffect(() => {
-    if (substituteRequestId === undefined) return;
-    let current = true;
-    void serviceStartClient.detail(substituteRequestId).then(task => {
-      if (!current) return;
-      if (task.request_id !== substituteRequestId || task.case_no !== caseNo
-        || task.workflow_kind !== 'leave' || task.status !== 'substitute_required' || task.leave_dates.length === 0) {
-        throw new Error('這筆代班待辦已處理或與本案不符，請從待辦重新查詢。');
-      }
-      setSubstitute({ status: 'ready', data: {
-        id: task.request_id,
-        version: task.version,
-        originalDates: task.leave_dates.map(day => day.original_date).sort(),
-      } });
-      setAttributionOpenOverride(true);
-    }).catch(error => {
-      if (current) setSubstitute({ status: 'error', message: error instanceof Error ? error.message : '代班待辦載入失敗。' });
-    });
-    return () => { current = false; };
-  }, [caseNo, substituteRequestId]);
   useEffect(() => {
     setEditingCompletedDates(false);
     setAttributionOpenOverride(null);
@@ -461,23 +434,20 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const currentServiceSegments = assignmentPlan.status === 'ready' && assignmentPlan.data.case_no === caseNo
     ? assignmentPlan.data.assignments.filter(segment => segment.assignment_id !== null)
     : [];
-  const autoOpenAttribution = substituteRequestId === undefined && timeline.status === 'ready'
+  const autoOpenAttribution = timeline.status === 'ready'
     && currentBranch === 'normal' && !terminalStatus && !completedService
     && new Set(currentServiceSegments.filter(segment => segment.official_service_dates.length > 0)
       .map(segment => segment.staff_id)).size > 1;
   const attributionOpen = attributionOpenOverride ?? (openUpcomingStaffing || autoOpenAttribution);
   const attributionPanel = attributionOpen && currentServiceSegments.length > 0
-    && (substitute.status !== 'ready' || (!terminalStatus && !completedService))
-    ? <OrderServiceAttributionPanel key={`${caseNo}:${substitute.status === 'ready' ? substitute.data.id : ''}`} caseNo={caseNo} segments={currentServiceSegments}
+    ? <OrderServiceAttributionPanel key={caseNo} caseNo={caseNo} segments={currentServiceSegments}
         completed={completedService} upcomingOnly={!completedService && (intakeOrderStatus === '訂單成立' || openUpcomingStaffing)}
-        substitute={!completedService && substitute.status === 'ready' ? substitute.data : undefined}
         onBusyChange={onOperationBusyChange} onSaved={() => {
           setAttributionOpenOverride(false);
-          setSubstitute({ status: 'skipped' });
           refreshFacts();
         }} />
     : null;
-  const historicalAttribution = substitute.status !== 'ready' && currentBranch === 'historical' && historicalAccounting.status === 'ready'
+  const historicalAttribution = currentBranch === 'historical' && historicalAccounting.status === 'ready'
     && ['歷史訂單－服務中', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(historicalAccounting.data.lifecycle_status)
     ? <div className="order-case-action-row">
         {historicalAccounting.data.accounting_pending?.includes('historical_attribution_actual_payout_evidence_missing') &&
@@ -675,10 +645,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   <fieldset disabled={datesPending}>
                     <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalBinding={historicalBinding}
                       showScheduleActions={false} onObserved={refreshFacts} onEditStateChange={setServiceConfirmationState} />
-                    {currentBranch === 'normal' && (!historicalBinding || hasOfficialSchedule) && (
-                      <ServiceStartSubstituteWorkbench key={`${caseNo}:${refreshRevision}`} caseNo={caseNo}
-                        useScheduleSaveLabel onCompleted={async () => refreshFacts()} />
-                    )}
                   </fieldset>
                 </>}
 
@@ -748,13 +714,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         </section>}
             {!completedService && <section className="order-v2-drawer-section service-arrangement-related-actions" aria-label="服務安排相關操作">
               {canChangeActualStart && <p>開始日有變動時，請先核對各段排班的調整結果。</p>}
-              {substitute.status === 'loading' && <p role="status">正在讀取代班待辦…</p>}
-              {substitute.status === 'error' && <p role="alert">{substitute.message}</p>}
-              {substitute.status === 'ready' && assignmentPlan.status === 'ready' && currentServiceSegments.length === 0 &&
-                <p role="alert">本案沒有可調整的正式服務日，請核對待辦與排班。</p>}
               <div className="order-case-action-row">
                 {currentBranch === 'normal' && !terminalStatus && hasOfficialSchedule &&
-                  <button type="button" disabled={navigationLocked || factsRefreshing || substitute.status === 'loading'} onClick={() => setAttributionOpenOverride(!attributionPanel)}>
+                  <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setAttributionOpenOverride(!attributionPanel)}>
                     {attributionPanel ? '返回服務安排' : '多月嫂排班'}
                   </button>}
                 {canChangeActualStart && operation !== 'actual-start' && <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('actual-start')}>{actualStartActionLabel}</button>}
@@ -773,7 +735,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 ? <>
                     {attributionPanel}
                     {currentBranch === 'normal' && currentServiceSegments.length > 0 &&
-                      <OrderAttributionFundingReview key={caseNo} caseNo={caseNo} revision={refreshRevision} onSaved={refreshFacts} />}
+                      <OrderAttributionFundingReview key={`funding:${caseNo}`} caseNo={caseNo} revision={refreshRevision} onSaved={refreshFacts} />}
                     {currentServiceSegments.length > 0 && <details className="order-case-action-row">
                       <summary>服務中換人</summary>
                       <div className="order-case-action-row">

@@ -248,7 +248,9 @@ def test_real_salary_writer_installments_export_and_repricing(client):
             cursor.execute("SELECT obligation_identity FROM staff_obligations WHERE case_no='pricing-scheduled' AND obligation_kind='service_pay' AND status<>'cancelled'")
             identity = cursor.fetchone()['obligation_identity']
             cursor.execute("INSERT INTO staff_payable_accounts(staff_id,aggregate_version) VALUES(%s,1) ON DUPLICATE KEY UPDATE aggregate_version=1",(staff_id,))
-            cursor.execute("INSERT INTO staff_payout_events(staff_id,event_type,amount_ntd,occurred_on,bank_account_identity_hash,reconciliation_reference,idempotency_key,actor,reason) VALUES(%s,'payout',12400,'2026-11-15',%s,'pricing-synthetic-paid','pricing-synthetic-paid','pricing-test','immutable synthetic payout fixture')",(staff_id,'a'*64))
+            cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,debit,direction,bank_references,warnings,raw_payload,classification_type) VALUES(%s,'sinopac','2026-11-15',12400,'outgoing','{}','[]','{}','staff_payout')",(uuid4().hex + uuid4().hex,))
+            bank_id = cursor.lastrowid
+            cursor.execute("INSERT INTO staff_payout_events(staff_id,event_type,amount_ntd,occurred_on,bank_account_identity_hash,reconciliation_reference,idempotency_key,actor,reason,finance_import_row_id) VALUES(%s,'payout',12400,'2026-11-15',%s,'pricing-synthetic-paid','pricing-synthetic-paid','pricing-test','immutable synthetic payout fixture',%s)",(staff_id,'a'*64,bank_id))
             payout_id = cursor.lastrowid
             cursor.execute("INSERT INTO staff_payout_obligation_links(payout_event_id,obligation_identity,allocated_amount_ntd,allocation_ordinal) VALUES(%s,%s,12400,1)",(payout_id,identity))
             from infrastructure.mysql.staff_payout_repository import _projection_rows, _upsert_projection
@@ -264,9 +266,16 @@ def test_real_salary_writer_installments_export_and_repricing(client):
         preview = post(client,'/api/v1/accounting-pricing/cases/pricing-scheduled/preview',request,'paid-preview')
         apply = {**request,'preview_fingerprint':preview['preview_fingerprint'],'reason':'synthetic paid correction'}
         post(client,'/api/v1/accounting-pricing/cases/pricing-scheduled/apply',apply,'paid-apply')
-        assert not [item for item in source.load(date(2026,11,15)) if item.staff_id == staff_id]
-        assert [item.amount.amount for item in source.load(date(2026,12,15)) if item.staff_id == staff_id] == [40400]
+        # 自備款已超付，不能從未來補助款扣抵，兩個來源均須先核對。
+        for payment_date in (date(2026,11,15), date(2026,12,15)):
+            items = [item for item in source.load(payment_date) if item.staff_id == staff_id]
+            assert [item.status.value for item in items] == ['anomaly']
         with connection.cursor() as cursor:
+            cursor.execute('SELECT funding_kind,amount_ntd FROM staff_obligation_installments '
+                           'WHERE obligation_identity=%s', (identity,))
+            assert {row['funding_kind']: row['amount_ntd'] for row in cursor.fetchall()} == {
+                'client': 12000, 'subsidy': 40800,
+            }
             cursor.execute('SELECT amount_ntd FROM staff_payout_events WHERE id=%s',(payout_id,))
             assert cursor.fetchone()['amount_ntd'] == 12400
             cursor.execute('SELECT amount_due_ntd FROM staff_obligations WHERE obligation_identity=%s',(identity,))
@@ -514,3 +523,110 @@ def test_deposit_policy_round_trips_and_binds_new_hcm_cases(client):
                 assert {row["obligation_type"]: row["amount_due_ntd"] for row in cursor.fetchall()} == amounts
     finally:
         connection.close()
+
+
+def test_subsidy_hours_change_updates_open_accounts_and_fresh_contract_preview(client):
+    from infrastructure.mysql.contract_full_preview_repository import MySqlFullContractProjectionRepository
+    from infrastructure.mysql.order_government_subsidy_projection_repository import MySqlOrderGovernmentSubsidyProjectionRepository
+    from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+    from subsystems.contract_signing.full_contract_preview import FullContractPreviewApplication
+    from subsystems.payroll.rebuild_workflow import PayrollRebuildWorkflow
+
+    catalog = client.get('/api/v1/accounting-pricing').json()['data']
+    post(client, '/api/v1/accounting-pricing/policies',
+         {'policy': policy(), 'expected_revision': catalog['revision']}, 'subsidy-contract-policy')
+    case_no = 'pricing-subsidy-contract'
+    seed_case(case_no, identity='一般市民')
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE orders SET service_hours_per_day=9,service_end_time='18:00:00',"
+                           "end_date='2026-10-20' WHERE case_no=%s", (case_no,))
+        connection.commit()
+    finally:
+        connection.close()
+    bootstrap_case(client, case_no)
+    seed_assignment(case_no)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT planned_hours FROM case_staff_assignments WHERE case_no=%s AND status='active'", (case_no,))
+            assert cursor.fetchall() == [{'planned_hours': None}]
+        with MySqlUnitOfWork(connection) as unit:
+            PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(connection), None).synchronize_in_unit_of_work(
+                case_no, actor=ActorContext('pricing-test'), key=IdempotencyKey('subsidy-contract-salary'),
+                correlation_id=CorrelationId('subsidy-contract-salary'))
+            unit.commit()
+    finally:
+        connection.close()
+
+    path = f'/api/v1/accounting-pricing/cases/{case_no}'
+    current = client.get(path).json()['data']
+    terms = {**current['terms'], 'client': {'covered': 300, 'excess': 320},
+             'payroll': {'covered': 300, 'excess': 310}}
+    post(client, path + '/apply', {'terms': terms, 'expected_revision': current['revision']},
+         'subsidy-contract-rate-setup')
+
+    def snapshot():
+        connection = mysql_adapter.get_connection()
+        try:
+            preview = FullContractPreviewApplication(MySqlFullContractProjectionRepository(connection)).preview_client(case_no)
+            government, = MySqlOrderGovernmentSubsidyProjectionRepository(connection).query_order_projection_facts((case_no,))
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT obligation_type,amount_due_ntd FROM client_obligations "
+                               "WHERE case_no=%s AND status<>'cancelled' AND direction='receivable_from_client' "
+                               "ORDER BY obligation_identity", (case_no,))
+                client_amounts = tuple(cursor.fetchall())
+                cursor.execute("SELECT amount_due_ntd FROM staff_obligations WHERE case_no=%s "
+                               "AND status<>'cancelled' AND obligation_kind='service_pay'", (case_no,))
+                staff_amounts = tuple(row['amount_due_ntd'] for row in cursor.fetchall())
+                cursor.execute('SELECT * FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case_no,))
+                ledger = tuple(cursor.fetchall())
+                cursor.execute('SELECT COUNT(*) AS n FROM case_pricing_events WHERE case_no=%s', (case_no,))
+                events = cursor.fetchone()['n']
+            return preview, client_amounts, staff_amounts, ledger, events, government.estimated_subsidy_amount_ntd
+        finally:
+            connection.close()
+
+    before, before_client, before_staff, before_ledger, before_events, before_government = snapshot()
+    assert before.field_values['F25'] == 180
+    assert before.field_values['projected.subsidy_hours'] == 40
+    assert before.field_values['projected.projected_subsidy_amount'] == 12000
+    assert before_government == 12000
+    assert before.field_values['B38'] == sum(row['amount_due_ntd'] for row in before_client) == 56800
+    assert before.field_values['projected.staff_payable_total'] == sum(before_staff) == 55400
+
+    current = client.get(path).json()['data']
+    candidate = {**current['terms'], 'subsidy_hours': 80}
+    request = {'terms': candidate, 'expected_revision': current['revision']}
+    planned = post(client, path + '/preview', request, 'subsidy-contract-preview')
+    assert planned['after']['covered_hours'] == 80
+    assert planned['after']['client_amount'] == 56000
+    assert planned['after']['staff_total_amount'] == 55000
+    assert planned['after']['subsidy_amount'] == 24000
+    command = {**request, 'preview_fingerprint': planned['preview_fingerprint'], 'reason': 'synthetic subsidy hours correction'}
+    saved = post(client, path + '/apply', command, 'subsidy-contract-save')
+    after = client.get(path).json()['data']
+    assert after['revision'] == saved['revision'] == current['revision'] + 1
+    assert after['terms']['subsidy_hours'] == 80
+    assert after['impact'] == planned['after']
+
+    updated, client_amounts, staff_amounts, ledger, events, government = snapshot()
+    assert updated.field_values['F25'] == 180
+    assert updated.field_values['projected.subsidy_hours'] == 80
+    assert updated.field_values['projected.projected_subsidy_amount'] == 24000
+    assert government == 24000
+    assert updated.field_values['B38'] == sum(row['amount_due_ntd'] for row in client_amounts) == 56000
+    assert updated.field_values['projected.staff_payable_total'] == sum(staff_amounts) == 55000
+    assert updated.preview_fingerprint != before.preview_fingerprint
+    assert ledger == before_ledger
+    assert events == before_events + 1
+
+    assert post(client, path + '/apply', command, 'subsidy-contract-save') == saved
+    stale = client.post(path + '/apply', json=command, headers={'Idempotency-Key': 'subsidy-contract-stale'})
+    assert stale.status_code == 409 and 'case_pricing_stale' in stale.text
+    repeated, repeated_client, repeated_staff, repeated_ledger, repeated_events, repeated_government = snapshot()
+    assert repeated.preview_fingerprint == updated.preview_fingerprint
+    assert (repeated_client, repeated_staff, repeated_ledger, repeated_events, repeated_government) == (client_amounts, staff_amounts, ledger, events, government)

@@ -12,6 +12,7 @@ http = base['http']
 rows, write, checked = base['rows'], base['write'], base['checked']
 postponement_submission = base['postponement_submission']
 apply_confirmed_postponement = base['apply_confirmed_postponement']
+owner_state, seed_legacy_pending = base['owner_state'], base['seed_legacy_pending']
 RETIRED_SUBMIT = '/api/v1/line/staff-self-service/leave-results/submit'
 ORIGINAL_DATE = '2027-01-05'
 POSTPONED_DATE = '2027-02-10'
@@ -38,12 +39,10 @@ def block_staff_day(staff, day):
     )
 
 
-def linked_substitute_change(command, item, substitute_staff):
+def substitute_change(command, substitute_staff):
     return {
         'scope': 'upcoming',
         'evidence': 'Recorded consent from the substitute by phone',
-        'substitute_request_id': item['request_id'],
-        'expected_substitute_request_version': item['version'],
         'moves': [{
             'source_assignment_id': command.assignment_id,
             'source_date': ORIGINAL_DATE,
@@ -167,64 +166,47 @@ def test_confirmed_postponement_updates_schedule_and_finance_without_push(http):
     ) == existing_deliveries
 
 
-def test_conflict_preserves_all_owner_facts_then_union_records_new_agreement(http):
+def test_conflict_preserves_all_owner_facts_then_fresh_agreement_can_apply(http):
     from domains.scheduling.service_start import ServiceStartConflict
 
     case, staff = setup(http)
-    before = schedule(case)
-    finance = rows('SELECT * FROM client_payment_terms WHERE case_no=%s', (case,))
     block_staff_day(staff[0], POSTPONED_DATE)
+    before = owner_state(case)
     command = confirmed_command(http, case, staff[0])
-    result = apply_confirmed_postponement(command)
-    assert result['status'] == 'substitute_required' and result['conflict_message']
-    assert schedule(case) == before
-    assert rows('SELECT * FROM client_payment_terms WHERE case_no=%s', (case,)) == finance
-    assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no': case}))['total'] == 1
     with pytest.raises(ServiceStartConflict) as raised:
-        apply_confirmed_postponement(replace(command, key=uuid4().hex))
-    assert raised.value.code == 'leave_result_already_pending'
-    body = {'expected_version': result['version'], 'idempotency_key': uuid4().hex,
-            'dates': [{'original_date': ORIGINAL_DATE, 'new_date': '2027-02-11'}]}
-    path = f"/api/v1/scheduling/service-start/{result['request_id']}/defer"
-    updated = checked(http.post(path, json=body))
+        apply_confirmed_postponement(command)
+    assert raised.value.code == 'staff_unavailable'
+    assert owner_state(case) == before
+    assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no': case}))['total'] == 0
+    new_command = confirmed_command(http, case, staff[0], dates=[(ORIGINAL_DATE, '2027-02-11')])
+    updated = apply_confirmed_postponement(new_command)
     assert updated['status'] == 'applied'
-    assert checked(http.post(path, json=body))['status'] == 'applied'
+    assert apply_confirmed_postponement(new_command) == updated
 
-
-def test_linked_substitution_updates_only_requested_day_without_waiting_for_group_join(http):
+def test_manual_substitution_updates_only_requested_day_without_todo_or_group_join(http):
     case, staff = setup(http)
     before = schedule(case)
-    order_dates = rows('SELECT actual_start_date, actual_end_date FROM orders WHERE case_no=%s', (case,))
-    due_dates = rows(
-        'SELECT first_payment_due_date, second_payment_due_date FROM client_payment_terms WHERE case_no=%s', (case,),
-    )
-    block_staff_day(staff[0], POSTPONED_DATE)
+    original = owner_state(case)
     confirmation = confirmed_command(http, case, staff[0])
-    item = apply_confirmed_postponement(confirmation)
-    assert schedule(case) == before and item['status'] == 'substitute_required' and not item['joined']
-    task_path = f"/api/v1/scheduling/service-start/{item['request_id']}"
-    old_command = {'expected_version': item['version'], 'idempotency_key': uuid4().hex,
-                   'start_date': ORIGINAL_DATE,
-                   'date_changes': [{'original_date': ORIGINAL_DATE, 'new_date': ORIGINAL_DATE}]}
-    assert http.post(task_path + '/dates', json=old_command).status_code == 410
-    command = substitute_command(http, case, linked_substitute_change(confirmation, item, staff[1]))
+    command = substitute_command(http, case, substitute_change(confirmation, staff[1]))
     headers = {'Idempotency-Key': uuid4().hex, 'X-Correlation-ID': case}
-    assert schedule(case) == before and checked(http.get(task_path))['status'] == 'substitute_required'
+    assert owner_state(case) == original
     path = f'/api/v1/orders/{case}/service-attribution/apply'
     receipt = checked(http.post(path, json=command, headers=headers))
-    result = checked(http.get(task_path))
-    assert result['status'] == 'applied' and not result['result']['group_record_queued']
     assert schedule(case) == [
         {**row, 'staff_id': staff[1][0]} if str(row['work_date']) == ORIGINAL_DATE else row for row in before
     ]
-    assert rows('SELECT actual_start_date, actual_end_date FROM orders WHERE case_no=%s', (case,)) == order_dates
-    assert rows(
-        'SELECT first_payment_due_date, second_payment_due_date FROM client_payment_terms WHERE case_no=%s', (case,),
-    ) == due_dates
+    after = owner_state(case)
+    assert after['orders'][0]['actual_start_date'] == original['orders'][0]['actual_start_date']
+    assert after['orders'][0]['actual_end_date'] == original['orders'][0]['actual_end_date']
+    for field in ('first_payment_due_date', 'second_payment_due_date'):
+        assert after['client_payment_terms'][0][field] == original['client_payment_terms'][0][field]
+    assert after['staff_obligations'] != original['staff_obligations']
+    assert after['client_obligations'] == original['client_obligations']
+    assert after['scheduling_service_start_requests'] == original['scheduling_service_start_requests']
     assert checked(http.post(path, json=command, headers=headers)) == receipt
-    assert checked(http.get(task_path))['version'] == result['version']
+    assert owner_state(case) == after
     assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no': case}))['total'] == 0
-
 
 def test_confirmed_postponement_guards_scope_versions_dates_and_rollback(http, monkeypatch):
     from domains.scheduling.leave_result import LeaveDateChange
@@ -255,44 +237,55 @@ def test_confirmed_postponement_guards_scope_versions_dates_and_rollback(http, m
     assert rows('SELECT COUNT(*) n FROM scheduling_service_start_requests WHERE case_no=%s', (case,))[0]['n'] == 1
 
 
-def test_same_case_date_collision_is_internal_todo_and_other_staff_days_are_unchanged(http):
+def test_same_case_date_collision_returns_conflict_and_preserves_all_owner_facts(http):
+    from domains.scheduling.service_start import ServiceStartConflict
+
     case, staff = setup(http, count=2)
-    before = schedule(case)
+    before = owner_state(case)
     command = confirmed_command(http, case, staff[1], dates=[('2027-02-04', '2027-02-05')])
-    result = apply_confirmed_postponement(command)
-    assert result['status'] == 'substitute_required'
-    assert schedule(case) == before
-    body = {'expected_version': result['version'], 'idempotency_key': uuid4().hex,
-            'dates': [{'original_date': '2027-02-04', 'new_date': '2027-03-10'}]}
-    result = checked(http.post(f"/api/v1/scheduling/service-start/{result['request_id']}/defer", json=body))
+    with pytest.raises(ServiceStartConflict):
+        apply_confirmed_postponement(command)
+    assert owner_state(case) == before
+    before_schedule = schedule(case)
+    result = apply_confirmed_postponement(confirmed_command(
+        http, case, staff[1], dates=[('2027-02-04', '2027-03-10')],
+    ))
     assert result['status'] == 'applied'
-    assert [r for r in schedule(case) if r['staff_id'] == staff[0][0]] == [r for r in before if r['staff_id'] == staff[0][0]]
-    assert len(schedule(case)) == len(before)
+    assert [r for r in schedule(case) if r['staff_id'] == staff[0][0]] == [
+        r for r in before_schedule if r['staff_id'] == staff[0][0]
+    ]
+    assert len(schedule(case)) == len(before_schedule)
 
-
-def test_linked_substitution_keeps_task_pending_on_changed_dates_and_conflict(http):
+def test_retired_linked_substitution_and_fresh_occupancy_conflict_write_nothing(http):
     case, staff = setup(http)
-    before = schedule(case)
-    block_staff_day(staff[0], POSTPONED_DATE)
     confirmation = confirmed_command(http, case, staff[0])
-    item = apply_confirmed_postponement(confirmation)
-    assert item['status'] == 'substitute_required'
-    change = linked_substitute_change(confirmation, item, staff[1])
-    preview_path = f'/api/v1/orders/{case}/service-attribution/preview'
-    changed_day = {**change, 'moves': [{**change['moves'][0], 'replacement_date': POSTPONED_DATE}]}
-    response = http.post(preview_path, json=changed_day)
-    assert response.status_code == 409
-    assert response.json()['detail']['error']['code'] == 'service_attribution_substitute_dates_conflict'
+    request_id = seed_legacy_pending(case, staff[0][0], assignment_id=confirmation.assignment_id, execution={
+        'kind': 'leave-v1', 'decision': 'defer',
+        'dates': [{'original_date': ORIGINAL_DATE, 'new_date': POSTPONED_DATE}],
+    })
+    task_path = f'/api/v1/scheduling/service-start/{request_id}'
+    old_task = checked(http.get(task_path))
+    before = owner_state(case)
+    change = substitute_change(confirmation, staff[1])
+    linked = {'substitute_request_id': request_id, 'expected_substitute_request_version': old_task['version']}
+    path = f'/api/v1/orders/{case}/service-attribution'
+    response = http.post(path + '/preview', json={**change, **linked})
+    assert response.status_code == 410
     command = substitute_command(http, case, change)
+    response = http.post(path + '/apply', json={**command, **linked},
+                         headers={'Idempotency-Key': uuid4().hex, 'X-Correlation-ID': case})
+    assert response.status_code == 410
+    blocked = http.post(task_path + '/dates', json={
+        'expected_version': old_task['version'], 'idempotency_key': uuid4().hex, 'start_date': ORIGINAL_DATE,
+    })
+    assert blocked.status_code == 410
+    assert blocked.json()['detail']['error']['code'] == 'leave_substitute_dates_retired'
     block_staff_day(staff[1], ORIGINAL_DATE)
-    response = http.post(
-        f'/api/v1/orders/{case}/service-attribution/apply', json=command,
-        headers={'Idempotency-Key': uuid4().hex, 'X-Correlation-ID': case},
-    )
+    response = http.post(path + '/apply', json=command,
+                         headers={'Idempotency-Key': uuid4().hex, 'X-Correlation-ID': case})
     assert response.status_code == 409
-    assert schedule(case) == before
-    assert checked(http.get(f"/api/v1/scheduling/service-start/{item['request_id']}"))['status'] == 'substitute_required'
-
+    assert owner_state(case) == before
+    assert checked(http.get(task_path)) == old_task
 
 def test_in_service_defer_preserves_started_days_and_receipt_history(http):
     from shared_kernel.clock import SystemBusinessClock

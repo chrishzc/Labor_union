@@ -102,14 +102,6 @@ def create_leave(repository, submission):
     if any(str(item.original_date) not in subject.service_dates for item in submission.dates):
         raise ServiceStartConflict('leave_result_dates_changed', '選擇的日期已不在本人正式排班，請重新查詢。')
     with repository.connection.cursor() as c:
-        c.execute("SELECT r.id,r.execution_dates FROM scheduling_service_start_requests r "
-                  "WHERE r.case_no=%s AND r.staff_id=%s AND r.status='substitute_required' FOR UPDATE",
-                  (submission.case_no, submission.staff_id))
-        selected = {str(d.original_date) for d in submission.dates}
-        for pending in c.fetchall():
-            context = leave_context(pending)
-            if context and selected & {d['original_date'] for d in context['dates']}:
-                raise ServiceStartConflict('leave_result_already_pending', '這些日期已有待處理結果，請勿重複送出。')
         context = {'kind': 'leave-v1', 'decision': submission.decision,
                    'dates': [{'original_date': str(d.original_date),
                               'new_date': str(d.new_date) if d.new_date else None} for d in submission.dates]}
@@ -117,31 +109,7 @@ def create_leave(repository, submission):
             '(case_no,staff_id,assignment_id,decision,requested_start_date,source_order_version,status,'
             'submit_key,submit_fingerprint,execution_dates) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
             (submission.case_no, submission.staff_id, submission.assignment_id,
-             'accepted' if submission.decision == 'defer' else 'declined', submission.dates[0].new_date,
-             submission.expected_order_version, 'awaiting_peers' if submission.decision == 'defer' else 'substitute_required',
+             'accepted', submission.dates[0].new_date,
+             submission.expected_order_version, 'awaiting_peers',
              submission.key, submission_fingerprint(submission), json.dumps(context, ensure_ascii=False)))
         return int(c.lastrowid)
-
-
-def record_leave_dates(repository, request_id, dates, *, defer=False):
-    request = repository.request(request_id, lock=True)
-    context = leave_context(request)
-    if not context:
-        if dates is not None or defer:
-            raise ServiceStartConflict('leave_result_required', '此操作只適用於請假協調結果。')
-        return
-    if not dates or {str(d.original_date) for d in dates} != {d['original_date'] for d in context['dates']}:
-        raise ServiceStartConflict('leave_result_dates_required', '請為每個原服務日填寫雙方確認後的實際日期。')
-    new_dates = tuple(d.new_date for d in dates)
-    if any(day is None for day in new_dates) or len(set(new_dates)) != len(new_dates):
-        raise ServiceStartConflict('leave_result_new_dates_invalid', '實際服務日期不可空白或重複。')
-    if defer and any(d.new_date <= d.original_date for d in dates):
-        raise ServiceStartConflict('leave_result_must_defer', '順延日期必須晚於原服務日。')
-    if defer:
-        context['decision'] = 'defer'
-    context['dates'] = [{'original_date': str(d.original_date), 'new_date': str(d.new_date)} for d in dates]
-    context.pop('conflict_message', None)
-    with repository.connection.cursor() as c:
-        c.execute('UPDATE scheduling_service_start_requests SET execution_dates=%s,selected_candidate_id='
-                  + ('NULL' if defer else 'selected_candidate_id') + ' WHERE id=%s',
-                  (json.dumps(context, ensure_ascii=False), request_id))

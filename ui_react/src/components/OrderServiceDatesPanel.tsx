@@ -811,7 +811,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       {effectiveServiceDates === null && assignmentPlan && assignmentPlan.scheduling_version === queryView.scheduling_version
         && assignmentPlan.assignments.some(segment => segment.official_service_dates.length === 0)
         && <p role="status">已有月嫂指派，但缺少正式逐日班次。</p>}
-      <p>拒絕或檔期衝突的案件，請由下方代班待辦接續處理。</p>
+      <p>遇到檔期衝突時，請由管理員從原案件調整排班。</p>
       {success !== null && <p role="status">{success}</p>}
     </section>
   );

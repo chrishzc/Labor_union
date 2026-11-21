@@ -78,6 +78,8 @@
 ### 3.5 Execution Conversion、Idempotency 與 Typed Errors
 
 - **Execution Conversion**：僅在 `訂單成立 AND contract_completed AND commitment_ready` 下執行。鎖定 commitment、Orders、Finance settlement、matching plan 與相關 staff occupancy，驗證同案方案、分配結果與總服務日數。月嫂回報及代班沿 [Scheduling SSTART](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 核對人員與人日。工會依 [多月嫂排班](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction) 以預覽及具原因的確認分配首份班表，記錄新分配並保留原 commitment days、已簽文件及原簽回人員。
+- **直接歸檔後的一般首排**：文件歸檔仍依 §3.4 辦理，不新增服務承諾或帳務就緒前置。正常案件已成立且完約、已有現行已接受方案與完整確認日期，但尚無承諾時，首排 Apply 在原 outer UoW 鎖定並重讀上述事實，由 Contract owner 依現行文件及方案建立精確人日承諾，再沿原 Execution Conversion 檢核與 writer 建立正式排班。Preview 只投影相同候選，不建立承諾；缺少合法方案、確認日期或現行必要文件時回 typed blocker。既有承諾保留原內容，不覆寫、不偽造舊 `signed_received` 事件，不重建 Finance 期款。任何步驟失敗須一併回滾新建承諾與排班。
+- **首排缺件錯誤**：完約、已接受方案、現行必要歸檔與確認日期缺件，分別回 `office_schedule_contract_completion_blocked`、`office_schedule_accepted_plan_blocked`、`office_schedule_signed_archive_blocked`、`office_schedule_confirmed_dates_blocked`。畫面沿伺服器原因引導補齊；不得將所有缺件混成不明的可排班狀態。
 - **Idempotency 與 Conflict**：同鍵同指紋重播回原 receipt；同鍵異指紋回 `contract_signature_idempotency_conflict`；stale 版本固定 typed 409 且前端保持同一 idempotency key 供重試／查詢。
 - **Commands／Stable Errors**：`GenerateContractDocumentVersion`、`DownloadUnsignedContractPdf`、`UploadReturnedContractDocument`、`Preview/RecordManualStaffContractAttestation`、`Preview/RecordManualClientContractAttestation`、`Preview/ApplyFinalSignedContractUpload`、`ConvertCommitmentToExecution`（命令回執寫入既有 `contract_signing_command_receipts`，條款 C34／C37 到期基準沿 Client Finance `deposit_due_date` 讀取）。Errors：`contract_document_empty | too_large | type_not_allowed | digest_mismatch | archive_failed`、`contract_status_version_conflict`、`contract_document_version_stale`、`signing_staff_occupancy_conflict`、`signing_service_dates_unavailable`、`external_signing_session_facts_unavailable`、`manual_contract_evidence_missing | confirmation_method_invalid | reason_missing | preview_stale | customer_acceptance_required`、`commitment_service_days_invalid | not_effective`、`contract_signature_idempotency_conflict`、`assignment_occupancy_conflict`。
 - **Writer Exit**：所有可控模板與未／已簽文件存取一律經 `TemplateCatalog`、`ContractRenderer`、`ImmutableDocumentArchive`（`services/` 或 API／UI 嚴禁直改 `orders.contract_identity`、commitment 或 Finance obligation）。
@@ -88,3 +90,9 @@
 2. **直接歸檔**。沒有送交、簽約工作、未簽文件或排班／帳務就緒資料時，人員仍可上傳已簽 PDF 並記錄完約。故障或欠缺應上傳的檔案時，零完約寫入。重送同一操作回原歸檔結果。工會系統不發送簽署提醒或契約下載連結，歷史投遞保留。
 3. **本機受控 DB 驗收**：依 [Global Migration §6.1](10_Global_保留資料Migration與Cutover_Subsystem.md#61-本機開發-db-受控驗收91) 於受控 `union_db`／`lu_test_*` 通過 Module、Subsystem、Domain（訂金→訂單成立＋簽約→conversion、代班不重簽）與 Browser E2E。
 4. **回收區塊持續顯示**。首次開啟頁面即顯示「回收簽署文件」。案件載入後可直接選檔，完約後可讀回檔名。
+
+| 驗收 ID | S：情境與前提 | T：使用者任務 | A：可重現操作 | R：可觀察結果 |
+|---|---|---|---|---|
+| CONTRACT-OFFICE-FIRST-01 | 正常案有現行已接受方案及完整確認日期，已直接歸檔現行所需文件，訂金已核銷或依原規則人工放行，尚無服務承諾。 | 儲存首份正式班表。 | 核對服務日及人員後提交首排 Apply，重新查詢承諾、正式排班、訂單與帳務。 | 同交易建立一份精確承諾及正式班表，回讀人日與提交內容一致；不補造簽回事件或更動原期款、已核銷金額，人工放行仍不等於實際收款。 |
+| CONTRACT-OFFICE-FIRST-02 | 缺必要文件、合法已接受方案或完整確認日期，或 Apply 時版本／檔期已變。 | 判斷是否能完成首排。 | 查詢或 Preview，再以原候選提交。 | Preview 零寫入；Apply 回 typed blocker／conflict 並指出原因，不留下新承諾、assignment、排班或帳務部分寫入。 |
+| CONTRACT-OFFICE-FIRST-03 | 首排已有承諾或同一命令已成功。 | 重查或重送同一首排命令。 | 使用相同冪等鍵及內容提交並重新查詢。 | 原承諾不可覆寫，同鍵同內容回原結果，不重複建立承諾、人日、排班或收付款。 |

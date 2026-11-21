@@ -22,6 +22,7 @@ from domains.orders.actual_start import (
     date_bound_manual_overrides,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.errors import ErrorCategory, TypedError
 from subsystems.orders.order_lifecycle_command_envelope import (
     lock_order_lifecycle_command_envelope,
@@ -330,7 +331,10 @@ class MySqlOrderActualStartRepository:
                 cursor, assignments, lock=lock,
             )
 
-    def validate_replacement_availability(self, candidate, *, lock: bool) -> None:
+    def validate_replacement_availability(
+        self, candidate: SchedulingGenerationCandidate, *, actual_start_date: date,
+        lock: bool,
+    ) -> None:
         staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
         with self._connection.cursor() as cursor:
             placeholders = ",".join("%s" for _ in staff_ids)
@@ -347,7 +351,10 @@ class MySqlOrderActualStartRepository:
                 for row in rows
             ):
                 raise ValueError("actual_start_staff_ineligible_blocked")
-            occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock, actual_start_date=candidate.new_actual_start_date)
+            occupied, _ = load_occupancy_snapshot(
+                cursor, staff_ids, candidate.case_no, lock=lock,
+                actual_start_date=actual_start_date,
+            )
             service_time = load_case_service_time(cursor, candidate.case_no, lock=lock)
         if first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied):
             raise ValueError("actual_start_staff_schedule_conflict")

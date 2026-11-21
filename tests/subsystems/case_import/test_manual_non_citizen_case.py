@@ -116,7 +116,7 @@ def test_manual_case_api_preserves_birth_date_cooking_and_holiday_preference(
         "service_time": "09:00-17:00 (8小時)",
         "birth_date": birth_date,
         "requires_cooking": requires_cooking,
-        **({"holiday_double_pay": holiday_answer} if holiday_answer is not None else {}),
+        "holiday_double_pay": holiday_answer,
     })
 
     assert response.status_code == 200
@@ -327,13 +327,18 @@ def test_manual_case_copies_saved_beclass_details_without_overwriting_new_form(m
     assert conn.committed
 
 
-def test_manual_case_rejects_unowned_copy_fields_before_writing(monkeypatch, manual_case_client):
+@pytest.mark.parametrize("unowned_fields", [
+    {"beclass_details": {"line_user_id": "not-a-binding"}},
+    {"beclass_details": {"holiday_double_pay": "是"}},
+    {"holiday_double_pay": "maybe"},
+])
+def test_manual_case_rejects_unowned_fields_and_invalid_preference_before_writing(monkeypatch, manual_case_client, unowned_fields):
     conn = _FakeConnection(_FakeCursor())
     monkeypatch.setattr("infrastructure.mysql.mysql_adapter.get_connection", lambda: conn)
     response = manual_case_client.post("/api/v1/admin/registration-applications/manual-non-citizen", json={
         **_REQUIRED_DETAILS, "name": "測試客戶", "phone": "0900000000",
         "service_start_date": "2026-12-01", "service_days": 10, "service_time": "09:00-17:00 (8小時)",
-        "beclass_details": {"line_user_id": "not-a-binding"},
+        **unowned_fields,
     })
     assert response.status_code == 422
     assert not conn.began

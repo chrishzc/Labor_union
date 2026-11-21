@@ -50,7 +50,7 @@ SOURCES = {
     Source.IMPORT_FIELDS: ('進件資料待修正', 'review', 'data_browser.read'),
     Source.FOLLOWUP: ('月嫂回覆待跟進', 'review', Cap.MATCHING_READ),
     Source.RECOMMENDATION: ('推薦確認與簽約', 'review', Cap.MATCHING_READ),
-    Source.SERVICE_START: ('開工、順延與代班', 'review', Cap.MATCHING_OVERRIDE),
+    Source.SERVICE_START: ('服務中換人', 'review', Cap.MATCHING_OVERRIDE),
     Source.DEPOSIT: ('訂金通知待處理', 'reminder', Cap.TASK_READ),
     Source.RECEIPT: ('帳款已入帳，待人員確認通知', 'reminder', Cap.CUSTOMER_SERVICE_HANDLE),
     Source.GROUP: ('訂金已付尚未建群', 'reminder', Cap.ORDER_GROUP_READ),
@@ -66,13 +66,18 @@ def _allowed(principal, source):
     return capability is None or has_required_capability(principal, str(capability))
 
 
+_EXCLUDED_TODO_SOURCES = frozenset({
+    Source.RUNTIME,
+    Source.DELIVERY,
+    Source.NOTIFICATION_FAILURE,
+})
 _DESKTOP_ONLY_SOURCES = frozenset({Source.STAFF_PROFILE, Source.IMPORT_FIELDS})
 
 
 def _catalog(principal, *, mobile=False):
     return [NotificationSourceView(source=key, label=value[0], group=value[1])
             for key, value in SOURCES.items()
-            if key != Source.RUNTIME
+            if key not in _EXCLUDED_TODO_SOURCES
             and not (mobile and key in _DESKTOP_ONLY_SOURCES)
             and _allowed(principal, key)]
 
@@ -88,7 +93,7 @@ def query_source(source, cursor, principal):
                                '客服工單提醒已停用。請於 LINE 官方帳號處理留言。', 'notification-workbench')
     if source == Source.LEAVE:
         raise typed_http_error(410, 'conflict', 'legacy_leave_todo_retired',
-                               '舊請假申請僅供歷史查閱；現行例外請使用開工、順延與代班待辦。', 'notification-workbench')
+                               '舊請假申請僅供歷史查閱。請從原案件調整排班。', 'notification-workbench')
     if source == Source.LOG:
         raise typed_http_error(410, 'conflict', 'service_day_log_reminder_retired',
                                '服務日誌缺漏催繳提醒已依高齡友善裁決退役，日誌維持於 LINE 群組相簿新增。', 'notification-workbench')
@@ -187,9 +192,9 @@ def _read_source(source, cursor, principal):
         application = next(dependency)
         try:
             rows, total = application.todos(page, SIZE)
-            items = [_item(source, r.request_id, '換人交接待處理' if r.workflow_kind=='handover' else '服務日期／代班待處理',
-                           r.conflict_message or '請接續詢問意願、邀請入群及記錄日期。',
-                           '只有需要代班或排程衝突才由工會處理。', case_no=r.case_no, reference_id=r.request_id,
+            items = [_item(source, r.request_id, '換人交接待處理',
+                           r.conflict_message or '請接續詢問意願、邀請入群及記錄交接日。',
+                           '本案有尚未完成的服務中換人。', case_no=r.case_no, reference_id=r.request_id,
                            person=r.staff_name, expected_version=r.version) for r in rows]
         finally:
             # The existing dependency is a generator and owns its connection.

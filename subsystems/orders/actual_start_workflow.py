@@ -233,7 +233,8 @@ class ActualStartWorkflowRepository(ActualStartReconfirmationControlPort, Protoc
         self, assignments: tuple, *, lock: bool,
     ) -> None: ...
     def validate_replacement_availability(
-        self, candidate: SchedulingGenerationCandidate, *, lock: bool,
+        self, candidate: SchedulingGenerationCandidate, *, actual_start_date: date,
+        lock: bool,
     ) -> None: ...
     def claim_actual_start_command(
         self, request: ActualStartApplyRequest, command_fingerprint: PreviewFingerprint
@@ -570,6 +571,7 @@ class ActualStartWorkflow:
             )
             self._repository.validate_replacement_availability(
                 scheduling,
+                actual_start_date=new_date,
                 lock=lock_calendar,
             )
         client_settlement = _existing_client_settlement(facts)

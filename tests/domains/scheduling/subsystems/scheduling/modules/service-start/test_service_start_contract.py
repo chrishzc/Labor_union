@@ -13,12 +13,16 @@ def test_legacy_leave_dates_refuse_new_mutations_but_replay_saved_commands():
     from datetime import date
     from unittest.mock import MagicMock
     from fastapi import HTTPException
+    from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
     from subsystems.scheduling.service_start_workflow import ServiceStartWorkflow
 
     repository, arrangement, units = MagicMock(), MagicMock(), MagicMock()
     application = ServiceStartWorkflow(repository, arrangement, units)
     repository.command_replay.return_value = None
-    repository.is_leave_request.return_value = True
+    repository.request.return_value = {'execution_dates': {'kind': 'leave-v1'}, 'status': 'substitute_required'}
+    repository.require_handover_command.side_effect = lambda *args, **kwargs: (
+        MySqlServiceStartRepository.require_handover_command(repository, *args, **kwargs)
+    )
     args = (41, date(2026, 11, 17), 3, "admin", "existing-key")
     with pytest.raises(HTTPException) as blocked:
         service_start.call(lambda: application.save_dates(*args))
@@ -29,8 +33,11 @@ def test_legacy_leave_dates_refuse_new_mutations_but_replay_saved_commands():
     units.return_value.__enter__.return_value.commit.assert_not_called()
     repository.command_replay.return_value = 41
     assert application.save_dates(*args) is repository.view.return_value
-    repository.is_leave_request.assert_called_once_with(41, lock=True)
+    repository.request.return_value['status'] = 'applied'
+    assert application.save_dates(*args) is repository.view.return_value
+    repository.require_joined_candidate.assert_not_called()
     arrangement.apply.assert_not_called()
+    units.return_value.__enter__.return_value.commit.assert_not_called()
 
 
 @pytest.mark.parametrize('role,status',[('line_manager',200),('staff',403),('line_viewer',200)])
@@ -66,7 +73,12 @@ def test_pending_service_todos_only_include_cases_the_apply_can_handle(status,vi
  c=sqlite3.connect(':memory:');c.row_factory=sqlite3.Row;c.create_function('JSON_UNQUOTE',1,lambda value:value)
  c.executescript('CREATE TABLE orders(case_no TEXT,status TEXT); CREATE TABLE scheduling_service_start_requests(id INTEGER,case_no TEXT,status TEXT,execution_dates TEXT,staff_id INTEGER,segment_id INTEGER,assignment_id INTEGER);')
  c.execute('INSERT INTO orders VALUES(?,?)',('CASE',status))
- c.execute('INSERT INTO scheduling_service_start_requests VALUES(1,?,?,?,?,NULL,NULL)',('CASE','substitute_required','{"kind":"leave-v1"}',1))
+ c.executemany('INSERT INTO scheduling_service_start_requests VALUES(?,?,?,?,?,NULL,NULL)', [
+    (1,'CASE','substitute_required',None,1),
+    (2,'CASE','substitute_required','{"kind":"leave-v1"}',1),
+    (3,'CASE','substitute_required','{"kind":"handover-v1"}',1),
+    (4,'CASE','applied','{"kind":"handover-v1"}',1),
+ ])
  class Cursor:
   def __enter__(self):self.cursor=c.cursor();return self
   def __exit__(self,*args):self.cursor.close()
@@ -75,8 +87,9 @@ def test_pending_service_todos_only_include_cases_the_apply_can_handle(status,vi
   def fetchone(self):return dict(self.cursor.fetchone())
   def fetchall(self):return [dict(r) for r in self.cursor.fetchall()]
  repo=MySqlServiceStartRepository(SimpleNamespace(cursor=Cursor));repo.view=lambda identity:identity
- items,total=repo.todos(1,25)
- assert bool(items) is visible and total==int(visible)
+ items,total=repo.todos(1,1,'CASE')
+ assert items==((3,) if visible else ()) and total==int(visible)
+ assert repo.todos(2,1,'CASE')==((),int(visible))
  c.close()
 @pytest.mark.parametrize('service_type',[None,'','   '])
 def test_missing_service_type_is_a_typed_block_before_schedule_or_finance_writes(service_type):

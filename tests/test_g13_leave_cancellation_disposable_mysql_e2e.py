@@ -126,8 +126,8 @@ def test_leave_acceptance_context_handles_mysql8_connection_collation(monkeypatc
             for operation, command in ((workflow.preview, preview_request), (workflow.apply, apply_request)):
                 with pytest.raises(LeaveSubstitutionWorkflowError) as caught:
                     operation(command)
-                assert caught.value.error.code == "leave_request_dates_outside_window"
-                assert "請假之服務日" in caught.value.error.message
+                assert caught.value.error.code == "legacy_leave_coordination_retired"
+                assert "原案件的多月嫂排班" in caught.value.error.message
             with workflow_connection.cursor() as cursor:
                 cursor.execute("SELECT COUNT(*) AS n FROM scheduling_leave_substitution_batches WHERE case_no=%s", (CASE_NO,))
                 assert cursor.fetchone()["n"] == 0

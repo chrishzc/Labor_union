@@ -13,11 +13,8 @@ from typing import Any, Literal, Mapping
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from domains.case_import.refund_account import refund_fields_from_survey
-from domains.case_import.registration_details import normalize_id_number
+from domains.case_import.registration_details import HOLIDAY_DOUBLE_PAY_SURVEY_FIELD, normalize_holiday_double_pay, normalize_id_number
 from shared_kernel.validation import require_canonical_text, require_positive_integer
-
-
-HOLIDAY_DOUBLE_PAY_SURVEY_FIELD = "三節假日是否願意支付雙倍薪水"
 
 
 class ProvisionalRegistrationIssue(StrEnum):
@@ -86,13 +83,15 @@ def build_provisional_registration_candidate(
     optional = _optional_payload(intent)
     survey_details = dict(_survey_details(intent.survey_details))
     survey_details["特殊計費:胎數"] = _required_multi_birth_count(survey_details)
-    if (
-        HOLIDAY_DOUBLE_PAY_SURVEY_FIELD in survey_details
-        and survey_details[HOLIDAY_DOUBLE_PAY_SURVEY_FIELD] not in ("是", "否")
-    ):
-        raise ProvisionalRegistrationDomainError(
-            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, "三節假日雙倍薪水意願須選擇是或否。"
-        )
+    if HOLIDAY_DOUBLE_PAY_SURVEY_FIELD in survey_details:
+        try:
+            survey_details[HOLIDAY_DOUBLE_PAY_SURVEY_FIELD] = normalize_holiday_double_pay(
+                survey_details[HOLIDAY_DOUBLE_PAY_SURVEY_FIELD]
+            )
+        except ValueError:
+            raise ProvisionalRegistrationDomainError(
+                ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, "三節假日雙薪意願須選擇是、否或未填。"
+            ) from None
     client = {
         "name": name,
         "phone": phone,

@@ -24,7 +24,7 @@
 - primary: `ui_react/src/components/LineNotificationWorkbench.tsx`
   - `ui_react/src/components/LineCardCopyEditor.tsx` — 整張卡片標題／自由說明／按鈕集中編輯、插入顯示資料及同次儲存，不接收 provider actions。
   - `ui_react/src/components/LineMessageFlow.tsx`、`ui_react/src/components/LineMessageFlow.css` — 全頁流程呈現元件，由聚焦測試驗證流程節點說明。通知工作台使用左側直式流程導覽。
-  - `ui_react/src/adapters/line_configuration/line_message_flow_adapter.ts` — 提供流程分類和順序，引用正式 descriptor／template，解析 current ID 與 enabled／流程控制呈現；「寄送案件資訊」引用單一整包公版。
+  - `ui_react/src/adapters/line_configuration/line_message_flow_adapter.ts` — 提供流程分類和順序，引用正式 descriptor／template，解析 current ID 與 enabled／流程控制呈現；「寄送案件資訊」引用單一整包公版。開工、延期衝突節點指向原案人工排班。
   - `ui_react/src/components/LineMessagePreviewWorkspace.tsx` — 即時公版預覽、abort／generation 與 display-only Flex／carousel renderer。
   - `ui_react/src/api/line_notification_rules/line_message_preview_client.ts` — authenticated closed preview catalog／subjects／preview transport。
   - `subsystems/line/message_preview.py` — LINE-owned typed preview contracts、純渲染協調與移除可執行 action 的 projection。
@@ -33,7 +33,7 @@
   - `subsystems/line/message_copy_catalog.py` — 明列目前內建訊息的虛擬 genesis、卡片欄位與共用純替換，保留動態區塊及舊工作快照。
   - `infrastructure/mysql/line_message_copy.py` — 借用原 connection 的設定 reader；不另開 writer／commit。
   - shared dependency: `subsystems/line/service_start_day.py` — 開工群組問候與第一期款提醒共用純文字組裝；代班／群組日期公版明列指定日期及月嫂欄位。
-- `subsystems/line/service_start_messages.py` — 開始服務階段代班徵詢與步驟 5 案件群組小幫手選單、確認開工日、雙方合意延期、專員協助及客戶常見疑問標準回答之純組裝與預設文案。
+- `subsystems/line/service_start_messages.py` — 服務中換人意願詢問與步驟 5 案件群組小幫手選單、確認開工日、雙方合意延期、專員協助及客戶常見疑問標準回答之純組裝與預設文案。
   - `infrastructure/mysql/line_message_preview_repository.py` — readonly transaction、參數化分頁、owner facts 與既有付款 source 轉接。
   - `api/routes/line_message_preview.py`
   - `api/schemas/line_message_preview.py`

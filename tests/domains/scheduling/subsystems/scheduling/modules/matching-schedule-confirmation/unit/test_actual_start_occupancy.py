@@ -109,9 +109,9 @@ def test_actual_start_repository_checks_prospective_second_start_before_order_wr
     from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
     cursor = _Cursor(None, other_actual)
     repository = MySqlOrderActualStartRepository(SimpleNamespace(cursor=lambda: cursor))
-    candidate = SimpleNamespace(case_no="CURRENT", new_actual_start_date=DAY, assignments=ASSIGNMENTS)
+    candidate = SimpleNamespace(case_no="CURRENT", assignments=ASSIGNMENTS)
     if blocked:
         with pytest.raises(ValueError, match="actual_start_staff_schedule_conflict"):
-            repository.validate_replacement_availability(candidate, lock=True)
+            repository.validate_replacement_availability(candidate, actual_start_date=DAY, lock=True)
     else:
-        repository.validate_replacement_availability(candidate, lock=True)
+        repository.validate_replacement_availability(candidate, actual_start_date=DAY, lock=True)

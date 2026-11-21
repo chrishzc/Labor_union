@@ -71,7 +71,7 @@ def _require_request_identity(request_id: int, payload_request_id: int) -> None:
 
 def _customer_defer_principal(line_id_token: str):
     _mobile_admin_context(line_id_token, LineCapability.REVIEW_DECIDE)
-    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請使用請假與代班待辦。'})
+    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請由月嫂在原案件群組提議雙方合意延期。'})
 
 
 def _coordination_context(

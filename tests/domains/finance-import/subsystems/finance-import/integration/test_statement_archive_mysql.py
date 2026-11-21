@@ -31,7 +31,10 @@ def client_for(connection):
 
 @pytest.mark.parametrize("bank", ["sinopac", "taishin"])
 @pytest.mark.parametrize("direction", ["client_receipt", "staff_salary", "client_refund"])
-def test_only_formal_owner_evidence_enters_success_export_and_supplements_still_work(connection, bank, direction):
+@pytest.mark.parametrize("connection_collation", ["utf8mb4_unicode_ci", "utf8mb4_0900_ai_ci"])
+def test_only_formal_owner_evidence_enters_success_export_and_supplements_still_work(connection, bank, direction, connection_collation):
+    with connection.cursor() as cursor:
+        cursor.execute("SET collation_connection = %s", (connection_collation,))
     case, target = seed(connection, direction)
     repository = MySqlStatementArchiveRepository(connection)
     before = {row.identity for row in repository.export_rows()}
@@ -51,6 +54,8 @@ def test_only_formal_owner_evidence_enters_success_export_and_supplements_still_
     assert {row.identity for row in rows} == before | {f"bank:{receipt.row_id}"}
     assert unposted not in {row.identity for row in rows}
     assert all(row.source == "reconciled" and row.cases for row in rows)
+    posted = next(row for row in rows if row.identity == f"bank:{receipt.row_id}")
+    assert posted.purpose and posted.purpose != "已核銷款項"
     with client_for(connection) as client:
         response = client.get("/statements/export")
     assert response.status_code == 200

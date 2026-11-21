@@ -37,10 +37,29 @@ def test_non_citizen_service_choices_match_manual_case_form():
 def test_optional_holiday_preference_is_in_registration_fees_section():
     source = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
     before, fees = source.split("💰 5. 費用與同意條款", 1)
-    assert 'name="holiday_double_pay"' not in before
-    options = re.findall(r'<input[^>]*name="holiday_double_pay"[^>]*>', fees)
-    assert [re.search(r'value="([^"]+)"', option)[1] for option in options] == ["是", "否"]
-    assert all("required" not in option for option in options)
+    assert 'id="holiday_double_pay"' not in before
+    preference = re.search(r'<select[^>]*id="holiday_double_pay"[^>]*>(.*?)</select>', fees, re.S)
+    assert preference is not None
+    assert "required" not in preference[0]
+    assert 'data-survey="三節假日是否願意支付雙倍薪水"' in preference[0]
+    assert re.findall(r'<option value="([^"]*)">', preference[1]) == ["", "是", "否"]
+    serializer = source.split("// 處理具名的表單欄位", 1)[1].split("// 處理單選 Radio", 1)[0]
+    script = r'''
+const assert = require('node:assert/strict');
+const key = '三節假日是否願意支付雙倍薪水';
+for (const [value, expected] of [['是', {[key]: '是'}], ['否', {[key]: '否'}], ['', {}]]) {
+    const surveyDetails = {};
+    const document = {
+        querySelectorAll(selectors) {
+            assert(selectors.split(', ').includes('select[data-survey]'));
+            return [{value, getAttribute(name) { assert.equal(name, 'data-survey'); return key; }}];
+        },
+    };
+''' + serializer + r'''
+    assert.deepEqual(surveyDetails, expected);
+}
+'''
+    subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
 
 
 def test_runtime_copy_describes_review_instead_of_promising_matching():

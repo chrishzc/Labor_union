@@ -306,7 +306,7 @@ class MatchingSegmentContact:
 class CustomerRecommendationFollowup:
     case_no: str
     plan_id: int
-    status: Literal["contact_requested", "awaiting_signing", "reply_reminder", "response_failed"]
+    status: Literal["awaiting_signing", "reply_reminder", "response_failed"]
     reminder_due_at: datetime | None
     ticket_id: int | None
     failure_reason: str | None = None

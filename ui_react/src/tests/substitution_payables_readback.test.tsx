@@ -1,32 +1,10 @@
-/**
- * File: substitution_payables_readback.test.tsx
- * Description: 驗證代班完成後只讀取本案 Staff Payables，且失敗重試不會重送代班變更。
- */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { staffLeaveInboxClient } from '../api/scheduling/staff_leave_inbox_client';
-import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
-import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
-import { serviceStartClient } from '../api/scheduling/service_start_client';
+/** The historical Scheduling/Payroll/Staff Payables lineage remains a read-only contract. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sessionClient } from '../api/auth/session_client';
+import { transport } from '../api/shared/transport';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
-import { SchedulingPage } from '../pages/SchedulingPage';
-import {
-  LEAVE_APPLY_REQUEST,
-  LEAVE_ASSIGNMENTS,
-  LEAVE_CASE_NO,
-  LEAVE_OBSERVED_ASSIGNMENTS,
-  LEAVE_PREVIEW,
-  LEAVE_PREVIEW_REQUEST,
-  LEAVE_RECEIPT,
-} from './fixtures/scheduling/leave_substitution_contract_fixtures';
-
-const coreStageProjectionMocks = vi.hoisted(() => ({ loadAll: vi.fn() }));
-vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
-  loadAllCoreStageTimelines: coreStageProjectionMocks.loadAll,
-}));
+import { LEAVE_CASE_NO, LEAVE_RECEIPT } from './fixtures/scheduling/leave_substitution_contract_fixtures';
 
 function lineage(): SubstitutionPayablesLineage {
   return {
@@ -114,130 +92,34 @@ function lineage(): SubstitutionPayablesLineage {
   };
 }
 
-function seedObservedReceipt(): void {
-  leaveSubstitutionFlowStore.setQueryReady(LEAVE_CASE_NO, LEAVE_ASSIGNMENTS);
-  leaveSubstitutionFlowStore.setDraft(LEAVE_CASE_NO, LEAVE_PREVIEW_REQUEST);
-  leaveSubstitutionFlowStore.setPreviewReady(LEAVE_CASE_NO, LEAVE_PREVIEW);
-  leaveSubstitutionFlowStore.setApplyPending(LEAVE_CASE_NO, LEAVE_APPLY_REQUEST);
-  leaveSubstitutionFlowStore.setReceiptReceived(LEAVE_CASE_NO, LEAVE_RECEIPT);
-  leaveSubstitutionFlowStore.setObserved(LEAVE_CASE_NO, LEAVE_OBSERVED_ASSIGNMENTS);
-}
+describe('歷史代班應付款唯讀結果', () => {
+  beforeEach(() => sessionClient.setSession('synthetic-payables-token', {
+    id: 1, username: 'fixture', display_name: 'Fixture', role: 'system_admin',
+  }));
+  afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
 
-function renderLeaveWorkspace(): void {
-  window.location.hash = `#scheduling?tab=leave_sub&case_no=${LEAVE_CASE_NO}`;
-  render(<SchedulingPage />);
-}
+  it('讀回本案原人員與代班人員的應付義務', async () => {
+    const result = lineage();
+    const get = vi.spyOn(transport, 'get').mockResolvedValue({ success: true, message: 'ok', data: result });
+    await expect(substitutionPayablesLineageClient.query(LEAVE_CASE_NO, LEAVE_RECEIPT.batch_key)).resolves.toEqual(result);
+    expect(get).toHaveBeenCalledWith(
+      `/api/v1/orders/${encodeURIComponent(LEAVE_CASE_NO)}/leave-substitution/${encodeURIComponent(LEAVE_RECEIPT.batch_key)}/payables-lineage`,
+      expect.any(Object),
+    );
+    expect(result.items.map(item => item.payables_evidence?.amount_due_ntd)).toEqual([4800, 3200]);
+  });
 
-describe('Scheduling substitution Staff Payables readback', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    coreStageProjectionMocks.loadAll.mockResolvedValue({ items: [{ case_no: LEAVE_CASE_NO }] });
-    leaveSubstitutionFlowStore.clearAll();
-    vi.spyOn(serviceStartClient, 'todos').mockResolvedValue({items:[],total:0,page:1,page_size:25});
-    vi.spyOn(serviceStartClient, 'options').mockResolvedValue({items:[]});
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
-      items: [
-        { id: 11, name: '月嫂甲', phone: null, education: null },
-        { id: 12, name: '月嫂乙', phone: null, education: null },
-      ],
-      next_cursor: null,
+  it('回讀失敗後只重查 GET，再返回不完整投影及具體原因', async () => {
+    const result = { ...lineage(), authoritative_complete: false, blockers: ['staff_payables_projection_missing'] };
+    const get = vi.spyOn(transport, 'get')
+      .mockRejectedValueOnce(new ApiHttpError(503, 'STAFF_PAYABLES_UNAVAILABLE', '讀取暫時失敗'))
+      .mockResolvedValueOnce({ success: true, message: 'ok', data: result });
+    const post = vi.spyOn(transport, 'post');
+    await expect(substitutionPayablesLineageClient.query(LEAVE_CASE_NO, LEAVE_RECEIPT.batch_key)).rejects.toBeInstanceOf(Error);
+    await expect(substitutionPayablesLineageClient.query(LEAVE_CASE_NO, LEAVE_RECEIPT.batch_key)).resolves.toMatchObject({
+      authoritative_complete: false, blockers: ['staff_payables_projection_missing'],
     });
-    vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
-    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({
-      items: [{
-        case_no: LEAVE_CASE_NO, client_name: '去敏客戶甲', order_status: '服務中',
-        staff_name: '月嫂甲', identity_status: 'verified',
-        start_date: '2026-08-01', end_date: '2026-08-31',
-        actual_start_date: '2026-08-01', actual_end_date: null,
-        service_days: 20, total_employer_self_pay_payable: 10000,
-      }],
-      next_cursor: null,
-      etag: 'a'.repeat(64),
-    });
-    vi.spyOn(staffAssignmentOptionsClient, 'getStaffAssignmentOptions').mockResolvedValue([]);
-    vi.spyOn(leaveSubstitutionClient, 'listAssignments').mockResolvedValue([...LEAVE_ASSIGNMENTS]);
-    vi.spyOn(substitutionPayablesLineageClient, 'query').mockResolvedValue(lineage());
-  });
-
-  it('從排班月曆切換至代班待辦，顯示全案待辦與收合的歷史紀錄', async () => {
-    if (window.location.hash !== '#scheduling') {
-      await new Promise<void>((resolve) => {
-        window.addEventListener('hashchange', () => resolve(), { once: true });
-        window.location.hash = '#scheduling';
-      });
-    }
-    render(<SchedulingPage />);
-    expect(screen.queryByRole('link', { name: /開工、順延與代班待辦/ })).not.toBeInTheDocument();
-    expect(serviceStartClient.todos).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
-
-    await waitFor(() => expect(screen.getByText('目前沒有待處理事項。')).toBeVisible());
-    const todos = screen.getByRole('region', { name: '待處理事項' });
-    expect(todos).toHaveTextContent('0 件待處理');
-    expect(serviceStartClient.todos).toHaveBeenCalledWith(1, undefined);
-    const history = screen.getByText('歷史請假紀錄');
-    expect(todos.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText(/臨時代班請從原案件/)).toBeVisible();
-    expect(screen.queryByRole('heading', { name: '舊請假調度與回讀' })).not.toBeInTheDocument();
-    expect(history.closest('details')).not.toHaveAttribute('open');
-    fireEvent.click(history);
-    expect(await screen.findByText('此狀態沒有歷史請假紀錄。')).toBeVisible();
-  });
-
-  it('回讀原人員與代班人員的本案未結義務，不顯示其他案件或內部版本', async () => {
-    seedObservedReceipt();
-    const query = vi.spyOn(substitutionPayablesLineageClient, 'query').mockResolvedValue(lineage());
-
-    renderLeaveWorkspace();
-
-    const readback = await screen.findByRole('region', { name: '代班薪資與付款狀態' });
-    await waitFor(() => expect(query).toHaveBeenCalledWith(LEAVE_CASE_NO, LEAVE_RECEIPT.batch_key));
-    await waitFor(() => expect(readback).toHaveTextContent('月嫂甲'));
-    expect(readback).toHaveTextContent('月嫂乙');
-    expect(readback).toHaveTextContent('NT$ 3,200');
-    expect(readback).toHaveTextContent('NT$ 4,800');
-    expect(readback).toHaveTextContent('待付款');
-    expect(readback).toHaveTextContent('版本化血緣');
-    expect(readback).toHaveTextContent(`Scheduling v${LEAVE_RECEIPT.scheduling_version} → Payroll v${LEAVE_RECEIPT.payroll_version}`);
-    expect(readback).toHaveTextContent('不會發動付款、匯出或再次套用代班');
-  });
-
-  it('回讀失敗後只重查 Staff Payables，不重送代班或請假待辦 mutation', async () => {
-    seedObservedReceipt();
-    const query = vi.spyOn(substitutionPayablesLineageClient, 'query')
-      .mockRejectedValueOnce(new Error('temporary'))
-      .mockResolvedValue(lineage());
-    const review = vi.spyOn(staffLeaveInboxClient, 'review');
-
-    renderLeaveWorkspace();
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('代班已更新，暫時無法查詢薪資和應付款');
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢薪資與應付款' }));
-
-    await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText(/應付 NT\$ 3,200/)).toBeInTheDocument();
-    expect(review).not.toHaveBeenCalled();
-    expect(screen.getByText('🎉 代班變更已完成')).toBeInTheDocument();
-  });
-
-  it('應付款資料尚未更新時說明具體原因，提供本案核對與唯讀重查入口', async () => {
-    seedObservedReceipt();
-    const pending = lineage();
-    pending.authoritative_complete = false;
-    pending.items[0].blockers = ['staff_payables_projection_missing'];
-    const query = vi.spyOn(substitutionPayablesLineageClient, 'query')
-      .mockResolvedValueOnce(pending).mockResolvedValue(lineage());
-    const review = vi.spyOn(staffLeaveInboxClient, 'review');
-    const apply = vi.spyOn(leaveSubstitutionClient, 'apply');
-    renderLeaveWorkspace();
-    expect(await screen.findByRole('alert')).toHaveTextContent('代班薪資已建立，應付款尚未更新');
-    expect(screen.getByRole('link', { name: '核對本案月嫂應付款 →' }))
-      .toHaveAttribute('href', `#finance?tab=client-receipts&case_no=${LEAVE_CASE_NO}&from=workbench`);
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢薪資與應付款' }));
-    await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText(/月嫂應付款查詢資料尚未更新/)).not.toBeInTheDocument());
-    expect(review).not.toHaveBeenCalled();
-    expect(apply).not.toHaveBeenCalled();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(post).not.toHaveBeenCalled();
   });
 });

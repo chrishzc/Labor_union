@@ -201,7 +201,8 @@ def test_contract_delivery_detail_keeps_history_and_reports_retry_availability(m
         'matching': ('matching_schedule_recipient', 'matching_schedule_snapshot', 'candidate_contact_question',
                      'candidate_contact_answer', 'candidate_weekly_service_information', 'service_start_inquiry'),
         'finance': ('client_deposit_reminder', 'client_deposit_settled', 'manual_client_payment_receipt',
-                    'manual_payment_overdue_reminder', 'client_second_payment_reminder', 'client_second_payment_settled'),
+                    'manual_payment_overdue_reminder', 'client_second_payment_reminder', 'client_second_payment_settled',
+                    'client_payment_initial_reminder', 'client_payment_automatic_followup'),
         'order': ('order_service_start_day','order_service_start_day_response','order_service_completion'),
         'assignment': ('manual_service_day_log_reminder', 'service_start_schedule'),
         'group_invitation': ('service_start_invitation',),
@@ -260,6 +261,64 @@ def test_incompatible_category_and_source_returns_zero_without_an_unfiltered_rea
     response=client.get('/api/v1/line/tasks',params={'category':'review','source_type':'finance'})
     assert response.status_code==200 and response.json()['data']['total']==0 and application.calls==[]
     assert client.get('/api/v1/line/tasks',params={'category':'not-a-category'}).status_code==422
+
+
+@pytest.mark.parametrize('filters,expected_ids', [
+    ({}, [7, 8, 9]),
+    ({'category': 'reminder'}, [8, 9]),
+    ({'source_type': 'finance'}, [8, 9]),
+    ({'category': 'reminder', 'source_type': 'finance'}, [8, 9]),
+])
+def test_payment_reminder_sources_survive_later_pages_and_finance_filters(
+    monkeypatch, filters, expected_ids,
+) -> None:
+    records = (
+        _record(),
+        replace(_record(), task_id=LineDeliveryTaskId(8),
+                source_aggregate_type='client_payment_initial_reminder'),
+        replace(_record(), task_id=LineDeliveryTaskId(9),
+                source_aggregate_type='client_payment_automatic_followup'),
+    )
+    queries = []
+
+    class Reader(_Application):
+        def list(self, query, actor):
+            self.calls.append('list')
+            queries.append(query)
+            selected = tuple(record for record in records if (
+                not query.source_aggregate_types
+                or record.source_aggregate_type in query.source_aggregate_types
+            ))
+            start = (query.page - 1) * query.page_size
+            return LineDeliveryAdminPage(
+                selected[start:start + query.page_size], len(selected),
+                query.page, query.page_size,
+            )
+
+    application = Reader()
+    client = _client(monkeypatch, application)
+    observed_ids = []
+    for page in range(1, len(expected_ids) + 2):
+        response = client.get('/api/v1/line/tasks', params={
+            **filters, 'page': page, 'page_size': 1,
+        })
+        assert response.status_code == 200
+        data = response.json()['data']
+        assert data['total'] == len(expected_ids)
+        assert data['page'] == page
+        items = data['items']
+        assert len(items) == (1 if page <= len(expected_ids) else 0)
+        observed_ids.extend(item['task_id'] for item in items)
+        assert all(item['source_type'] == 'finance' for item in items if item['task_id'] in (8, 9))
+        for denied in ('U-secret', 'CASE-secret', 'provider-secret', 'payload_json'):
+            assert denied not in response.text
+
+    assert observed_ids == expected_ids
+    assert application.calls == ['list'] * (len(expected_ids) + 1)
+    if filters:
+        for query in queries:
+            assert {'client_payment_initial_reminder', 'client_payment_automatic_followup'} <= set(query.source_aggregate_types)
+            assert 'customer_service_ticket' not in query.source_aggregate_types
 
 
 def test_scheduling_leave_notification_projects_to_bounded_assignment_label(

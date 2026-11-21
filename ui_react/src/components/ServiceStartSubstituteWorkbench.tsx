@@ -4,8 +4,7 @@ import { serviceStartClient, type ServiceStartView, type StartCommand, type Hand
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import './ServiceStartSubstituteWorkbench.css';
 
-interface Props {caseNo?:string;requestId?:number;onCompleted?:()=>Promise<void>;title?:string;scope?:'service-start'|'schedule-changes';useScheduleSaveLabel?:boolean}
-interface Pending {id:number;action:'inquire'|'invite'|'dates'|'defer';body:StartCommand;observeOnly?:boolean}
+interface Pending {id:number;action:'inquire'|'invite'|'dates';body:StartCommand;observeOnly?:boolean}
 const storageKey=(id:number)=>`service-start-command:${id}`;
 const willingness={pending:'等待月嫂回覆',willing:'願意代班',unwilling:'無法代班'};
 const invitationLabels:Record<string,string>={pending:'待寄送',processing:'寄送中',sent:'已寄送',failed:'寄送失敗',cancelled:'已取消'};
@@ -71,63 +70,23 @@ export function ServiceHandoverWorkbench({caseNo,assignmentId}:{caseNo:string;as
   </section>;
 }
 
-export function ServiceStartSubstituteWorkbench({caseNo,requestId,onCompleted,title='服務開始、延期與代班待辦',scope,useScheduleSaveLabel=false}:Props) {
-  const [page,setPage]=useState(1);
-  const [total,setTotal]=useState(0);
-  const [items,setItems]=useState<ServiceStartView[]>([]);
-  const [error,setError]=useState('');
-  const [loading,setLoading]=useState(true);
-  const [options,setOptions]=useState<{staff_id:number;name:string}[]>([]);
-  const generation=useRef(0);
-  const refresh=useCallback(async()=>{
-    const current=++generation.current;
-    setLoading(true);setError('');
-    try {
-      if(requestId!==undefined) {
-        setItems([]);setTotal(0);
-        const item=await serviceStartClient.detail(requestId);
-        if(current!==generation.current)return;
-        if(item.request_id!==requestId || (caseNo && item.case_no!==caseNo))throw new Error('指定需求與案件不一致，請從通知事項重新開啟。');
-        setItems([item]);setTotal(1);
-        if(item.workflow_kind!=='leave'){
-          const staff=await serviceStartClient.options();if(current===generation.current)setOptions(staff.items);
-        }
-        return;
-      }
-      const result=await serviceStartClient.todos(page,caseNo);
-      if(current!==generation.current)return;
-      const recovered:ServiceStartView[]=[];
-      for(let i=0;i<sessionStorage.length;i++) {
-        const key=sessionStorage.key(i);
-        if(!key?.startsWith('service-start-command:')) continue;
-        const id=Number(key.split(':')[1]);
-        if(!Number.isSafeInteger(id) || result.items.some(item=>item.request_id===id)) continue;
-        const item=await serviceStartClient.detail(id);
-        if(current!==generation.current)return;
-        if(!caseNo || item.case_no===caseNo) recovered.push(item);
-      }
-      const loadedItems=[...result.items,...recovered];
-      setItems(loadedItems);setTotal(result.total);
-      if(result.items.length===0 && page>1 && result.total>0) setPage(Math.max(1,Math.ceil(result.total/25)));
-      if(loadedItems.some(item=>item.workflow_kind!=='leave')){
-        const staff=await serviceStartClient.options();if(current===generation.current)setOptions(staff.items);
-      }
-    } catch(e) {if(current===generation.current)setError(e instanceof Error?e.message:'代班待辦載入失敗。');}
-    finally {if(current===generation.current)setLoading(false);}
-  },[page,caseNo,requestId]);
-  useEffect(()=>{void refresh();return()=>{generation.current++;};},[refresh]);
-  const visibleItems=items.filter(item=>scope===undefined || (item.workflow_kind==='service_start')===(scope==='service-start'));
-  return <section className="service-start-workbench" aria-label={title}>
-    <header><h2>{title}</h2>{scope===undefined && !loading && !error && <span>{total} 件待處理</span>}<button type="button" disabled={loading} onClick={()=>void refresh()}>重新查詢代班待辦</button></header>
-    {error && <p role="alert">{error}</p>}
-    {loading && <p role="status">正在查詢…</p>}
-    {!loading && !error && visibleItems.length===0 && <p>目前沒有待處理事項。</p>}
-    {visibleItems.map(item=><SubstituteCard key={item.request_id} initial={item} options={options} saveSchedule={item.workflow_kind==='service_start' && (useScheduleSaveLabel || scope==='service-start')} onCompleted={async()=>{if(requestId===undefined)setTotal((await serviceStartClient.todos(page,caseNo)).total);await onCompleted?.();}}/>)}
-    {total>25 && <nav aria-label="代班待辦分頁"><button type="button" disabled={page===1 || loading} onClick={()=>setPage(p=>p-1)}>上一頁</button><span>{page} / {Math.ceil(total/25)}</span><button type="button" disabled={page*25>=total || loading} onClick={()=>setPage(p=>p+1)}>下一頁</button></nav>}
+export function ServiceStartSubstituteWorkbench({ initial }: { initial: ServiceStartView }) {
+  const [options, setOptions] = useState<{ staff_id: number; name: string }[]>([]);
+  useEffect(() => {
+    let current = true;
+    if (initial.status !== 'applied') {
+      void serviceStartClient.options().then(result => {
+        if (current) setOptions(result.items);
+      }).catch(() => undefined);
+    }
+    return () => { current = false; };
+  }, [initial]);
+  return <section className="service-start-workbench" aria-label="服務中換人">
+    <SubstituteCard key={initial.request_id} initial={initial} options={options} />
   </section>;
 }
 
-function SubstituteCard({initial,options,onCompleted,saveSchedule=false}:{initial:ServiceStartView;options:{staff_id:number;name:string}[];onCompleted?:()=>Promise<void>;saveSchedule?:boolean}) {
+function SubstituteCard({initial,options}:{initial:ServiceStartView;options:{staff_id:number;name:string}[]}) {
   const [item,setItem]=useState(initial);
   const [observed,setObserved]=useState(false);
   const mounted=useRef(true);
@@ -138,8 +97,7 @@ function SubstituteCard({initial,options,onCompleted,saveSchedule=false}:{initia
   const [keyword,setKeyword]=useState('');
   const [found,setFound]=useState<typeof options|null>(null);
   const search=async()=>{setBusy(true);setError('');try{setFound((await serviceStartClient.options(keyword)).items);}catch(e){setError(e instanceof Error?e.message:'人選查詢失敗。');}finally{setBusy(false);}};
-  const [start,setStart]=useState(initial.workflow_kind==='handover'?initial.requested_start_date??initial.proposed_start_date??'':initial.proposed_start_date??initial.requested_start_date??'');
-  const [end,setEnd]=useState('');
+  const [start,setStart]=useState(initial.requested_start_date??initial.proposed_start_date??'');
   const [pending,setPending]=useState<Pending|null>(()=>{
     try {const value=sessionStorage.getItem(storageKey(initial.request_id));return value?JSON.parse(value) as Pending:null;} catch {return null;}
   });
@@ -179,7 +137,6 @@ function SubstituteCard({initial,options,onCompleted,saveSchedule=false}:{initia
         const controller=new AbortController();observation.current=controller;
         await verifyCompletedAssignment(result,initial,controller.signal);
         if(controller.signal.aborted || !mounted.current) return;
-        await onCompleted?.();
         if(controller.signal.aborted || !mounted.current) return;
         setObserved(true);
       }
@@ -205,7 +162,6 @@ function SubstituteCard({initial,options,onCompleted,saveSchedule=false}:{initia
         const controller=new AbortController();observation.current=controller;
         await verifyCompletedAssignment(result,initial,controller.signal);
         if(controller.signal.aborted || !mounted.current) return;
-        await onCompleted?.();
         if(controller.signal.aborted || !mounted.current) return;
         setObserved(true);
         savePending(null);
@@ -215,19 +171,13 @@ function SubstituteCard({initial,options,onCompleted,saveSchedule=false}:{initia
     finally{inFlight.current=false;if(mounted.current) setBusy(false);}
   };
   const frozen=busy || pending!==null || item.status==='applied';
-  const leave=item.workflow_kind==='leave';
-  const handover=item.workflow_kind==='handover';
   const handoverDates=(item.handover_dates??[]).filter(day=>day>=start);
-  const scheduleTarget=new URLSearchParams({case:item.case_no,work:'service',substitute:String(item.request_id)});
   return <article className="service-start-card"><h3>案件 {item.case_no}</h3>
-    <p>原月嫂：{item.staff_name} · {handover?'服務中換人':leave?'延期／代班待辦':'客戶希望開始日：'+(item.requested_start_date??'尚待工會確認')}</p>
-    {leave && <p>原服務日：{item.leave_dates.map(d=>d.original_date).join('、')}</p>}
-    {handover && <p>原區段剩餘服務日：{item.handover_dates.join('、')}</p>}
+    <p>原月嫂：{item.staff_name} · 服務中換人</p>
+    <p>原區段剩餘服務日：{item.handover_dates.join('、')}</p>
     {item.conflict_message && <p role="status">{item.conflict_message}</p>}
     {item.status==='applied'?(observed?<><strong>正式排班已完成</strong><p>開始日：{item.result?.actual_start_date} · 第一期款期限：{item.result?.first_payment_due_date}</p>
-      {item.result?.assignments.map((assignment,index)=><p key={index}>{assignment.staff_name}：{assignment.service_dates.join('、')}</p>)}</>:<p>排班已處理，尚未確認最新結果。{(!pending || leave) && <button type="button" disabled={busy} onClick={()=>void refresh()}>查詢排班結果</button>}</p>):leave
-      ? <a href={`#order-workbench-v2?${scheduleTarget}`}>前往多月嫂排班</a>
-      : <>
+      {item.result?.assignments.map((assignment,index)=><p key={index}>{assignment.staff_name}：{assignment.service_dates.join('、')}</p>)}</>:<p>排班已處理，尚未確認最新結果。{!pending && <button type="button" disabled={busy} onClick={()=>void refresh()}>查詢排班結果</button>}</p>):<>
       <p>選定代班月嫂：{item.selected_staff_name??'尚未選定'} · {item.willingness?willingness[item.willingness]:'請先選人並詢問意願'}</p>
       {item.proposed_start_date && <p>需替代區段：{item.proposed_start_date} ～ {item.proposed_end_date}</p>}
       {(!item.selected_staff_id || item.willingness==='unwilling' || choosing) && <fieldset disabled={frozen}>
@@ -235,21 +185,19 @@ function SubstituteCard({initial,options,onCompleted,saveSchedule=false}:{initia
         <label>月嫂姓名<input aria-label="搜尋月嫂姓名" value={keyword} maxLength={50} onChange={e=>setKeyword(e.target.value)}/></label>
         <button type="button" onClick={()=>void search()}>搜尋代班月嫂</button>
         <label>代班月嫂<select aria-label="代班月嫂" value={staffId} onChange={e=>setStaffId(e.target.value)}><option value="">請選擇月嫂</option>{(found??options).filter(o=>o.staff_id!==item.staff_id).map(o=><option key={o.staff_id} value={o.staff_id}>{o.name}</option>)}</select></label>
-        {!handover && <><label>需替代開始日<input type="date" value={start} onChange={e=>setStart(e.target.value)}/></label>
-        <label>需替代結束日<input type="date" value={end} onChange={e=>setEnd(e.target.value)}/></label></>}
-        <button type="button" disabled={!staffId || (!handover && (!start || !end || end<start))} onClick={()=>run('inquire',{staff_id:Number(staffId),start_date:handover?item.handover_dates[0]:start,end_date:handover?item.handover_dates.at(-1):end})}>詢問該月嫂意願</button>
+        <button type="button" disabled={!staffId || item.handover_dates.length === 0} onClick={()=>run('inquire',{staff_id:Number(staffId),start_date:item.handover_dates[0],end_date:item.handover_dates.at(-1)})}>詢問該月嫂意願</button>
       </fieldset>}
-      {item.selected_staff_id && (handover || item.willingness!=='willing') && !choosing && <button type="button" disabled={frozen} onClick={()=>setChoosing(true)}>改問其他月嫂</button>}
+      {item.selected_staff_id && !choosing && <button type="button" disabled={frozen} onClick={()=>setChoosing(true)}>改問其他月嫂</button>}
       <p>邀請：{item.invitation_status?(invitationLabels[item.invitation_status]??'待查核'):'尚未寄送'} · 加入狀態：{item.joined?'已加入原案件群組':'待加入'}</p>
       {item.willingness==='willing' && !item.joined && <button type="button" disabled={frozen || ['pending','processing','sent'].includes(item.invitation_status??'')} onClick={()=>run('invite')}>寄送本案群組邀請連結</button>}
       <button type="button" disabled={busy} onClick={()=>void refresh()}>重新查詢加入狀態</button>
-      {item.willingness==='willing' && item.joined && !choosing && <fieldset disabled={frozen}><legend>{handover?'記錄雙方已協調的交接日':'人員填寫實際服務日期'}</legend>
-        <label>{handover?'交接日':'實際服務開始日'}<input type="date" value={start} onChange={e=>setStart(e.target.value)}/></label>
-        {handover && <><p>交接日起接任 {handoverDates.length} 個服務日：{handoverDates.join('、')}</p><p>儲存後更新剩餘排班與帳務，已服務日期及已付款紀錄保留，日期表交付原案件群組。</p></>}
-        <button type="button" disabled={!start || (handover && handoverDates.length===0)} onClick={()=>run('dates',{start_date:start})}>{handover?'儲存交接日並更新排班與帳務':saveSchedule?'儲存班表':'儲存並更新排班'}</button>
+      {item.willingness==='willing' && item.joined && !choosing && <fieldset disabled={frozen}><legend>記錄雙方已協調的交接日</legend>
+        <label>交接日<input type="date" value={start} onChange={e=>setStart(e.target.value)}/></label>
+        <p>交接日起接任 {handoverDates.length} 個服務日：{handoverDates.join('、')}</p><p>儲存後更新剩餘排班與帳務，已服務日期及已付款紀錄保留，日期表交付原案件群組。</p>
+        <button type="button" disabled={!start || handoverDates.length===0} onClick={()=>run('dates',{start_date:start})}>儲存交接日並更新排班與帳務</button>
       </fieldset>}
     </>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {pending && !leave && <p>這筆操作結果尚未確認。<button type="button" disabled={busy} onClick={()=>void command(pending)}>{pending.observeOnly?'查詢排班結果':'確認原操作結果'}</button></p>}
+    {pending && <p>這筆操作結果尚未確認。<button type="button" disabled={busy} onClick={()=>void command(pending)}>{pending.observeOnly?'查詢排班結果':'確認原操作結果'}</button></p>}
   </article>;
 }

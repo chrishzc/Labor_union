@@ -13,6 +13,8 @@ import pytest
 from fastapi import HTTPException
 
 from api.routes import service_date_confirmation as routes
+
+
 from domains.orders.lifecycle import (
     OrderLifecycleRootFacts,
     OrderLifecycleStatus,
@@ -848,3 +850,19 @@ def test_arrangement_lifecycle_snapshot_keeps_the_confirmed_actual_start_for_con
     snapshot=_lifecycle_payload(repository.command)
     assert snapshot['actual_start_date']=='2026-09-06'
     assert repository.command.candidate.business_date==date(2026,10,1)
+
+
+@pytest.mark.parametrize("code, clue", [
+    ("office_schedule_contract_completion_blocked", "完約"),
+    ("office_schedule_accepted_plan_blocked", "接受"),
+    ("office_schedule_signed_archive_blocked", "已簽 PDF"),
+    ("office_schedule_confirmed_dates_blocked", "預計服務日期"),
+])
+def test_office_schedule_prerequisite_errors_name_the_missing_fact(code, clue):
+    with pytest.raises(HTTPException) as caught:
+        routes._raise_value_error(ValueError(code), CorrelationId("office-prerequisite"))
+    assert caught.value.status_code == 409
+    error = caught.value.detail["error"]
+    assert error["code"] == code
+    assert error["category"] == "domain_blocked"
+    assert clue in error["message"]

@@ -24,7 +24,6 @@ from infrastructure.mysql.payroll_terms_writer import (
     persist_actual_start_rate_snapshot_carry, persist_payroll_rate_snapshots, persist_payroll_terms_impact,
 )
 from infrastructure.mysql.scheduling_replacement_writer import persist_scheduling_replacement
-from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
 from infrastructure.mysql.staff_payout_repository import query_staff_funding_portions
 from infrastructure.mysql.staff_overpayment_recovery_repository import MySqlStaffOverpaymentRecoveryRepository
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -40,7 +39,6 @@ from subsystems.orders.official_service_date_correction_workflow import (
     OfficialDateReceipt,
     OfficialDateSelection,
     MonetaryBlocker,
-    SubstituteRequestLink,
 )
 from subsystems.orders.terms_workflow import PayrollImpactPersistenceCommand
 from subsystems.staff_payables.overpayment_recovery import (
@@ -168,16 +166,6 @@ class MySqlOfficialServiceDateCorrectionRepository:
 
     def load_attribution(self, case_no: str, change, *, lock: bool):
         return self._load_attribution_facts(case_no, change, lock=lock)
-
-    def load_substitute_request(self, case_no: str, link: SubstituteRequestLink, *, lock: bool) -> tuple[int, tuple[date, ...]]:
-        return MySqlServiceStartRepository(self._connection).pending_leave_attribution(
-            case_no, link.request_id, link.expected_version, lock=lock,
-        )
-
-    def complete_substitute_request(self, case_no: str, link: SubstituteRequestLink, *, actor: str, key: str) -> None:
-        service_start = MySqlServiceStartRepository(self._connection)
-        service_start.complete(link.request_id, service_start.effective_schedule_result(case_no), actor, key,
-                               enqueue_group_schedule=False)
 
     def load_funding_review(self, case_no: str, *, lock: bool):
         return self._load_attribution_facts(case_no, None, lock=lock)

@@ -40,7 +40,7 @@
   - `ui_react/src/api/scheduling/candidate_contact_pool_client.ts` — weekly GET 讀保存日期；同一路徑 POST Preview 接受當次日期，經 Orders Preview 驗證後零寫入投影每週時數。
   - `api/routes/matches.py` — 正式推薦包讀取受控履歷 PDF，經共用 LINE 圖片服務逐頁轉圖，與確認卡同一次寄送。客戶履歷下載入口回 410。
   - `subsystems/line/candidate_contact_postback_application.py` — 將兩種候選意願交給 recipient-bound owner adapter，在原 UoW 提交意願與固定回覆紀錄後，由 Webhook 立即 Reply。按 webhook identity 冪等，失敗不補 Push。
-  - `subsystems/scheduling/matching_notification_application.py`、`subsystems/line/matching_postback_application.py` — 客戶推薦回覆依 `line-event:{event_id}` 先確認收件，背景從 Inbox 處理決策及客服；新版寄送停用前包互動。
+  - `subsystems/scheduling/matching_notification_application.py`、`subsystems/line/matching_postback_application.py` — 客戶接受推薦依 `line-event:{event_id}` 先確認收件，背景從 Inbox 處理決策；舊卡片 `contact_requested` 只在 Webhook Reply 提供 LINE 官方帳號聯絡指引。新版寄送停用前包互動。
   - `subsystems/line/candidate_contact_coordination_worker.py` — 取消尚未送出的退役協調、群組與重新詢問工作，並提供 24 小時未回覆的唯讀提醒；R-04 資格沿用既有 case gate。
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
 - `subsystems/scheduling/matching_coordination_workflow.py` — 舊 Preview／ApplyZeroCandidateAlternative 回 typed retired error，不再產生固定協調通知；一般零候選確認／歷史查詢保留。
@@ -81,7 +81,6 @@
 - outbound: `scheduling/waiting-deposit-lock` — 人工或 LINE 的正式客戶接受回覆，在原 UoW 借用 canonical 自動保留；先取得人員占用 mutex，current 日期齊備才保存唯一等待訂金鎖，衝突與配對回覆一同 rollback。
 - outbound: `scheduling/service-before-replacement` — 已提交 R-04 收據綁定 current 零指派 generation 時，訂單成立案件可由原候選及客戶確認 writer 續辦；不回寫 Orders lifecycle，不復用舊推薦的客戶決定。
 - outbound: `external-integration/line` — 候選整包以一筆 `line_delivery_tasks` 投遞，`info_1_sent` 的 `information_package` payload 標記用於整包回讀。事件鍵、任務 ID、回覆驗證與跟進沿既有來源，既有逐份紀錄保留。
-- outbound: `customer-service` — 推薦協助借用既有 create-or-append ticket writer；`subsystems/line/matching_postback_application.py` 將後續留言轉交同一客服需求，不建立 escalation 或群組通知。
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
 - outbound: `orders/orders` — case/lifecycle boundary.
 - outbound: `orders/controlled-reopen` — 借用目前解除取消的重開收據及其取消、排班收據判定重新媒合資格；`infrastructure/mysql/replacement_matching_query.py` 統一候選查詢／寫入、推薦與客戶確認的開放條件及資料待核對原因，不改寫 Orders 狀態或歷史收據。

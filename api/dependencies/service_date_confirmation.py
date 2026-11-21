@@ -3,6 +3,7 @@
 from functools import partial
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.db.external_staff_completion_port import MySqlExternalStaffCompletionPort
 from infrastructure.mysql.matching_schedule_confirmation_repository import (
     MySqlMatchingScheduleConfirmationRepository,
 )
@@ -68,7 +69,8 @@ def get_historical_restart_schedule_save():
 def get_office_schedule_save():
     connection = get_connection()
     try:
-        yield partial(save_office_schedule, connection, build_assignment_plan_application)
+        yield partial(save_office_schedule, connection, build_assignment_plan_application,
+                      commitments=MySqlExternalStaffCompletionPort(connection))
     finally:
         connection.close()
 
@@ -76,6 +78,7 @@ def get_office_schedule_save():
 def get_office_schedule_preview():
     connection = get_connection()
     try:
-        yield partial(preview_office_schedule, connection)
+        yield partial(preview_office_schedule, connection,
+                      commitments=MySqlExternalStaffCompletionPort(connection))
     finally:
         connection.close()

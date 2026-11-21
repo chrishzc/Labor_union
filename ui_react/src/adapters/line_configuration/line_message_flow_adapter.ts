@@ -74,10 +74,10 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     ] },
     { title: '開始服務', nodes: [
       { id: 'group-helper-menu', title: '群組小幫手選單（月嫂專屬控制台）', delivery: ['reply'], ids: ['helper-menu-card', 'helper-menu-completed'], alternatives: true, summary: '月嫂在案件群組輸入「工會」或「小幫手」，系統以 Reply 回覆選單。正式完工後，本案月嫂重新叫出選單即可看到「滿意度調查問卷」。' },
-      { id: 'confirm-start-date', title: '確認開工日', delivery: ['reply'], ids: ['helper-confirm-start-card', 'helper-confirm-start-completed'], summary: '月嫂或客戶由原生日期滾輪發起約定開工日提議，系統回覆開工確認單；防自提自審（提案方點同意靜默不反應），由對方確認後單一 UoW 自動完成排班並更新一期款期限；點擊重新選擇發送取消通知。正式開工後選單自動隱藏此項。' },
+      { id: 'confirm-start-date', title: '確認開工日', delivery: ['reply'], ids: ['helper-confirm-start-card', 'helper-confirm-start-completed'], summary: '月嫂或客戶提議開工日，由對方確認後保存正式排班與一期款期限。遇到檔期衝突時，群組回覆原因，由工會人員從原案件調整排班。正式開工後選單隱藏此項。' },
       { id: 'opening-day-greeting', title: '開工當天群組問候', delivery: ['automatic'], ids: ['payment-first-greeting', 'payment-first-reminder'], alternatives: true, summary: '開工當天向案件群組發送一則純文字問候。第一期款尚未結清時，在同一則文字附上繳款提醒。' },
-      { id: 'service-schedule', title: '服務排程', delivery: ['reply'], ids: ['helper-schedule-unconfirmed', 'service-start-result'], relatedIds: ['service-start-inquiry', 'staff-leave-completed'], summary: '以 7 欄排班日曆卡片呈現（圖例標註多月嫂區段與固定排休日，精簡直觀）；未開工時提示預期排程或先確認開工日，開工後供雙方查看已服務天數、剩餘天數與排休日（純 Reply 回覆，0 Push 額度）。' },
-      { id: 'mutual-postponement', title: '雙方合意延期', delivery: ['reply'], ids: ['helper-postponement-card', 'helper-postponement-completed'], summary: '僅限本案月嫂由 Flex URI Action 免費開啟（客戶操作回覆阻擋提示）；LIFF 嚴格鎖定本案、阻擋客戶開啟，重用後台日曆樣式支援多天成對調整且天數守恆；無衝突送出並經客戶同意後單一 UoW 更新排班（防自提自審，客戶重新協調回覆取消通知）。' },
+      { id: 'service-schedule', title: '服務排程', delivery: ['reply'], ids: ['helper-schedule-unconfirmed', 'service-start-result'], summary: '以 7 欄排班日曆卡片呈現多月嫂區段與固定排休日。未開工時提示預期排程或先確認開工日，開工後供雙方查看已服務天數、剩餘天數與排休日。' },
+      { id: 'mutual-postponement', title: '雙方合意延期', delivery: ['reply'], ids: ['helper-postponement-card', 'helper-postponement-completed'], summary: '本案月嫂在 LIFF 選擇原服務日及補班日。客戶同意時重查檔期，無衝突才更新排班。遇到衝突時保留原班表，群組回覆原因，可重新協調日期或聯繫工會。' },
       { id: 'staff-assistance', title: '案件群組留言', internal: true, summary: '需要工會協助時，由月嫂或客戶在原案件群組留言。' },
       { id: 'group-guidelines', title: '客戶常見疑問', delivery: ['reply'], ids: ['helper-guidelines-card', 'helper-faq-ingredients', 'helper-faq-hours', 'helper-faq-subsidy'], summary: '宣導排程修改須事前合意、配合政府補助不提前解約、請假採合意延期補班；內建常見客戶疑問（食材採買、服務時段、補助撥款），月嫂可一鍵由系統 Reply 代發工會標準回答。支援於後台調整卡片文案、問題選項與標準回答。' },
     ] },

@@ -261,6 +261,7 @@ class LeaveSubstitutionWorkflow:
         self._clock = clock or SystemBusinessClock()
 
     def preview(self, request: LeaveSubstitutionPreviewRequest) -> LeaveSubstitutionPreview:
+        self._require_current_request(request)
         facts = self._repository.load_for_preview(request.case_no, request.intent)
         linked = _resolve_linked_preview(self._linked_request_resolver, request)
         _validate_linked_staff_relation(request, facts, linked)
@@ -308,6 +309,7 @@ class LeaveSubstitutionWorkflow:
                 replay_evidence.claim_state,
                 replay_evidence,
             )
+        self._require_current_request(request)
         preflight = _canonical_staff_ids(
             self._repository.preflight_impacted_staff_ids(
                 request.case_no,
@@ -337,6 +339,12 @@ class LeaveSubstitutionWorkflow:
         if evidence.facts is None:
             _raise_replay_integrity(request, "fresh command facts are missing")
         return self._apply_fresh(request, command_fingerprint, preflight, evidence.facts, linked)
+
+    @staticmethod
+    def _require_current_request(request):
+        if request.linked_request is not None:
+            raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT,
+                                  "legacy_leave_coordination_retired", "請從原案件的多月嫂排班調整。")
 
     def _apply_fresh(self, request, command_fingerprint, preflight, facts, linked):
         _validate_linked_staff_relation(request, facts, linked)

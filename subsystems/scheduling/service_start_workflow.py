@@ -112,9 +112,12 @@ class ServiceStartWorkflow:
         replay = self.repository.replay_submission(submission, lock=True)
         if replay is not None:
             return replay
+        if submission.decision.value != 'accepted':
+            raise self._coordination_retired()
         subject = self.repository.lock_subject(submission)
-        request_id = self.repository.create_submission(submission, subject)
-        if submission.decision.value == 'accepted':
+        self.repository.arrangement_savepoint()
+        try:
+            request_id = self.repository.create_submission(submission, subject)
             self._arrange(
                 request_id,
                 submission.start_date,
@@ -122,6 +125,9 @@ class ServiceStartWorkflow:
                 submission.key,
                 enqueue_group_schedule=enqueue_group_schedule,
             )
+        except ServiceStartConflict:
+            self.repository.rollback_arrangement()
+            raise
         return self.repository.view(request_id, staff_id=submission.staff_id, lock=True)
 
     def leave_cases(self, staff_id):
@@ -146,8 +152,11 @@ class ServiceStartWorkflow:
         replay = self.repository.replay_leave(submission)
         if replay is not None:
             return replay
-        request_id = self.repository.create_leave(submission)
-        if submission.decision == 'defer':
+        if submission.decision != 'defer':
+            raise self._coordination_retired()
+        self.repository.arrangement_savepoint()
+        try:
+            request_id = self.repository.create_leave(submission)
             self._arrange(
                 request_id,
                 submission.dates[0].new_date,
@@ -155,6 +164,9 @@ class ServiceStartWorkflow:
                 submission.key,
                 enqueue_group_schedule=enqueue_group_schedule,
             )
+        except ServiceStartConflict:
+            self.repository.rollback_arrangement()
+            raise
         return self.repository.view(request_id, staff_id=submission.staff_id, lock=True)
 
     def todos(self, page=1, page_size=25, case_no=None):
@@ -180,27 +192,31 @@ class ServiceStartWorkflow:
             return result
 
     def inquire(self, request_id, staff_id, start_date, end_date, version, actor, key):
+        payload = (request_id, staff_id, str(start_date), str(end_date), version, actor)
         with self.units() as unit:
             self.repository.lock_command(request_id, (staff_id,))
-            replay = self.repository.command_replay('inquire', key, (request_id, staff_id, str(start_date), str(end_date), version, actor))
-            if replay is None:
-                self.repository.inquire(request_id, staff_id, start_date, end_date, version, actor, key)
-                self.repository.save_command('inquire', key, request_id, (request_id, staff_id, str(start_date), str(end_date), version, actor))
+            replay = self.repository.command_replay('inquire', key, payload)
+            if replay is not None:
+                return self.repository.view(request_id, lock=True)
+            self.repository.require_handover_command(request_id)
+            self.repository.inquire(request_id, staff_id, start_date, end_date, version, actor, key)
+            self.repository.save_command('inquire', key, request_id, payload)
             result = self.repository.view(request_id,lock=True)
-            if replay is None:
-                unit.commit()
+            unit.commit()
             return result
 
     def invite(self, request_id, version, actor, key):
+        payload = (request_id, version, actor)
         with self.units() as unit:
             self.repository.lock_command(request_id)
-            replay = self.repository.command_replay('invite', key, (request_id, version, actor))
-            if replay is None:
-                self.repository.invite(request_id, version, actor, key)
-                self.repository.save_command('invite', key, request_id, (request_id, version, actor))
+            replay = self.repository.command_replay('invite', key, payload)
+            if replay is not None:
+                return self.repository.view(request_id, lock=True)
+            self.repository.require_handover_command(request_id)
+            self.repository.invite(request_id, version, actor, key)
+            self.repository.save_command('invite', key, request_id, payload)
             result = self.repository.view(request_id,lock=True)
-            if replay is None:
-                unit.commit()
+            unit.commit()
             return result
 
     def save_dates(self, request_id, start_date, version, actor, key, date_changes=None):
@@ -211,49 +227,53 @@ class ServiceStartWorkflow:
         with self.units() as unit:
             self.repository.lock_command(request_id)
             replay = self.repository.command_replay('dates', key, payload)
-            if replay is None:
-                if self.repository.is_leave_request(request_id, lock=True):
-                    raise ServiceStartConflict("leave_substitute_dates_retired", "請從原案件的多月嫂排班辦理代班。")
-                self.repository.require_joined_candidate(request_id, version)
-                self.repository.record_leave_dates(request_id, date_changes)
-                self.repository.record_candidate_date(request_id,start_date)
-                self._arrange(request_id, start_date, actor, key)
-                self.repository.save_command('dates', key, request_id, payload)
+            if replay is not None:
+                return self.repository.view(request_id, lock=True)
+            self.repository.require_handover_command(request_id, dates=True)
+            self.repository.require_joined_candidate(request_id, version)
+            if date_changes is not None:
+                raise ServiceStartConflict('leave_result_required', '交接只接受交接日。')
+            self.repository.record_candidate_date(request_id,start_date)
+            self.repository.arrangement_savepoint()
+            self._arrange(request_id, start_date, actor, key, handover=True)
+            self.repository.save_command('dates', key, request_id, payload)
             result = self.repository.view(request_id,lock=True)
-            if replay is None:
-                unit.commit()
+            unit.commit()
             return result
 
     def save_defer_dates(self, request_id, dates, version, actor, key):
         payload = (request_id, tuple((str(d.original_date), str(d.new_date)) for d in dates), version, actor)
-        with self.units() as unit:
+        with self.units():
             self.repository.lock_command(request_id)
             replay = self.repository.command_replay('defer', key, payload)
-            if replay is None:
-                self.repository.require_pending(request_id, version)
-                self.repository.record_leave_dates(request_id, dates, defer=True)
-                self._arrange(request_id, dates[0].new_date, actor, key)
-                self.repository.save_command('defer', key, request_id, payload)
-            result = self.repository.view(request_id,lock=True)
-            if replay is None:
-                unit.commit()
-            return result
+            if replay is not None:
+                return self.repository.view(request_id, lock=True)
+            raise self._coordination_retired()
 
     def record_willingness_in_current_unit_of_work(self, token, line_user_id, willingness, event_key):
         return self.repository.record_willingness(token, line_user_id, willingness, event_key)
 
-    def _arrange(self, request_id, start_date, actor, key, *, enqueue_group_schedule: bool = True):
-        # A canonical business occupancy conflict becomes an exception work item.
-        # Infrastructure and stale errors still abort the complete transaction.
-        self.repository.arrangement_savepoint()
+    @staticmethod
+    def _coordination_retired():
+        return ServiceStartConflict('service_start_coordination_retired', '請從原案件的多月嫂排班調整。')
+
+    def _arrange(self, request_id, start_date, actor, key, *, enqueue_group_schedule: bool = True, handover: bool = False):
         try:
             result = self.arrangement.apply(request_id, start_date, actor, key)
         except Exception as error:
             if not self.arrangement.is_occupancy_conflict(error):
                 raise
-            self.repository.rollback_arrangement()
-            self.repository.mark_substitute_required(request_id, error)
-            return
+            if handover:
+                self.repository.rollback_arrangement()
+                self.repository.mark_handover_conflict(request_id)
+                return
+            if isinstance(error, ServiceStartConflict):
+                raise
+            detail = getattr(error, 'error', None)
+            raise ServiceStartConflict(
+                getattr(detail, 'code', None) or 'staff_occupancy_conflict',
+                getattr(detail, 'message', None) or '月嫂檔期衝突，請聯繫工會調整本案排班。',
+            ) from error
         if result is not None:
             self.repository.complete(
                 request_id,

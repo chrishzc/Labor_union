@@ -232,8 +232,6 @@ class OfficialDateRepository(Protocol):
     def load_attribution(self, case_no: str, change: ServiceAttributionChange, *, lock: bool): ...
     def replay_attribution(self, key: str, command_fingerprint: str, *, lock: bool = False) -> OfficialDateReceipt | None: ...
     def persist_attribution(self, command: SchedulingReplacementCommand, preview: ServiceAttributionPreview) -> OfficialDateReceipt: ...
-    def load_substitute_request(self, case_no: str, link: SubstituteRequestLink, *, lock: bool) -> tuple[int, tuple[date, ...]]: ...
-    def complete_substitute_request(self, case_no: str, link: SubstituteRequestLink, *, actor: str, key: str) -> None: ...
     def load_funding_review(self, case_no: str, *, lock: bool): ...
     def replay_funding_review(self, case_no: str, key: str, digest: str, *, lock: bool = False): ...
     def persist_funding_review(self, review: AttributionFundingReview, *, actor: ActorContext, key: IdempotencyKey,
@@ -255,6 +253,7 @@ class OfficialServiceDateCorrectionWorkflow:
         return replace(self._repository.load(case_no), history=self._repository.load_history(case_no))
 
     def preview_attribution(self, case_no: str, change: ServiceAttributionChange) -> ServiceAttributionPreview:
+        self._require_current_attribution(change)
         return self._prepare_attribution(case_no, change, lock=False)
 
     def apply_attribution(self, case_no: str, change: ServiceAttributionChange, *,
@@ -275,13 +274,18 @@ class OfficialServiceDateCorrectionWorkflow:
         if replay is not None:
             return replay
         with self._unit_of_work() as unit_of_work:
+            if change.substitute is not None:
+                # Keep the old request identity available for completed receipt readback.
+                replay = self._repository.replay_attribution(idempotency_key, command_fingerprint.value, lock=True)
+                if replay is not None:
+                    return replay
+                self._require_current_attribution(change)
             facts, terms, payable_versions, manual_amounts, funding = self._repository.load_attribution(case_no, change, lock=True)
             replay = self._repository.replay_attribution(idempotency_key, command_fingerprint.value, lock=True)
             if replay is not None:
                 return replay
             if (facts.order_version, facts.scheduling_version) != (expected_order_version, expected_scheduling_version):
                 raise ValueError("official_date_version_conflict")
-            self._validate_substitute_request(facts, change, lock=True)
             preview = _attribution_preview(facts, terms, payable_versions, change, manual_amounts, funding)
             if preview.fingerprint.value != preview_fingerprint:
                 raise ValueError("official_date_preview_stale")
@@ -295,32 +299,19 @@ class OfficialServiceDateCorrectionWorkflow:
                 preserve_leave_occupancy=True,
             )
             receipt = self._repository.persist_attribution(command, preview)
-            if change.substitute is not None:
-                self._repository.complete_substitute_request(case_no, change.substitute, actor=actor, key=idempotency_key)
             unit_of_work.commit()
             return receipt
 
     def _prepare_attribution(self, case_no, change, *, lock):
         facts, terms, payable_versions, manual_amounts, funding = self._repository.load_attribution(case_no, change, lock=lock)
-        self._validate_substitute_request(facts, change, lock=lock)
         preview = _attribution_preview(facts, terms, payable_versions, change, manual_amounts, funding)
         self._repository.validate_availability(preview.scheduling, lock=lock)
         return preview
 
-    def _validate_substitute_request(self, facts: OfficialDateFacts, change: ServiceAttributionChange, *, lock: bool) -> None:
-        if change.substitute is None:
-            return
-        staff_id, original_dates = self._repository.load_substitute_request(facts.case_no, change.substitute, lock=lock)
-        if change.scope != "upcoming" or tuple(move.source_date for move in change.moves) != original_dates:
-            raise ValueError("service_attribution_substitute_dates_conflict")
-        source_staff = {assignment.assignment_id: assignment.staff_id for assignment in facts.assignments}
-        if any(
-            move.source_date != move.replacement_date
-            or source_staff.get(move.source_assignment_id) != staff_id
-            or move.staff_id == staff_id
-            for move in change.moves
-        ):
-            raise ValueError("service_attribution_substitute_dates_conflict")
+    @staticmethod
+    def _require_current_attribution(change: ServiceAttributionChange) -> None:
+        if change.substitute is not None:
+            raise ValueError("service_attribution_substitute_request_retired")
 
     def query_funding_review(self, case_no: str):
         loaded = self._repository.load_funding_review(case_no, lock=False)

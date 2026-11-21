@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Callable, Protocol
 
 from domains.contract_signing.external_signing import (
@@ -183,6 +183,28 @@ class FinalSigningPrerequisiteCommand:
     actor: ActorContext
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
+class ArchivedCommitmentDay:
+    matching_segment_id: int
+    staff_id: int
+    service_date: date
+
+
+@dataclass(frozen=True, slots=True)
+class ArchivedCommitmentCandidate:
+    case_no: str
+    matching_plan_id: int
+    days: tuple[ArchivedCommitmentDay, ...]
+
+
+class ArchivedCommitmentPort(Protocol):
+    def preview_archived_commitment(
+        self, case_no: str, *, for_update: bool = False,
+    ) -> ArchivedCommitmentCandidate | None: ...
+
+    def ensure_archived_commitment(self, command: FinalSigningPrerequisiteCommand) -> int: ...
 
 
 class FinalDocumentWorkflowError(RuntimeError):
@@ -754,6 +776,9 @@ def _utc(value: datetime) -> datetime:
 
 __all__ = [
     "ApplyFinalSignedContractUpload",
+    "ArchivedCommitmentCandidate",
+    "ArchivedCommitmentDay",
+    "ArchivedCommitmentPort",
     "FinalContractDocumentReadback",
     "FinalDocumentRepository",
     "FinalDocumentWorkflowError",

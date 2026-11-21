@@ -255,8 +255,11 @@ describe('saved demand application review', () => {
     const babyInfo = screen.getByRole('combobox', { name: '胎數' });
     expect(babyInfo).toBeRequired();
     expect(babyInfo).toHaveValue('');
-    const holidayPreference = screen.getByRole('combobox', { name: /三節假日.*雙倍薪水/ });
+    const holidayPreference = screen.getByRole('combobox', { name: /^三節假日雙薪意願/ });
     expect(holidayPreference).not.toBeRequired();
+    expect(holidayPreference).toHaveValue('');
+    fireEvent.change(holidayPreference, { target: { value: '是' } });
+    fireEvent.change(holidayPreference, { target: { value: '' } });
     expect(holidayPreference).toHaveValue('');
     fireEvent.change(holidayPreference, { target: { value: '否' } });
     expect(Array.from((babyInfo as HTMLSelectElement).options, option => option.value)).toEqual(['', '單胞胎', '雙胞胎']);

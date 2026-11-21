@@ -5,6 +5,8 @@ Description: 驗證 LINE 客戶臨時登記之身分證格式、非市民必填�
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from domains.case_import.provisional_registration import (
@@ -85,19 +87,20 @@ def test_non_citizen_candidate_keeps_merged_fields_and_refund_account_without_is
 
 
 @pytest.mark.parametrize("non_citizen", [False, True])
-@pytest.mark.parametrize("answer", [None, "是", "否"])
-def test_holiday_double_pay_preference_is_optional_and_preserved(non_citizen, answer):
-    from dataclasses import replace
-
+def test_holiday_double_pay_preference_is_optional_and_only_kept_in_survey(non_citizen):
     intent = _non_citizen_intent() if non_citizen else _intent(id_number=None)
     key = "三節假日是否願意支付雙倍薪水"
-    if answer is not None:
-        intent = replace(intent, survey_details={**intent.survey_details, key: answer})
-    survey = build_provisional_registration_candidate(intent).beclass_payload["survey_details"]
-    if answer is None:
-        assert key not in survey
-    else:
-        assert survey[key] == answer
+    baseline = build_provisional_registration_candidate(intent)
+    assert key not in baseline.beclass_payload["survey_details"]
+    for answer in (None, "是", "否"):
+        answered = replace(intent, survey_details={**intent.survey_details, key: answer})
+        candidate = build_provisional_registration_candidate(answered)
+        assert candidate.beclass_payload["survey_details"][key] == answer
+        assert candidate.client_payload == baseline.client_payload
+
+    invalid = replace(intent, survey_details={**intent.survey_details, key: "maybe"})
+    with pytest.raises(ProvisionalRegistrationDomainError, match="三節假日雙薪意願"):
+        build_provisional_registration_candidate(invalid)
 
 
 @pytest.mark.parametrize("service_time", [

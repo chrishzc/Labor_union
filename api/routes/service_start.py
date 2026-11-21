@@ -18,7 +18,7 @@ def call(operation):
     try:
         return operation()
     except ServiceStartConflict as error:
-        status = 410 if error.code == 'leave_substitute_dates_retired' else 409
+        status = 410 if error.code in {'leave_substitute_dates_retired', 'service_start_coordination_retired'} else 409
         raise typed_http_error(status,'conflict',error.code,error.message,'service-start') from error
     except (ValueError, LookupError) as error:
         raise typed_http_error(409,'domain_blocked',str(error),'目前資料無法完成安排，請重新查詢並核對。','service-start') from error

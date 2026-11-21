@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 
@@ -88,7 +88,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
   });
 
   it.each(['formal_service', 'service_completion', 'confirmed_service_dates'])(
-    '在 %s 同頁顯示服務日期、排班結果與待辦', async (stage) => {
+    '在 %s 同頁顯示服務日期、排班結果與服務中換人入口', async (stage) => {
     const data = page();
     data.items[0]!.current_core_stage_code = stage;
     mocks.core.mockResolvedValue(data);
@@ -96,15 +96,21 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     await screen.findByRole('heading', { name: '現行服務日期' });
     expect(screen.getByText('日期操作入口')).toBeVisible();
     expect(screen.getByText('排班操作入口')).toBeVisible();
-    expect(screen.getAllByRole('region', { name: '服務開始、延期與代班待辦' })).toHaveLength(1);
+    const related = within(screen.getByRole('region', { name: '服務安排相關操作' }));
+    fireEvent.click(related.getByText('服務中換人', { selector: 'summary' }));
+    expect(await related.findByRole('link', { name: /服務中換人/ })).toHaveAttribute(
+      'href', `#scheduling?tab=handover&case_no=${CASE}&assignment_id=17`,
+    );
+    expect(screen.queryByRole('region', { name: '服務開始、延期與代班待辦' })).not.toBeInTheDocument();
+    expect(mocks.substitute).not.toHaveBeenCalled();
     expect(screen.queryByRole('navigation', { name: '服務安排步驟' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
   });
 
-  it('編輯既有多月嫂班表時收起現行服務日期與待辦，返回後恢復原區塊', async () => {
+  it('編輯既有多月嫂班表時收起現行服務日期與排班結果，返回後恢復原區塊', async () => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
     const title = await screen.findByRole('heading', { name: '現行服務日期' });
-    const tasks = screen.getByRole('region', { name: '服務開始、延期與代班待辦' });
+    const assignmentPlan = screen.getByText('排班操作入口');
     const openEditor = screen.getByRole('button', { name: '多月嫂排班' });
     await waitFor(() => expect(openEditor).toBeEnabled());
 
@@ -112,14 +118,16 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
 
     expect(await screen.findByRole('region', { name: '多月嫂排班' })).toBeVisible();
     expect(title).not.toBeVisible();
-    expect(tasks).not.toBeVisible();
+    expect(assignmentPlan).not.toBeVisible();
     expect(screen.queryByRole('heading', { name: '現行服務日期' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回服務安排' }));
 
     expect(screen.queryByRole('region', { name: '多月嫂排班' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '現行服務日期' })).toBe(title);
-    expect(screen.getByRole('region', { name: '服務開始、延期與代班待辦' })).toBe(tasks);
+    expect(screen.getByText('排班操作入口')).toBe(assignmentPlan);
+    expect(assignmentPlan).toBeVisible();
+    expect(screen.queryByRole('region', { name: '服務開始、延期與代班待辦' })).not.toBeInTheDocument();
   });
 
   it('訂單成立已有兩位正式排班時直接顯示各自月曆，返回後回讀不重新開啟', async () => {
@@ -150,23 +158,18 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(screen.queryByRole('region', { name: '多月嫂排班' })).not.toBeInTheDocument();
   });
 
-  it.each([CASE, 'OTHER-CASE'])('只以服務端核對的待辦日期在原案件開啟多月嫂排班（%s）', async (taskCase) => {
-    mocks.substitute.mockResolvedValue({ request_id: 32, case_no: taskCase, version: 4,
-      workflow_kind: 'leave', status: 'substitute_required', leave_dates: [{ original_date: '2099-09-02', new_date: '2099-09-03' }] });
+  it('同案人力配置開啟後續排班，無須讀取待辦或送出異動', async () => {
     mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [{
       assignment_id: 17, candidate_key: null, staff_id: 7, sequence: 1,
       assigned_start_date: '2099-09-01', assigned_end_date: '2099-09-02',
       official_service_dates: ['2099-09-01', '2099-09-02'], actual_hours: null, lineage_source_assignment_ids: [],
     }] });
-    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" substituteRequestId={32} onClose={vi.fn()} />);
-    expect(mocks.substitute).toHaveBeenCalledWith(32);
-    if (taskCase === CASE) {
-      expect(await screen.findByRole('region', { name: '多月嫂排班' })).toBeVisible();
-      expect(screen.getByText(/待代班日期：2099-09-02/)).toBeVisible();
-    } else {
-      expect(await screen.findByText(/這筆代班待辦已處理或與本案不符/)).toBeVisible();
-      expect(screen.queryByRole('region', { name: '多月嫂排班' })).not.toBeInTheDocument();
-    }
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" openUpcomingStaffing onClose={vi.fn()} />);
+    expect(await screen.findByRole('region', { name: '多月嫂排班' })).toBeVisible();
+    expect(screen.queryByText(/待代班日期/)).not.toBeInTheDocument();
+    expect(mocks.substitute).not.toHaveBeenCalled();
+    expect(mocks.previewAttribution).not.toHaveBeenCalled();
+    expect(mocks.applyAttribution).not.toHaveBeenCalled();
   });
 
   it.each([

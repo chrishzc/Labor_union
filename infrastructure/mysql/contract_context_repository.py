@@ -31,7 +31,10 @@ o.actual_end_date,c.id AS client_id,c.name AS client_name,c.phone AS client_phon
 c.city AS client_city,c.address AS client_address,c.identity_status AS client_identity_status,
 c.service_type,c.service_time,c.due_month,c.baby_info,c.delivery_type,c.residence_type,
 c.notes AS client_notes,o.custom_rest_dates,
-b.query_no AS beclass_query_no,b.survey_details,b.admin_notes AS beclass_admin_notes
+b.query_no AS beclass_query_no,b.birth_date AS client_birth_date,
+CASE WHEN JSON_VALID(b.survey_details) THEN
+NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(b.survey_details,'$."身分證字號"')),''),'null')
+END AS client_identity_card,b.survey_details,b.admin_notes AS beclass_admin_notes
 FROM orders o JOIN clients c ON c.case_no=o.case_no
 LEFT JOIN beclass_records b ON b.bound_case_no=o.case_no WHERE o.case_no=%s"""
 

@@ -494,7 +494,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
 
     fireEvent.change(screen.getByPlaceholderText('按月嫂姓名或編號...'), { target: { value: '不存在' } });
     fireEvent.click(screen.getByRole('button', { name: /🟡 待派單／排班緩衝期/ }));
-    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
+    expect(screen.queryByRole('button', { name: '代班待辦' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     fireEvent.click(screen.getByRole('button', { name: /排班月曆/ }));
     expect(calendarRequests(requests)).toHaveLength(initial + 2);
@@ -578,11 +578,11 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
+    expect(screen.queryByRole('button', { name: '代班待辦' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();
-    expect(screen.getByText(/臨時代班請從原案件/)).toBeInTheDocument();
+    expect(screen.queryByText('歷史請假紀錄')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled());

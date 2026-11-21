@@ -75,6 +75,7 @@
 - 首次確認與更正皆須 Preview／Apply（正常案件開工與代班流程依 [Scheduling §3.3 SSTART-01～08](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 自動同步並保存群組結果日曆；禁止以 `planned_start` 或預設日 fallback）。
 - **尚無有效正式 assignment（日期-only 路徑）**：僅更新 `actual_start_date` 與 `lifecycle_version`（Finance／Payroll／Scheduling 不存在時傳 `NULL`，不建空事件或假排班；此狀態不代表已開始服務）；若 Preview 後已有有效排班則回 typed conflict 關閉重取。
 - **已有有效正式 assignment**：須顯示逐段重建預覽，單一 Apply 同交易重建 assignments、正式服務日、`actual_end_date` 與 lifecycle，並由 Payroll adapter 一對一原值搬移 source assignment rate snapshot（source 缺漏回 integrity blocker）；過期日期與新確認日間不補造服務日；歷史重啟案依 [規格 27 §8](27_歷史訂單生命週期與服務天數帳務正式規格.md#8-重啟正常流程) 免除訂金／簽約前置直接進入服務中。
+- **更正日期的檔期基準**：Preview 與 Apply 的檔期檢查均使用本次送交 Orders 的新實際開始日。假日或排休可能使第一個正式服務日晚於該日期，不得改以首個服務日、原開始日或預定開始日推定檔期基準。Scheduling 候選只承載其既有排班事實；跨 owner 檢查由 Actual Start 流程明確提供當次日期。
 
 ### 3.6 Cancellation 與 Controlled Reopen
 
@@ -96,3 +97,9 @@
 1. 涵蓋全生命週期狀態轉移、`service_time_terms` 三欄缺漏 fail closed、跨日 offset 拒絕猜測、訂金於開工前後沖正之差異行為、已鎖定案退款不解鎖，以及完工後 `floor_fee_correction` 與 `official-service-dates` 守恆。
    服務中以每日 4 小時、30 天的測試案件驗證預設鎖定、逐次解除、直接改為每日 8 小時、調整總天數與替代班表、確認保存與回讀。核對有效日期、工時、客戶應付、月嫂薪資及既有收付紀錄，並涵蓋未解鎖、無權限、已完工、檔期或版本衝突的拒絕。
 2. 驗證 `AutoCompleteOrderService` 與 `leave-substitution` 搶鎖 CAS 衝突零部分寫入、取消與違約金全案結算及 `direction` enum 一致、代班不重開簽約與不影響原月嫂合法薪資。
+
+| 驗收 ID | S：情境與前提 | T：使用者任務 | A：可重現操作 | R：可觀察結果 |
+|---|---|---|---|---|
+| ACTUAL-START-REPLAN-01 | 已有正式排班、人員有效且新日期無檔期衝突；新開始日可為排休日。 | 更正實際開始日並核對逐段排班。 | 送出新日期 Preview，核對後 Apply，再重新讀取本案日期與正式排班。 | Preview 零寫入，檔期檢查使用送交日期；Apply 原子更新日期及排班，讀回與預覽一致，人員順序、服務日數及原費率快照保持既有契約。 |
+| ACTUAL-START-REPLAN-02 | 更正後的月嫂日期與其他案件的有效占用衝突。 | 確認更正是否可辦理。 | 送出 Preview，另驗證 Apply 提交前新增衝突的情境。 | 回傳可辨識的檔期衝突，無日期、排班或帳務部分寫入；畫面顯示拒絕原因。 |
+| ACTUAL-START-REPLAN-03 | Preview 完成後 Orders 或 Scheduling owner version 已變更。 | 提交先前核對的更正。 | 使用原 Preview 與版本 Apply，再重新查詢。 | 回傳 typed version／stale conflict，保留最新 owner 事實並要求重新核對；不得以重試或 generic 500 掩蓋衝突。 |

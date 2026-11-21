@@ -636,11 +636,11 @@ export function RegistrationApplications({ onEditStateChange, initialId, sourceC
               </label>
 
               <label className="full-width">
-                <span>若服務期間遇到三節假日（端午、中秋、除夕、初一、初二），是否願意支付雙倍薪水？（選填）</span>
+                <span>三節假日雙薪意願（選填）</span>
                 <select
                   value={manualForm.holiday_double_pay ?? ''}
-                  onChange={e => {
-                    const answer = e.currentTarget.value;
+                  onChange={event => {
+                    const answer = event.currentTarget.value;
                     setManualForm(prev => ({ ...prev, holiday_double_pay: answer === '是' || answer === '否' ? answer : undefined }));
                   }}
                   disabled={manualBusy}
@@ -649,6 +649,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, sourceC
                   <option value="是">是</option>
                   <option value="否">否</option>
                 </select>
+                <small>詢問端午、中秋、除夕、初一及初二服務時的雙薪意願。答案只作紀錄，不影響帳務。</small>
               </label>
 
               <label className="full-width">

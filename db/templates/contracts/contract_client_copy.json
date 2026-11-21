@@ -291,6 +291,18 @@
       "db_key": "phone",
       "requiredness": "required"
     },
+    "B179": {
+      "label": "甲方出生年月日 (B179)",
+      "db_table": "beclass_records.birth_date (Case Import typed projection)",
+      "db_key": "client_birth_date",
+      "requiredness": "conditional"
+    },
+    "D179": {
+      "label": "甲方身分證字號 (D179)",
+      "db_table": "beclass_records.survey_details (Case Import typed projection)",
+      "db_key": "client_identity_card",
+      "requiredness": "conditional"
+    },
     "B180": {
       "label": "甲方通訊地址 (B180)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",

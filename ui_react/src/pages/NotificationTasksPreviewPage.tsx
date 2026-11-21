@@ -21,14 +21,13 @@ const TASK_GROUPS = [
   { id: 'all', label: '全部事項', icon: Inbox },
   { id: 'review', label: '審核與協調', icon: ClipboardCheck },
   { id: 'reminder', label: '款項與群組', icon: Wallet },
-  { id: 'support', label: '系統與寄送異常', icon: ShieldCheck },
 ] as const;
 const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
 const PRIMARY:Record<NotificationSource,string> = {
   registration:'查看申請',identity:'審核身分綁定',
   staff_profile:'審核月嫂資料異動',import_fields:'前往客戶名冊修正',
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
-  followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',
+  followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理換人交接',
   deposit:'發送繳費提醒',payment_receipt:'前往帳務確認',group:'查看建群指令',overdue:'發送提醒',
   delivery:'查看寄送工作',runtime:'前往通知對象設定',
   notification_failure:'處理通知建立異常',

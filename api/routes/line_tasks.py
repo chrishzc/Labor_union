@@ -283,6 +283,7 @@ _SOURCE_TYPE_GROUPS = {
         "manual_client_payment_receipt",
         "manual_payment_overdue_reminder",
         "client_second_payment_reminder", "client_second_payment_settled",
+        "client_payment_initial_reminder", "client_payment_automatic_followup",
     ),
     LineDeliveryPublicSourceType.ASSIGNMENT: (
         "case_staff_assignment",

@@ -495,12 +495,14 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
 
         <!-- Section 5: 費用與同意條款 -->
         <div class="section-title">💰 5. 費用與同意條款</div>
-        <div class="form-group" role="group" aria-labelledby="holidayDoublePayLabel">
-            <div class="form-label" id="holidayDoublePayLabel">若服務期間遇到三節假日（端午、中秋、除夕、初一、初二），是否願意支付雙倍薪水？（選填）</div>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="holiday_double_pay" value="是" id="holidayDoublePayYes"><label for="holidayDoublePayYes">是</label></div>
-                <div class="radio-item"><input type="radio" name="holiday_double_pay" value="否" id="holidayDoublePayNo"><label for="holidayDoublePayNo">否</label></div>
-            </div>
+        <div class="form-group">
+            <label class="form-label" for="holiday_double_pay">三節假日雙薪意願（選填）</label>
+            <select class="form-input" id="holiday_double_pay" data-survey="三節假日是否願意支付雙倍薪水" aria-describedby="holidayDoublePayHint">
+                <option value="">未填</option>
+                <option value="是">是</option>
+                <option value="否">否</option>
+            </select>
+            <div class="form-hint" id="holidayDoublePayHint">詢問端午、中秋、除夕、初一及初二服務時的雙薪意願。答案只作紀錄，不影響帳務。</div>
         </div>
         <div class="form-group">
             <label class="form-label required">補助款退款銀行代號加分行</label>
@@ -1368,18 +1370,17 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             // 收集 survey_details
             let surveyDetails = {};
             
-            // 處理一般 text/textarea 的 survey 資料
-            document.querySelectorAll('input[data-survey], textarea[data-survey]').forEach(el => {
+            // 處理具名的表單欄位
+            document.querySelectorAll('input[data-survey], textarea[data-survey], select[data-survey]').forEach(el => {
                 if (el.value.trim()) {
                     surveyDetails[el.getAttribute('data-survey')] = el.value.trim();
                 }
             });
 
             // 處理單選 Radio 的 survey 資料 (透過 name)
-            const radioGroups = ['multi_birth_count', 'holiday_double_pay', 'breastfeed', 'needs_cooking', 'diet', 'veg_staff', 'alcohol', 'floor_fee', 'parking'];
+            const radioGroups = ['multi_birth_count', 'breastfeed', 'needs_cooking', 'diet', 'veg_staff', 'alcohol', 'floor_fee', 'parking'];
             const radioKeys = {
                 'multi_birth_count': '特殊計費:胎數',
-                'holiday_double_pay': '三節假日是否願意支付雙倍薪水',
                 'breastfeed': '哺乳方式：',
                 'needs_cooking': '是否需要下廚：',
                 'diet': '月子餐點調理喜好/飲食習慣：',

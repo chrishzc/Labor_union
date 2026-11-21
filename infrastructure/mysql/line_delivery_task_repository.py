@@ -467,12 +467,15 @@ class MySqlLineDeliveryTaskRepository:
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM line_delivery_tasks" + where, parameters)
             total_row = optional_row(cursor.fetchone()) or {"total": 0}
-            # Sort and paginate only IDs. A resume PNG in payload_snapshot can
-            # exceed MySQL's sort buffer by itself.
+            # Filter payload_snapshot in a non-merged derived table before sorting
+            # only (id, scheduled_at_utc). A resume PNG in payload_snapshot can
+            # exceed MySQL's sort buffer when filtered and sorted in the same query.
             cursor.execute(
                 f"SELECT {_ADMIN_COLUMNS} FROM line_delivery_tasks JOIN ("
-                f"SELECT id FROM line_delivery_tasks{where} "
-                "ORDER BY scheduled_at_utc DESC,id DESC LIMIT %s OFFSET %s"
+                f"SELECT /*+ NO_MERGE(filtered_tasks) */ filtered_tasks.id FROM ("
+                f"SELECT id, scheduled_at_utc FROM line_delivery_tasks{where}"
+                ") AS filtered_tasks "
+                "ORDER BY filtered_tasks.scheduled_at_utc DESC, filtered_tasks.id DESC LIMIT %s OFFSET %s"
                 ") AS task_page USING (id)",
                 [*parameters, query.page_size, offset],
             )
@@ -798,7 +801,8 @@ def _redact_invitation_payload(payload_json: str) -> str:
 
 
 _RETENTION_CANDIDATES_SQL = (
-    "SELECT task.id FROM line_delivery_tasks task WHERE task.processing_status IN ('sent','cancelled') "
+    "SELECT /*+ NO_MERGE(candidates) */ candidates.id FROM ("
+    "SELECT task.id, task.updated_at_utc FROM line_delivery_tasks task WHERE task.processing_status IN ('sent','cancelled') "
     "AND task.updated_at_utc<%s AND task.lease_owner IS NULL AND task.lease_acquired_at_utc IS NULL "
     "AND task.lease_expires_at_utc IS NULL AND COALESCE(task.error_code,'')<>'line_reply_outcome_uncertain' "
     "AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(task.payload_snapshot,'$._retention_expired')),'false')<>'true' "
@@ -807,8 +811,8 @@ _RETENTION_CANDIDATES_SQL = (
     "AND COALESCE((SELECT a.error_code FROM line_delivery_attempt_events a WHERE a.task_id=task.id "
     "ORDER BY a.attempt_number DESC LIMIT 1),'')<>'line_reply_outcome_uncertain' "
     "AND NOT EXISTS(SELECT 1 FROM line_notification_intents i WHERE i.delivery_task_id=task.id "
-    "AND i.intent_status<>CASE task.processing_status WHEN 'sent' THEN 'provider_accepted' ELSE 'cancelled' END) "
-    "ORDER BY task.updated_at_utc,task.id LIMIT %s"
+    "AND i.intent_status<>CASE task.processing_status WHEN 'sent' THEN 'provider_accepted' ELSE 'cancelled' END)"
+    ") AS candidates ORDER BY candidates.updated_at_utc, candidates.id LIMIT %s"
 )
 
 

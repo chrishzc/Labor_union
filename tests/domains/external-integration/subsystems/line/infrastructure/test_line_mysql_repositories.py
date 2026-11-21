@@ -290,7 +290,7 @@ def test_delivery_admin_projection_selects_only_contract_columns() -> None:
 
     assert [item.task_id.value for item in page.items] == [8, 7]
     admin_sql = cursor.executed[1][0]
-    assert "JOIN (SELECT id FROM line_delivery_tasks ORDER BY" in admin_sql
+    assert "JOIN (SELECT /*+ NO_MERGE(filtered_tasks) */ filtered_tasks.id FROM (SELECT id, scheduled_at_utc FROM line_delivery_tasks" in admin_sql
     for internal_column in (
         "payload_fingerprint",
         "idempotency_key",

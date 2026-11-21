@@ -25,8 +25,15 @@
     - 案件群組月嫂專屬小幫手選單（含【確認開工日】、【服務排程】、【雙方合意延期】、案件群組留言指引與【客戶常見疑問標準回答】）：月嫂輸入喚醒詞「工會」或「小幫手」及後續各步驟操作（確認單產出、雙方同意、排程查詢、舊協助按鈕的留言指引與標準回答）固定走 `line_webhook_reply` 同步回覆，全程 0 Push 額度消耗。
 - **安全觀察端點（Zero Commit／Zero Wakeup）**：
   - `GET /api/v1/line/configurations/{kind}/safe`（僅回傳 `kind`、`revision` 與 `state=empty | configured`，禁洩漏定義、URI 或任何 secret）。
-  - Delivery public masked query（限 allowlist 篩選與真實總數分頁，禁止以 `user_id`／payload／raw error 過濾或回傳）。
+  - Delivery public masked query（限 allowlist 篩選與真實總數分頁，禁止以 `user_id`／payload／raw error 過濾或回傳）。既有付款首次提醒 `client_payment_initial_reminder` 與自動追蹤 `client_payment_automatic_followup` 均投影為既有公開來源類別 `finance`，款項類別篩選與每頁回應使用相同來源資格。未知來源維持 typed `line_delivery_query_invalid_result`、`retryable=false`，不以略過該列或猜測類別交付不完整清單。
   - `GET /api/v1/line/identity/reviews/numbered`（真實 DB `COUNT + LIMIT/OFFSET` 分頁；待審隊列無自動逾期或時間升級，僅限具認證人員依 [身分管理規格](23_LINE身分管理與解除正式規格.md) 手動審核，legacy internal-key-only 審查端點回 `410 Gone`）。
+
+### 2.1 公開工作清單分頁驗收
+
+| 驗收 ID | S：情境與前提 | T：使用者任務 | A：可重現操作 | R：可觀察結果 |
+|---|---|---|---|---|
+| DELIVERY-QUERY-01 | 工作集合固定且跨越一頁，後頁含首次付款提醒及自動追蹤。 | 查看完整寄送紀錄及款項提醒。 | 依序查第一頁、第二頁、末頁與超出末頁，另查 `category=reminder`、`source_type=finance`。 | 合法提醒均呈現為 `finance`，各頁總數與同一資格集合一致，無工作重複或遺漏，超出末頁回空集合；Query 零寫入、零發送，回應持續遮罩敏感內容。 |
+| DELIVERY-QUERY-02 | 查詢結果含未定義的來源。 | 判斷清單是否完整可用。 | 查詢包含該工作的頁面。 | 整次 Query 回 typed unavailable，不洩漏 raw recipient、payload、來源內容或 provider detail，不送訊息、不改 task／receipt。 |
 
 ## 3. 服務群組綁定、待辦與代班邀請
 

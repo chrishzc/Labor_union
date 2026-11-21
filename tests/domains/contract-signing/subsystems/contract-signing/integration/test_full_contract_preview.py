@@ -69,6 +69,99 @@ def test_contract_context_uses_current_order_time_instead_of_legacy_client_text(
     assert _common_facts(case)["service_time"] == expected
 
 
+@pytest.mark.parametrize("birth_date,identity_card", [
+    (date(1990, 1, 2), "DEMO-IDENTITY"),
+    (None, None),
+])
+def test_client_contract_identity_fields_reach_the_real_workbook_and_fingerprint(birth_date, identity_card):
+    from infrastructure.mysql.contract_context_repository import MySqlContractContextRepository
+    from infrastructure.mysql.contract_full_preview_repository import _common_facts, _owner_values
+    from subsystems.contract_signing.full_contract_preview import projection_fingerprint
+
+    row = {"case_no": "CASE-IDENTITY", "client_birth_date": birth_date,
+           "client_identity_card": identity_card}
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def execute(self, sql, params):
+            assert params == ("CASE-IDENTITY",)
+            assert "b.birth_date AS client_birth_date" in sql
+            assert "身分證字號" in sql and "AS client_identity_card" in sql
+        def fetchone(self): return dict(row)
+
+    case = MySqlContractContextRepository(SimpleNamespace(cursor=Cursor)).load_case_facts("CASE-IDENTITY")
+    facts = _common_facts(case)
+    root = Path(__file__).resolve().parents[6]
+    content = render_contract_template(
+        template_path=root / "db/templates/contracts/contract_client_copy.xlsx",
+        mapping_path=root / "db/templates/contracts/contract_client_copy.json",
+        facts=facts,
+    )
+    book = load_workbook(BytesIO(content))
+    actual_birth = book.active["B179"].value
+    assert (actual_birth.date() if isinstance(actual_birth, datetime) else actual_birth) == birth_date
+    assert book.active["D179"].value == identity_card
+    book.close()
+    fingerprint = projection_fingerprint(_owner_values(facts, "client"))
+    for key, updated in (("client_birth_date", date(1991, 2, 3)),
+                         ("client_identity_card", "OTHER-DEMO-IDENTITY")):
+        assert projection_fingerprint(_owner_values({**facts, key: updated}, "client")) != fingerprint
+
+
+@pytest.mark.parametrize("scope,planned_hours,charge_days,expected_hours,expected_subsidy", [
+    ("client", None, 20, Decimal("180"), Decimal("40")),
+    ("client", Decimal("90"), 20, Decimal("90"), Decimal("40")),
+    ("client", None, 0, None, None),
+    ("staff", None, 20, None, None),
+])
+def test_client_contract_borrows_formal_service_hours_without_requiring_payroll(
+    monkeypatch, scope, planned_hours, charge_days, expected_hours, expected_subsidy,
+):
+    from contextlib import nullcontext
+    from infrastructure.mysql import contract_full_preview_repository as adapter
+    from domains.client_finance.obligation_planning import (
+        ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms,
+    )
+    from shared_kernel.money import MoneyNTD
+
+    case = {"case_no": "CASE-HOURS", "service_days": 20, "service_hours_per_day": 9,
+            "client_identity_status": "一般市民", "floor_fee": 0}
+    assignment = {"assignment_id": 18, "staff_id": 1, "status": "planned",
+                  "planned_hours": planned_hours}
+    finance = ClientFinanceTermsFacts(
+        "CASE-HOURS", 1, 9, MoneyNTD(0),
+        tuple(ClientChargeDay(date(2026, 12, 1) + timedelta(days=i), False) for i in range(charge_days)),
+        ClientPaymentTerms(5, MoneyNTD(300), date(2026, 11, 1), date(2026, 12, 1), None), (),
+    )
+    monkeypatch.setattr(adapter.MySqlContractContextRepository, "load_case_facts", lambda *_: case)
+    monkeypatch.setattr(adapter.MySqlContractContextRepository, "load_assignments", lambda *_: (assignment,))
+    monkeypatch.setattr(adapter, "_client_virtual_account", lambda *_: None)
+    monkeypatch.setattr(adapter, "select_order", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(adapter, "load_contract_client_finance_facts", lambda *_args, **_kwargs: finance)
+    for name in ("_load_client_email", "_load_approved_subsidy_claim"):
+        monkeypatch.setattr(adapter, name, lambda *_: None)
+    def unavailable_payroll(*_args):
+        raise ValueError("payroll_bootstrap_required")
+    monkeypatch.setattr(adapter, "load_preview_facts", unavailable_payroll)
+    repository = adapter.MySqlFullContractProjectionRepository(SimpleNamespace(cursor=lambda: nullcontext(None)))
+    projection = (repository.load_client_projection("CASE-HOURS") if scope == "client"
+                  else repository.load_staff_projection("CASE-HOURS", 18))
+    assert projection.facts.get("total_hours") == expected_hours
+    assert projection.facts.get("subsidy_hours") == expected_subsidy
+    if scope == "client":
+        root = Path(__file__).resolve().parents[6]
+        content = render_contract_template(
+            template_path=root / "db/templates/contracts/contract_client_copy.xlsx",
+            mapping_path=root / "db/templates/contracts/contract_client_copy.json",
+            facts=projection.facts,
+        )
+        book = load_workbook(BytesIO(content))
+        assert book.active["F25"].value == expected_hours
+        assert book.active["B28"].value == expected_subsidy
+        book.close()
+
+
 def test_formal_staff_obligation_does_not_hide_committed_contract_dates(monkeypatch):
     from infrastructure.mysql import contract_full_preview_repository as adapter
     from domains.client_finance.obligation_planning import (
@@ -876,7 +969,7 @@ def test_contract_templates_print_one_page_wide_without_horizontal_fragment_page
 
 def test_client_finance_coverage_projection_caps_citizen_subsidy_at_current_limit():
     facts = {
-        "identity_status": "補助市民",
+        "identity_status": "一般市民",
         "total_hours": 80,
         "service_hours_per_day": 8,
         "floor_fee": 0,

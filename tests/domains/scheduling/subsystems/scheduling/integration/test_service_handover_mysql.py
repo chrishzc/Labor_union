@@ -143,6 +143,14 @@ def test_invalid_handover_dates_preserve_schedule_and_all_money(http,day):
 def test_conflict_retains_todo_all_original_facts_and_can_change_candidate(http):
     case,staff,assignment=setup(http)
     item=ready(http,case,assignment,staff[1]);before=schedule(case);financial=money(case)
+    base['seed_legacy_pending'](case, staff[0][0], assignment_id=assignment)
+    base['seed_legacy_pending'](case, staff[0][0], assignment_id=assignment, execution={
+        'kind': 'leave-v1', 'decision': 'substitute',
+        'dates': [{'original_date': str(TODAY), 'new_date': None}],
+    })
+    page = checked(http.get(ROOT + '/todos', params={'case_no': case, 'page_size': 1}))
+    assert page['total'] == 1 and [row['request_id'] for row in page['items']] == [item['request_id']]
+    assert checked(http.get(ROOT + '/todos', params={'case_no': case, 'page_size': 1, 'page': 2}))['items'] == []
     write("INSERT INTO scheduling_staff_unavailability_blocks(staff_id,block_kind,start_date,end_date,status,reason,created_by) VALUES (%s,'long_leave',%s,%s,'effective','synthetic','synthetic')",(staff[1][0],TODAY,TODAY+timedelta(days=30)))
     result=checked(save(http,item)[0])
     assert result['status']=='substitute_required' and result['conflict_message']

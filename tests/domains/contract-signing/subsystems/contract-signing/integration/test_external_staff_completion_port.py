@@ -44,6 +44,102 @@ def test_existing_commitment_replays_and_borrowed_adapter_never_commits(monkeypa
     assert captured["finance_commands"]
 
 
+def _archive_port_fixture(monkeypatch, *, missing=None, commitment=None, terminal=False):
+    class Connection:
+        def __init__(self):
+            self.executions = []
+            self.commitment = commitment
+            self.commit_calls = self.rollback_calls = 0
+
+        def cursor(self):
+            connection = self
+            class Cursor:
+                lastrowid = 88
+                def __enter__(self): return self
+                def __exit__(self, *_): pass
+                def execute(self, sql, params=()):
+                    self.sql = sql
+                    connection.executions.append((sql, params))
+                    if sql.startswith("INSERT INTO precontract_service_commitments "):
+                        connection.commitment = {"id": 88, "terminal_event_id": None}
+                def fetchone(self):
+                    if "FROM precontract_service_commitments" in self.sql:
+                        if connection.commitment is None:
+                            return None
+                        return {**connection.commitment, "terminal_event_id": 1 if terminal else None}
+                    if "FROM confirmed_service_date_versions" in self.sql:
+                        return None if missing == "dates" else {"id": 7, "service_day_count": 2, "service_days": 2}
+                    assert "FROM orders" in self.sql
+                    return None if missing == "completion" else {"case_no": "CASE-001"}
+                def fetchall(self):
+                    if "FROM caregiver_matching_plan_segments" in self.sql:
+                        return [{"id": 11, "staff_id": 501, "assigned_start_date": date(2026, 8, 26),
+                                 "assigned_end_date": date(2026, 8, 27)}]
+                    assert "FROM confirmed_service_date_days" in self.sql
+                    return [{"service_date": date(2026, 9, 1)}, {"service_date": date(2026, 9, 3)}]
+            return Cursor()
+
+    class ArchiveRepository:
+        def __init__(self, connection): pass
+        def load_case_signing_context(self, case_no, *, for_update):
+            if missing == "plan": return None
+            return SimpleNamespace(matching_plan_id=9, staff_targets=(SimpleNamespace(matching_segment_id=11),))
+        def signed_archive(self, case_no, *, for_update):
+            return ("digest", {"files": [{"target": "client"}] + (
+                [] if missing == "archive" else [{"target": "staff:11"}]
+            )})
+
+    monkeypatch.setattr(module, "MySqlContractExternalSigningRepository", ArchiveRepository)
+    monkeypatch.setattr(module, "_commitment_service_days", lambda *_: pytest.fail("must use current confirmed dates"))
+    monkeypatch.setattr(module, "persist_client_finance_terms_impact", lambda *_: pytest.fail("must not write deposit"))
+    connection = Connection()
+    return connection, MySqlExternalStaffCompletionPort(connection)
+
+
+def test_archived_commitment_preview_and_borrowed_write_use_exact_confirmed_days(monkeypatch):
+    from subsystems.contract_signing.final_document_workflow import FinalSigningPrerequisiteCommand
+
+    connection, port = _archive_port_fixture(monkeypatch)
+    candidate = port.preview_archived_commitment("CASE-001")
+    assert [(day.staff_id, day.service_date) for day in candidate.days] == [
+        (501, date(2026, 9, 1)), (501, date(2026, 9, 3)),
+    ]
+    assert all(sql.startswith("SELECT ") for sql, _ in connection.executions)
+    command = FinalSigningPrerequisiteCommand("CASE-001", 9, ActorContext("test"),
+                                             IdempotencyKey("archive-office"), CorrelationId("archive-office"))
+    assert port.ensure_archived_commitment(command) == 88
+    assert port.ensure_archived_commitment(command) == 88
+    headers = [params for sql, params in connection.executions if sql.startswith("INSERT INTO precontract_service_commitments ")]
+    days = [params for sql, params in connection.executions if sql.startswith("INSERT INTO precontract_service_commitment_days ")]
+    assert len(headers) == 1
+    assert days == [(88, 11, 501, date(2026, 9, 1)), (88, 11, 501, date(2026, 9, 3))]
+    assert connection.commit_calls == connection.rollback_calls == 0
+    assert any(sql.endswith(" FOR UPDATE") for sql, _ in connection.executions)
+
+
+@pytest.mark.parametrize("missing,code", [
+    ("completion", "office_schedule_contract_completion_blocked"),
+    ("plan", "office_schedule_accepted_plan_blocked"),
+    ("archive", "office_schedule_signed_archive_blocked"),
+    ("dates", "office_schedule_confirmed_dates_blocked"),
+])
+def test_archived_commitment_missing_facts_reject_without_writing(monkeypatch, missing, code):
+    connection, port = _archive_port_fixture(monkeypatch, missing=missing)
+    with pytest.raises(ValueError, match=code):
+        port.preview_archived_commitment("CASE-001", for_update=True)
+    assert all(sql.startswith("SELECT ") for sql, _ in connection.executions)
+
+
+def test_archived_commitment_keeps_existing_and_does_not_revive_terminal(monkeypatch):
+    connection, port = _archive_port_fixture(monkeypatch, missing="archive", commitment={"id": 88})
+    assert port.preview_archived_commitment("CASE-001", for_update=True) is None
+    assert len(connection.executions) == 1
+    connection, port = _archive_port_fixture(monkeypatch, commitment={"id": 88}, terminal=True)
+    with pytest.raises(ValueError, match="office_schedule_commitment_blocked"):
+        port.preview_archived_commitment("CASE-001", for_update=True)
+    assert all(sql.startswith("SELECT ") for sql, _ in connection.executions)
+
+
 @pytest.mark.parametrize("scenario, expected", [
     ("free", ()), ("own_case", ()), ("outside_interval", ()),
     ("other_assignment", ("signing_staff_occupancy_conflict",)),

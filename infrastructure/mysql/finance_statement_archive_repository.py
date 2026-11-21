@@ -222,7 +222,7 @@ def _load_row_purposes(cursor, row_ids: tuple[int, ...], by_id: dict[int, dict])
                'government_subsidy' AS proof_source,
                b.direction AS entry_type,
                NULL AS obligation_type,
-               CAST(t.id AS CHAR) AS item_identity,
+               CAST(t.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS item_identity,
                0 AS ordinal
         FROM government_subsidy_transactions t
         JOIN finance_import_rows b ON b.id=t.finance_import_row_id
@@ -232,7 +232,7 @@ def _load_row_purposes(cursor, row_ids: tuple[int, ...], by_id: dict[int, dict])
                'government_subsidy' AS proof_source,
                b.direction AS entry_type,
                NULL AS obligation_type,
-               CAST(entry.id AS CHAR) AS item_identity,
+               CAST(entry.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS item_identity,
                0 AS ordinal
         FROM government_subsidy_period_entries entry
         JOIN finance_import_rows b ON b.id=entry.finance_import_row_id

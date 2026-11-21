@@ -95,7 +95,6 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
     .surface-list > .card { border-width:0 0 1px; border-radius:0; margin:0; padding:18px 4px; background:transparent; }
     #serviceStartTodos label { display:grid; gap:6px; margin:14px 0; }
     #serviceStartTodos button { margin:6px 0; }
-    #serviceStartTodos .substitute-schedule-link { display:inline-flex; align-items:center; min-height:44px; font-weight:700; color:var(--green-strong); }
     .multi-select { width:100%; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
     .multi-select summary { padding:12px; cursor:pointer; list-style-position:inside; }
     .multi-select-options { display:grid; gap:2px; max-height:220px; overflow:auto; padding:0 12px 12px; }
@@ -173,7 +172,7 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
         </div>
         <div id="reviews" class="surface-list"></div>
       </div>
-      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="serviceStartWorkstream"><span class="workstream-copy"><strong>服務開始、延期、代班與換人</strong><small id="serviceStartMeta">待處理 — 件</small></span><span class="workstream-count" id="serviceStartCount">—</span><span class="workstream-action">查看</span></button>
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="serviceStartWorkstream"><span class="workstream-copy"><strong>服務中換人</strong><small id="serviceStartMeta">待處理 — 件</small></span><span class="workstream-count" id="serviceStartCount">—</span><span class="workstream-action">查看</span></button>
       <div id="serviceStartWorkstream" class="workstream-panel hidden"><div id="serviceStartTodos" class="surface-list"></div></div>
       <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="customerRecommendationWorkstream">
         <span class="workstream-copy"><strong>客戶推薦確認與簽約</strong><small id="customerRecommendationMeta">待處理 — 件</small></span>
@@ -978,7 +977,7 @@ function focusNotificationItems(source,items) {
   notificationSelection.matched=found.length===1;
   return found;
 }
-const notificationGroups = {all:'全部事項',review:'審核與協調',reminder:'款項與日誌',support:'系統與寄送異常'};
+const notificationGroups = {all:'全部事項',review:'審核與協調',reminder:'款項與群組'};
 const notificationParents = new Map();
 function restoreNotificationPanels() {
   notificationSelection=null;
@@ -1834,16 +1833,14 @@ async function loadServiceStartTodos(){
   if(notificationVersion!==notificationSequence)return;
   setWorkstreamCount('serviceStartCount','serviceStartMeta',data.total,'待處理');
   renderPagination(root,{...data,pageSize:data.page_size,totalPages:Math.max(1,Math.ceil(data.total/data.page_size))},page=>{serviceStartPage=page;loadServiceStartTodos().catch(e=>showStatus(e.message,true));});
-  if(!data.items.length){const empty=document.createElement('p');empty.textContent='目前沒有排程衝突或代班待辦。';root.append(empty);return data.total;}
-  const choices=data.items.some(item=>item.workflow_kind!=='leave')
-    ? await postJson('/api/v1/line/mobile-admin/service-start/staff-options',{})
-    : {items:[]};
+  if(!data.items.length){const empty=document.createElement('p');empty.textContent='目前沒有待處理的換人交接。';root.append(empty);return data.total;}
+  const choices=await postJson('/api/v1/line/mobile-admin/service-start/staff-options',{});
   if(notificationVersion!==notificationSequence)return;
   data.items=focusNotificationItems('service_start',data.items);
-  for(const item of data.items) root.append(serviceStartTodoCard(item,choices.items,managementEntryUrl));
+  for(const item of data.items) root.append(serviceStartTodoCard(item,choices.items));
   return data.total;
 }
-function serviceStartTodoCard(initial,options,managementUrl){
+function serviceStartTodoCard(initial,options){
   let item=initial;let choosing=false;const card=document.createElement('article');card.className='surface-card';
   const body=document.createElement('div');const status=document.createElement('p');status.setAttribute('role','status');card.append(body,status);
   const commandKey='service-start-mobile-command:'+item.request_id;
@@ -1861,44 +1858,28 @@ function serviceStartTodoCard(initial,options,managementUrl){
   async function refresh(){busy=true;status.textContent='';render();try{item=await postJson('/api/v1/line/mobile-admin/service-start/'+item.request_id+'/query',{});}catch(error){status.textContent=error.message;}finally{busy=false;render();}}
   function render(){
     body.replaceChildren();const title=document.createElement('h3');title.textContent='案件 '+item.case_no;body.append(title);
-    const original=document.createElement('p');original.textContent='原月嫂：'+item.staff_name+(item.workflow_kind==='handover'?'｜服務中換人｜原區段剩餘服務日：'+item.handover_dates.join('、'):item.workflow_kind==='leave'?'｜原服務日：'+item.leave_dates.map(d=>d.original_date).join('、'):'｜希望開始日：'+(item.requested_start_date||'尚待工會確認'));body.append(original);
+    const original=document.createElement('p');original.textContent='原月嫂：'+item.staff_name+'｜原區段剩餘服務日：'+item.handover_dates.join('、');body.append(original);
     if(item.status==='applied'){const done=document.createElement('p');done.textContent='已完成正式排班｜開始日：'+item.result.actual_start_date+'｜第一期款期限：'+item.result.first_payment_due_date;body.append(done);for(const a of item.result.assignments){const dates=document.createElement('p');dates.textContent=a.staff_name+'：'+a.service_dates.join('、');body.append(dates);}return;}
-    const isHandover=item.workflow_kind==='handover';
     if(item.conflict_message){const p=document.createElement('p');p.textContent=item.conflict_message;body.append(p);}
-    if(item.workflow_kind==='leave'){
-      if(!managementUrl){
-        const unavailable=document.createElement('p');
-        unavailable.textContent='管理端連結暫時不可用。請登入管理端後從代班待辦開啟本案。';
-        body.append(unavailable);
-        return;
-      }
-      const link=document.createElement('a');
-      link.className='substitute-schedule-link';
-      link.textContent='前往多月嫂排班';
-      const route=new URLSearchParams({case:item.case_no,work:'service',substitute:String(item.request_id)});
-      link.href=managementUrl+'#order-workbench-v2?'+route;
-      body.append(link);
-      return;
-    }
     const selected=document.createElement('p');selected.textContent='代班人選：'+(item.selected_staff_name||'尚未選定')+'｜意願：'+({pending:'等待回覆',willing:'願意代班',unwilling:'無法代班'}[item.willingness]||'尚未詢問');body.append(selected);
     if(pending){body.append(button('確認原操作結果',()=>void send(pending)));return;}
     if(!item.selected_staff_id || item.willingness==='unwilling' || choosing){
       const search=field('搜尋月嫂姓名','text');search.maxLength=50;body.append(button('搜尋代班月嫂',async()=>{busy=true;try{options=(await postJson('/api/v1/line/mobile-admin/service-start/staff-options',{keyword:search.value})).items;}catch(e){status.textContent=e.message;}finally{busy=false;render();}}));
       const select=document.createElement('select');select.setAttribute('aria-label','代班月嫂');const empty=document.createElement('option');empty.value='';empty.textContent='請選擇代班月嫂';select.append(empty);
       for(const o of options.filter(o=>o.staff_id!==item.staff_id)){const option=document.createElement('option');option.value=o.staff_id;option.textContent=o.name;select.append(option);}body.append(select);
-      const start=field('需替代開始日');start.value=item.proposed_start_date||item.requested_start_date||'';const end=field('需替代結束日');
-      if(isHandover){start.value=item.handover_dates[0];end.value=item.handover_dates.at(-1);start.readOnly=true;end.readOnly=true;}
-      const ask=button('詢問該月嫂意願',()=>run('inquire',{staff_id:Number(select.value),start_date:start.value,end_date:end.value}),true);
-      for(const input of [select,start,end])input.onchange=()=>{ask.disabled=busy||!select.value||!start.value||!end.value||end.value<start.value;};body.append(ask);
+      const start=item.handover_dates[0];
+      const end=item.handover_dates.at(-1);
+      const ask=button('詢問該月嫂意願',()=>run('inquire',{staff_id:Number(select.value),start_date:start,end_date:end}),true);
+      select.onchange=()=>{ask.disabled=busy||!select.value||!start||!end;};body.append(ask);
     }
-    if((isHandover||item.willingness==='pending')&&!choosing)body.append(button('改問其他月嫂',()=>{choosing=true;render();}));
+    if(item.selected_staff_id&&!choosing)body.append(button('改問其他月嫂',()=>{choosing=true;render();}));
     const invitation=document.createElement('p');invitation.textContent='邀請：'+({pending:'待寄送',processing:'寄送中',sent:'已寄送',failed:'寄送失敗',cancelled:'已取消'}[item.invitation_status]||'尚未寄送')+'｜'+(item.joined?'已加入原案件群組':'待加入');body.append(invitation);
     if(item.willingness==='willing'&&!item.joined)body.append(button('寄送本案群組邀請連結',()=>run('invite'),['pending','processing','sent'].includes(item.invitation_status)));
     body.append(button('重新查詢加入狀態',()=>void refresh()));
-    if(item.willingness==='willing'&&item.joined&&!choosing){const start=field(isHandover?'交接日':'實際服務開始日');start.value=item.requested_start_date||item.proposed_start_date||'';
-      const summary=document.createElement('p');if(isHandover)body.append(summary);
-      const save=button(isHandover?'儲存交接日並更新排班與帳務':'儲存並更新排班',()=>run('dates',{start_date:start.value}),!start.value);
-      function update(){const dates=(item.handover_dates||[]).filter(d=>d>=start.value);save.disabled=busy||!start.value||(isHandover&&!dates.length);summary.textContent='交接日起接任 '+dates.length+' 個服務日：'+dates.join('、');}
+    if(item.willingness==='willing'&&item.joined&&!choosing){const start=field('交接日');start.value=item.requested_start_date||item.proposed_start_date||'';
+      const summary=document.createElement('p');body.append(summary);
+      const save=button('儲存交接日並更新排班與帳務',()=>run('dates',{start_date:start.value}),!start.value);
+      function update(){const dates=(item.handover_dates||[]).filter(d=>d>=start.value);save.disabled=busy||!start.value||!dates.length;summary.textContent='交接日起接任 '+dates.length+' 個服務日：'+dates.join('、');}
       start.onchange=update;update();body.append(save);}
   }
   render();return card;

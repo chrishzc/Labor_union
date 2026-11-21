@@ -39,6 +39,7 @@
 - `#line-studio`／`#line-liff-studio` → `line-interface` 表單分頁。
 - `#line-management?tab=push_queue|delivery|richmenu|message_flow|liff` → 依責任導向 `line-notifications` 或 `line-interface`。
 - `#finance?tab=payment-destination` → 導向 `finance` 每月帳務。
+- 排班的 `leave_sub` 分頁與開工、延期、局部代班需求的 `#scheduling?tab=coordination&case_no=<case>&request=<id>` 連結不開啟代班工作面。需求類型與案件由服務端授權查詢結果判定，不以 query string 推測。能確認原案件且具權限時導向 [案件人力配置](31_MultiCaregiver_Admin_UI正式規格.md#case-staffing)；無法確認案件或無權限時沿現行查詢與授權規則顯示阻擋，不自動建立、續辦或提交需求。服務中換人連結仍依其原案件入口處理。
 - 已移除側欄入口之未知或 retired hash（包含 `#anomalies`、`#storage-management`、`#file-settings`、`#historical-service-accounting`、`#line-security`、`#order-tracker`、`#orders`、`#system-status`）：沿用 App 未知 hash 預設規則顯示待辦看板，不建立替代獨立頁面。
 - `system-status` 雖無獨立頁面，仍保留右上角 shell 狀態指示器與 `GET /api/v1/system/status/performance-snapshot` 唯讀 Query。
 
@@ -65,7 +66,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **客戶資料與訂單異動申請退役**。自路由移除舊客戶表單頁面（`/line-profile-guard`、`/line-profile-update`、`/line-order-update`）及送審、查詢、審核 API（`/api/v1/line/client-profile/*`、`/api/v1/client-profile/requests*`、`/api/v1/line/mobile-admin/client-profile/requests*`、`/api/v1/line/order-change/{query,preview,requests}`、`/api/v1/orders/change-requests*`）。舊 `POST /api/v1/line/order-change/apply` 維持 `410 Gone`，提示客戶在 LINE 聊天室留言。
 - **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。
 
-- **舊請假送件**。`staff_leave_apply` 舊連結顯示雙方合意延期指引。月嫂直送 `POST /api/v1/line/staff-self-service/leave-results/submit` 及舊雙邊確認 `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 回 `410 Gone`。工會端原服務開始 `dates` 動作的局部代班分支拒絕新提交並回 `410 Gone`，舊成功操作可原鍵讀回。局部代班從 [多月嫂排班](31_MultiCaregiver_Admin_UI正式規格.md#4-局部代班工作面) 接續。
+- **請假送件與代班待辦入口**。排班頁移除「代班待辦」分頁及其中的歷史請假畫面，桌面與行動通知不提供開工、延期衝突或局部代班待辦續辦入口。`staff_leave_apply` 連結顯示雙方合意延期指引。月嫂直送 `POST /api/v1/line/staff-self-service/leave-results/submit` 及雙邊確認 `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 回 `410 Gone`。工會端原服務開始 `dates` 動作的局部代班分支拒絕新提交並回 `410 Gone`。歷史記錄及成功操作收據保留唯讀與原鍵讀回，不恢復請假或代班續辦流程。正常開工、合意延期與服務中換人依 [Scheduling](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 各自契約處理，管理員排班由 [案件人力配置](31_MultiCaregiver_Admin_UI正式規格.md#case-staffing) 承接。
 
 ### 3.3 Windows NAS 維護入口
 
@@ -91,3 +92,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - page module 可被 TypeScript build／test 載入；
 - 直接相關 typed API client 與 focused UI test 通過；
 - 已停用 410／移除路由均回傳預期 typed status 且無寫入副作用。
+
+| S 情境與前提 | T 任務 | A 操作 | R 可判定結果 |
+|---|---|---|---|
+| 有排班權限，並持有開工或延期衝突的代班待辦連結 | 從原案件處理排班 | 開啟排班頁、`leave_sub` 或指定案件及需求的 `coordination` 連結；再以無權限與無法確認案件驗證 | 排班頁不顯示代班待辦及歷史請假畫面。合法案件導向原案人力配置，其餘顯示阻擋，開頁零寫入，不恢復待辦或自動提交 |

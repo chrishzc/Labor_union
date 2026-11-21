@@ -14,11 +14,9 @@ from domains.case_import.order_information import ORDER_INFORMATION_KEYS, order_
 from domains.case_import.client_import_validation import EMAIL_PATTERN
 from domains.case_import.cooking_requirement import normalize_cooking_requirement
 from domains.case_import.non_citizen_registration import validate_non_citizen_service_time
-from domains.case_import.provisional_registration import (
-    HOLIDAY_DOUBLE_PAY_SURVEY_FIELD,
-    ProvisionalRegistrationCandidate,
-)
+from domains.case_import.provisional_registration import ProvisionalRegistrationCandidate
 from domains.case_import.refund_account import normalize_refund_field
+from domains.case_import.registration_details import HOLIDAY_DOUBLE_PAY_SURVEY_FIELD, normalize_holiday_double_pay
 from domains.clients.profile import CLIENT_PHONE_PATTERN, normalize_client_phone
 from infrastructure.mysql.case_import_repository import (
     CaseImportMySqlUnitOfWork,
@@ -132,9 +130,10 @@ def create_manual_non_citizen_case(
         raise ValueError("退款銀行帳號須為 1 至 50 碼數字。") from exc
     if refund_account_no is None:
         raise ValueError("請輸入退款銀行帳號。")
-    holiday_double_pay = payload.get("holiday_double_pay")
-    if holiday_double_pay is not None and holiday_double_pay not in ("是", "否"):
-        raise ValueError("三節假日雙倍薪水意願須選擇是或否。")
+    try:
+        holiday_double_pay = normalize_holiday_double_pay(payload.get("holiday_double_pay"))
+    except ValueError:
+        raise ValueError("三節假日雙薪意願須選擇是、否或未填。") from None
 
     copied_details = payload.get("beclass_details") or {}
     allowed_copy_fields = {"tel", "ext", "zip_code", "admin_notes", *ORDER_INFORMATION_KEYS}

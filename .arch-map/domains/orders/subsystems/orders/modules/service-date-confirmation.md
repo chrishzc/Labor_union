@@ -40,6 +40,7 @@
 - outbound: `orders/lifecycle-authoritative-facts` — 歷史正式安排以 typed lifecycle candidate 委派現有 Orders writer 保存事件、projection 與 outbox；尚未確認或未來開始日維持訂單成立。
 - outbound: `scheduling/scheduling` — 歷史儲存班表 Apply 使用 canonical generation replacement writer 建立有效班表。
 - outbound: `staff-payables/payroll` — 日期保存不寫 rate snapshot；後續真正建立安排時才沿 source frozen rate，或在歷史 pairing 無 source snapshot 時使用既有 case payroll policy。
+- outbound: `contract-signing/external-signing-presentation` — 一般首排借用 `ArchivedCommitmentPort` 以現行直接歸檔、已接受方案及確認日期投影缺少的精確承諾；Apply 經同一 outer UoW 的公開 borrowed writer 建立，Preview 不寫入，既有承諾不覆寫。
 - inbound: `orders/historical-precision-restart` — 空 effective generation 與重啟事件中的媒合方案、分段及歷史來源。舊版重啟事件沿用原歷史配對證據。
 
 ## Contracts

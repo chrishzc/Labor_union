@@ -1,15 +1,16 @@
 /**
  * File: SchedulingPage.tsx
- * Description: 顯示排班甘特、請假待辦與調度工作台，以業務語意呈現確認、鎖定與結果回讀。
+ * Description: 顯示排班甘特月曆、案件檔期排查與國定假日政策。
  */
 import { ServiceStartSubstituteWorkbench } from '../components/ServiceStartSubstituteWorkbench';
+import { serviceStartClient, type ServiceStartView } from '../api/scheduling/service_start_client';
+import { sessionClient } from '../api/auth/session_client';
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import './SchedulingPage.css';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_timelines';
 import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
@@ -18,7 +19,6 @@ import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_cl
 import type { SchedulingCurrentAssignment } from '../api/scheduling/scheduling_current_schemas';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
-import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import {
@@ -38,21 +38,6 @@ import {
   type SchedulingEligibilityCollisionViewModel,
 } from '../adapters/scheduling/eligibility_collision_adapter';
 import {
-  applyLeaveSubstitutionFlow,
-  previewLeaveSubstitutionFlow,
-  queryLeaveSubstitutionFlow,
-  resolveLeaveSubstitutionMachineState,
-  retryLeaveSubstitutionApplyFlow,
-  retryLeaveSubstitutionObservationFlow,
-  setLeaveSubstitutionDraft,
-} from '../adapters/scheduling/leave_substitution_flow_adapter';
-import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
-import type {
-  LeaveResolutionType,
-  LeaveSubstitutionApplyRequest,
-  LeaveSubstitutionPreviewRequest,
-} from '../api/scheduling/leave_substitution_schemas';
-import {
   applyHolidayFlow,
   holidayFlowStore,
   previewHolidayFlow,
@@ -66,24 +51,13 @@ import {
   type HolidayPreviewRequest,
   type HolidayRow,
 } from '../adapters/scheduling/holiday_flow_adapter';
-import {
-  staffLeaveInboxClient,
-  type LeaveInboxItem,
-  type LeaveInboxStatus,
-} from '../api/scheduling/staff_leave_inbox_client';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
-import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { Drawer } from '../components/Drawer';
 import { OfficialHolidayCsvImport } from '../components/scheduling/OfficialHolidayCsvImport';
 import { ServiceHandoverPage } from './ServiceHandoverPage';
 
-type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays';
+type SchedulingTab = 'calendar' | 'holidays';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
-
-interface SchedulingDeepLink {
-  tab: SchedulingTab;
-  caseNo: string;
-}
 
 interface MonthSelection {
   year: number;
@@ -91,23 +65,6 @@ interface MonthSelection {
 }
 
 const STAFF_PAGE_SIZE = 20;
-
-const PAYABLES_BLOCKER_MESSAGES: Record<string, string> = {
-  staff_payables_projection_missing: '代班薪資已建立，應付款尚未更新。請重新查詢，或到本案應付款核對。',
-  payroll_obligation_event_missing: '找不到本次代班對應的薪資義務紀錄',
-  payroll_obligation_event_ambiguous: '本次代班對應到多筆薪資義務紀錄，尚無法唯一確認',
-  payroll_obligation_version_mismatch: '代班與薪資義務的版本不一致',
-  payroll_obligation_version_invalid: '薪資義務的前後版本無法銜接',
-  payroll_obligation_assignment_mismatch: '薪資義務的人員或服務指派與代班結果不一致',
-  payroll_obligation_projection_missing: '薪資義務紀錄已存在，但目前義務資料尚未建立',
-  payroll_obligation_current_event_mismatch: '目前薪資義務與本次代班紀錄不一致',
-  payroll_obligation_not_payable: '本次薪資義務目前不是有效的待付款項，請核對是否已結清或取消',
-  staff_payables_amount_mismatch: '月嫂應付款金額與代班薪資義務不一致',
-  staff_payables_balance_mismatch: '月嫂應付款的金額、已付與未結餘額不一致',
-  staff_payables_status_invalid: '月嫂應付款目前的狀態無法確認',
-  scheduling_payroll_version_invalid: '排班與薪資的版本無法銜接',
-  substitution_outcome_missing: '找不到本次代班的處理結果紀錄',
-};
 
 function decodeHashComponent(value: string): string {
   return decodeURIComponent(value.replace(/\+/g, ' '));
@@ -145,27 +102,6 @@ function canonicalCaseNoFromQuery(queryText: string): string {
   const characterCount = [...canonical].length;
   if (characterCount < 1 || characterCount > 50 || containsControlCharacter(canonical)) return '';
   return canonical;
-}
-
-function parseSchedulingDeepLink(hash: string): SchedulingDeepLink {
-  const normalizedHash = hash.replace(/^#\/?/, '');
-  const queryStart = normalizedHash.indexOf('?');
-  const path = queryStart === -1 ? normalizedHash : normalizedHash.slice(0, queryStart);
-  if (path !== 'scheduling' || queryStart === -1) {
-    return { tab: 'calendar', caseNo: '' };
-  }
-
-  try {
-    const queryText = normalizedHash.slice(queryStart + 1);
-    const query = new URLSearchParams(queryText);
-    const tab = query.get('tab');
-    if (tab !== 'leave_sub') {
-      return { tab: 'calendar', caseNo: '' };
-    }
-    return { tab, caseNo: canonicalCaseNoFromQuery(queryText) };
-  } catch {
-    return { tab: 'calendar', caseNo: '' };
-  }
 }
 
 export function taipeiCalendarDate(at: Date): { year: number; month: number; day: number } {
@@ -349,17 +285,6 @@ function flowStateLabel(state: string): string {
     observation_failed: '最新結果待確認',
   };
   return labels[state] ?? '狀態待確認';
-}
-
-function leaveInboxStatusLabel(status: LeaveInboxStatus): string {
-  const labels: Record<LeaveInboxStatus, string> = {
-    pending: '待審核',
-    accepted_for_processing: '處理中',
-    resolved: '已完成代班',
-    rejected: '已退回',
-    cancelled: '已取消',
-  };
-  return labels[status];
 }
 
 function HolidayPolicyWorkspace() {
@@ -705,777 +630,6 @@ function HolidayPolicyWorkspace() {
           )}
         </div>
       </Drawer>
-    </section>
-  );
-}
-
-function LeaveSubstitutionWorkspace({
-  suggestedCaseNo,
-  staffList,
-}: {
-  suggestedCaseNo: string | null;
-  staffList: readonly StaffDirectoryCardViewModel[];
-}) {
-  const staffIdentity = useStaffIdentityLabels();
-  const [caseNo, setCaseNo] = useState(() => suggestedCaseNo || '');
-  const [caseOptions, setCaseOptions] = useState<readonly { caseNo: string; clientName: string }[]>([]);
-  const [caseOptionsLoading, setCaseOptionsLoading] = useState(true);
-  const [caseOptionsError, setCaseOptionsError] = useState<string | null>(null);
-  const [caseOptionsRevision, setCaseOptionsRevision] = useState(0);
-  const [assignmentId, setAssignmentId] = useState<number | null>(null);
-  const [scheduleId, setScheduleId] = useState<number | null>(null);
-  const [resolutionType, setResolutionType] = useState<LeaveResolutionType>('substitute');
-  const [substituteStaffId, setSubstituteStaffId] = useState<number | null>(null);
-  const [replacementWorkDate, setReplacementWorkDate] = useState('');
-  const [reason, setReason] = useState('');
-  const submittingRef = useRef(false);
-  const [, setStoreRevision] = useState(0);
-
-  // 舊 LINE 請假紀錄與已受理案件的調度回讀
-  const [inboxStatus, setInboxStatus] = useState<LeaveInboxStatus>('resolved');
-  const [inboxItems, setInboxItems] = useState<readonly LeaveInboxItem[]>([]);
-  const [selectedInboxItem, setSelectedInboxItem] = useState<LeaveInboxItem | null>(null);
-  const [inboxBusy, setInboxBusy] = useState(false);
-  const [inboxError, setInboxError] = useState<string | null>(null);
-  const [inboxReceipt, setInboxReceipt] = useState<string | null>(null);
-  const [linkedInboxError, setLinkedInboxError] = useState<string | null>(null);
-  const manualDispatchTitleRef = useRef<HTMLHeadingElement>(null);
-  const inboxQueryGenerationRef = useRef(0);
-  const observedInboxReceiptRef = useRef<string | null>(null);
-  const [payablesReadback, setPayablesReadback] = useState<SubstitutionPayablesLineage | null>(null);
-  const [payablesBusy, setPayablesBusy] = useState(false);
-  const [payablesError, setPayablesError] = useState<string | null>(null);
-  const payablesQueryGenerationRef = useRef(0);
-
-  const loadInbox = useCallback(async () => {
-    const generation = ++inboxQueryGenerationRef.current;
-    setInboxBusy(true);
-    setInboxError(null);
-    try {
-      const items = await staffLeaveInboxClient.list(inboxStatus);
-      if (generation === inboxQueryGenerationRef.current) {
-        setInboxItems(items);
-        setSelectedInboxItem(current => current ? items.find(item => item.id === current.id) ?? null : null);
-      }
-    } catch (caught) {
-      if (generation === inboxQueryGenerationRef.current) {
-        setInboxError(caught instanceof Error ? caught.message : '請假待辦載入失敗。');
-      }
-    } finally {
-      if (generation === inboxQueryGenerationRef.current) {
-        setInboxBusy(false);
-      }
-    }
-  }, [inboxStatus]);
-
-  useEffect(() => { void loadInbox(); }, [loadInbox]);
-
-  const selectAcceptedLeave = (item: LeaveInboxItem) => {
-    setLinkedInboxError(null);
-    setInboxReceipt(null);
-    setSelectedInboxItem(item);
-    setReason('');
-    const matchedAssignment = assignments.find((assignment) => assignment.staff_id === item.staff_id);
-    if (matchedAssignment) {
-      setAssignmentId(matchedAssignment.assignment_id);
-      setScheduleId(matchedAssignment.official_schedules.find((day) => day.work_date >= item.leave_start_date && day.work_date <= item.leave_end_date)?.schedule_id ?? null);
-    }
-  };
-  useEffect(() => { if (selectedInboxItem) manualDispatchTitleRef.current?.focus(); }, [selectedInboxItem]);
-
-  useEffect(
-    () => leaveSubstitutionFlowStore.subscribe(() => setStoreRevision((value) => value + 1)),
-    [],
-  );
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setCaseOptionsLoading(true);
-    setCaseOptionsError(null);
-    setCaseOptions([]);
-    const loadCases = async () => {
-      try {
-        const [page, coreStagePage] = await Promise.all([
-          loadAllOrderSummaries(
-            ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
-            { page_size: 200, lifecycle_scope: 'unfinished' },
-            { signal: controller.signal },
-          ),
-          loadAllCoreStageTimelines(
-            { workbench_scope: 'in_progress', page_size: 200 },
-            { signal: controller.signal },
-          ),
-        ]);
-        const inProgressCases = new Set(coreStagePage.items.map((item) => item.case_no));
-        const candidates = page.items.filter((item) => inProgressCases.has(item.case_no));
-        const options = await Promise.all(candidates.map(async (item) => {
-          const assignments = await leaveSubstitutionClient.listAssignments(
-            item.case_no, { signal: controller.signal },
-          );
-          return assignments.some((assignment) => assignment.official_schedules.length > 0)
-            ? { caseNo: item.case_no, clientName: item.client_name }
-            : null;
-        }));
-        if (!controller.signal.aborted) {
-          setCaseOptions(options.filter((item): item is NonNullable<typeof item> => item !== null));
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setCaseOptionsError('已排班案件載入失敗，請重新載入。');
-        }
-      } finally {
-        if (!controller.signal.aborted) setCaseOptionsLoading(false);
-      }
-    };
-    void loadCases();
-    return () => controller.abort();
-  }, [caseOptionsRevision]);
-
-  useEffect(() => {
-    setCaseNo(suggestedCaseNo || '');
-  }, [suggestedCaseNo]);
-
-  const normalizedCaseNo = caseOptions.some((item) => item.caseNo === caseNo) ? caseNo : '';
-
-  const draft = normalizedCaseNo ? leaveSubstitutionFlowStore.get(normalizedCaseNo) : undefined;
-  const machine = resolveLeaveSubstitutionMachineState(draft);
-  const showLegacyDispatch = selectedInboxItem !== null || draft?.receipt != null
-    || ['apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed'].includes(machine.type);
-  const observedReceipt = machine.type === 'observed' ? machine.receipt : null;
-  const assignments = draft?.assignments ?? [];
-  const selectedAssignment = assignments.find((item) => item.assignment_id === assignmentId) ?? null;
-  const schedules = selectedAssignment?.official_schedules ?? [];
-  const selectedSchedule = schedules.find((item) => item.schedule_id === scheduleId) ?? null;
-  const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
-    .includes(machine.type);
-  const loadPayablesReadback = useCallback(async () => {
-    if (!observedReceipt) return;
-    const generation = ++payablesQueryGenerationRef.current;
-    setPayablesBusy(true);
-    setPayablesError(null);
-    try {
-      const readback = await substitutionPayablesLineageClient.query(normalizedCaseNo, observedReceipt.batch_key);
-      if (generation === payablesQueryGenerationRef.current) {
-        setPayablesReadback(readback);
-      }
-    } catch {
-      if (generation === payablesQueryGenerationRef.current) {
-        setPayablesReadback(null);
-        setPayablesError('代班已更新，暫時無法查詢薪資和應付款。請重新查詢，勿重送代班。');
-      }
-    } finally {
-      if (generation === payablesQueryGenerationRef.current) {
-        setPayablesBusy(false);
-      }
-    }
-  }, [normalizedCaseNo, observedReceipt]);
-
-  useEffect(() => {
-    if (!observedReceipt) {
-      payablesQueryGenerationRef.current += 1;
-      setPayablesReadback(null);
-      setPayablesError(null);
-      setPayablesBusy(false);
-      return;
-    }
-    void loadPayablesReadback();
-  }, [loadPayablesReadback, observedReceipt]);
-
-  useEffect(() => {
-    const linkedRequest = observedReceipt?.linked_request;
-    if (!linkedRequest) return;
-    if (observedInboxReceiptRef.current === observedReceipt.batch_key) return;
-    observedInboxReceiptRef.current = observedReceipt.batch_key;
-    setLinkedInboxError(null);
-
-    if (linkedRequest.status === 'accepted_for_processing') {
-      setInboxStatus('accepted_for_processing');
-      setInboxReceipt('本批日期已完成；同一請假仍有其他日期或案件未處理。請按「重新整理指派」，選擇剩餘服務日；其他案件請由案件選單切換後繼續調度。');
-      void loadInbox();
-      return;
-    }
-    if (linkedRequest.status !== 'resolved' || linkedRequest.resolved_version === null) return;
-
-    if (linkedRequest.notification_intent !== 'enqueued') {
-      setLinkedInboxError('本次變更未建立 LINE 通知工作，請改由人工通知並確認。');
-      return;
-    }
-
-    const generation = ++inboxQueryGenerationRef.current;
-    setInboxBusy(true);
-    setInboxError(null);
-    void staffLeaveInboxClient.list('resolved', 100)
-      .then((items) => {
-        if (generation !== inboxQueryGenerationRef.current) return;
-        const resolvedItem = items.find((item) => item.id === linkedRequest.request_id);
-        if (
-          !resolvedItem
-          || resolvedItem.request_status !== 'resolved'
-          || resolvedItem.aggregate_version !== linkedRequest.resolved_version
-        ) {
-          throw new Error('請假待辦的完成狀態與本次調度結果不一致。');
-        }
-        setInboxStatus('resolved');
-        setInboxItems(items);
-        setSelectedInboxItem(null);
-        setInboxReceipt(
-          '已確認關聯的請假待辦完成，且與最新調度結果一致。',
-        );
-      })
-      .catch((caught) => {
-        if (generation === inboxQueryGenerationRef.current) {
-          const message = caught instanceof Error ? caught.message : '請假待辦完成狀態查詢失敗。';
-          setLinkedInboxError(`變更已受理，但${message}`);
-        }
-      })
-      .finally(() => {
-        if (generation === inboxQueryGenerationRef.current) {
-          setInboxBusy(false);
-        }
-      });
-  }, [observedReceipt]);
-
-  useEffect(() => {
-    if (assignments.length === 0) {
-      setAssignmentId(null);
-      setScheduleId(null);
-      return;
-    }
-    const linkedAssignment = selectedInboxItem && assignments.find((item) => item.staff_id === selectedInboxItem.staff_id);
-    const current = assignments.find((item) => item.assignment_id === assignmentId);
-    if (!current || (linkedAssignment && current.staff_id !== linkedAssignment.staff_id)) {
-      const first = linkedAssignment || assignments[0];
-      setAssignmentId(first.assignment_id);
-      setScheduleId(first.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null);
-    }
-  }, [assignmentId, assignments, selectedInboxItem]);
-
-  useEffect(() => {
-    if (!selectedAssignment) return;
-    if (!selectedAssignment.official_schedules.some((item) => item.schedule_id === scheduleId)) {
-      setScheduleId(selectedAssignment.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null);
-    }
-  }, [scheduleId, selectedAssignment, selectedInboxItem]);
-
-  const buildPreviewRequest = (): LeaveSubstitutionPreviewRequest | null => {
-    if (!selectedInboxItem || !selectedAssignment || !selectedSchedule) return null;
-    if (resolutionType === 'substitute' && substituteStaffId === null) return null;
-    return {
-      original_assignment_id: selectedAssignment.assignment_id,
-      items: [{
-        original_schedule_id: selectedSchedule.schedule_id,
-        work_date: selectedSchedule.work_date,
-        resolution_type: resolutionType,
-        substitute_staff_id: resolutionType === 'substitute' ? substituteStaffId : null,
-        replacement_work_date: resolutionType === 'defer_following_assignments' && replacementWorkDate
-          ? replacementWorkDate
-          : null,
-      }],
-      leave_request_id: selectedInboxItem.id,
-      expected_leave_request_version: selectedInboxItem.aggregate_version,
-    };
-  };
-
-  const invalidatePreview = () => {
-    const request = buildPreviewRequest();
-    if (request && normalizedCaseNo && draft?.assignments) {
-      setLeaveSubstitutionDraft(normalizedCaseNo, request);
-    }
-  };
-
-  const query = () => {
-    if (!normalizedCaseNo || busy) return;
-    void loadInbox();
-    void queryLeaveSubstitutionFlow(normalizedCaseNo).catch(() => undefined);
-  };
-
-  const apply = async () => {
-    const previewRequest = buildPreviewRequest();
-    if (!previewRequest || !normalizedCaseNo || busy || submittingRef.current) return;
-    submittingRef.current = true;
-    try {
-      setLeaveSubstitutionDraft(normalizedCaseNo, previewRequest);
-      const prepared = await previewLeaveSubstitutionFlow(normalizedCaseNo);
-      if (prepared.apply_readiness.status !== 'ready') return;
-      const request: LeaveSubstitutionApplyRequest = {
-        ...previewRequest,
-        expected_order_version: prepared.order_version,
-        expected_scheduling_version: prepared.scheduling_version,
-        expected_client_finance_version: prepared.client_finance_version,
-        expected_payroll_version: prepared.payroll_version,
-        preview_fingerprint: prepared.preview_fingerprint,
-        reason: reason.trim(),
-      };
-      await applyLeaveSubstitutionFlow(normalizedCaseNo, request);
-    } catch {
-      // The flow store retains typed failures and the original command for safe retry.
-    } finally {
-      submittingRef.current = false;
-    }
-  };
-
-  const error = draft?.error;
-  const errorText = error ? error.message : null;
-  const defaultScheduleId = (selectedAssignment ?? assignments[0])?.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null;
-  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '補班日': replacementWorkDate, '原因': reason }, { baseline: { '排班': defaultScheduleId, '請假處理': 'substitute', '代班月嫂': null, '補班日': '', '原因': '' }, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
-
-
-  return (
-    <section className="leave-substitution-workspace" data-surface-id="scheduling.leave-substitution">
-      {!showLegacyDispatch && <p>臨時代班請從原案件的「服務安排 → 多月嫂排班」辦理。
-        {suggestedCaseNo && <a href={`#order-workbench-v2?case=${encodeURIComponent(suggestedCaseNo)}&work=service&staffing=upcoming`}> 開啟本案多月嫂排班</a>}
-      </p>}
-      {showLegacyDispatch && <>
-      <header className="leave-substitution-header">
-        <div>
-          <p className="leave-substitution-kicker">查詢排班 → 儲存代班安排 → 查看結果</p>
-          <h2 ref={manualDispatchTitleRef} tabIndex={-1}>舊請假調度與回讀</h2>
-          <p>續辦已受理的舊請假資料，或核對先前已提交的排班結果。</p>
-        </div>
-        <span className={`leave-substitution-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
-      </header>
-
-      {inboxReceipt && (
-        <div className="leave-substitution-notice success" style={{ margin: 0 }}>
-          {inboxReceipt}
-        </div>
-      )}
-
-      {linkedInboxError && (
-        <div className="leave-substitution-notice error" style={{ margin: 0 }}>
-          {linkedInboxError}
-        </div>
-      )}
-
-      {/* 當前載入的 LINE 請假待辦提示橫幅 */}
-      {selectedInboxItem && (
-        <div style={{ padding: '12px 18px', background: '#ffedd5', border: '1.5px solid #fdba74', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <span style={{ fontSize: '0.9rem', color: '#9a3412', fontWeight: 700 }}>
-            🚨 目前已連動 LINE 請假待辦（{staffIdentity.label(selectedInboxItem.staff_id, selectedInboxItem.staff_name, staffList.find(staff => staff.id === selectedInboxItem.staff_id)?.unionNo)} ｜ {selectedInboxItem.leave_start_date}～{selectedInboxItem.leave_end_date}）
-          </span>
-          <button
-            type="button"
-            className="scheduling-action"
-            onClick={() => {
-              setSelectedInboxItem(null);
-              setReason('');
-            }}
-            style={{ padding: '5px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-          >
-            返回歷史請假紀錄
-          </button>
-        </div>
-      )}
-
-      {/* 由後端排除完成／取消案件，再確認目前有效的正式排班服務日 */}
-      <div className="leave-substitution-query-row" style={{ background: '#fff8f6', padding: '16px 20px', borderRadius: '12px', border: '1.5px solid #fed7aa' }}>
-        <div style={{ flex: '1 1 320px' }}>
-          <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#9a3412', marginBottom: '6px' }}>
-            📋 選擇已排班案件／訂單編號
-          </label>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <select
-              aria-label="請假代班訂單編號"
-              value={normalizedCaseNo}
-              disabled={busy || caseOptionsLoading || Boolean(caseOptionsError)}
-              onChange={(event) => {
-                setCaseNo(event.target.value);
-                setAssignmentId(null);
-                setScheduleId(null);
-                setReason('');
-              }}
-              style={{ flex: 1, minWidth: '260px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
-            >
-              <option value="">{caseOptionsLoading ? '正在載入已排班案件…' : '請選擇已排班案件'}</option>
-              {caseOptions.map((item) => (
-                <option key={item.caseNo} value={item.caseNo}>
-                  {item.caseNo} ｜ {item.clientName}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              data-control-id="scheduling.leave.query"
-              disabled={!normalizedCaseNo || busy}
-              onClick={query}
-              style={{ padding: '9px 18px', fontSize: '0.92rem', borderRadius: '8px' }}
-            >
-              {machine.type === 'query_loading' ? '⏳ 查詢中…' : '🔍 重新整理指派'}
-            </button>
-          </div>
-          {caseOptionsError && (
-            <div className="leave-substitution-notice" role="alert">
-              {caseOptionsError}
-              <button type="button" onClick={() => setCaseOptionsRevision((value) => value + 1)}>
-                重新載入案件
-              </button>
-            </div>
-          )}
-          {!caseOptionsLoading && !caseOptionsError && caseOptions.length === 0 && (
-            <small className="leave-substitution-notice" role="status">
-              目前沒有已排班且服務未完成的案件。
-            </small>
-          )}
-          {!normalizedCaseNo && !caseOptionsLoading && !caseOptionsError && caseOptions.length > 0 && (
-            <small className="leave-substitution-notice" data-control-id="scheduling.leave.query-guidance">
-              請先選擇已正式排班且尚未服務完成的案件，才能查詢指派並檢查代班影響。
-            </small>
-          )}
-        </div>
-      </div>
-
-      {normalizedCaseNo && (
-        <div style={{ padding: '16px 20px', background: '#ffffff', border: '1.5px solid #dec0b6', borderRadius: '12px', boxShadow: '0 2px 8px rgba(74, 69, 67, 0.04)' }}>
-          <strong style={{ fontSize: '1rem', color: '#9a3412' }}>📋 案件 #{normalizedCaseNo} 排班資料</strong>
-          <p style={{ margin: '8px 0 0', color: '#74593f', fontSize: '0.86rem' }}>
-            {draft ? `查得 ${assignments.length} 筆指派；服務日期與人員以以下查詢結果為準。` : '尚未查詢；不顯示推測的客戶、地點或服務條件。'}
-          </p>
-        </div>
-      )}
-
-      {machine.type === 'query_loading' && (
-        <div style={{ padding: '24px', textAlign: 'center', background: '#fff8f6', borderRadius: '12px', border: '1px dashed #dec0b6', color: '#ea580c', fontWeight: 700 }}>
-          ⏳ 正在查詢案件 #{normalizedCaseNo} 的排班…
-        </div>
-      )}
-
-      {draft?.assignments && draft.assignments.length === 0 && machine.type !== 'query_loading' && (
-        <div className="leave-substitution-notice" style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '12px', padding: '16px 20px', color: '#92400e' }}>
-          <div style={{ fontWeight: 750, fontSize: '0.95rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            ℹ️ 案件 #{normalizedCaseNo} 目前尚未建立排班
-          </div>
-          <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#78350f', lineHeight: 1.5 }}>
-            此案件目前處於洽談／媒合階段。若月嫂在<strong>已簽約履約中</strong>發生突發狀況（例如郭萱或王明欣服務中請假），系統將在此工作台提供緊急代班排程調度。
-          </p>
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '10px' }}>
-            <button
-              type="button"
-              className="scheduling-action"
-              onClick={() => void query()}
-              disabled={busy}
-              style={{ padding: '6px 14px', fontSize: '0.82rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-            >
-              🔄 重新整理指派
-            </button>
-          </div>
-        </div>
-      )}
-
-      {assignments.length > 0 && (
-        <div className="leave-substitution-form-grid">
-          <label>
-            原指派月嫂
-            <select
-              aria-label="原服務指派"
-              value={assignmentId ?? ''}
-              disabled={busy}
-              onChange={(event) => {
-                setAssignmentId(Number(event.target.value));
-                setScheduleId(null);
-                invalidatePreview();
-              }}
-            >
-              {assignments.map((assignment) => (
-                <option key={assignment.assignment_id} value={assignment.assignment_id}>
-                  #{assignment.assignment_id} ｜ {staffIdentity.label(assignment.staff_id, staffList.find((s) => s.id === assignment.staff_id)?.displayName, staffList.find((s) => s.id === assignment.staff_id)?.unionNo)} ｜ {assignment.assigned_start_date}～{assignment.assigned_end_date}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            原服務日（請假／調整日期）
-            <select
-              aria-label="服務日"
-              value={scheduleId ?? ''}
-              disabled={busy || schedules.length === 0}
-              onChange={(event) => {
-                setScheduleId(Number(event.target.value));
-                invalidatePreview();
-              }}
-            >
-              {schedules.length === 0 && <option value="">此指派目前沒有服務日</option>}
-              {schedules.map((schedule) => (
-                <option key={schedule.schedule_id} value={schedule.schedule_id}>
-                  {schedule.work_date}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            代班處理方式
-            <select
-              aria-label="請假代班處理方式"
-              value={resolutionType}
-              disabled={busy}
-              onChange={(event) => {
-                const next = event.target.value as LeaveResolutionType;
-                setResolutionType(next);
-                if (next === 'defer_following_assignments') {
-                  setSubstituteStaffId(null);
-                } else {
-                  setReplacementWorkDate('');
-                }
-                invalidatePreview();
-              }}
-            >
-              <option value="substitute">安排合格代班月嫂</option>
-              <option value="defer_following_assignments">原月嫂順延／指定補班</option>
-            </select>
-          </label>
-          {resolutionType === 'defer_following_assignments' && <label>
-            指定補班日期
-            <input
-              type="date"
-              aria-label="指定補班日期"
-              value={replacementWorkDate}
-              disabled={busy}
-              onChange={(event) => {
-                setReplacementWorkDate(event.target.value);
-                invalidatePreview();
-              }}
-            />
-            <small>填寫補班日，只移動這一天。留空則依案件週休與假日條件順延後續服務日。</small>
-          </label>}
-          {resolutionType === 'substitute' && <label>
-            指派代班月嫂
-            <select
-              aria-label="代班人員"
-              value={substituteStaffId ?? ''}
-              disabled={busy}
-              onChange={(event) => {
-                setSubstituteStaffId(event.target.value ? Number(event.target.value) : null);
-                invalidatePreview();
-              }}
-            >
-              <option value="">請選擇代班服務人員</option>
-              {staffList.filter((staff) => staff.id !== selectedAssignment?.staff_id).map((staff) => (
-                <option key={staff.id} value={staff.id}>{staffDisplayLabel(staff.unionNo, staff.displayName)}</option>
-              ))}
-            </select>
-          </label>}
-        </div>
-      )}
-
-      {selectedAssignment && schedules.length === 0 && (
-        <p className="leave-substitution-notice error">此指派目前沒有服務日，無法檢查代班影響；請先完成排班。</p>
-      )}
-
-      {assignments.length > 0 && (
-        <div className="leave-substitution-actions">
-          <label>
-            處理原因（選填）
-            <textarea
-              aria-label="請假代班處理原因"
-              value={reason}
-              maxLength={500}
-              disabled={busy}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            data-control-id="scheduling.leave.apply"
-            disabled={!buildPreviewRequest() || busy}
-            onClick={() => void apply()}
-          >
-            {busy ? '⏳ 處理中…' : '儲存代班變更'}
-          </button>
-        </div>
-      )}
-
-      {draft?.preview && draft.preview.apply_readiness.status !== 'ready' && (
-        <section className="leave-substitution-notice error" aria-label="請假代班檢核結果" role="alert">
-          <h3>目前無法儲存代班變更</h3>
-          <p>{draft.preview.apply_readiness.blockers.join('、')}</p>
-        </section>
-      )}
-
-      {draft?.receipt && (
-        <section className="leave-substitution-receipt" aria-live="polite">
-          <h3>🎉 代班變更已完成</h3>
-          {draft.receipt.linked_request ? (
-            <p>
-              關聯的請假待辦已完成；
-              LINE 通知：{draft.receipt.linked_request.notification_intent === 'enqueued'
-                ? '已排入發送，尚未確認送達'
-                : '尚未建立'}。
-            </p>
-          ) : (
-            <p>本次為人工／電話調度，未關聯 LINE 請假待辦。</p>
-          )}
-          <p>{machine.type === 'observed' ? '已確認最新指派。' : '變更已受理，正在確認最新指派。'}</p>
-        </section>
-      )}
-
-      {observedReceipt && (
-        <section className="leave-substitution-receipt" aria-label="代班薪資與付款狀態" aria-live="polite">
-          <h3>代班薪資與付款狀態</h3>
-          <p>以下為代班→Payroll→Staff Payables 的版本化血緣與最新唯讀資料；本區不會發動付款、匯出或再次套用代班。</p>
-          {payablesBusy && <p>正在查詢受影響服務人員的最新應付款…</p>}
-          {(payablesError || (payablesReadback && !payablesReadback.authoritative_complete)) && (
-            <>
-              {payablesError && <p className="leave-substitution-notice error" role="alert">{payablesError}</p>}
-              <button type="button" onClick={() => void loadPayablesReadback()}>
-                重新查詢薪資與應付款
-              </button>
-            </>
-          )}
-          {payablesReadback && !payablesReadback.authoritative_complete && (
-            <p className="leave-substitution-notice error" role="alert">
-              代班已完成，薪資與應付金額仍待核對：{[...new Set([...payablesReadback.blockers, ...payablesReadback.items.flatMap((item) => item.blockers)])].map(code => PAYABLES_BLOCKER_MESSAGES[code] ?? `尚無法核對應付款（${code}）`).join('；') || '資料待補正'}。
-              {' '}<a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(normalizedCaseNo)}&from=workbench`}>核對本案月嫂應付款 →</a>
-            </p>
-          )}
-          {payablesReadback && payablesReadback.items.map((item) => {
-            const evidence = item.payables_evidence;
-            const staffId = evidence?.staff_id ?? item.resulting_staff_id;
-            const person = staffList.find((staff) => staff.id === staffId);
-            const staffName = staffIdentity.label(staffId, person?.displayName, person?.unionNo);
-            const payoutStatus = evidence?.projection_status === 'payable'
-              ? '待付款'
-              : evidence?.projection_status === 'completed'
-                ? '已完成付款'
-                : evidence?.projection_status === 'anomaly'
-                  ? '待異常處理'
-                  : '應付金額待確認';
-            return (
-              <div key={item.lineage_subject}>
-                <strong>{staffName}</strong>
-                {evidence ? (
-                  <ul>
-                    <li>
-                      應付 NT$ {evidence.amount_due_ntd.toLocaleString()}｜未結 NT$ {(evidence.projection_balance_ntd ?? evidence.amount_due_ntd).toLocaleString()}｜到期日 {evidence.due_date ?? '—'}｜{payoutStatus}
-                    </li>
-                  </ul>
-                ) : (
-                  <p>尚未取得這筆代班對應的月嫂應付款查詢資料。</p>
-                )}
-                <small>來源血緣：{item.lineage_subject}；Scheduling v{payablesReadback.scheduling_version} → Payroll v{payablesReadback.resulting_payroll_version}</small>
-              </div>
-            );
-          })}
-        </section>
-      )}
-
-      {errorText && <p className="leave-substitution-notice error" role="alert">{errorText}</p>}
-      {machine.type === 'outcome_unknown' && (
-        <button type="button" onClick={() => void retryLeaveSubstitutionApplyFlow(normalizedCaseNo).catch(() => undefined)}>
-          再次確認變更結果
-        </button>
-      )}
-      {machine.type === 'observation_failed' && (
-        <button type="button" onClick={() => void retryLeaveSubstitutionObservationFlow(normalizedCaseNo).catch(() => undefined)}>
-          查詢最新指派
-        </button>
-      )}
-      {machine.type === 'stale' && <button type="button" onClick={query}>重新查詢最新資料</button>}
-      </>}
-      <details className="scheduling-leave-history">
-        <summary>歷史請假紀錄</summary>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <p>查閱舊 LINE 請假申請。已受理的舊案可接續完成原調度。</p>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
-              狀態
-              <select
-                value={inboxStatus}
-                onChange={(e) => setInboxStatus(e.target.value as LeaveInboxStatus)}
-                disabled={inboxBusy}
-                style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.84rem' }}
-              >
-                <option value="pending">未受理</option>
-                <option value="accepted_for_processing">已受理處理中</option>
-                <option value="resolved">已完成代班</option>
-                <option value="rejected">已退回</option>
-                <option value="cancelled">已取消</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              className="scheduling-action"
-              onClick={() => void loadInbox()}
-              disabled={inboxBusy}
-              style={{ padding: '6px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-            >
-              {inboxBusy ? '⏳ 載入中…' : '🔄 重新整理'}
-            </button>
-          </div>
-        </div>
-
-        {inboxError && <p className="leave-substitution-notice error" role="alert">{inboxError}</p>}
-        {inboxItems.length === 0 && !inboxBusy && !inboxError && (
-          <div style={{ padding: '16px', textAlign: 'center', background: '#fffcfb', borderRadius: '8px', border: '1px dashed #dec0b6', color: '#8b7169', fontSize: '0.86rem' }}>
-            此狀態沒有歷史請假紀錄。
-          </div>
-        )}
-
-        {inboxItems.length > 0 && (
-          <div style={{ display: 'grid', gap: '10px' }}>
-            {inboxItems.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '12px',
-                  padding: '12px 16px',
-                  background: selectedInboxItem?.id === item.id ? '#fff7ed' : '#fffaf8',
-                  borderRadius: '10px',
-                  border: selectedInboxItem?.id === item.id ? '2px solid #ea580c' : '1.5px solid #fed7aa',
-                }}
-              >
-                <div style={{ display: 'grid', gap: '4px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <strong style={{ fontSize: '0.98rem', color: '#1e1b19' }}>
-                      👩‍🍼 {staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)}
-                    </strong>
-                    <span className={`contract-status-pill ${item.request_status === 'pending' ? 'waiting' : item.request_status === 'accepted_for_processing' ? 'active' : 'signed'}`} style={{ fontSize: '0.78rem' }}>
-                      {leaveInboxStatusLabel(item.request_status)}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.86rem', color: '#9a3412', fontWeight: 600 }}>
-                    📅 請假期間：{item.leave_start_date} ～ {item.leave_end_date}
-                  </div>
-                  <div style={{ fontSize: '0.84rem', color: '#4b5563' }}>
-                    💬 事由：{item.request_reason || '未填寫請假說明'}
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {item.request_status === 'accepted_for_processing' ? (
-                    <button
-                      type="button"
-                      className="scheduling-action"
-                      aria-pressed={selectedInboxItem?.id === item.id}
-                      onClick={() => selectAcceptedLeave(item)}
-                      disabled={inboxBusy}
-                      style={{
-                        padding: '7px 14px',
-                        fontSize: '0.86rem',
-                        border: '1px solid',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: 750,
-                      }}
-                    >
-                      {selectedInboxItem?.id === item.id
-                        ? '✓ 正在調度此案'
-                        : '選取並繼續調度'}
-                    </button>
-                  ) : (
-                    <span style={{ color: '#74593f', fontSize: '0.82rem', fontWeight: 700 }}>
-                      僅供查閱。
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </details>
     </section>
   );
 }
@@ -2314,9 +1468,7 @@ function buildGanttSpans(
 
 const SchedulingWorkbench: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
-  const [activeTab, setActiveTab] = useState<SchedulingTab>(
-    () => parseSchedulingDeepLink(window.location.hash).tab,
-  );
+  const [activeTab, setActiveTab] = useState<SchedulingTab>('calendar');
   const [staffList, setStaffList] = useState<StaffDirectoryCardViewModel[]>([]);
   const [directoryLoading, setDirectoryLoading] = useState<boolean>(true);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
@@ -2344,16 +1496,12 @@ const SchedulingWorkbench: React.FC = () => {
   const [calendarError, setCalendarError] = useState<Error | null>(null);
   const [retryGeneration, setRetryGeneration] = useState<number>(0);
   const [availabilityRevision, setAvailabilityRevision] = useState(0);
-  const [eligibilityCaseNo, setEligibilityCaseNo] = useState(
-    () => parseSchedulingDeepLink(window.location.hash).caseNo,
-  );
+  const [eligibilityCaseNo, setEligibilityCaseNo] = useState('');
   const [eligibilityState, setEligibilityState] = useState<EligibilityCollisionState>({ kind: 'idle' });
   const [collisionDrawerOpen, setCollisionDrawerOpen] = useState(false);
 
   // 🔮 洽談案件幽靈投影 (Ghost Projection) 狀態：預設沒有選擇案件
-  const [selectedCaseNo, setSelectedCaseNo] = useState<string>(
-    () => parseSchedulingDeepLink(window.location.hash).caseNo || '',
-  );
+  const [selectedCaseNo, setSelectedCaseNo] = useState('');
   const [caseOptionsState, setCaseOptionsState] = useState<CalendarCaseOptionsState>({ kind: 'loading' });
   const [caseEligibilityRows, setCaseEligibilityRows] = useState<Record<number, CaseEligibilityRowState>>({});
   const [caseOptionsRetryGeneration, setCaseOptionsRetryGeneration] = useState(0);
@@ -2406,16 +1554,6 @@ const SchedulingWorkbench: React.FC = () => {
       eligibilityControllerRef.current?.abort();
       caseEligibilityControllerRef.current?.abort();
     };
-  }, []);
-
-  useEffect(() => {
-    const syncDeepLink = () => {
-      const deepLink = parseSchedulingDeepLink(window.location.hash);
-      setActiveTab(deepLink.tab);
-      setEligibilityCaseNo(deepLink.caseNo);
-    };
-    window.addEventListener('hashchange', syncDeepLink);
-    return () => window.removeEventListener('hashchange', syncDeepLink);
   }, []);
 
   // 載入服務人員名冊
@@ -3012,13 +2150,6 @@ const SchedulingWorkbench: React.FC = () => {
           onClick={() => { if (('calendar') !== activeTab) requestLeave(() => setActiveTab('calendar')); }}
         >
           📅 排班月曆
-        </button>
-        <button
-          data-surface-id="scheduling.tab.leave_sub"
-          className={`scheduling-tab-btn ${activeTab === 'leave_sub' ? 'active' : ''}`}
-          onClick={() => { if (('leave_sub') !== activeTab) requestLeave(() => setActiveTab('leave_sub')); }}
-        >
-          代班待辦
         </button>
         <button
           data-surface-id="scheduling.tab.holidays"
@@ -3641,13 +2772,6 @@ const SchedulingWorkbench: React.FC = () => {
         </section>
       )}
 
-      {/* Other Tabs */}
-      {activeTab === 'leave_sub' && (
-        <>
-          <ServiceStartSubstituteWorkbench title="待處理事項" />
-          <LeaveSubstitutionWorkspace suggestedCaseNo={eligibilityCaseNo.trim() || null} staffList={staffList} />
-        </>
-      )}
       {activeTab === 'holidays' && (
         <HolidayPolicyWorkspace />
       )}
@@ -3963,6 +3087,55 @@ const SchedulingWorkbench: React.FC = () => {
   );
 };
 
+function LegacySchedulingLink({ caseNo, request }: { caseNo: string; request?: string | null }) {
+  const [state, setState] = useState<
+    { kind: 'loading' | 'blocked' } | { kind: 'handover'; item: ServiceStartView }
+  >({ kind: 'loading' });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const requestId = Number(request);
+    if (!caseNo || (request !== undefined
+      && (!request || !/^[1-9][0-9]*$/.test(request) || !Number.isSafeInteger(requestId)))) {
+      setState({ kind: 'blocked' });
+      return;
+    }
+
+    async function resolve() {
+      if (request !== undefined) {
+        const item = await serviceStartClient.detail(requestId);
+        if (controller.signal.aborted) return;
+        if (item.request_id !== requestId || item.case_no !== caseNo) throw new Error('case mismatch');
+        if (item.workflow_kind === 'handover') {
+          setState({ kind: 'handover', item });
+          return;
+        }
+      }
+      const plan = await ordersQueryClient.getAssignmentPlan(caseNo, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (plan.case_no !== caseNo) throw new Error('case mismatch');
+      const capability = plan.assignments.some(item => item.official_service_dates.length > 0)
+        ? 'system.administration' : 'line.matching.override';
+      if (!sessionClient.getUser()?.capabilities.includes(capability)) throw new Error('schedule permission missing');
+      const target = new URLSearchParams({ case: caseNo, work: 'service', staffing: 'upcoming' });
+      window.location.replace(`#order-workbench-v2?${target}`);
+    }
+    void resolve().catch(() => {
+      if (!controller.signal.aborted) setState({ kind: 'blocked' });
+    });
+    return () => controller.abort();
+  }, [caseNo, request]);
+
+  return <main className="scheduling-gantt-page">
+    <ManagementPageHeader title={state.kind === 'handover' ? '服務中換人' : '案件排班'}>
+      <a href="#scheduling">返回排班月曆</a>
+    </ManagementPageHeader>
+    {state.kind === 'loading' && <p role="status">正在確認案件…</p>}
+    {state.kind === 'blocked' && <p role="alert">無法確認案件或排班權限，請從案件工作區開啟。</p>}
+    {state.kind === 'handover' && <ServiceStartSubstituteWorkbench initial={state.item} />}
+  </main>;
+}
+
 export const SchedulingPage: React.FC = () => {
   const [hash, setHash] = useState(window.location.hash);
   useEffect(() => {
@@ -3970,15 +3143,16 @@ export const SchedulingPage: React.FC = () => {
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  const params=new URLSearchParams(hash.split('?')[1] ?? '');
-  if(params.get('tab')==='coordination') {
-    const raw=params.get('request');const id=raw===null?undefined:Number(raw);
-    const invalid=id!==undefined && (!Number.isSafeInteger(id) || id<=0);
-    return <div className="scheduling-gantt-page"><ManagementPageHeader title="開工、順延與代班"><a href="#scheduling">返回排班月曆</a></ManagementPageHeader>
-      {invalid?<p role="alert">需求編號無效，請從通知事項重新開啟。</p>:<ServiceStartSubstituteWorkbench key={hash} requestId={id} caseNo={params.get('case_no') ?? undefined}/>}</div>;
+  const query = hash.split('?')[1] ?? '';
+  const params = new URLSearchParams(query);
+  const tab = params.get('tab');
+  if (tab === 'coordination' || tab === 'leave_sub') {
+    const request = tab === 'coordination' && params.getAll('request').length === 1
+      ? params.get('request') : null;
+    return <LegacySchedulingLink key={hash} caseNo={canonicalCaseNoFromQuery(query)}
+      request={tab === 'coordination' ? request : undefined} />;
   }
-  return params.get('tab') === 'handover'
-    ? <ServiceHandoverPage key={hash} /> : <SchedulingWorkbench />;
+  return tab === 'handover' ? <ServiceHandoverPage key={hash} /> : <SchedulingWorkbench />;
 };
 
 export default SchedulingPage;

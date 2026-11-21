@@ -357,8 +357,7 @@ _VALIDATION_MESSAGES = {
     'service_attribution_unperformed_date_blocked': '請選擇已服務的日期。後續服務請使用換人或代班。',
     'service_attribution_upcoming_date_blocked': '後續排班只能調整今天起的服務日期。',
     'service_attribution_assignment_conflict': '所選日期或月嫂與目前指派不符，請重新讀取排班。',
-    'service_attribution_substitute_request_conflict': '這筆代班待辦已更新或不適用本案，請重新查詢。',
-    'service_attribution_substitute_dates_conflict': '請將待辦所列原服務日全數改由其他月嫂承接，並保留原日期。',
+    'service_attribution_substitute_request_retired': '請從原案件的多月嫂排班調整。',
     'service_attribution_assignment_limit': '最多可配置四個服務區段，請調整後重新預覽。',
     'service_attribution_retired_staff_blocked': '退役月嫂的既有班次可保留。新增或移動班次時，請選擇在職月嫂。',
     'service_attribution_target_assignment_ambiguous': '該月嫂已有多個區段，請先核對應承接的區段。',
@@ -396,7 +395,10 @@ def _call(operation):
         return BaseResponse(data=operation(), message="正式服務日期已取得或更正")
     except ValueError as error:
         code = str(error)
-        if "idempotency" in code:
+        if code == 'service_attribution_substitute_request_retired':
+            status = 410
+            category = 'conflict'
+        elif "idempotency" in code:
             status = 409
             category = "idempotency_mismatch"
         elif "conflict" in code or "stale" in code or "occupancy" in code:

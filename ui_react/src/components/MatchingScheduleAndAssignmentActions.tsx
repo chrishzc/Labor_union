@@ -1,5 +1,4 @@
 import React from 'react';
-import { ServiceStartSubstituteWorkbench } from './ServiceStartSubstituteWorkbench';
 interface PlanSegment {
   segmentId: number;
   sequence: number;
@@ -25,10 +24,9 @@ interface Props {
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 
-export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({caseNo,assignmentExists,scheduleComplete,officialServiceDates=[],onAssignmentCompleted}) => (
+export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({assignmentExists,scheduleComplete,officialServiceDates=[]}) => (
   <section aria-label="服務開始與排班結果">
     <p>{scheduleComplete ? '正式排班已生效。' : assignmentExists ? '已有月嫂指派，但缺少正式逐日班次。' : '客戶與月嫂在服務群組協調後，由月嫂提交開始日期；通過檢查即自動更新排班。'}</p>
     {officialServiceDates.length>0 && <details><summary>查看目前正式服務日期</summary><p>{officialServiceDates.join('、')}</p></details>}
-    <ServiceStartSubstituteWorkbench caseNo={caseNo} onCompleted={onAssignmentCompleted} scope="schedule-changes"/>
   </section>
 );

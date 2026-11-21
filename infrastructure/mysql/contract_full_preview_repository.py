@@ -117,6 +117,7 @@ class MySqlFullContractProjectionRepository:
             current[0].get("staff_id") if active_assignment_id is not None else None,
             expected_service_dates=expected_dates,
             use_expected_service_dates=use_current_order_payments and not current,
+            use_case_service_hours=True,
         )
         if not current and not use_current_order_payments:
             plan = _load_precontract_plan(self._connection, case_no, case)
@@ -461,6 +462,8 @@ def _common_facts(
             else virtual_account
         ),
         "client_name": case.get("client_name"),
+        "client_birth_date": case.get("client_birth_date"),
+        "client_identity_card": case.get("client_identity_card"),
         "phone": case.get("client_phone"),
         "address": case.get("client_address"),
         "city": case.get("client_city"),
@@ -569,7 +572,7 @@ def _owner_values(facts: dict[str, object], owner: str) -> dict[str, object]:
     prefixes = {
         "order": {"case_no", "start_date", "end_date", "service_days", "service_hours_per_day", "floor_fee", "special_holidays"},
         "client": {
-            "client_name", "phone", "address", "city", "service_time",
+            "client_name", "client_birth_date", "client_identity_card", "phone", "address", "city", "service_time",
             "service_type", "baby_info", "delivery_type", "residence_type", "notes", "email", "identity_status",
         },
         "staff": {"staff_name", "staff_phone", "city", "address"},
@@ -603,6 +606,7 @@ def _extend_owner_facts(
     *,
     expected_service_dates: tuple[date, ...] = (),
     use_expected_service_dates: bool = False,
+    use_case_service_hours: bool = False,
 ) -> None:
     """Borrow existing typed Finance/Payroll/Scheduling readers when bootstrapped."""
     # Client/Case Import is an independent owner.  Its normalized email read
@@ -637,6 +641,10 @@ def _extend_owner_facts(
                 ),
             )
             facts["total_hours"] = total_hours
+        if use_case_service_hours and facts.get("total_hours") is None and finance.charge_days:
+            facts["total_hours"] = Decimal(len(finance.charge_days)) * Decimal(
+                str(finance.service_hours_per_day)
+            )
         payment = finance.payment_terms
         facts.update(
             {
@@ -677,6 +685,11 @@ def _extend_owner_facts(
                 "client_virtual_account": facts.get("client_virtual_account"),
             }
         )
+        _project_subsidy_coverage(facts, owners, finance.pricing)
+        if subsidy_claim is not None:
+            facts["subsidy_hours"] = subsidy_claim["claimed_hours"]
+            facts["subsidy_salary"] = subsidy_claim["approved_amount"]
+            owners["government_subsidy"] = projection_fingerprint(subsidy_claim)
         # Client payment fields do not depend on a Payroll bootstrap.
         with connection.cursor() as cursor:
             typed = load_preview_facts(cursor, case_no)
@@ -797,13 +810,6 @@ def _extend_owner_facts(
                 facts['staff_payable_due_date'] = payment_date_projection(portions)
                 facts['payroll_payment_date'] = facts['staff_payable_due_date']
             owners['payroll'] = projection_fingerprint({'payroll':owners.get('payroll'),'rate':facts['service_unit_price'],'due':facts.get('staff_payable_due_date')})
-        _project_subsidy_coverage(facts, owners, finance.pricing)
-        if subsidy_claim is not None:
-            # B40 is the Government Subsidy service claim, not a staff wage.
-            # Only an exact approved claim item may populate it.
-            facts["subsidy_hours"] = subsidy_claim["claimed_hours"]
-            facts["subsidy_salary"] = subsidy_claim["approved_amount"]
-            owners["government_subsidy"] = projection_fingerprint(subsidy_claim)
     except Exception:
         # Missing owner bootstrap is represented by missing typed facts and is
         # surfaced by the Preview mapping blockers; no fallback formula exists.

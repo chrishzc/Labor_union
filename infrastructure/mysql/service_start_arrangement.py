@@ -11,14 +11,16 @@ import json
 from domains.scheduling.assignment_plan import (
     AssignmentPlanIntent, AssignmentPlanSegmentIntent, StaffOccupancyFact, first_shift_conflict, service_shift_may_overlap,
 )
-from domains.scheduling.commitment_execution import ExecutionServiceDay
+from domains.scheduling.commitment_execution import (
+    CommitmentExecutionMismatch, CommitmentServiceDay, ExecutionServiceDay, require_exact_commitment_execution,
+)
 from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
 from domains.payroll.installments import payroll_installments
 from domains.scheduling.leave_substitution import LeaveResolutionType, LeaveSubstitutionBatchIntent, LeaveSubstitutionItem
 from domains.scheduling.service_start import ServiceStartConflict
 from infrastructure.mysql.automatic_client_accounting import synchronize_client_charges
 from infrastructure.mysql.assignment_plan_repository import (
-    _require_exact_commitment_days, _require_retired_staff_assignment_preservation,
+    _locked_waiting_lock_plan_ids, _require_exact_commitment_days, _require_retired_staff_assignment_preservation,
 )
 from infrastructure.mysql.historical_actual_start_date_planner import _canonical_service_mode
 from infrastructure.mysql.mysql_adapter import calculate_attendance_schedule
@@ -40,6 +42,7 @@ from subsystems.orders.actual_start_workflow import ActualStartWorkflow
 from subsystems.orders.historical_restart_arrangement import HistoricalRestartArrangementReceipt
 from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
 from subsystems.payroll.terms_impact import calculate_assignment_payroll
+from subsystems.contract_signing.final_document_workflow import ArchivedCommitmentPort, FinalSigningPrerequisiteCommand
 
 
 class MySqlServiceStartArrangement:
@@ -80,16 +83,13 @@ class MySqlServiceStartArrangement:
         if handover_context(request):
             self._handover(request, candidate, start_date, who, cid, key)
         elif context:
-            self._leave_result(request, context, candidate, who, cid, key)
+            self._leave_result(request, context, who, cid, key)
         elif query.has_formal_assignments:
-            if candidate:
-                self._substitute(request, candidate, start_date, who, cid, key)
-            else:
-                preview = self.actual_start.preview(request['case_no'], start_date)
-                self.actual_start.apply_in_current_unit_of_work(ActualStartApplyRequest(
-                    request['case_no'], start_date, ExpectedVersion(preview.order_version),
-                    ExpectedVersion(preview.scheduling_version), preview.fingerprint,
-                    IdempotencyKey('start-date:'+key), who, '', cid))
+            preview = self.actual_start.preview(request['case_no'], start_date)
+            self.actual_start.apply_in_current_unit_of_work(ActualStartApplyRequest(
+                request['case_no'], start_date, ExpectedVersion(preview.order_version),
+                ExpectedVersion(preview.scheduling_version), preview.fingerprint,
+                IdempotencyKey('start-date:'+key), who, '', cid))
         else:
             if not self._initial(request, start_date, who, cid, key):
                 return None
@@ -127,7 +127,7 @@ class MySqlServiceStartArrangement:
             ExpectedVersion(preview.client_finance_version),ExpectedVersion(preview.payroll_version),
             preview.fingerprint,IdempotencyKey('handover:'+key),actor,'工會記錄雙方已協調的服務中換人交接日',cid))
 
-    def _leave_result(self, request, context, candidate, actor, cid, key):
+    def _leave_result(self, request, context, actor, cid, key):
         dates = context['dates']
         originals = tuple(date.fromisoformat(item['original_date']) for item in dates)
         replacements = tuple(date.fromisoformat(item['new_date']) if item['new_date'] else None for item in dates)
@@ -143,14 +143,12 @@ class MySqlServiceStartArrangement:
             rows = {row['work_date']:row for row in c.fetchall()}
         if any(day not in rows for day in originals) or len({rows[day]['assignment_id'] for day in originals}) != 1:
             raise ServiceStartConflict('leave_result_dates_changed', '原服務日或服務月嫂已變更，請重新查詢排班。')
-        if context['decision'] == 'substitute' and candidate is None:
-            raise ServiceStartConflict('substitute_selection_required', '請先選定願意代班且已加入案件群組的月嫂。')
-        staff_id = candidate['staff_id'] if candidate else request['staff_id']
-        self._require_available_days(request['case_no'], staff_id, replacements, '新的服務日期有不可排班紀錄。')
+        self._require_available_days(request['case_no'], request['staff_id'], replacements,
+                                     '新的服務日期有不可排班紀錄。請重新協調補班日期或聯繫工會。')
         intent = LeaveSubstitutionBatchIntent(rows[originals[0]]['assignment_id'], tuple(
             LeaveSubstitutionItem(rows[old]['id'], old,
-                LeaveResolutionType.SUBSTITUTE if candidate else LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
-                candidate['staff_id'] if candidate else None,
+                LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                None,
                 False,
                 new if new != old else None) for old,new in zip(originals,replacements)))
         preview = self.leave.preview(LeaveSubstitutionPreviewRequest(request['case_no'],intent,cid))
@@ -291,25 +289,17 @@ class MySqlServiceStartArrangement:
             response=responses.get(segment['id'])
             if response is None or response['source_order_version']!=request['source_order_version']:
                 return False
-            replacement=self.repository.candidate(response,lock=True)
             if response['id']==request['id']:
                 day=start_date
-            elif (response['decision']=='accepted' or replacement) and response['status']=='awaiting_peers':
+            elif response['decision']=='accepted' and response['status']=='awaiting_peers' and response['selected_candidate_id'] is None:
                 day=response['requested_start_date']
             else:
                 return False
-            if replacement:
-                if replacement['willingness']!='willing' or not self.repository.joined(response,replacement):
-                    return False
-                staff_id=replacement['staff_id']
-            else:
-                if response['decision']!='accepted':
-                    return False
-                staff_id=segment['staff_id']
+            staff_id=segment['staff_id']
             calendar=calculate_attendance_schedule(day,int(segment['service_days']),mode)
             dates=tuple(item['date'] if isinstance(item['date'],date) else date.fromisoformat(str(item['date']))
                 for item in calendar['day_by_day'] if item['is_work_day'])
-            self._require_available_days(request['case_no'], staff_id, dates, '服務時段有不可排班紀錄，需由工會安排代班。')
+            self._require_available_days(request['case_no'], staff_id, dates, '服務時段有不可排班紀錄，請聯繫工會調整本案排班。')
             intents.append(AssignmentPlanSegmentIntent(int(staff_id),day,dates[-1],dates))
         start=min(item.assigned_start_date for item in intents)
         facts=self.actual_start._repository.load_actual_start_query(request['case_no'],for_update=True)
@@ -339,25 +329,6 @@ class MySqlServiceStartArrangement:
             ExpectedVersion(preview.client_finance_version),ExpectedVersion(preview.payroll_version),
             preview.fingerprint,IdempotencyKey('start-assignment:'+key),actor,'月嫂回報雙方協調結果，自動建立正式排班',cid))
         return True
-
-    def _substitute(self,request,candidate,start,actor,cid,key):
-        with self.connection.cursor() as c:
-            c.execute('SELECT day.id,day.work_date FROM staff_schedule day '
-                'JOIN scheduling_aggregates g ON g.effective_generation_id=day.generation_id '
-                'WHERE day.assignment_id=%s AND day.effective_marker=1 AND day.is_work_day=1 '
-                'AND day.work_date BETWEEN %s AND %s ORDER BY day.work_date FOR UPDATE',
-                (request['assignment_id'],start,candidate['proposed_end_date']))
-            days=c.fetchall()
-        if not days:
-            raise ServiceStartConflict('substitute_dates_missing','指定區段沒有可替代的正式服務日，請重新核對。')
-        intent=LeaveSubstitutionBatchIntent(request['assignment_id'],tuple(LeaveSubstitutionItem(
-            row['id'],row['work_date'],LeaveResolutionType.SUBSTITUTE,candidate['staff_id']) for row in days))
-        preview=self.leave.preview(LeaveSubstitutionPreviewRequest(request['case_no'],intent,cid))
-        self.leave.apply_in_current_unit_of_work(LeaveSubstitutionApplyRequest(request['case_no'],intent,
-            ExpectedVersion(preview.order_version),ExpectedVersion(preview.scheduling_version),
-            ExpectedVersion(preview.client_finance_version),ExpectedVersion(preview.payroll_version),
-            preview.fingerprint,IdempotencyKey('start-substitute:'+key),actor,'工會記錄已加入群組的代班服務日期',cid))
-
 
 def current_service_start_execution(cursor,case_no,plan_id=None,*,lock=False):
     """Current explicit results, never legacy date-card confirmation events."""
@@ -431,7 +402,10 @@ def _office_execution_days(segments):
     return tuple(ExecutionServiceDay(segment.staff_id, day) for segment in segments for day in segment.service_dates)
 
 
-def preview_office_schedule(connection, case_no, segments, *, actual_start_date, reason, lock=False):
+def preview_office_schedule(
+    connection, case_no, segments, *, actual_start_date, reason, lock=False,
+    commitments: ArchivedCommitmentPort | None = None,
+):
     with connection.cursor() as cursor:
         facts = load_preview_facts(cursor, case_no, office_first_schedule=True)
         staff_ids = tuple(segment.staff_id for segment in segments)
@@ -464,8 +438,25 @@ def preview_office_schedule(connection, case_no, segments, *, actual_start_date,
         def preview_execution(_cursor, _case, _plan, *, lock):
             return {"substitutions": {}, "office_reallocation_reason": reason.strip()}, execution_days
 
-        _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, lock=lock,
-                                       execution_reader=preview_execution, office_preview=True)
+        commitment = commitments.preview_archived_commitment(case_no, for_update=lock) if commitments else None
+        if commitment is None:
+            _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, lock=lock,
+                                           execution_reader=preview_execution, office_preview=True)
+        else:
+            options = dict(
+                confirmed_days=execution_days, service_start_plan_id=commitment.matching_plan_id,
+                office_reallocation=bool(reason.strip()),
+            )
+            signed_days = tuple(CommitmentServiceDay(day.staff_id, day.service_date) for day in commitment.days)
+            plan_ids = _locked_waiting_lock_plan_ids(cursor, lock_ids, lock=lock)
+            try:
+                require_exact_commitment_execution(commitment.matching_plan_id, plan_ids, signed_days, execution_days, **options)
+            except CommitmentExecutionMismatch:
+                if reason.strip():
+                    raise
+                options["office_reallocation"] = True
+                require_exact_commitment_execution(commitment.matching_plan_id, plan_ids, signed_days, execution_days, **options)
+                raise ValueError("office_schedule_reallocation_reason_required") from None
         conflict = first_shift_conflict(case_no, load_case_service_time(cursor, case_no, lock=lock), assignments, occupied)
         if conflict:
             raise ServiceStartConflict('office_schedule_occupancy_conflict',
@@ -491,7 +482,7 @@ def preview_office_schedule(connection, case_no, segments, *, actual_start_date,
 def save_office_schedule(
     connection, assignment_application_factory, case_no, segments, *, actual_start_date, expected_order_version,
     expected_scheduling_version, expected_confirmed_version, idempotency_key, actor,
-    reason, correlation_id, preview_fingerprint=None,
+    reason, correlation_id, preview_fingerprint=None, commitments: ArchivedCommitmentPort | None = None,
 ):
     reallocation_reason = reason.strip()
     reason = reallocation_reason or "工會確認服務日期並建立正式班表"
@@ -544,6 +535,7 @@ def save_office_schedule(
             raise ValueError("office_schedule_stale_version")
         if preview_fingerprint is not None and preview_office_schedule(
             connection, case_no, segments, actual_start_date=actual_start_date, reason=reallocation_reason, lock=True,
+            commitments=commitments,
         )["preview_fingerprint"] != preview_fingerprint:
             raise ValueError("office_schedule_stale_version")
         current = assignment_application_factory(connection).query(case_no).assignment_plan
@@ -559,6 +551,12 @@ def save_office_schedule(
         start = actual_repository.load_actual_start_query(case_no, for_update=True)
         if start.service_data_locked:
             raise ValueError("office_schedule_locked_blocked")
+        if commitments is not None:
+            candidate = commitments.preview_archived_commitment(case_no, for_update=True)
+            if candidate is not None:
+                commitments.ensure_archived_commitment(FinalSigningPrerequisiteCommand(
+                    case_no, candidate.matching_plan_id, who, key, cid,
+                ))
         if start.current_actual_start_date != actual_start_date:
             if start.has_formal_assignments:
                 raise ValueError("office_schedule_existing_start_conflict")
