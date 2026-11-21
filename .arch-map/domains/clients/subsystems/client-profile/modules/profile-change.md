@@ -74,6 +74,7 @@
 - layout_basis: Backend contract tests own Client Profile and BeClass query/mutation boundaries; the mirrored React root owns the case-centered registry editing and bounded read-only roster interaction.
 - test_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/`
 - test_root: `ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/`
+- 既有合成測試（後端目錄的 `contract/test_application.py` L97–104）：`query_admin` 可讀取舊 `baby_info`，但 `preview_admin` 拒絕更新該欄；測試儲存庫的欄位不變，版本仍為 0。此案例未驗證 Apply。
 
 - Client Profile 管理端一般維護與 HCM 補件依 Global §2.4 一次點擊送出；reason 可空白，變更歷程保留空白及操作人員／時間，內部仍使用既有 Preview／Apply。
 
