@@ -12,7 +12,7 @@
 
 ## Contracts
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` §8 retirement decision.
-- `document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md` — retired URLs absent from routing/OpenAPI.
+- `document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md` — 舊帳戶維護的 GET／Preview／Apply 已從路由與 OpenAPI 移除（文件契約，非執行環境驗證）。
 - Physical retirement adapter belongs to Global migration local-database-fresh-reset.
 
 ## Verification
