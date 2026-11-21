@@ -34,7 +34,7 @@
 ## 4. DSM 冷備份副本受控升級（`upgrade-database.sh` / `update_nas_database.py`）
 
 - 專供 NAS 容器離線維護手動執行（禁止排程自動切換）。`--update` 於鎖內串接「冷備份卷身分核對 → 還原副本卷 → network-none 啟動同版 MySQL 並委派 `scripts.update_local_database` 完成 preserve-data 升級與驗證 → 通過後方更新 Compose physical volume 與 `NAS_IMAGE` 並啟動服務」。
-- 原營運來源庫保持停機且 SQL 零連線；失敗時保留原卷與備份卷，不自動刪除或覆寫；Switch 前寫入 config before／after hash（保留 `.env` 其他設定、憑證與 MFA keys）。
+- 原營運來源庫保持停機且 SQL 零連線；需要連線驗證的是隔離環境還原的新副本，不是原營運來源庫。Switch 前寫入 config before／after hash（保留 `.env` 其他設定、憑證與 MFA keys）；失敗時保留原卷與備份卷，不自動刪除或覆寫。
 
 <a id="windows-nas-maintenance"></a>
 
@@ -78,7 +78,7 @@ Windows 選項 7／8 切換後暫留原庫，供本次維護驗收與必要回�
 
 - 以 Asia/Taipei 日曆與備份檔名時間選取：今天及前 13 天保留全部排程備份；當週及前 7 週各保留最新成功的一份，週一開始；當月及前 11 個月各保留最新成功的一份。三者取聯集，同一份只占一個檔案。週或月未備份時不虛構檔案；跨年依 ISO 週與日曆月份計算。
 - 僅新版每日排程建立且成功收據標記 `retention_managed=true` 的 ZIP 納入自動淘汰。既有未標記、手動、升級前、legacy `.sql.gz`、來源不符、未知檔案及 `_partial/` 一律不自動刪除。新政策不回溯接管既有檔案。
-- 沿既有 maintenance lock，在本次排程備份成功並完整驗證後才清理；最新成功備份及未來時間檔案保留。當次備份失敗不執行清理。
+- 沿既有 maintenance lock，在本次排程備份成功並完整驗證後才清理；最新成功備份及未來時間檔案保留。當次備份失敗或尚未通過完整驗證，不執行清理，不能以舊的成功備份替代本次檢查。
 - 清理前核對 target host／port／database、固定備份根目錄、精確月份子目錄及檔名，拒絕 symlink／junction 或超出根目錄的路徑；待刪 ZIP 必須通過既有完整封裝、checksum、gzip 及 SQL digest 驗證。驗證不完整不刪除。
 - 沿備份根目錄 `_retention/` 保留本次清理計畫與逐檔處理結果，不保存 credential 或 SQL。只刪計畫內已驗證過期 ZIP，不遞迴清空資料夾；重跑按現況重新判定。
 - 本節只管理 SQL 排程備份，不取代受控檔案與登入驗證金鑰的獨立備份，也不變更寄送紀錄六個月政策或防重送憑證。
