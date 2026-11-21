@@ -9,7 +9,7 @@
 
 ## 2. 定位與 SSOT
 
-本 Subsystem 是 Global 基礎設施能力，不屬於任何業務 Domain。負責在不更動唯讀 source database 的前提下，建立、驗證並切換至新 candidate database（不負責業務資料補猜、ledger 修復或自動刪除來源庫）。
+本 Subsystem 是 Global 基礎設施能力，不屬於任何業務 Domain。負責在不更動唯讀 source database 的前提下，建立、驗證並切換至新 candidate database（不負責業務資料補猜、ledger 修復或自動刪除來源庫）。遷移是在新候選庫套用並驗證發行內容；切換是把應用程式指向已通過驗證的候選庫。只完成遷移或驗證，不代表已切換。
 
 | 概念 | 唯一權威 |
 |---|---|
@@ -56,7 +56,7 @@
   → fresh-read metadata → append applied/exact/failed journal → classify part state
   ```
   - Journal identity 綁定 `source_database + release_id`（不混用先前 release 鏈）；每次 Apply 前須建立該機器專屬之 release-scoped mysqldump 與 local backup receipt（缺原始備份／身分不符回 `backup_required`；schema 已 exact 但既有同 release journal 未完成回 `verification_incomplete`）。
-  - **計時與逾時保護**：前置驗證上限 `300` 秒、更新後驗證上限 `300` 秒、單條 DDL 上限 `30` 秒、等鎖上限 `5` 秒、單次 socket 上限 `30` 秒；local receipt 與 completed journal 紀錄 `phase_timings`，超時回 `preparation_duration_exceeded`／`blocked_duration_exceeded`／`verification_duration_exceeded`（DDL 結果未明須先核對而不盲目重跑）。
+  - **計時與逾時保護**：前置驗證上限 `300` 秒、更新後驗證上限 `300` 秒、單條 DDL 上限 `30` 秒、等鎖上限 `5` 秒、單次 socket 上限 `30` 秒；local receipt 與 completed journal 紀錄 `phase_timings`，超時回 `preparation_duration_exceeded`／`blocked_duration_exceeded`／`verification_duration_exceeded`。若 DDL 結果未明，須先核對該版本的 durable journal 與新讀取的 metadata；只有符合 §3 明定的可續跑邊界才續行，不盲目重跑。
   - schema-only fast path 限 `localhost` development／validation 非 MySQL 系統 schema，遠端與 production 一律拒絕。
   - Windows 遠端 NAS 曾誤入 fast path 而中斷 1080 時，僅接受原 journal 的連續已驗證 canonical 前綴及完整原始備份。先驗證原備份的完整性、來源身分與資料指紋，再以該備份保存的原始 trigger 定義重建 1079 基線，須符合 journal 的原基線完整 schema SHA；不得假設伺服器保存的 SQL 排版與專案 SQL 原文相同。基線 trigger 順序須沿原 MySQL metadata 欄位的排序規則，包含原備份中已被 DROP 的名稱，不得改用 Python 字串排序。已套用 CREATE 的 trigger 以既有 canonical SQL 契約比較，再使用現況原始定義及快照原順序重建已驗證前綴，須符合現況完整 schema SHA。此證明只授權該次新副本恢復實際受影響的 guard parts，納入原 plan fingerprint 並於 Apply fresh-plan 再驗；不得改寫原庫或歷史紀錄、隱藏其他 partial／drift，或略過結果未明的 DDL。
 - **Candidate Backfill／Validation／Switch**：Backfill 先 dry-run 驗證 affected rows 與 before／after fingerprint；不可唯一轉換者進 bounded `legacy_unresolved`；Switch 使用 `SwitchStateReconciler` 核對 before／after `.env` hash 決定 crash window 狀態。
@@ -100,4 +100,4 @@
 ## 7. 驗收標準
 
 1. Module 驗證 SQL splitter（含引號內分號）、descriptor exact／partial／drift（parent existing metadata 與 successor allowlist）、`.env` round-trip 與 fingerprint 衝突。
-2. Subsystem 與 Global 真實 MySQL 驗證 source read-only、備份／還原 digest 保護、statement 中斷續跑、crash-window `.env` hash 核對、rollback 不刪 candidate，以及每個 release 均同時通過 fresh empty DB bootstrap 與完整 `source → dump → candidate → latest release → verify`。
+2. Subsystem 與 Global 真實 MySQL 驗證 source read-only、備份／還原 digest 保護、statement 中斷續跑、crash-window `.env` hash 核對、rollback 不刪 candidate，以及每個 release 均同時通過 fresh empty DB bootstrap 與完整 `source → dump → candidate → latest release → verify`。切換中斷時核對收據是否存在及其內容，並比對 `.env` 前後雜湊；收據缺失或狀態不明分別參照 §5 的 `switch_receipt_missing`／`switch_state_ambiguous`。回復原庫後確認候選庫仍保留。
