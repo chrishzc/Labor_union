@@ -47,7 +47,7 @@ Query 依注入的台北業務日期排除未來排班，人員核對當日是�
   - `ui_react/src/tests/orders_page_real_data.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_cancellation.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_reopen.test.tsx`
-- test_root: `ui_react/src/tests/order_cancellation_client.test.ts`
+- test_root: `ui_react/src/tests/order_cancellation_client.test.ts` — 既有 schema 案例區分合法的 `null` 與漏欄，必要欄位不能省略。
 
 ## Provenance
 - Cancellation workflow ownership — `architecture_declared` — Orders §3.5 and existing Orders subsystem map.
