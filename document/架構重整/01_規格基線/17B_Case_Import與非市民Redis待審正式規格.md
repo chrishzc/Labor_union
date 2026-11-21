@@ -48,6 +48,8 @@
 
 ### 3.1.1 原案資料帶入與獨立操作（`NC-MANUAL-01～04`、`NC-SEPARATE-01`）
 
+本節也包含下表既有的時段驗收 `NC-MANUAL-05`。
+
 - 管理端提供「以此案資料建立非市民新案」。承辦人選定來源案，帶入該案可對應的客戶及問卷欄位至既有手動非市民新案表單，核對並補齊 §3.1 必填欄位後確認送出；缺值留待填寫，不猜補其他客戶或案件資料，不要求客戶重新填 LIFF。
 - 新案沿既有手動非市民機制新增客戶、配發 A 案號、建立 BeClass 問卷及必要初始化。不改寫來源案號、身分、訂單及歷史，不搬移帳務、銷帳明細、排班或契約；不複製 `line_user_id`、binding 或其版本。退款資料沿既有受權限控制的表單處理，不進入日誌或收據。
 - 正常作業由人員先取消洽談中的市民案，再建立非市民新案；歷史訂單重啟後發現身分不符時，由人員使用相同入口處理。系統不依來源案狀態、取消是否完成、歷史／重啟身分或銷帳狀態新增資格檢查，也不要求補救專用模式或原因。
@@ -68,7 +70,7 @@
 ### 3.2 核准前問卷不得進 MySQL 與獨立 Redis 7 架構（`REG-BOUNDARY`、`REG-REDIS`、`REG-EXPIRY`）
 
 - **`REG-BOUNDARY-01～06`（儲存與邊界隔離）**：
-  - 核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
+  - 查到待審申請只表示收件，不表示已建正式案件。核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
   - 對外收件容器 `registration-intake` 僅持 LIFF token 驗證與專用 `registration-redis` 受限 ACL（僅可讀寫待審內容與計數器命名空間，完全不配置 MySQL 憑證、網路路徑或審核決策權限）；瀏覽器僅呼叫 bounded API。
   - 管理員審核核准於 MySQL 唯一 outer UoW 透過各 owning Domain writer 原子建立正式 Client／BeClass（含同步保存 `beclass_records.refund_bank_code` 與 `refund_account_no`，依 `REG-REFUND-01～03`）／Orders（含非市民建檔）與 LINE binding，並透過 Controlled File Storage boundary 將暫存的存摺封面歸檔至 NAS `02_客戶存摺封面` 資料夾，確認完成後方清除 Redis 問卷原文與暫存圖檔。
 - **`REG-REDIS-01～04`（持久化設定與編號）**：專用 `registration-redis`（Redis 7 獨立實例＋持久化卷，禁與 cache 共用；關閉 host port；設定 `appendonly yes`、`appendfsync always`、`noeviction`、`maxmemory 256mb`、`auto-aof-rewrite-percentage 100`、`auto-aof-rewrite-min-size 64mb`）。容量滿或 AOF 錯誤一律拒收而不退回 MySQL。專用 Redis 持久化計數器須於還原後與 MySQL 核對最大已用編號（禁擅自以空庫或已核准值重設）。
@@ -78,7 +80,7 @@
   - 待審申請自伺服器提交時起算固定 **14 × 24 小時（14 天）**，設定不可延長之絕對 `expires_at` 與 Redis TTL（重開／查詢不延長；到期立即清除問卷並釋放主體占用，保留最小「已到期」狀態供查「申請已到期，請重新申請」；轉入核准處理中立即解除 TTL 改受恢復索引保護以防 MySQL 交易中途遺失）。
   - 明確拒絕立終態並立即清除問卷原文（僅留申請號、拒絕時間與操作人供授權回讀）；拒絕或到期後可重新提出新申請（原號重送僅回原終態）。
 - **`REG-REDIS-06～08`（兩儲存故障恢復、維護與 AOF 實體整理）**：
-  - 核准中 MySQL 未提交：恢復作業讀取處理中索引以原操作識別續走冪等 MySQL writer；MySQL 已提交 Redis 未清除：核對已 commit 回執後僅補行 Redis 終態與刪除，絕不重建案號／Client。
+  - 核准中斷後先分清 MySQL 是否已提交。若未提交，恢復作業讀取處理中索引，以原操作識別續走冪等 MySQL writer；若已提交但 Redis 未清除，核對已 commit 回執後只補做 Redis 終態與刪除，絕不重建案號或 Client。
   - 內部維運排程除設定原生 AOF rewrite 外，每小時偵測自上次整理後如有問卷清除則執行一次 `BGREWRITEAOF`，實體抹除舊 AOF 內容（禁止腳本手動刪 AOF）；獨立容器拓樸由 `docker-compose.registration.yml` 與 `REGISTRATION_REDIS_ADMIN_PASSWORD_FILE` 隔離（`registration-intake` 不掛 `.env` 或管理 secret），首次全新空實例以 `scripts.registration_maintenance --initialize-new-instance --once` 初始化並於一般啟動／還原核對既有 SQL 最大編號。
 
 ## 4. HCM 進件規範、欄位警示與 `BECLASS-001／IMPORT-003`
