@@ -30,6 +30,7 @@
 - integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_order_amount_calculator.py`
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py`
+- 既有日期案例（上列測試 L60–98）：第二期有應繳金額時，日期由第一期預計入帳日加 15 個曆日（含跨年／閏年案例）；第二期金額為零時不產生日期；已收第二期取消並形成退款候選時，保留原義務到期日，原本未知則仍無日期。僅核對候選層斷言，未驗證資料庫或實際付款／退款。
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`
 
 ## Provenance
