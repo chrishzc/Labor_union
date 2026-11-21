@@ -23,7 +23,7 @@
 
 ## Verification
 - higher_boundary: tests/domains/government-subsidy/subsystems/government-subsidy/integration/
-- focused: `test_government_subsidy_overpayment.py`, `test_government_subsidy_overpayment_workflow.py`
+- focused: `test_government_subsidy_overpayment.py`, `test_government_subsidy_overpayment_workflow.py` — 既有合成案例核對預覽過期會拒絕套用，且不持久化。
 
 ## Transaction boundary
 - Government Subsidy receipt／offset Query／Preview／Apply 維持單一 outer UoW 與 fresh readback。退回、退款核銷及追償 operation 已移除；歷史資料與 release schema 保留。
