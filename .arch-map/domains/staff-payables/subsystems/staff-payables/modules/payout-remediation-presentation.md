@@ -20,7 +20,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/staff_payout_remediation_workbench.test.tsx`
-- test_root: `ui_react/src/tests/staff_payout_remediation_client.test.ts`
+- test_root: `ui_react/src/tests/staff_payout_remediation_client.test.ts` — 既有模擬案例核對背景工作結果的命令類型不符時拒絕解碼。
 - routing: `.arch-map/tests/domains/staff-payables/subsystems/staff-payables/modules/payout-remediation-presentation.md`
 
 ## Change triggers

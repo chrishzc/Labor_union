@@ -20,4 +20,4 @@ Payroll 或 historical settlement adapter 直接寫 recovery。合法 Payroll co
 ## Verification
 - `tests/domains/staff-payables/subsystems/staff-payables/integration/test_recovery_disposition_mysql.py`
 - tests由Staff Payables Subsystem current integration root持有。
-- `tests/domains/staff-payables/subsystems/staff-payables/integration/test_payroll_handover_correction.py`
+- `tests/domains/staff-payables/subsystems/staff-payables/integration/test_payroll_handover_correction.py` — 既有合成案例核對部分付款只更新投影，投影版本過期也不建立追償。

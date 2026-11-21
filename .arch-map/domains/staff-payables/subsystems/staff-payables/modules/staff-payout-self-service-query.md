@@ -10,7 +10,7 @@
 
 ## Implementation
 - primary:
-  - `subsystems/staff_payables/staff_payout_self_service_query.py`
+  - `subsystems/staff_payables/staff_payout_self_service_query.py` — 基本查詢參數不合法時先拒絕，不呼叫儲存庫。
   - `infrastructure/mysql/staff_payout_self_service_query_repository.py`
 
 ## Dependencies

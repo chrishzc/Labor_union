@@ -17,7 +17,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/staff_overpayment_recovery_actions.test.tsx`
+- test_root: `ui_react/src/tests/staff_overpayment_recovery_actions.test.tsx` — 既有模擬案例核對查得多筆目前配對時顯示提示，不提供收款核銷儲存。
 - routing: `.arch-map/tests/domains/staff-payables/subsystems/staff-payables/modules/overpayment-recovery-presentation.md`
 
 ## Change triggers

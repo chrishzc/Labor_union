@@ -24,6 +24,6 @@
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md`。
 
 ## Verification
-- integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py`
+- integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py` — 既有合成案例核對相同命令重送回傳原收據，不增加寫入。
 - integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_repository_recovery.py`
 - integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_subsidy_split_mysql.py` — 無方案／無分期共同確認、已有分期、先前部分付款、原日期、來源衝突、同鍵異命令及中途失敗整筆回滾；補助先付時銀行別餘額與月清冊／逐案查核一致，含自備款小於補助款。
