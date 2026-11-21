@@ -14,7 +14,10 @@
 ### 2.1 既有 Staff roster summary 與 detail
 
 - `subsystems/staff/summary_query.py` 的 `StaffSummary` 維持 bounded 欄位：`id`、`name`、`phone`、`education`，不隨 BeClass 題目擴張。
-- 選取單一月嫂時以 `GET /api/v1/staff/{staff_id}/profile` 讀取 Staff-owned `StaffProfile`（含報名時間、完整身分證、行動電話、市話／分機、Email、生日、地址、學歷、完整緊急聯絡人電話、內部行政註記與銀行帳戶）。銀行完整帳號查閱與遮蔽邊界依 [案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md) §6 辦理；response 嚴禁包含 IP、LINE User ID、raw workbook／JSON 或 credential。空值顯示「尚未登錄」。
+- 選取單一月嫂時以 `GET /api/v1/staff/{staff_id}/profile` 讀取 Staff-owned `StaffProfile`（含報名時間、完整身分證、行動電話、市話／分機、Email、生日、地址、學歷、完整緊急聯絡人電話、內部行政註記與銀行帳戶）。
+  - 銀行完整帳號查閱與遮蔽邊界依 [案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md) §6 辦理。
+  - response 嚴禁包含 IP、LINE User ID、raw workbook／JSON 或 credential。
+  - 空值顯示「尚未登錄」。
 - 一般資格證明由 `staff_certifications` 擁有，與 `has_massage_cert` 投影到 qualification master 的 `certifications` section。
 
 ### 2.2 BeClass 已採納 relation facts 與交通方式 gap
@@ -74,5 +77,5 @@ PreferenceTopicSummary {
 ## 6. 驗收標準
 
 1. 六母題與 `PreferenceTopicSummary` shape 具確定性且 bounded；`values` 與六組 `[其它]` 各自隔離不合併。
-2. `transportation` 在無正式來源前穩定回傳 `source_not_ready`，禁止挪用料理能力 `[其它]`。
+2. `transportation` 在無正式來源前穩定回傳 `other_detail_status=source_not_ready`、`other_detail=null`，禁止挪用料理能力 `[其它]`。
 3. Read projection 零敏感欄位洩漏、零寫入能力、UI 不直接 join relation tables。

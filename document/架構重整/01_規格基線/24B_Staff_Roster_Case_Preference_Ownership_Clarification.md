@@ -36,11 +36,11 @@ Case Import 只負責 workbook normalization/adoption，不是 roster query 或 
 
 現行 importer 對 `staff_transportation` 的 other source 為 `None`：
 
-- `transportation_other_detail` 屬 read-model logical placeholder，在補齊專屬 persistence owner 前固定回 `source_not_ready`。
+- `transportation_other_detail` 屬 read-model logical placeholder。在補齊專屬 persistence owner 前，依 [Staff Roster Read Model](24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md) §3，名冊只讀投影的 `transportation` 回傳 `other_detail_status=source_not_ready`、`other_detail=null`。
 - 嚴禁把料理能力 `[其它]`、其他 `[其它].N`、空字串或推測值填入 transportation detail。
 
 ## 4. 驗收標準
 
 1. Matching preferences、roster read projection、料理能力與個資／資格四類邊界清楚分離，不共用 write API。
 2. `[其它]` 與 `[其它].1`～`[其它].5` 嚴格鎖定原母題，無 generic `other_note`。
-3. 交通方式 `other_detail` 保持 `source_not_ready`，不與其他母題交叉回填。
+3. 交通方式回傳 `other_detail_status=source_not_ready`、`other_detail=null`，不與其他母題交叉回填。
