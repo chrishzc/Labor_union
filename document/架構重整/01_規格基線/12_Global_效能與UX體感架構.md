@@ -14,7 +14,7 @@
 效能判斷只使用可量測 evidence：browser／React interaction timing、API server timing／payload bytes／correlation id、DB query count／duration／rows examined／lock wait、cache hit／miss／age／invalidation reason、background job queued／started／completed time、projector／outbox lag 與 compression response behavior。
 
 - 效能量測不得建立逐請求 telemetry 資料表、不得把 request／response payload 或逐筆 timing 寫入資料庫，也不得輸出無上限的 slow-request console log。
-- API 僅在當次回應附 `Server-Timing` 與 `X-Response-Time-Ms`；cache telemetry 僅為程序記憶體中的固定計數，程序重啟即歸零。
+- API 僅在當次回應附 `Server-Timing` 與 `X-Response-Time-Ms`；cache telemetry 僅為程序記憶體中的固定計數，程序重啟即歸零。 `api/middleware/performance.py` L14–26 只佐證這個 middleware 在當次回應附加耗時標頭，不代表已驗證全系統的效能資料保存方式。
 - 效能 budget 採 record-only：只供人工於本機可重跑快照檢視與比較，不顯示即時警告、不建立 anomaly、不影響 command 結果，也不阻擋 release。
 
 ### 2.1 系統效能快照查詢入口
