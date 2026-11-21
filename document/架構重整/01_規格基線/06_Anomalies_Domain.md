@@ -41,6 +41,7 @@ Anomalies 只表達「目前確實可能發生、而且狀態成立後需要工�
 | `GOVSUB-003` | deterministic validation、tests、migration readback |
 | `GOVSUB-004` | Government Subsidy normal owner operation；不建立第二套 recovery |
 | `GOVSUB-005` | owner revision／validation tests |
+| `GOVSUB-007`（退役） | 不形成 Anomalies current issue；既有帳務、審查與更正由 Government Subsidy 負責 |
 | `IMPORT-003` | HCM 正常 intake；客戶資料修改走 Client owner profile change |
 | `IMPORT-006` | Finance Import tests／validation／operational failure；不做 runtime recovery workbench |
 | `SCHEDULE-002` | Scheduling transaction／migration tests；非法 partial lineage 不作日常產品情境 |
@@ -73,7 +74,7 @@ predicate false 後直接刪除 row；同一 canonical subject 日後再次成�
 
 ## 5. Government Subsidy owner validation
 
-Government Subsidy 的正常 claim、receipt、allocation、reversal、review 與必要 owner correction 由其自身 owner 承接；非法 reducer／projection 狀態由 deterministic validation、focused tests 與 migration readback 保護，不建立第二套 Anomalies recovery。
+Government Subsidy 的正常 claim、receipt、allocation、reversal、review 與必要 owner correction 由其自身 owner 承接；非法 reducer／projection 狀態由 deterministic validation、focused tests 與 migration readback 保護，不建立第二套 Anomalies recovery。已退役的政府退款超額識別 `GOVSUB-007` 不加入 Anomalies 的 producer、current projection、React current mapping 或 public current definition；既有業務仍依上述 owner 規則處理。
 
 ## 6. `LINE-006` current contract
 
@@ -130,11 +131,11 @@ Operational／readback failure 由 durable-job／runtime health 處理；若 DB 
 
 ## 10. 驗收標準
 
-- runtime current issue exact set = `{LINE-006}`；
+- runtime current issue 支援的定義碼集合是 `{LINE-006}`；沒有有效問題時，清單可為空。
 - Government Subsidy 的正常 claim／receipt／allocation／reversal validation 保留；
 - `BECLASS-001` 只存在 Case Import／Client owner follow-up，不出現在 current anomaly projection；
 - 退役 13 碼不再有 runtime producer／public current definition／React current mapping；
 - `LINE-006` pending／processing／retryable／readback-incomplete 本身不產生 issue，只有需要人工介入才產生；
 - 人工結清與新事件情境依 [LINE 結清驗收](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#43-結清驗收) `LINE-CLOSE-01`～`07`；Anomalies 只核對 authoritative predicate 與 current row 同步，不另保存投遞處置；
 - legal `customer + staff` dual-role 與同一 Client 多案件不產生 `LINE-004`；same-type replacement 走 LINE Identity normal operation；
-- predicate false 且 authoritative complete 時 current row 實際刪除。
+- 已有 `LINE-006` current row 時，觀察 bounded recheck 後的列表：LINE 的權威讀回完整且 predicate false 時實際移除該 row；讀回不完整不得刪除，也不因不完整新增業務異常。
