@@ -10,7 +10,7 @@
 ## Implementation
 - primary:
   - `shared_kernel/validation.py`
-  - `shared_kernel/fingerprints.py`
+  - `shared_kernel/fingerprints.py` — 將支援的資料正規化，再序列化為鍵排序的 JSON 並以 SHA-256 產生指紋；拒絕不支援的值。
 
 ## Provenance
 - Shared pure validation and fingerprint primitives — `source_observed` — current repository。
