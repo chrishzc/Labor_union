@@ -16,7 +16,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/historical_operational_baseline_readback.test.tsx`
+- test_root: `ui_react/src/tests/historical_operational_baseline_readback.test.tsx` — 既有模擬案例核對切換案件後，先前案件延遲回傳不會覆蓋目前畫面。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-baseline-presentation.md`
 
 ## Change triggers
