@@ -9,7 +9,7 @@
 
 ## Implementation
 - primary:
-  - `domains/scheduling/staff_availability.py`
+  - `domains/scheduling/staff_availability.py` — 長假須明確給起訖日；恢復接案須指定暫停紀錄及恢復日，不混用建立時的起訖欄位。
   - `subsystems/scheduling/staff_availability_workflow.py`
   - `infrastructure/mysql/staff_availability_repository.py`
   - `ui_react/src/pages/StaffPage.tsx`
