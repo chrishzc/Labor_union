@@ -128,7 +128,9 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 - 共用根目錄由 NAS 管理者預建並授予子目錄建立 ACL；程式於首次寫入時自動建立 `01`～`05`（含 `04_LINE選單資源 (media)/rich_menus`）與 `_staging` 並繼承 NAS ACL（唯讀 Query 與 dry run 不建立資料夾）；未填 `union_no` 之月嫂以 `ID{staff.id}` 命名快照（後續更名不搬移舊檔）；不合法路徑字元轉底線且嚴防 root escape。
 - 新正式受控附件於原 outer transaction 保存 finalize intent，commit 後由 bounded finalize runner 歸檔至 `01`～`04` 新 locator；未綁定 LINE 原始媒體位於 `_staging/line_media`。
 - 明確設定本機絕對儲存路徑時，新上傳的客戶服務契約及月嫂委任契約歸檔至 `01`，客戶審核／建檔時確認的存摺封面歸檔至 `02`，月嫂履歷、證照及體檢文件歸檔至 `03`。登錄時建立 finalize intent，由背景工作歸檔並維持原檔案識別的下載能力。新上傳的 LINE 選單素材由既有媒體資產流程直接寫入 `04/rich_menus/`，以資產識別讀取。既有檔案位置照原紀錄讀取。
-- `05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一共用根（無獨立 `NAS_BACKUP_DIR`），Global migration 使用 `_partial/` 與 `_maintenance/`，備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過後封裝為單一 `.zip` 發布（並向下相容讀取既有 `_receipts/YYYY-MM/` 舊三檔備份）；一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
+- **共用根下的備份目錄**：`05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一共用根（無獨立 `NAS_BACKUP_DIR`）。本項只描述共用根內的目錄；Windows 維護入口的備份目的目錄選擇見 [NAS Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md) §5。
+  - Global migration 使用 `_partial/` 與 `_maintenance/`。備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過後封裝為單一 `.zip` 發布（並向下相容讀取既有 `_receipts/YYYY-MM/` 舊三檔備份）。
+  - 一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
 - 實體檔案命名固定為 `[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`；透過 `FileSystemControlledFileStorage.readiness()` Fail-Closed 保護寫入一致性。新歸檔的存摺封面採用登錄當時的正式客戶姓名，附客戶編號以區分同名客戶。過長的姓名截短至可完整表示於前 180 個 UTF-8 bytes 的字元。既有存摺封面仍依原儲存位置讀取。
 
 ## 9. 驗收標準
