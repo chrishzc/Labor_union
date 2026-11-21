@@ -9,7 +9,7 @@
 
 ## 2. 管理端 React 正式入口
 
-管理端唯一前端為 `ui_react/`。正式入口必須同時存在於以下兩處，僅存其一即視為 registry drift：
+管理端唯一前端為 `ui_react/`。對同一個 page identity，必須同時找到以下兩處；只找到導航或只找到 render 分支，均視為 registry drift：
 
 1. `ui_react/src/components/MasterLayout.tsx` 宣告可達 navigation entry；
 2. `ui_react/src/App.tsx` 對相同 page identity 具備 render branch。
@@ -51,6 +51,8 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 
 ### 3.2 已停用／移除之端點與替代邊界
 
+依各條區分：明定 `410 Gone` 的停用入口仍按原契約回應；明定自路由與 OpenAPI 移除的入口，不應拿 `410` 當作驗收結果。保留或替代入口只依各條明載的範圍。
+
 - **銀行無案件人工新增**：`POST /api/v1/finance-import/statements/manual` 經認證後固定回 typed 410；案件手動補登改用案件抽屜正式補登入口。既有備查紀錄另保留 `GET /api/v1/finance-import/statements/manual/export` 唯讀下載。
 - **政府補助舊逐案入口**：改用 `/api/v1/government-subsidy/periods` 月／季／年整期核銷；原 claim planning／submission／approval、逐案 receipt、offset 與 advance settlement POST 端點回 410，durable worker 拒絕建立舊命令；歷史 Query 與原交易沖正保留。
 - **舊帳戶維護端點**：`/api/v1/client-finance/payment-destination`（GET、`/preview`、`/apply`）已自路由與 OpenAPI 移除。
@@ -64,7 +66,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **LINE 加入好友歡迎訊息設定**：`GET /api/v1/line/onboarding`、`POST /api/v1/line/onboarding/preview` 與 `PUT /api/v1/line/onboarding` 回傳 typed `410 Gone`；加入好友歡迎訊息改由 LINE 官方帳號後台設定，通知工作台與公版目錄不再列管歡迎詞。
 - **LINE 客服工單退役**。舊客服工單摘要、列表、明細、客服提醒、客服回覆與行動客服 API 回 `410 Gone`。切換結案保留原授權。
 - **客戶資料與訂單異動申請退役**。自路由移除舊客戶表單頁面（`/line-profile-guard`、`/line-profile-update`、`/line-order-update`）及送審、查詢、審核 API（`/api/v1/line/client-profile/*`、`/api/v1/client-profile/requests*`、`/api/v1/line/mobile-admin/client-profile/requests*`、`/api/v1/line/order-change/{query,preview,requests}`、`/api/v1/orders/change-requests*`）。舊 `POST /api/v1/line/order-change/apply` 維持 `410 Gone`，提示客戶在 LINE 聊天室留言。
-- **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。
+- **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），後端仍保留既有 Query／Preview／Apply、30 天排程清理（`run_automatic_retention_cycle`）與資料。
 
 - **請假送件與代班待辦入口**。排班頁移除「代班待辦」分頁及其中的歷史請假畫面，桌面與行動通知不提供開工、延期衝突或局部代班待辦續辦入口。`staff_leave_apply` 連結顯示雙方合意延期指引。月嫂直送 `POST /api/v1/line/staff-self-service/leave-results/submit` 及雙邊確認 `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 回 `410 Gone`。工會端原服務開始 `dates` 動作的局部代班分支拒絕新提交並回 `410 Gone`。歷史記錄及成功操作收據保留唯讀與原鍵讀回，不恢復請假或代班續辦流程。正常開工、合意延期與服務中換人依 [Scheduling](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 各自契約處理，管理員排班由 [案件人力配置](31_MultiCaregiver_Admin_UI正式規格.md#case-staffing) 承接。
 
@@ -91,7 +93,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - `App.tsx` render branch 存在；
 - page module 可被 TypeScript build／test 載入；
 - 直接相關 typed API client 與 focused UI test 通過；
-- 已停用 410／移除路由均回傳預期 typed status 且無寫入副作用。
+- 明定停用的端點回預期的 typed `410`；明定自路由與 OpenAPI 移除的端點，驗證不再註冊於兩者。兩類皆不得造成寫入副作用。
 
 | S 情境與前提 | T 任務 | A 操作 | R 可判定結果 |
 |---|---|---|---|
