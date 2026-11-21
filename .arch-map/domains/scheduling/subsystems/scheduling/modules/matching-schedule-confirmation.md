@@ -51,7 +51,7 @@
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md`
 
 ## Verification
-- test_root: `ui_react/src/tests/matching_schedule_confirmation_actions.test.tsx`
+- test_root: `ui_react/src/tests/matching_schedule_confirmation_actions.test.tsx` — 既有模擬案例確認有指派但缺正式逐日班次時，不顯示排班已生效。
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-schedule-confirmation/`
 - direct_api_test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-schedule-confirmation/`
 - layout_status: `custom_current`
