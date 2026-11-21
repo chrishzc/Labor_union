@@ -64,7 +64,7 @@
 7. snapshot token 只有在 owner 沒有單一合法 version、且確實需要證明 multi-root authoritative snapshot 時才可使用。
 8. 不得用兩個以上 mechanism 保護同一 stale condition，除非每一個有不同且明確的 failure meaning。
 9. 真正 stale 表示 caller 確認 candidate 後，出現「不屬於本 command 預期 state transition」的 external current-fact change，使 candidate 不再合法。
-10. stale／version conflict 必須是 closed typed `conflict`（對 HTTP 通常是 409）；不得用 `RuntimeError`／generic 500 表示正常 concurrency conflict。
+10. 例如：同一批次第一筆合法寫入使 owner version 往前，不因這個預期變化把後續內部步驟判為 stale；若使用者已確認候選，而不屬於本次命令預期狀態轉移的現行事實變更使該候選不再有效，就按外部 stale 處理。stale／version conflict 必須是 closed typed `conflict`（對 HTTP 通常是 409）；不得用 `RuntimeError`／generic 500 表示正常 concurrency conflict。
 11. 不得以 blind retry 修 false-stale。先區分 external stale、self-induced state advance、idempotent replay、deterministic derived drift、data-integrity conflict。
 12. 新增 fingerprint／digest／snapshot token 前，必須能回答：保護哪個 race、owner version 為何不足、與 idempotency／content digest 的差異、唯一 failure meaning。無法回答就不新增。
 
@@ -73,7 +73,7 @@
 管理端既有儲存、套用、匯入、帳務處理、案件／排班／人員狀態異動、LINE 設定與發布及營運清理，一律由人員填妥必要業務輸入後一次點擊送出。管理端不設作為防操作失誤用途的獨立預覽步驟、已核對勾選或純確認對話框，不因未按預覽或未勾選而阻擋送出（不擴張公開 LINE／LIFF 使用者端行為）。
 
 - 人工自由文字原因／備註均為選填；未提供或留空保存空字串，不代填虛構理由。人事異動的既有原因分類可不選，填寫時仍須屬合法分類。系統產生的機器錯誤碼、拒絕分類、來源可用性與必要業務 evidence 保持各 owner 語意。
-- 同一次點擊可以先呼叫既有零寫入檢查／試算，再將同一 intent 與回傳的 typed candidate 交給正式 Apply；不把中間結果變成下一道人員確認。既有傳輸 fingerprint 僅沿用既有命令一致性檢查，不新增第二層 token、retry 或 fallback。
+- 同一次點擊可以先呼叫既有零寫入檢查／試算，再將同一 intent 與回傳的 typed candidate 交給正式 Apply；不把中間結果變成下一道人員確認。人員只點擊一次送出，不等於略過後端檢查：必要業務證據仍由原 owner 驗證。既有傳輸 fingerprint 僅沿用既有命令一致性檢查，不新增第二層 token、retry 或 fallback。
 - 保留欄位型別／合法值、業務 blocker、actor／authorization、owner version／必要 snapshot、fresh-read／lock、冪等命令識別、receipt 與正式 readback。資料競爭仍回 typed conflict；結果未明仍查回或重送同一原命令，不重新產生另一筆 mutation。
 - 不改 Domain owner、根事實、交易邊界、DB schema、帳務守恆、簽署證據或實際 provider 成功判定。畫面視覺／文件預覽可以保留為查看功能，不得成為儲存前置條件。
 
@@ -120,7 +120,7 @@ current_version
 - `unavailable`
 - `internal`
 
-只有真正 infrastructure／availability failure 可標 retryable。`conflict` 必須重新 Query／Preview，不得自動 Apply。UI 不得依 message 字串判斷流程。
+只有真正 infrastructure／availability failure 可標 retryable。`conflict` 必須重新 Query／Preview，不得自動 Apply。UI 依結構化的 `category`／`code` 判斷流程，不依 `message` 字串判斷流程，也不把衝突當成可直接重送的基礎設施故障。
 
 ### 4.1 FastAPI 管理端公開邊界
 
@@ -170,4 +170,4 @@ owner root / immutable event 出現 current issue
 - 可唯一安全決定的結果可由 owning Domain 自動完成。
 - 原因、歸屬或修復動作不唯一時停在 owner review／current issue，不猜答案。
 - Anomalies 只組合 current predicate／action descriptor，不擁有帳務、排班、薪資、Orders 或 LINE root correction。
-- 每個 current issue 只需定義 owner、subject、active/completion predicate、合法 action 與必要 evidence；不得為所有 code 建立 generic resolve／tracking workflow。
+- 每個 current issue 只需定義 owner、subject、active/completion predicate、合法 action 與必要 evidence。執行合法 action 或收到命令收據不等於問題已解除；須經 durable recheck，確認 owner 的 current-issue predicate 已不成立才移除。不得為所有 code 建立 generic resolve／tracking workflow。
