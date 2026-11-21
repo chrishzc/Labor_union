@@ -55,6 +55,7 @@
 - layout_status: `custom_current`
 - layout_basis: Backend tests protect the workbook owner contract; the mirrored React root follows the existing project frontend test layout and verifies the HCM Preview/Apply UI and typed result adapters.
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/hcm-current-workbook-import/`
+- 合成 SQLite 回歸（上列後端測試目錄的 `regression/test_hcm_partial_order_terms.py` L61–86、L97–141）：待補件資料逐欄保留合法條款，無效時間欄位維持空值，缺開始日或天數時補件預覽阻擋 Apply。已保存的有效值可由 Orders reader 讀回。此案例不涵蓋 MySQL、重播或整份工作簿。
 - test_root: `ui_react/src/tests/domains/case-import/subsystems/case-import/modules/hcm-current-workbook-import/`
 - test_root: `tests/fixtures/case_import/hcm_ui_demo_20261020.xlsx` — 人工 UI 匯入驗收的合成 workbook，涵蓋正常、缺漏與格式錯誤列；沿用現有 fixture 路徑。
 
