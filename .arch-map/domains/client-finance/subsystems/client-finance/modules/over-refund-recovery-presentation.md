@@ -6,6 +6,7 @@
 
 ## Responsibility
 呈現客戶退款超額追償的既有 Query／Preview／Apply 與 fresh owner readback。一般畫面只顯示案件、追償餘額、closed狀態、處理方式與安全錯誤；配對identity/version只保留在預設收合的技術操作欄位。不得改寫Client Finance完成predicate或建立虛構銀行入款。
+Apply 後只以重新讀取的 owner 結果判定是否顯示異常可解除：追償餘額為零，且狀態為 `recovered` 或 `adjusted`。Apply 收據不替代此判定。
 
 ## Implementation
 - primary: `ui_react/src/components/ClientOverRefundRecoveryWorkbench.tsx`
