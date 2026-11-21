@@ -44,6 +44,8 @@
 
 四種走法匯入 `Invoke-ManagerAction` 的 `database-upgrade`，再到 `Invoke-DatabaseMaintenance 'upgrade'`。Python 環境不存在或同一安裝仍有受管服務時，管理器回報錯誤而不呼叫維護模組；通過才委派 `scripts.nas_database_maintenance upgrade`。其 `backup` 和 `restore` 分別由選項 `6`、`8` 分派，不是升級別名。受管服務運作時仍允許備份，升級與復原則受上述檢查限制。獨立的 NAS 升級批次不經管理器，見 [Migration 架構](../../migration/modules/preserved-database-upgrade.md#windows-nas-維護交接)；不要把管理器前置檢查套用到所有入口。
 
+管理器針對受管服務狀態的前置檢查及委派可查 [既有管理器測試](../../../../../../tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/test_windows_manager.py#L358-L394) 的 `test_database_delegate_requires_stop_for_upgrade_restore_and_propagates_failure`。它以替身檢查服務運作時允許備份、拒絕升級與復原且不代停服務、停止後委派，以及備份子程序失敗時管理器會報錯；不驗證 MySQL 或實機維護結果。
+
 ## Contracts
 - Windows 統一操作：根目錄 `Windows管理.bat` → `scripts/launchers/manage_windows.ps1` → 既有 supervisor；整組停止重用 frontend-control run-bound channel，新增 starting／ready／stopping／stopped／failed 與 cleanup-confirmed readback，不新增公開維運 API。舊 `start_windows_remote.bat` 只轉接參數；舊開發／NAS／DB 維護入口仍有各自 consumer，不退役。
 - Windows 獨立主機來源包：`scripts/package_windows_runtime.py` 內聚 `include_source` 秘密過濾，排除 runtime data／ignored 設定，附來源雜湊 manifest，不包含資料或 Tunnel token；`scripts/launchers/WINDOWS-REMOTE.md` 承接安裝、換機及純人工 Cloudflare 設定。`test_windows_manager.py` 位於本 Module test root，保護封裝不讀秘密及更新 build-before-stop；既有 frontend lifecycle test 同時驗證整組停止。
