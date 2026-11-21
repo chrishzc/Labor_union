@@ -25,7 +25,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/line_delivery_task_workbench.test.tsx`
+- test_root: `ui_react/src/tests/line_delivery_task_workbench.test.tsx` — 既有模擬案例確認變更篩選會中止舊頁請求，晚到的舊回應不會覆蓋新結果。
 - integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_delivery_operations_workbench.test.tsx`
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/delivery-task-presentation.md`
 - integration_root: `tests/test_line_delivery_public_query_route.py`
