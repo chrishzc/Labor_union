@@ -25,7 +25,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/historical_order_workbook_client.test.ts`
+- test_root: `ui_react/src/tests/historical_order_workbook_client.test.ts` — 既有模擬案例區分 Apply 暫時不可用與 Preview 錯誤。
 
 ## Provenance
 - Presentation 不重算 owner facts — `architecture_declared` — Orders historical adoption contract。

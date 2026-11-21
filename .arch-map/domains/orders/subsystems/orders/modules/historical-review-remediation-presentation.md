@@ -19,7 +19,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/historical_order_review_remediation.test.tsx`
+- test_root: `ui_react/src/tests/historical_order_review_remediation.test.tsx` — 既有模擬案例核對預覽未回傳時停用處理原因欄位且不套用，取得預覽後只套用一次。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-review-remediation-presentation.md`
 
 ## Change triggers

@@ -41,7 +41,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-completion/`
-- integration_root: `ui_react/src/tests/historical_completion.test.tsx`
+- integration_root: `ui_react/src/tests/historical_completion.test.tsx` — 既有模擬案例核對儲存只套用一次，完成後才通知上層。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-completion.md`
 
 ## Provenance

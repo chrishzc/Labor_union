@@ -9,7 +9,7 @@
 
 ## Implementation
 - primary:
-  - `domains/orders/historical_adoption.py`
+  - `domains/orders/historical_adoption.py` — 採納候選只有在案件狀態改變或日期有修正時才推進 Orders lifecycle version；這是候選結果，不代表已寫入。
   - `subsystems/orders/historical_adoption_workflow.py`
   - `subsystems/orders/historical_order_workbook.py`
   - `subsystems/orders/historical_order_workbook_import.py`

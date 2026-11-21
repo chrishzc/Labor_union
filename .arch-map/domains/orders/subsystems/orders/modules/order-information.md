@@ -17,7 +17,6 @@ Case Import 照護與服務約定的 named projection 疊加 current BeClass cor
 
 ## Implementation
 - `subsystems/orders/order_information.py` — 共用 case-only 服務／照護內容與 saved-date 週說明 typed projection；逐人 Preview 保留 recipient-bound fingerprint，不建立假 assignment 或 candidate。
-- `subsystems/orders/order_information.py`
 - `infrastructure/mysql/order_information_repository.py`
 - `db/templates/tpl_info_01.json`
 - `db/templates/tpl_info_02.json`

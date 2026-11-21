@@ -41,7 +41,7 @@
 - layout_status: custom_current
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/actual-start/`
 - higher_boundary: `tests/domains/orders/subsystems/orders/integration/test_order_actual_start_workflow.py`
-- test_root: `ui_react/src/tests/order_workbench_v2_actual_start.test.tsx` — existing drawer mutation／recovery integration。
+- test_root: `ui_react/src/tests/order_workbench_v2_actual_start.test.tsx` — existing drawer mutation／recovery integration。 既有模擬案例核對正式讀回尚未符合回執時不顯示完成、不重送套用，直到讀回一致才顯示完成。
 
 ## Provenance
 - Actual Start writer and cross-owner persistence — `source_observed` — `subsystems/orders/actual_start_workflow.py`.

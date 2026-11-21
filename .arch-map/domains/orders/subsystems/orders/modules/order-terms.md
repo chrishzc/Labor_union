@@ -70,7 +70,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - test_root: `tests/test_order_terms_preassignment_correction.py`
 - test_root: `tests/domains/orders/subsystems/orders/modules/order-terms/`
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-terms/`
-- test_root: `ui_react/src/tests/order_terms_mutation_client.test.ts` — 既有 Terms typed-client 契約測試，沿用現行位置。
+- test_root: `ui_react/src/tests/order_terms_mutation_client.test.ts` — 既有 Terms typed-client 契約測試，沿用現行位置。 既有模擬案例核對一般保存不要求永久命令鍵，並拒絕案件識別不一致的正式收據。
 - test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/`
 - test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/integration/`
 
