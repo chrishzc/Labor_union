@@ -33,7 +33,11 @@
 - **候選查詢不排除規則**：
   - 「新增候選月嫂」開啟即自動執行 Query（僅查詢、零寫入），切換案件或關閉抽屜取消未完成請求。
   - 區域與週間服務均**不排除候選**，也不因不符合或待確認禁止加入候選池；料理、每日時數、節日、胎數及獨立數字偏好均不參與候選提示或排除。
-  - 姓名旁緊鄰顯示原值與狀態：「區域：月嫂原值 · 符合狀態」、「週間服務：月嫂原值 · 符合狀態」（`matched` / `not_matched` / `pending` /「尚未登錄」）。區域讀 `clients.city`/`address`（不複製完整地址）與 `staff_regions`；週間讀 `clients.service_type` 與 `staff_weekly_rest`（同義辨識「周/週」「一/1」「二/2」，週休二日與週一至週五視為同方式，保留休周六／休周日差異，不把週休二日誤認符合週休一日）。回傳結構化 `matching_conditions.region` 與 `matching_conditions.preferred_service_days`（含 `status`、`required_value`、`staff_values`）及相容 `filter_results`（UI 嚴禁以布林推定未知狀態）；單純 `not_matched` 或 `source_not_ready` 不得投影 `SCHEDULE-005` 或任何硬性異常。
+  - 姓名旁緊鄰顯示原值與狀態：「區域：月嫂原值 · 符合狀態」、「週間服務：月嫂原值 · 符合狀態」（`matched` / `not_matched` / `pending` /「尚未登錄」）。
+    - 區域讀 `clients.city`/`address`（不複製完整地址）與 `staff_regions`。
+    - 週間讀 `clients.service_type` 與 `staff_weekly_rest`（同義辨識「周/週」「一/1」「二/2」，週休二日與週一至週五視為同方式，保留休周六／休周日差異，不把週休二日誤認符合週休一日）。
+    - 回傳結構化 `matching_conditions.region` 與 `matching_conditions.preferred_service_days`（含 `status`、`required_value`、`staff_values`）及相容 `filter_results`（UI 嚴禁以布林推定未知狀態）。
+    - 單純 `not_matched` 或 `source_not_ready` 不得投影 `SCHEDULE-005` 或任何硬性異常。
 
 ### 3.2 六母題 relation QPA 與 `[其它]` 所有權
 
@@ -70,7 +74,10 @@
 
 - **手動觸發**：僅在新增候選、已加入候選卡片與多月嫂分段介面提供單人查詢；開頁、換頁或重讀零 Google API 呼叫，結果不影響排序、資格或排班。
 - **來源與傳輸**：起點取 Staff `city/address`、終點取案件 `city/address`（缺地址回 typed block 零用量）；後端以 `GOOGLE_MAPS_ROUTES_API_KEY` 呼叫官方 HTTPS `computeRoutes`（`TWO_WHEELER`），金鑰與 raw 地址／payload 不進 job、log、receipt 或前端參數。
-- **紀錄與防重**：沿 `background_jobs` 以單次 `event_key` 在 outer transaction enqueue 並 claim running（`max_attempts=1`），commit 後才呼叫 Google；同 key 重播不重送，不同命令回 conflict；timeout／未知結果視為用量待確認不 blind retry。查詢結果僅於當次畫面呈現，不持久寫入。
+- **紀錄與防重**：沿 `background_jobs` 以單次 `event_key` 在 outer transaction enqueue 並 claim running（`max_attempts=1`），commit 後才呼叫 Google。
+  - 同 key 重播不重送，不同命令回 conflict。
+  - timeout／未知結果視為用量待確認不 blind retry。
+  - 查詢結果僅於當次畫面呈現，不持久寫入。
 - **計次與帳務核對**：依 `America/Los_Angeles` 計費月統計本系統已送出、計費、待確認、免費 1000 次額度與估計美元（`200 / no-route` 計入估計計費，`401/403/429/5xx` 不計費，其餘無法唯一判定之 `4xx` 與 timeout 列待確認）；管理員可透過 `POST /api/v1/scheduling/commute-usage/reconciliation` 人工登錄 Google 報表累計數與 cutoff 時間，估算只疊加 cutoff 之後本機計費。
 - **入口**：`GET /api/v1/scheduling/commute-usage`、`POST /api/v1/orders/{case_no}/caregivers/{staff_id}/commute`、`POST /api/v1/scheduling/commute-usage/reconciliation`。
 
