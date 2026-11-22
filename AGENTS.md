@@ -12,7 +12,7 @@ Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任
 
 1. 記錄 branch、HEAD、`git status --short`，保留所有 dirty paths。
 2. 使用者已點名精確 path、symbol 或 test 時，直接開該檔案；只在需要確認 owner／相鄰測試時讀最接近的 `.arch-map/` leaf，不得先遍歷根索引或搜尋整個 repository。
-3. 使用者只描述功能、畫面或業務詞彙時，以 `.arch-map/` 作為第一個定位索引：先用 filename-only bounded search（例如 `rg -l`）只搜尋 `.arch-map/`，最多保留 10 個候選且不輸出全文。若命中唯一最接近的 Module／Subsystem leaf，直接讀該 leaf；候選仍不明時才讀 `.arch-map/index.md`，並只沿一條 `Domain → Subsystem → Module` 最短路徑往下，不開 sibling branches。
+3. 使用者只描述功能、畫面或業務詞彙時，優先透過新版 Archmap 外掛 `arch-map@personal-tips` 的 `arch-map:arch-map-entry`，限域查詢 `.arch-map/` 中最接近的 Domain／Subsystem／Module。只在外掛不可用或未涵蓋該查詢時，才對 `.arch-map/` 做 filename-only bounded search（例如 `rg -l`），最多保留 10 個候選且不輸出全文。仍無法定位時，才讀 `.arch-map/index.md` 並沿單一最短路徑往下，不開 sibling branches。
 4. `.arch-map/` leaf 一旦指出 owner、source、adapter、直接依賴或測試路徑，導航即結束；只讀完成 current task 所需的目標檔案與一個最直接測試。
 5. **停止條件：** 已能確定 current target、owner、write set 與 focused verification。達成後不得繼續做 repository-wide search、caller graph 擴張、相鄰 Module／Domain 探索或文件瀏覽；「可能相關」不是擴搜理由。
 6. 只有 `.arch-map/` 明確標示未建模／incomplete、沒有路由、指向的 path 不存在，或目標檔案出現一個會實質改變行為／修改位置／驗證邊界的 unresolved dependency 時，才在最可能的 owner 目錄做一次 bounded symbol／path search。解決該 unknown 後立即停止，不得因地圖缺口轉成全 repository 掃描。
