@@ -92,7 +92,7 @@ document/架構重整/   正式規格、仍有效決策與必要證據
 ## Agent 與開發者閱讀順序
 
 1. 先讀 `AGENTS.md`。
-2. 已知精確 path／symbol 時直接開檔；只有功能描述時，先在 `.arch-map/` 做 filename-only bounded search，命中唯一 leaf 就直接讀取，候選不明時才讀 `.arch-map/index.md` 並沿單一最短路徑定位。
+2. 已知精確 path／symbol 時直接開檔；只有功能描述時，優先用新版 Archmap 外掛 `arch-map@personal-tips` 的 `arch-map:arch-map-entry` 限域定位。外掛不可用或未涵蓋查詢時，才按 `AGENTS.md` 對 `.arch-map/` 做限域搜尋；仍不明時，只沿 `.arch-map/index.md` 的單一最短路徑定位。
 3. leaf 已指出 owner、source、adapter 與 focused test 後停止擴大搜尋。
 4. 只有修改 owner、SSOT、public contract、Unit of Work、schema／migration 或跨 Domain invariant 時，才讀對應正式規格。
 5. 正式規格索引為 `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md`。

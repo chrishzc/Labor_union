@@ -16,8 +16,8 @@
 
 只有功能或業務描述時：
 
-1. 在 `.arch-map/` 做 filename-only bounded search。
-2. 命中唯一最接近的 leaf 時直接讀取；候選不明時才讀 `.arch-map/index.md`，沿單一 Domain → Subsystem → Module 最短路徑定位。
+1. 優先使用新版 Archmap 外掛 `arch-map@personal-tips` 的 `arch-map:arch-map-entry`，限域查詢 `.arch-map/` 中最接近的 Domain／Subsystem／Module。
+2. 外掛不可用或未涵蓋查詢時，才按 `AGENTS.md` 對 `.arch-map/` 做 filename-only bounded search；仍不明時，才讀 `.arch-map/index.md`，沿單一 Domain → Subsystem → Module 最短路徑定位。
 3. leaf 已列出 owner、implementation、adapter 與 focused test 後停止。
 4. 只有路徑失效或缺少會改變實作決策的事實時，才在 owning directory 做一次 bounded source search。
 
