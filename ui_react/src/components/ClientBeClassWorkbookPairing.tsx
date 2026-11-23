@@ -79,8 +79,6 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
     return candidate ? [candidate] : [];
   });
   const active = groupRows.find(row => row.source_row === activeRow);
-  const activeCases = active ? selected.get(active.source_row) ?? [] : [];
-  const activeClient = candidatesByCase.get(activeCases[0])?.client_id;
   const ownerByCase = new Map(groupRows.flatMap((row, index) =>
     (selected.get(row.source_row) ?? []).map(caseNo => [caseNo, { row, alternate: index % 2 === 1 }] as const)
   ));
@@ -205,7 +203,7 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
           const assigned = ownerByCase.get(item.case_no);
           const owner = assigned?.row;
           const canSelect = active !== undefined && active.case_nos.includes(item.case_no)
-            && (!owner || owner === active) && (activeClient === undefined || activeClient === item.client_id);
+            && (!owner || owner === active);
           return <div key={item.case_no} className={`beclass-pairing-card target${owner ? ' linked' : ''}${assigned?.alternate ? ' alternate' : ''}`}>
             <button className="beclass-pairing-pick" type="button" aria-disabled={!canSelect} aria-pressed={owner !== undefined} onClick={() => {
               if (!canSelect) return;
@@ -221,7 +219,7 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
             }}>
               <strong>{item.case_no}</strong>
               <ComparisonFacts name={item.name} phone={item.masked_phone} city={item.city} dateLabel="HCM 建檔時間" date={item.created_at} start={item.start_date} />
-              <span className="beclass-pairing-state">{owner ? `已連 ${owner.query_no}` : active && !canSelect ? '目前不可配對' : '可配對'}</span>
+              <span className="beclass-pairing-state">{owner ? `已連 ${owner.query_no}` : active && !canSelect ? '不在這份問卷的候選案件中' : '可配對'}</span>
             </button>
             <span className="beclass-pairing-port" aria-hidden="true" ref={node => {
               if (node) casePorts.current.set(item.case_no, node);

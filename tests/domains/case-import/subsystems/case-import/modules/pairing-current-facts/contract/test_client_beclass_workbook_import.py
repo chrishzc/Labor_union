@@ -423,8 +423,9 @@ def test_row_receipt_replays_without_creating_a_second_root(monkeypatch):
     assert len(repository.created) == 1
 
 
-def test_same_workbook_replay_recovers_reconciliation_without_duplicate_event(
-    monkeypatch,
+@pytest.mark.parametrize("locked_after_acceptance", [False, True])
+def test_same_workbook_replay_preserves_receipt_without_duplicate_event(
+    monkeypatch, locked_after_acceptance,
 ):
     repository = _Repository()
     reconciliation = _Reconciliation()
@@ -436,25 +437,31 @@ def test_same_workbook_replay_recovers_reconciliation_without_duplicate_event(
         "ignored.xlsx", "same-key", preview.preview_fingerprint, "admin", "corr"
     )
     repository.replay_bound_cases = ("HCM-0007",)
+    if locked_after_acceptance:
+        reconciliation.error = ValueError("service_data_locked")
     replay = service.apply(
         "ignored.xlsx", "same-key", preview.preview_fingerprint, "admin", "corr"
     )
 
     assert first.replayed_workbook is False
     assert replay.replayed_workbook is True
+    assert replay.created_count == first.created_count == 1
+    assert replay.row_issues == first.row_issues == ()
     assert reconciliation.calls == ["HCM-0007", "HCM-0007"]
     assert reconciliation.event_count == 1
+    assert repository.connection.rollbacks == int(locked_after_acceptance)
 
 
-def test_reconciliation_failure_rolls_back_row_before_receipt(monkeypatch):
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
+def test_reconciliation_failure_rolls_back_row_before_receipt(monkeypatch, error_type):
     repository = _Repository()
     service = _service(
-        repository, _Reconciliation(error=RuntimeError("downstream unavailable"))
+        repository, _Reconciliation(error=error_type("downstream unavailable"))
     )
     monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
     preview = service.preview("ignored.xlsx")
 
-    with pytest.raises(RuntimeError, match="downstream unavailable"):
+    with pytest.raises(error_type, match="downstream unavailable"):
         service.apply(
             "ignored.xlsx", "failure-key", preview.preview_fingerprint, "admin", "corr"
         )
@@ -462,6 +469,38 @@ def test_reconciliation_failure_rolls_back_row_before_receipt(monkeypatch):
     assert repository.rows == {}
     assert repository.saved_workbook is None
     assert repository.connection.rollbacks == 1
+
+
+def test_automatic_row_lock_keeps_existing_source_and_imports_later_row(monkeypatch):
+    repository = _Repository()
+    reconciliation = _Reconciliation()
+    service = _service(repository, reconciliation)
+    locked = _valid_row("BC-LOCKED")
+    ready = {**_valid_row("BC-READY"), "姓名": "另一位測試客戶"}
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(
+        _valid_row("EXISTING-1"), locked, ready,
+    ))
+
+    def resolve(name, phone, *, for_update):
+        case_no = "HCM-READY" if name == ready["姓名"] else "HCM-0007"
+        return ClientCaseBindingResolution(ClientCaseBindingStatus.UNIQUE, 1, 1, 7, case_no)
+
+    def reconcile(case_no):
+        if case_no == "HCM-0007":
+            raise ValueError("service_data_locked")
+
+    monkeypatch.setattr(repository, "resolve_client_case_binding", resolve)
+    monkeypatch.setattr(reconciliation, "reconcile", reconcile)
+    preview = service.preview("ignored.xlsx")
+    receipt = service.apply("ignored.xlsx", "mixed-auto", preview.preview_fingerprint, "admin", "corr")
+
+    assert receipt.source_row_count == 3
+    assert receipt.created_count == receipt.existing_source_count == receipt.existing_conflict_count == 1
+    assert receipt.row_issues == (
+        intake.ClientBeClassWorkbookRowIssue(3, "BC-LOCKED", ("煮食需求",), ("service_data_locked",)),
+    )
+    assert tuple(repository.rows) == (f"client-beclass-workbook:{_DIGEST}:row:4",)
+    assert repository.connection.rollbacks == 2
 
 
 def test_existing_query_number_is_reported_as_existing_source_not_a_binding_conflict(monkeypatch):
@@ -558,6 +597,7 @@ class _ManualPairingRepository(_Repository):
         self.claims = {}
         self.unavailable = set()
         self.other_client_cases = set()
+        self.nonmatching_cases = set()
 
     def load_workbook_claim(self, key):
         return self.claims.get(key)
@@ -576,7 +616,7 @@ class _ManualPairingRepository(_Repository):
                 f"2026-08-0{index} 09:30:00", f"2026-09-0{index}",
             )
             for index, number in enumerate(("HCM-A", "HCM-B", "HCM-C"), start=1)
-            if number not in unavailable and (case_no is None or case_no == number)
+            if number not in unavailable | self.nonmatching_cases and (case_no is None or case_no == number)
         )
         return intake.ClientBeClassCaseAvailability(candidates, {})
 
@@ -785,22 +825,24 @@ def test_confirmed_pairings_resume_after_rows_commit_before_workbook_receipt(mon
     assert [(item.source_row, item.case_no) for item in resumed.manual_bindings] == list(selections)
 
 
-@pytest.mark.parametrize("second_case", ["same_client", "occupied", "other_client"])
+@pytest.mark.parametrize("second_case", ["same_client", "matching_other_id", "occupied", "different_identity"])
 def test_one_questionnaire_applies_to_two_cases_atomically(monkeypatch, second_case):
     repository = _ManualPairingRepository()
     service = _service(repository)
     workbook = _workbook(_valid_row("BC-SHARED"))
     monkeypatch.setattr(intake, "_load_workbook", lambda _: workbook)
     selections = ((2, "HCM-A"), (2, "HCM-B"))
-    if second_case == "other_client":
+    if second_case == "matching_other_id":
         repository.other_client_cases.add("HCM-B")
     preview = service.preview("ignored.xlsx", manual_pairing=True)
     if second_case == "occupied":
         repository.unavailable.add("HCM-B")
+    if second_case == "different_identity":
+        repository.nonmatching_cases.add("HCM-B")
 
     receipt = service.apply("ignored.xlsx", "shared-key", preview.preview_fingerprint, "admin", "corr",
                             manual_pairings=selections)
-    if second_case != "same_client":
+    if second_case in {"occupied", "different_identity"}:
         assert repository.created == []
         assert receipt.existing_conflict_count == 1
         assert receipt.manual_bindings == ()
@@ -814,6 +856,73 @@ def test_one_questionnaire_applies_to_two_cases_atomically(monkeypatch, second_c
     assert [(row["query_no"], row["bound_case_no"]) for row in repository.created] == [
         ("BC-SHARED", "HCM-A"), ("BC-SHARED", "HCM-B"),
     ]
+    assert [row["client_id"] for row in repository.created] == [7, 8 if second_case == "matching_other_id" else 7]
+
+
+def test_locked_cooking_rolls_back_only_its_questionnaire(monkeypatch):
+    repository = _ManualPairingRepository()
+    reconciliation = _Reconciliation()
+    service = _service(repository, reconciliation)
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(
+        _valid_row("BC-LOCKED"), _valid_row("BC-READY"),
+    ))
+
+    def reconcile(case_no):
+        if case_no == "HCM-B":
+            raise TermsWorkflowError(TypedError(
+                ErrorCategory.DOMAIN_BLOCKED, "service_data_locked",
+                "The cooking requirement cannot be corrected.", CorrelationId("cooking"),
+            ))
+
+    monkeypatch.setattr(reconciliation, "reconcile", reconcile)
+    begin = repository.connection.begin
+    rollback = repository.connection.rollback
+    created_before = []
+    receipts_before = {}
+
+    def begin_row_transaction():
+        nonlocal created_before, receipts_before
+        created_before = repository.created.copy()
+        receipts_before = repository.rows.copy()
+        begin()
+
+    def roll_back_row_transaction():
+        repository.created = created_before
+        repository.rows = receipts_before
+        rollback()
+
+    monkeypatch.setattr(repository.connection, "begin", begin_row_transaction)
+    monkeypatch.setattr(repository.connection, "rollback", roll_back_row_transaction)
+    app = FastAPI()
+    app.include_router(workbook_route.router)
+    app.dependency_overrides[workbook_route.require_admin] = lambda: AdminPrincipal(
+        1, "test-admin", "Test Admin", "system_admin",
+    )
+    app.dependency_overrides[workbook_route.get_client_beclass_workbook_import_service] = lambda: service
+    selections = ((2, "HCM-A"), (2, "HCM-B"), (3, "HCM-C"))
+    pairings = [{"source_row": row, "case_no": case} for row, case in selections]
+    with TestClient(app) as client:
+        files = {"workbook": ("mixed.xlsx", b"synthetic workbook rows")}
+        preview = client.post("/api/v1/case-import/client-beclass/workbooks/preview", files=files)
+        assert preview.status_code == 200
+        response = client.post(
+            "/api/v1/case-import/client-beclass/workbooks/apply",
+            files=files,
+            data={"preview_fingerprint": preview.json()["data"]["preview_fingerprint"],
+                  "manual_pairings": json.dumps(pairings)},
+            headers={"Idempotency-Key": "mixed-rows", "X-Correlation-ID": "mixed-rows"},
+        )
+
+    assert response.status_code == 200, response.json()
+    result = ClientBeClassWorkbookReceiptView.model_validate(response.json()["data"])
+    assert result.source_row_count == 2
+    assert result.created_count == result.existing_conflict_count == 1
+    assert [(item.query_no, item.case_no) for item in result.manual_bindings] == [("BC-READY", "HCM-C")]
+    assert [(issue.source_row, issue.query_no, issue.fields, issue.issue_codes) for issue in result.row_issues] == [
+        (2, "BC-LOCKED", ["煮食需求"], ["service_data_locked"]),
+    ]
+    assert [item["bound_case_no"] for item in repository.created] == ["HCM-C"]
+    assert len(repository.rows) == 1
 
 
 def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
@@ -846,10 +955,14 @@ def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
                 (case_a, source_row["姓名"], source_row["行動電話"]),
             )
             client_id = int(cursor.lastrowid)
-            cursor.execute("INSERT INTO clients (case_no,name) VALUES (%s,%s)", (case_b, "HCM 建檔"))
+            cursor.execute(
+                "INSERT INTO clients (case_no,name,phone) VALUES (%s,%s,%s)",
+                (case_b, source_row["姓名"], source_row["行動電話"]),
+            )
+            second_client_id = int(cursor.lastrowid)
             cursor.executemany(
                 "INSERT INTO orders (case_no,client_id,status) VALUES (%s,%s,'洽談中')",
-                [(case_a, client_id), (case_b, client_id)],
+                [(case_a, client_id), (case_b, second_client_id)],
             )
         connection.commit()
 

@@ -235,7 +235,8 @@ export function adaptClientBeClassImportRowIssues(rows: NonNullable<ClientBeClas
     sourceRow: row.source_row,
     identifier: row.query_no,
     fields: row.fields,
-    reasons: row.issue_codes.map(reasonLabel),
+    reasons: row.issue_codes.map(code => code === 'service_data_locked'
+      ? '案件服務資料已鎖定，無法補寫煮食需求' : reasonLabel(code)),
   }));
 }
 

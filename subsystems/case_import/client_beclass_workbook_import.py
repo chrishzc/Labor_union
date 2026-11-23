@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 import pandas as pd
 
@@ -23,10 +23,12 @@ from domains.case_import.client_beclass_binding import (
     ClientBeClassCaseUnavailableReason,
     ClientCaseBindingStatus,
 )
+from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
 from subsystems.case_import.beclass_review_intake import canonical_review_identifier, record_invalid_beclass_row
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
+from subsystems.orders.terms_workflow import TermsWorkflowError
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +186,10 @@ class ClientBeClassWorkbookUnavailable(RuntimeError):
     pass
 
 
+class _CookingServiceDataLocked(RuntimeError):
+    pass
+
+
 class BoundCaseCookingReconciliationPort(Protocol):
     def reconcile(self, case_no: str) -> object: ...
 
@@ -332,16 +338,22 @@ class ClientBeClassWorkbookImportService:
             bindings: list[ClientBeClassManualBinding] = []
             outcomes: Counter[str] = Counter()
             for row_number, row in workbook.rows:
-                if row_number in selections:
-                    outcome = self._apply_manual_row(
-                        workbook, row_number, row, selections[row_number], actor,
-                        correlation_id, row_issues, bindings,
-                    )
-                else:
-                    outcome = self._apply_row(
-                        workbook, row_number, row, actor, correlation_id, row_issues,
-                        check_case_availability=manual_pairings is not None,
-                    )
+                try:
+                    if row_number in selections:
+                        outcome = self._apply_manual_row(
+                            workbook, row_number, row, selections[row_number], actor,
+                            correlation_id, row_issues, bindings,
+                        )
+                    else:
+                        outcome = self._apply_row(
+                            workbook, row_number, row, actor, correlation_id, row_issues,
+                            check_case_availability=manual_pairings is not None,
+                        )
+                except _CookingServiceDataLocked:
+                    row_issues.append(ClientBeClassWorkbookRowIssue(
+                        row_number, _text(row.get("查詢序號")), ("煮食需求",), ("service_data_locked",),
+                    ))
+                    outcome = "existing_conflict"
                 outcomes[outcome] += 1
             _assert_conservation(len(workbook.rows), outcomes)
             receipt = ClientBeClassWorkbookReceipt(workbook.digest, len(workbook.rows), outcomes["created"], outcomes["exact_replay"], outcomes["review_required"], outcomes["existing_conflict"], outcomes["existing_source"], False, tuple(row_issues), tuple(bindings))
@@ -403,7 +415,6 @@ class ClientBeClassWorkbookImportService:
             else:
                 if not pending or (
                     len(pending) == len(selected_bindings)
-                    and len({item.client_id for item, _, _ in pending}) == 1
                     and self._write_manual_bindings(payload, pending, actor, correlation_id, workbook, row_number, row)
                 ):
                     unit_of_work.commit()
@@ -422,7 +433,7 @@ class ClientBeClassWorkbookImportService:
             )
             if root_id is None:
                 return False
-            self._reconciliation.reconcile(case.case_no)
+            self._reconcile_cooking(case.case_no)
             self._repository.save_row_receipt(
                 source_identity, fingerprint, root_id, "created", review_identity, actor
             )
@@ -487,9 +498,8 @@ class ClientBeClassWorkbookImportService:
                 case_no = self._repository.bound_case_no_for_root(
                     stored.get("root_id")
                 )
-                if case_no is not None:
-                    self._reconciliation.reconcile(case_no)
-                unit_of_work.commit()
+                if case_no is None or self._recheck_accepted_cases((case_no,)):
+                    unit_of_work.commit()
                 return "exact_replay"
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
             errors = blocking_client_beclass_errors(row)
@@ -511,8 +521,8 @@ class ClientBeClassWorkbookImportService:
                 bound_sources = self._repository.bound_sources_for_query(
                     str(payload["query_no"])
                 )
-                for bound_source in bound_sources:
-                    self._reconciliation.reconcile(bound_source["case_no"])
+                if not self._recheck_accepted_cases(source["case_no"] for source in bound_sources):
+                    return "existing_source"
                 self._repository.save_row_receipt(
                     source_identity,
                     fingerprint,
@@ -574,7 +584,7 @@ class ClientBeClassWorkbookImportService:
                 self._repository.save_row_receipt(source_identity, fingerprint, None, outcome, review_identity, actor)
                 unit_of_work.commit()
                 return outcome
-            self._reconciliation.reconcile(str(bound_root["case_no"]))
+            self._reconcile_cooking(str(bound_root["case_no"]))
             review_identity = self._record_field_warnings(workbook, row_number, row, payload)
             self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", review_identity, actor)
             unit_of_work.commit()
@@ -641,15 +651,34 @@ class ClientBeClassWorkbookImportService:
             payload["manual_bindings"] = tuple(
                 ClientBeClassManualBinding(**item) for item in payload.get("manual_bindings", ())
             )
-            for case_no in self._repository.bound_case_nos_for_workbook(digest):
-                self._reconciliation.reconcile(case_no)
-            unit_of_work.commit()
+            if self._recheck_accepted_cases(self._repository.bound_case_nos_for_workbook(digest)):
+                unit_of_work.commit()
             return ClientBeClassWorkbookReceipt(
                 **{
                     **payload,
                     "replayed_workbook": True,
                 }
             )
+
+    def _reconcile_cooking(self, case_no: str) -> None:
+        try:
+            self._reconciliation.reconcile(case_no)
+        except TermsWorkflowError as error:
+            if error.error.category != ErrorCategory.DOMAIN_BLOCKED or error.error.code != "service_data_locked":
+                raise
+            raise _CookingServiceDataLocked from error
+        except ValueError as error:
+            if error.args != ("service_data_locked",):
+                raise
+            raise _CookingServiceDataLocked from error
+
+    def _recheck_accepted_cases(self, case_nos: Iterable[str]) -> bool:
+        try:
+            for case_no in case_nos:
+                self._reconcile_cooking(case_no)
+        except _CookingServiceDataLocked:
+            return False
+        return True
 
     def _claim_workbook(self, key: str, digest: str, correlation_id: str) -> None:
         with self._unit_of_work_factory() as unit_of_work:

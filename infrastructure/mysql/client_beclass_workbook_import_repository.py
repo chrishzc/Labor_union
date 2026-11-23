@@ -168,7 +168,7 @@ class ClientBeClassWorkbookImportRepository:
     ) -> int | None:
         with self.connection.cursor() as cursor:
             cursor.execute(
-                f"SELECT client_id,bound_case_no,{','.join(self._SOURCE_COLUMNS)} "
+                f"SELECT bound_case_no,{','.join(self._SOURCE_COLUMNS)} "
                 "FROM beclass_records WHERE query_no=%s ORDER BY id FOR UPDATE",
                 (payload["query_no"],),
             )
@@ -176,8 +176,8 @@ class ClientBeClassWorkbookImportRepository:
             case_no = str(client_case["case_no"])
             source = _comparable_source(payload)
             if any(
-                not allow_additional_case or row["client_id"] != client_id
-                or row["bound_case_no"] is None or row["bound_case_no"].casefold() == case_no.casefold()
+                not allow_additional_case or row["bound_case_no"] is None
+                or row["bound_case_no"].casefold() == case_no.casefold()
                 or _comparable_source(row) != source
                 for row in cursor.fetchall()
             ):

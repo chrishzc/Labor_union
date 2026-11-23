@@ -78,6 +78,19 @@ describe('Four mutually exclusive import result counters', () => {
     });
   });
 
+  it('BeClass shows which questionnaire could not import because cooking is locked', () => {
+    expect(adaptClientBeClassImportResult({
+      source_content_digest: digest, source_row_count: 2, created_count: 1,
+      exact_replay_count: 0, existing_source_count: 0, review_required_count: 0,
+      existing_conflict_count: 1, replayed_workbook: false,
+      row_issues: [{ source_row: 2, query_no: 'BC-LOCKED', fields: ['煮食需求'], issue_codes: ['service_data_locked'] }],
+    })).toMatchObject({
+      importedCount: 1, duplicateCount: 0, notImportedCount: 1,
+      notImportedRows: [{ sourceRow: 2, identifier: 'BC-LOCKED', fields: ['煮食需求'],
+        reasons: ['案件服務資料已鎖定，無法補寫煮食需求'] }],
+    });
+  });
+
   it('Staff review overlays never add another row to the result', () => {
     expect(adaptStaffHistoricalImportResult({ source_content_digest: digest, source_row_count: 10, created_count: 3, adopted_existing_count: 3, exact_replay_count: 2, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 8, preview_fingerprint: fingerprint, replayed_workbook: false })).toMatchObject({ sourceCount: 10, importedCount: 6, duplicateCount: 2, notImportedCount: 2 });
   });

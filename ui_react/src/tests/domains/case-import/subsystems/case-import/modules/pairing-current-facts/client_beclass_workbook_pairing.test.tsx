@@ -36,10 +36,10 @@ it('groups shared cases in a drawer, retains links across groups and closing, an
       existing_conflict_count: 0, existing_source_count: 0, preview_fingerprint: previewFingerprint,
       manual_rows: queryNos.map((query_no, index) => ({
         ...shared, source_row: index + 2, query_no, submitted_at: '2026-08-02 10:00',
-        case_nos: index === 0 ? ['HCM-B', 'HCM-C', 'HCM-X'] : index === 1 ? ['HCM-A', 'HCM-B'] : ['HCM-D', 'HCM-E'],
+        case_nos: index === 0 ? ['HCM-B', 'HCM-C'] : index === 1 ? ['HCM-A', 'HCM-B', 'HCM-X'] : ['HCM-D', 'HCM-E'],
       })),
       candidates: ['HCM-A', 'HCM-B', 'HCM-C', 'HCM-D', 'HCM-E', 'HCM-X'].map((case_no, index) => ({
-        ...shared, case_no, client_id: index < 3 ? 7 : 8, created_at: `2026-08-0${index + 1} 09:30`,
+        ...shared, case_no, client_id: index < 2 ? 7 : 8, created_at: `2026-08-0${index + 1} 09:30`,
         start_date: `2026-09-0${index + 1}`,
       })),
     }))
