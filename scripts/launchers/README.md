@@ -15,7 +15,7 @@ Windows 日常啟停／更新／搬機改用專案根目錄的 `Windows管理.ba
 | `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
 | `backup_nas_database.bat` | 手動備份或設定每日 18:00 的 NAS SQL 備份。 |
 | `initialize_nas_schema.bat` | NAS 安全升級：先備份，在新庫升級並驗證後切換，不清空原庫。 |
-| `restore_nas_database.bat` | 選擇成功備份，復原到新庫、驗證後切換。 |
+| `restore_nas_database.bat` | 選擇成功備份，驗證後復原至原本庫名，完成後清除本次暫存資料。 |
 | `initialize_nas_schema.sh` | 技術人員的空庫 fresh 初始化，與 Windows 日常維護入口分開。 |
 | `supervise_local_runtime.ps1` | Windows owned-process supervisor；負責 readiness、存活檢查與 scoped cleanup。 |
 | `start_local_development_no_auth.bat`／`.sh` | 只供隔離本機的 `local_bypass` 包裝；委派標準入口，不複製啟動流程。 |
@@ -105,7 +105,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 |---|---|---|
 | 保存資料 | `backup_nas_database.bat` | 選「立即備份」或「設定每日備份」。 |
 | 更新資料庫 | `initialize_nas_schema.bat` | 已改為安全升級；先停止工會系統，依中文提示確認。沒有清空重建選項。 |
-| 從備份復原 | `restore_nas_database.bat` | 先停止工會系統，選備份編號並確認；先建立新庫驗證，保留原庫。 |
+| 從備份復原 | `restore_nas_database.bat` | 先停止工會系統並選擇備份；依同名復原流程驗證、替換及清理。 |
 
 每日備份預設 **18:00（Windows 當地時間）**。現場在「稽核與系統 → 資料庫備份」修改時間、查看最近成功備份及失敗提示；第一次按「啟用每日備份」才建立排程。
 電腦須開機並登入執行系統的 Windows 帳號；錯過時會在下次登入後補跑。排程只備份，不會自動升級或復原。
@@ -122,15 +122,15 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 
 這是不停機的 SQL 一致性快照；目錄沿用正式規格名稱「資料庫冷備份」，不會為每日備份停止 MySQL。`_receipts/` 保存成功驗證紀錄，`_partial/` 保留未完成材料，`_maintenance/` 保存必要升級／復原技術紀錄。缺少成功紀錄的配對不會列入復原清單。匯入時串流解壓，不把整份 SQL 解到本機。
 復原先列出預設備份位置的成功備份；預設位置無法讀取或沒有完整備份時，自動開啟 Windows 檔案選擇視窗，選取 `.sql.gz` 備份檔即可，不必輸入路徑。按「取消」不連線或修改資料庫；視窗等待操作人員選擇，不設 30 秒時限。手動來源可位於其他 NAS 或本機既存副本，但須保留月份目錄、同名 `.sha256` 及根目錄下對應 `_receipts/` 成功紀錄；只有單一 SQL／壓縮檔無法通過驗證。手動來源只讀、不搬移、不改 `.env` 的備份位置；復原操作紀錄仍寫入設定好的 NAS 備份專區，因此該 NAS 根目錄仍須可存取且可寫。符號連結／junction、損壞或未完成的備份不會匯入。技術人員仍可用 `--backup-file` 指定檔案；互動視窗失敗不改要求現場人員輸入路徑。
-備份不自動覆蓋、輪替或刪除；請維護人員定期確認成功備份、可用容量及獨立設備副本。備份有完整個資，僅授權人員可存取，不提供網頁下載。
+一般手動備份不由復原流程覆蓋或刪除；請維護人員定期確認成功備份、可用容量及獨立設備副本。備份有完整個資，僅授權人員可存取，不提供網頁下載。
 
 已設定 NAS UNC 根目錄的 Windows 安裝，其合約、模板、月嫂附件、照護照片、LINE 選單資源也共用此根目錄；不再另填 `MEDIA_STORAGE_ROOT`／`CONTRACT_DOCUMENT_ARCHIVE_ROOT`。統一入口的 source 模式即使將 process `APP_ENV` 設為 `development`，仍以明確設定的 NAS 根目錄為準，不會改用舊路徑。
 首次寫入會自動建立規格的 01～05 與 `_staging`；案件／日期／月嫂子目錄在新檔確認後依資料建立。上傳與產生的選單底圖都在 `04_LINE選單資源 (media)/rich_menus`，未綁定的 LINE 原始媒體在 `_staging/line_media`。
 新受控附件由背景 worker 在原交易提交後驗證並歸檔；舊檔的識別與下載不改，失敗保留暫存供核對。本機開發使用非 NAS 根目錄時，保留既有明確合約／媒體路徑及舊 staging 讀取；不會自動搬移現存資料，此調整不修改現有 `.env`。
 
-升級會先備份，再在新的資料庫副本執行既有 migration 與資料保留驗證；復原也先匯入新的副本。
-通過驗證及原帳號連線測試後，才切換正式電腦 `.env` 的資料庫名稱。**原庫、舊備份及失敗副本都保留。**
-完成後重新啟動工會系統，使用原帳號及 MFA 確認登入、資料查詢與操作。切換後已產生新資料時，不能直接切回舊庫而忽略新資料。
+升級會先備份，再在新的資料庫副本執行既有 migration 與資料保留驗證。通過驗證及原帳號連線測試後，才切換正式電腦 `.env` 的資料庫名稱。**升級時的原庫、舊備份及失敗副本都保留。**
+復原依[同名復原流程](../../.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore)進行，庫名與 `.env` 不變，選定備份 A 保留；本次備份 B 與唯一暫存資料庫在成功後刪除，失敗時保留，清理中斷時只接續清理。
+完成後重新啟動工會系統，使用原帳號及 MFA 確認登入、資料查詢與操作。升級切換後已產生新資料時，不能直接切回舊庫而忽略新資料。
 失敗時不要清空或重複執行，保留畫面與備份紀錄交給維護人員；備份版本不符會停止切換。
 
 #### 技術人員：正式機的一次設定

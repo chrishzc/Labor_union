@@ -397,10 +397,11 @@ def test_verified_manual_source_is_read_only_and_restore_creates_default_journal
     parent = tmp_path / "replacement-share"
     parent.mkdir()
     settings["backup_root"] = parent / nas.BACKUP_FOLDER
-    monkeypatch.setattr(nas, "writer", lambda *_: SimpleNamespace(client_prefix=lambda *_: None))
+    monkeypatch.setattr(nas, "writer", lambda *_: object())
+    monkeypatch.setattr(nas, "maintenance_lock", lambda *_: nullcontext(object()))
     def stop_after_validation(*_):
         raise nas.MaintenanceBlocked("synthetic stop before database import")
-    monkeypatch.setattr(nas, "require_event_scheduler_safe", stop_after_validation)
+    monkeypatch.setattr(nas, "_restore_server", stop_after_validation)
     with pytest.raises(nas.MaintenanceBlocked, match="synthetic stop"):
         nas.restore(settings, archive)
     assert settings["backup_root"].is_dir()
@@ -1103,106 +1104,311 @@ def test_verify_restored_inventory_semantic_match_and_mismatches():
         nas.verify_restored_inventory(actual_wrong_charset, base)
 
 
+@pytest.fixture
+def same_name_restore(settings, monkeypatch):
+    archive, _ = make_backup(settings, monkeypatch)
+    inventory = nas.validate_backup(archive)["inventory"]
+    database = settings["database"]
+    original = settings["environment_file"].read_bytes()
+    server = {"id": "11111111-1111-4111-8111-111111111111"}
+    data = {database: "original", "lu_test_neighbor": "neighbor"}
+    defaults = {}
+    steps = []
+    fail = set()
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def execute(self, statement, values=()):
+            self.row = None
+            if statement.startswith("CREATE DATABASE "):
+                name = statement.split('`')[1]
+                steps.append(("create", name))
+                assert name not in data
+                data[name] = None
+                defaults[name] = {key: inventory[key] for key in ("charset", "collation")}
+                if name == database and "create_unknown" in fail:
+                    raise nas.MaintenanceBlocked("target create result lost")
+            elif statement.startswith("DROP DATABASE "):
+                name = statement.split('`')[1]
+                steps.append(("drop", name))
+                del data[name]
+                if name == database and "drop_unknown" in fail:
+                    raise nas.MaintenanceBlocked("target drop result lost")
+            elif "default_character_set_name AS charset" in statement:
+                self.row = defaults[values[0]] if data.get(values[0]) is None else None
+            elif "information_schema.processlist" in statement:
+                self.row = {"n": int("busy" in fail)}
+            else:
+                steps.append(("migration_sql", statement))
+
+        def fetchone(self):
+            return self.row
+
+    connection = SimpleNamespace(cursor=Cursor, close=lambda: None)
+    config = SimpleNamespace(host=settings["host"], port=settings["port"], user="fixture", password="fixture",
+                             connect=lambda *_: connection, client_prefix=lambda *_: ["mysql"])
+    lock = Mock(side_effect=lambda _: nullcontext(connection))
+    monkeypatch.setattr(nas, "maintenance_lock", lock)
+    monkeypatch.setattr(nas, "writer", lambda *_: config)
+    monkeypatch.setattr(nas, "_restore_server", lambda _: (server["id"], "fixture-server"))
+    monkeypatch.setattr(nas, "_restore_read_server", lambda _: (server["id"], "fixture-server"))
+    monkeypatch.setattr(nas, "schema_inventory", lambda *_, **__: inventory)
+    monkeypatch.setattr(nas.migration, "database_exists", lambda _, target: target in data)
+    monkeypatch.setattr(nas, "_restore_check_credentials", lambda _, target, uuid: steps.append(("credentials", target)))
+    monkeypatch.setattr(nas, "prepare_runtime_access", lambda _, target, **__: steps.append(("prepare", target)))
+    monkeypatch.setattr(nas, "protect_account_receipts", lambda _, target, **__: steps.append(("protect", target)))
+    monkeypatch.setattr(nas, "switch_runtime", lambda *args: pytest.fail("restore must keep .env bytes"))
+    monkeypatch.setattr(nas, "require_event_scheduler_safe", lambda *_: None)
+
+    def evidence(_, target, **kwargs):
+        if target not in data or data[target] is None:
+            raise nas.MaintenanceBlocked("missing evidence")
+        return {
+            "schema_sha256": "a" * 64,
+            "rows": {"fixture": {"count": 1, "primary_key_sha256": "b" * 64,
+                                 "full_row_sha256": nas._restore_hash(data[target])}},
+        }
+
+    monkeypatch.setattr(nas, "_restore_evidence", evidence)
+    real_backup = nas.backup
+
+    def backup(current, **kwargs):
+        kind = kwargs["operation_root"].name
+        steps.append(("backup", kind))
+        if kind in fail:
+            raise nas.MaintenanceBlocked("backup stage failed")
+        return real_backup(current, **kwargs)
+
+    monkeypatch.setattr(nas, "backup", backup)
+
+    def import_sql(command, path, _):
+        target = command[-1]
+        steps.append(("import", target))
+        assert {"--binary-mode", "--one-database"} <= set(command)
+        if "candidate_import" in fail and target != database:
+            return SimpleNamespace(returncode=1)
+        if target == database:
+            assert path != archive and path.parent.parent.name == "verified"
+            if "target_import" in fail:
+                data[target] = "partial"
+                return SimpleNamespace(returncode=1)
+        else:
+            assert path == archive
+        data[target] = "restored"
+        return SimpleNamespace(returncode=int("target_import_unknown" in fail and target == database))
+
+    monkeypatch.setattr(nas.migration, "restore_sql_dump", import_sql)
+    from scripts import update_local_database as updater
+    from infrastructure.mysql import nas_mutations
+    monkeypatch.setattr(updater, "build_additive_preview", lambda *_: {"status": "current"})
+    monkeypatch.setattr(updater, "require_current_database", lambda _: None)
+    monkeypatch.setattr(nas_mutations, "ensure_nas_procedures", lambda _: steps.append(("procedures", None)))
+
+    def journal():
+        marker = nas._restore_read(nas._restore_marker(settings["environment_file"]))
+        if marker is not None:
+            return nas._restore_read(Path(marker["journal"]))
+        path, = settings["backup_root"].glob("_maintenance/_same_name_restore/*.json")
+        return nas._restore_read(path)
+
+    def startup_blocked():
+        return nas.restore_startup_blocked(settings["host"], settings["port"], database,
+                                           environment_file=settings["environment_file"])
+
+    return SimpleNamespace(archive=archive, archive_bytes=archive.read_bytes(), data=data, steps=steps, fail=fail,
+                           original=original, settings=settings, database=database, lock=lock,
+                           journal=journal, startup_blocked=startup_blocked, server=server)
+
+
 @pytest.mark.parametrize("conversion_ok", [True, False])
 @pytest.mark.parametrize("procedures_ok", [True, False])
-def test_restore_automatically_applies_pending_additive_migration(settings, monkeypatch, conversion_ok, procedures_ok):
-    archive, _ = make_backup(settings, monkeypatch)
-    executed_statements = []
-    class DummyCursor:
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def execute(self, stmt, *args, **kwargs): executed_statements.append(stmt)
-        def fetchall(self): return [{"Msg_type": "status", "Msg_text": "OK"}]
-    class DummyConnection:
-        def cursor(self): return DummyCursor()
-        def close(self): pass
-    dummy_config = SimpleNamespace(
-        host="127.0.0.1",
-        port=3306,
-        user="root",
-        password="pwd",
-        tls={},
-        settings=settings,
-        client_prefix=lambda *_: ["mysql"],
-        connect=lambda *args: DummyConnection(),
-    )
-    monkeypatch.setattr(nas, "writer", lambda *_: dummy_config)
-    monkeypatch.setattr(nas, "schema_inventory", lambda *args, **kw: {"tables": [{"name": "fixture", "kind": "BASE TABLE"}], "charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"})
-    monkeypatch.setattr(nas.migration, "database_exists", lambda *_: False)
-    monkeypatch.setattr(nas.migration, "restore_sql_dump", lambda *args, **kw: SimpleNamespace(returncode=0))
-    monkeypatch.setattr(nas, "require_event_scheduler_safe", lambda *_: None)
-    activation = []
-    def convert(_config, _database, *, apply):
-        activation.append(("protect", apply))
+def test_restore_automatically_applies_pending_additive_migration(same_name_restore, monkeypatch, conversion_ok, procedures_ok):
+    flow = same_name_restore
+    from scripts import update_local_database as updater
+    from infrastructure.mysql import nas_mutations
+    previews = []
+
+    def preview(_, database, run):
+        previews.append(database)
+        if len(previews) == 1:
+            return {"status": "ready", "pending_releases": [{"release_id": "labor-union-hcm-review-status-2026-11-06-v1"}]}
+        return {"status": "current"}
+
+    def convert(_, database, *, apply):
+        assert apply
+        flow.steps.append(("protect", database))
         if not conversion_ok:
             raise nas.MaintenanceBlocked("fixture receipt conversion failed")
-    monkeypatch.setattr(nas, "protect_account_receipts", convert)
-    monkeypatch.setattr(nas, "prepare_runtime_access", lambda *_: activation.append(("prepare", True)))
-    monkeypatch.setattr(nas, "switch_runtime", lambda *args: activation.append(("switch", True)))
-    from infrastructure.mysql import nas_mutations
-    def install_procedures(connection):
-        activation.append(("procedures", True))
+
+    def procedures(_):
+        flow.steps.append(("procedures", None))
         if not procedures_ok:
-            raise ValueError("NAS security procedure drift; no changes applied")
-    monkeypatch.setattr(nas_mutations, "ensure_nas_procedures", install_procedures)
+            raise ValueError("NAS security procedure drift")
 
-    from scripts import update_local_database as updater
-    previews = []
-    def fake_preview(cfg, cand, r):
-        if not previews:
-            previews.append("initial")
-            return {"status": "ready", "pending_releases": [{"release_id": "labor-union-hcm-review-status-2026-11-06-v1"}]}
-        return {"status": "current", "release_id": "labor-union-hcm-review-status-2026-11-06-v1"}
-
-    monkeypatch.setattr(updater, "build_additive_preview", fake_preview)
-    monkeypatch.setattr(updater, "require_current_database", lambda res: None)
+    monkeypatch.setattr(updater, "build_additive_preview", preview)
+    monkeypatch.setattr(nas, "protect_account_receipts", convert)
+    monkeypatch.setattr(nas_mutations, "ensure_nas_procedures", procedures)
 
     if conversion_ok and procedures_ok:
-        nas.restore(settings, archive)
-        assert activation == [("protect", True), ("prepare", True), ("procedures", True), ("switch", True)]
-    elif conversion_ok:
-        with pytest.raises(ValueError, match="NAS security procedure drift"):
-            nas.restore(settings, archive)
-        assert activation == [("protect", True), ("prepare", True), ("procedures", True)]
+        nas.restore(flow.settings, flow.archive)
+        assert flow.data[flow.database] == "restored"
+        assert previews[-1] == flow.database
+        assert [step[0] for step in flow.steps if step[0] in {"protect", "prepare", "procedures"}] == [
+            "protect", "procedures", "prepare",
+        ]
     else:
-        with pytest.raises(nas.MaintenanceBlocked, match="fixture receipt conversion failed"):
-            nas.restore(settings, archive)
-        assert activation == [("protect", True)]
-    assert len(previews) == 1
-    assert any("hcm_review_status" in str(stmt) for stmt in executed_statements)
+        match = "固定程序準備失敗" if conversion_ok else "fixture receipt conversion failed"
+        with pytest.raises(nas.MaintenanceBlocked, match=match):
+            nas.restore(flow.settings, flow.archive)
+        assert flow.data[flow.database] == "original"
+        assert not any(action == "drop" for action, _ in flow.steps)
+        assert ("procedures", None) in flow.steps if conversion_ok else ("procedures", None) not in flow.steps
+    assert len(previews) >= 2
+    assert any(action == "migration_sql" and "hcm_review_status" in value for action, value in flow.steps)
 
 
-def test_restore_blocks_incompatible_version_with_clear_reason(settings, monkeypatch):
-    archive, _ = make_backup(settings, monkeypatch)
-    class DummyCursor:
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def execute(self, *args, **kwargs): pass
-        def fetchall(self): return [{"Msg_type": "status", "Msg_text": "OK"}]
-    dummy_config = SimpleNamespace(
-        host="127.0.0.1",
-        port=3306,
-        user="root",
-        password="pwd",
-        tls={},
-        settings=settings,
-        client_prefix=lambda *_: ["mysql"],
-        connect=lambda *args: SimpleNamespace(cursor=lambda: DummyCursor(), close=lambda: None),
-    )
-    monkeypatch.setattr(nas, "writer", lambda *_: dummy_config)
-    monkeypatch.setattr(nas, "schema_inventory", lambda *args, **kw: {"tables": [{"name": "fixture", "kind": "BASE TABLE"}], "charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"})
-    monkeypatch.setattr(nas.migration, "database_exists", lambda *_: False)
-    monkeypatch.setattr(nas.migration, "restore_sql_dump", lambda *args, **kw: SimpleNamespace(returncode=0))
-    monkeypatch.setattr(nas, "require_event_scheduler_safe", lambda *_: None)
-
+def test_restore_blocks_incompatible_version_with_clear_reason(same_name_restore, monkeypatch):
+    flow = same_name_restore
     from scripts import update_local_database as updater
     monkeypatch.setattr(updater, "build_additive_preview", lambda *_: {
-        "status": "blocked",
-        "blocked_reason": "schema_state_drift_detected",
+        "status": "blocked", "blocked_reason": "schema_state_drift_detected",
     })
+    with pytest.raises(nas.MaintenanceBlocked, match="不相容.*schema_state_drift_detected"):
+        nas.restore(flow.settings, flow.archive)
+    assert flow.data[flow.database] == "original"
+    assert flow.journal()["phase"] == "preparing_candidate"
 
-    with pytest.raises(nas.MaintenanceBlocked, match="不相容.*schema_state_drift_detected.*未切換"):
-        nas.restore(settings, archive)
+
+@pytest.mark.parametrize("missing_target", [False, True])
+def test_same_name_restore_twice_removes_only_its_artifacts(same_name_restore, missing_target):
+    flow = same_name_restore
+    other = flow.archive.with_name("other.zip")
+    other.write_bytes(b"unrelated backup")
+    if missing_target:
+        del flow.data[flow.database]
+    for index in range(2):
+        start = len(flow.steps)
+        run = nas.restore(flow.settings, flow.archive)
+        steps = flow.steps[start:]
+        assert ("backup", "before") in steps if not (missing_target and index == 0) else ("backup", "before") not in steps
+        assert flow.data == {flow.database: "restored", "lu_test_neighbor": "neighbor"}
+        assert not list(run.rglob("*.zip"))
+        assert not list(run.rglob("*.sql.gz"))
+        assert flow.archive.read_bytes() == flow.archive_bytes
+        assert other.read_bytes() == b"unrelated backup"
+        assert flow.settings["environment_file"].read_bytes() == flow.original
+        assert flow.journal()["phase"] == "completed"
+        assert not flow.startup_blocked()
+
+
+@pytest.mark.parametrize(("failure", "phase"), [
+    ("before", "backing_up"),
+    ("candidate_import", "importing_candidate"),
+    ("verified", "exporting"),
+])
+def test_failure_before_replacement_preserves_target_and_reuses_operation(same_name_restore, failure, phase):
+    flow = same_name_restore
+    flow.fail.add(failure)
+    with pytest.raises(nas.MaintenanceBlocked):
+        nas.restore(flow.settings, flow.archive)
+    candidate = flow.journal()["candidate"]
+    assert flow.journal()["phase"] == phase
+    assert flow.data[flow.database] == "original"
+    assert flow.archive.read_bytes() == flow.archive_bytes
+    assert not any(action == "drop" for action, _ in flow.steps)
+    flow.fail.clear()
+    if failure == "candidate_import":
+        before = list(flow.steps)
+        with pytest.raises(nas.MaintenanceBlocked, match="匯入結果未明"):
+            nas.restore(flow.settings, flow.archive)
+        assert flow.steps == before
+        assert flow.journal()["candidate"] == candidate
+    else:
+        run = nas.restore(flow.settings, flow.archive)
+        assert run.name == candidate
+        assert flow.data[flow.database] == "restored"
+
+
+@pytest.mark.parametrize("failure", ["drop_unknown", "create_unknown", "target_import_unknown", "target_import", "busy"])
+def test_interrupted_target_is_reconciled_or_preserved_without_reimport(same_name_restore, failure):
+    flow = same_name_restore
+    flow.fail.add(failure)
+    with pytest.raises(nas.MaintenanceBlocked):
+        nas.restore(flow.settings, flow.archive)
+    first = list(flow.steps)
+    journal = flow.journal()
+    assert flow.startup_blocked()
+    assert flow.archive.is_file()
+    assert journal["candidate"] in flow.data
+    assert len(list(flow.settings["backup_root"].glob(f"_maintenance/{journal['candidate']}/*/*/*.zip"))) == 2
+    flow.fail.clear()
+    if failure == "target_import":
+        with pytest.raises(nas.MaintenanceBlocked, match="暫存基準不符"):
+            nas.restore(flow.settings, flow.archive)
+        assert flow.steps == first
+        assert flow.startup_blocked()
+    else:
+        assert nas.restore(flow.settings, flow.archive).name == journal["candidate"]
+        assert flow.steps.count(("drop", flow.database)) == 1
+        assert flow.steps.count(("create", flow.database)) == 1
+        assert flow.steps.count(("import", flow.database)) == 1
+        assert not flow.startup_blocked()
+
+
+def test_retry_after_partial_cleanup_only_deletes_remaining_artifacts(same_name_restore, monkeypatch):
+    flow = same_name_restore
+    unlink = Path.unlink
+    removed = []
+    fail = True
+
+    def delete(path, *args, **kwargs):
+        if path.suffix == ".zip" and path.parent.parent.name in {"before", "verified"}:
+            if path.parent.parent.name == "verified" and fail:
+                raise OSError("synthetic denied deletion")
+            removed.append(path.parent.parent.name)
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", delete)
+    with pytest.raises(nas.RestoreCleanupPending, match="資料復原成功，清理待完成"):
+        nas.restore(flow.settings, flow.archive)
+    candidate = flow.journal()["candidate"]
+    assert flow.journal()["phase"] == "cleanup_pending"
+    assert removed == ["before"]
+    assert not flow.startup_blocked()
+    assert flow.data[flow.database] == "restored"
+    assert candidate not in flow.data
+    first = list(flow.steps)
+    fail = False
+    assert nas.restore(flow.settings, None).name == candidate
+    assert flow.steps == first
+    assert removed == ["before", "verified"]
+    assert flow.archive.read_bytes() == flow.archive_bytes
+
+
+@pytest.mark.parametrize("changed", ["env", "server", "backup"])
+def test_unfinished_operation_rejects_identity_drift(same_name_restore, changed):
+    flow = same_name_restore
+    flow.fail.add("drop_unknown")
+    with pytest.raises(nas.MaintenanceBlocked):
+        nas.restore(flow.settings, flow.archive)
+    first = list(flow.steps)
+    if changed == "env":
+        flow.settings["environment_file"].write_bytes(flow.original + b"# changed\n")
+    elif changed == "server":
+        flow.server["id"] = "22222222-2222-4222-8222-222222222222"
+    else:
+        path, = flow.settings["backup_root"].glob("_maintenance/lu_nas_restore_*/verified/*/*.zip")
+        path.write_bytes(b"unexpected output")
+    with pytest.raises(nas.MaintenanceBlocked):
+        nas.restore(flow.settings, flow.archive)
+    assert flow.steps == first
+    assert flow.data["lu_test_neighbor"] == "neighbor"
+    assert flow.archive.read_bytes() == flow.archive_bytes
 
 
 # NAS-RET-01..04: tmp_path ZIPs only; no connection to an actual NAS or DB.

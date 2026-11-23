@@ -286,7 +286,15 @@ function Invoke-DatabaseMaintenance {
     if ($Mode -ne 'backup' -and (Get-ManagedState)) {
         throw '請先選擇「2 停止全部」，再執行資料庫升級或復原。'
     }
-    & $PythonPath -m scripts.nas_database_maintenance $Mode
+    if ($Mode -eq 'restore') {
+        Assert-NoRemainingRuntime $null
+        $previousOwner = $env:LABOR_UNION_RESTORE_MANAGER_PID
+        $env:LABOR_UNION_RESTORE_MANAGER_PID = [string]$PID
+        try { & $PythonPath -m scripts.nas_database_maintenance $Mode }
+        finally { $env:LABOR_UNION_RESTORE_MANAGER_PID = $previousOwner }
+    } else {
+        & $PythonPath -m scripts.nas_database_maintenance $Mode
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "資料庫維護 ($Mode) 未成功，請依上方顯示的問題診斷排查。"
     }

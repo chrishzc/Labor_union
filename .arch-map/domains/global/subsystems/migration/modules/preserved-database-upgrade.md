@@ -24,14 +24,14 @@
 - Predecessor: `db/migration_releases/labor_union_2026_11_05_finance_case_subsidy_plans_v1.json` and its descriptors, fresh `db/schema_parts/245_finance_case_subsidy_plans.sql`, and preserve `db/schema_parts/1067_finance_case_subsidy_plans.sql`. Qualification: `validation/receipts/PROV-FINANCE-COMPACT-20261105-local-additive-qualification-plans.json`.
 - `db/schema_parts/244_finance_case_arrangements.sql`／`1066_finance_case_arrangements.sql`、`db/migration_releases/labor_union_2026_11_04_finance_case_arrangements_v1.json` 與同名 descriptors：Finance Import workspace 的逐案直付安排版本／操作鍵與不可變更正事件，schema-only、零 backfill／seed；原金額、日期與核銷保留。fresh assembly／v60 full release `db/releases/labor_union_validation_schema_finance_case_arrangements_v1.sql`／compact fresh 沿原工具生成，資格為 `validation/receipts/PROV-FINANCE-DIRECT-20261104-local-additive-qualification-arrangements.json`。
 - 每日排程備份滾動保存：`scripts/nas_database_maintenance.py` 沿原 maintenance lock，在新備份完整驗證後，僅淘汰同目標且新版標記的 ZIP；14 日／8 週／12 月聯集保存，沿 `10A` §5.2。既有未標記、手動、升級前及 legacy 備份保留。
-- Windows NAS SQL maintenance（依本節下方所連 NAS 維護規格 §5）： `scripts/nas_database_maintenance.py`; `scripts/launchers/backup_nas_database.bat`, `scripts/launchers/initialize_nas_schema.bat`, `scripts/launchers/restore_nas_database.bat`; opt-in template `scripts/launchers/nas_database_maintenance.env.example`. Original Windows initializer name now routes candidate upgrade, never reset. Remote MySQL transport keeps TLS and separate read-only/read-write connections, allowing shared credentials including root. Existing full global administrators without partial revocations need no new grants; candidate access is still verified with original credentials. It backs up before upgrade, restores only to new schemas, preserves old schemas, and switches only DB_DATABASE. Native canonical runner remains schema/backfill/verification owner; its candidate/client adapter hooks do not change hash-bound release artifacts.
+- Windows SQL maintenance: `scripts/nas_database_maintenance.py`; `scripts/launchers/backup_nas_database.bat`, `scripts/launchers/initialize_nas_schema.bat`, `scripts/launchers/restore_nas_database.bat`; optional settings template `scripts/launchers/nas_database_maintenance.env.example`. The initializer delegates safe upgrade, never reset. Upgrade retains its source/candidate and `DB_DATABASE` switch flow. Restore is owned by [同名復原契約](../../../../../requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore). TLS, separate reader/writer connections and original runtime credentials remain in use. Native canonical migration owns compatible schema/backfill and current-version verification; immutable releases are unchanged.
 - Account receipt protection: the Windows NAS maintenance adapter routes `protect-account-receipts` to the Access owner and converts restored fingerprints before activating a backup candidate. Preserve-data upgrade refuses a source or candidate with unconverted password-bearing receipts.
 - Windows 管理器的呼叫方式與維護交接見 [Windows NAS 維護交接](#windows-nas-維護交接)；設定、備份位置與流程結果以 [NAS 維護規格 §5](../../../../../requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-nas-maintenance) 為準。
 - `scripts/migrate_preserved_database_additive_schema.py:qualify_registry_signing_source_recovery` 只讀核對 1080 原始 journal／備份，以已驗證 dump 的原始 trigger 定義及 MySQL metadata 名稱順序重建基線完整 schema SHA，含已被 DROP 的名稱。歷史備份的完整性、身分及 journal 指紋仍核對；僅此副本恢復資格檢查不要求目前資料列等於歷史備份，改由目前來源的全新備份與副本資料驗證保護維護期間修正，一般直連升級及接續仍核對原備份資料列。已套用 trigger 以 canonical 契約比較，再使用現況原始定義及快照原順序核對前綴完整 SHA，避免 SQL 匯入排版及 Python 排序差異誤擋。`build_plan` 與 `apply_schema` 的 `source_recovery_root` 僅授權該次、該 guard family 的已證明 partial；Apply 重新驗證同一份原始證據，只有新副本執行修復 DDL，未知結構與結果未明仍拒絕。
 - `_schema_snapshot` 的 trigger-only 步驟不讀取投影必為空的其他 metadata，trigger 條件下推至參數化 SQL，保留排序、定義及原快照 SHA。`_table_evidence` 每次呼叫批次取得主鍵定義；各表 count、checksum、完整主鍵雜湊及切換前 fresh-read 仍保留，不跨階段快取，不改變原庫唯讀與副本升級邊界。
 - `scripts/nas_database_maintenance.py:source_answer_preflight` 在來源具備 1037 與綁定查詢前提時，於備份前以唯讀連線呼叫 Case Import `project_order_information` 檢查單一綁定問卷胎數。沿 owner 將已確認舊標籤 `雙胞胎(+150時薪)` 投影為 `雙胞胎`，保留原問卷、費率與標準回填規則；錯誤只回報筆數及原因碼。
 - Windows resolves the backup destination in this order: `NAS_BACKUP_DIR` in `.env`, then `NAS_BACKUP_DIR` in the optional maintenance settings file. If neither sets a destination, it uses the [Controlled File Storage](../../../../../requirements/30_Controlled_File_Storage_NAS正式規格.md) §8.2 reserved child `CONTROLLED_FILE_STORAGE_ROOT/05_資料庫冷備份 (db_backups)`. If the storage root is unset, it uses the same child under the project backup root: `backups/05_資料庫冷備份 (db_backups)`. Local, mapped and UNC destinations may create required directories; read-only status and dry runs do not create them. Uses Taipei-month directories, `union_db_YYYYMMDD_HHMMSS.zip` (packaging `.sql.gz`, `.sql.gz.sha256`, and receipt `.json` into one deletable archive while retaining backward-compatible discovery/restore for legacy three-file `.sql.gz` + `_receipts/` sets). Reuses `infrastructure/file/controlled_file_storage.py:DATABASE_BACKUP_DIRECTORY` and `FileSystemControlledFileStorage.readiness`; the business-file adapter excludes this reserved backup subtree from discovery and direct reads. Unwritable destinations fail without silently selecting another directory. Restore defaults to this backup area; if unavailable/empty, a native Windows OpenFileDialog selects an existing alternate archive (`.zip` or legacy `.sql.gz`), including local copies, without typed-path input or an interaction timeout. Cancel stops before DB connection; technical `--backup-file` remains available. Full v2 integrity/receipt validation and no symlink/junction chain remain mandatory. Source selection never changes the default destination and keeps journal writes beside the configured backups. `_partial/` and `_maintenance/` use that destination. Canonical `restore_sql_dump` streams gzip/zip bytes to the native client; raw dump consumers retain their existing path. Only sanitized task/result state remains local, and status never claims disaster recovery readiness from configuration or a same-NAS copy.
-- Only the new, unexposed NAS candidate may reuse its complete admission snapshot for exact/allowed retired-absent parts. Pending/partial statement checks and final whole-copy preservation/currentness/switch fresh reads remain canonical and mandatory; existing local/DSM callers retain their original path.
+
 - Schedule transport/presentation: `api/routes/database_backup.py`, `ui_react/src/api/database_backup_client.ts`, `ui_react/src/pages/DatabaseBackupPage.tsx`, `ui_react/src/pages/DatabaseBackupPage.css`. Enabled internal sessions can change the local Windows daily SQL backup time (default 18:00) using a version check; status is read-only and contains no credentials/raw SQL. Windows Task Scheduler owns execution; `scratch/nas_database_maintenance/schedule.json` records the current local setup, not Domain data. No schedule or NAS apply is installed by development checks.
 - `db/schema_parts/240_order_reopen_reason_optional.sql`、`db/schema_parts/1062_order_reopen_reason_optional.sql`、`db/migration_releases/labor_union_2026_10_29_order_reopen_reason_optional_v1.json` 及同名 descriptors — 只移除重開事件複合 CHECK 的人工備註非空條件，保留命令、actor、correlation 與其他 guards；精確舊定義 pending、新定義 exact，缺少或未知定義 fail closed，所有既有列不變。Metadata contract 沿本 Module test root，業務空白備註寫入沿 Orders cancellation 的既有跨 owner MySQL integration test。
 - `db/schema_parts/239_matching_manual_reason_optional.sql`／`db/schema_parts/1061_matching_manual_reason_optional.sql`、`db/migration_releases/labor_union_2026_10_29_matching_manual_reason_optional_v1.json` 及同名 descriptors — 移除已退役的人工媒合原因非空 CHECK，保留歷史列與其餘約束。原定義精確比對才 pending，已移除 exact，未知定義或 parent drift 停止；fresh／preserve 交易驗收在 matching-coordination integration root，metadata contract 在本 Module test root。
@@ -173,6 +173,32 @@
   - `db/migration_releases/labor_union_2026_09_29_client_zero_obligation_establishment_v1.descriptors.json`
   - `validation/receipts/PROV-ZERO-OBLIGATION-local-additive-qualification-20260929.json` — reusable synthetic-MySQL fresh／preserve qualification; machine-local source backup remains mandatory.
 
+- Only the new, unexposed NAS candidate may reuse its complete admission snapshot for exact/allowed retired-absent parts. Pending/partial statement checks and final whole-copy preservation/currentness/switch fresh reads remain canonical and mandatory; existing local/DSM callers retain their original path.
+
+### 同名復原協調與接續
+
+本節描述依 [同名復原契約](../../../../../requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore) 接線的復原協調；行為驗證由下方既有 Windows maintenance 測試入口承接。
+
+- `scripts/nas_database_maintenance.py:restore` 維持既有入口，由 `SameNameRestore` 與 `RestorePhase` 協調固定目標庫、備份A、本次備份B、唯一暫存庫及最終匯出物。目標身分、設定 digest、各備份 digest、驗證基準、逐步進度與已完成的清理項目均綁定同一操作；不以庫名前綴搜尋可刪除目標。備份B與最終匯出ZIP位於該次 `_maintenance/` 子目錄，與一般備份列表及排程淘汰分開。
+- 復原紀錄先於對應副作用持久化。原庫存在時先完整備份B；暫存庫匯入A並經既有 migration、Access 收據保護與固定程序準備後，輸出可驗證 SQL，再以該輸出重建同名目標。最終結構、筆數與主鍵證據沿用 migration 能力；復原協調器補上 deterministic full-row fingerprints，核對完整列內容，不以 checksum 或主鍵雜湊替代完整列證據。不更改 `.env`。
+- 復原使用同一 MySQL 維護鎖排除其他維護寫入，Windows 入口另沿既有管理鎖與 runtime 停止讀回排除啟動競爭。重跑先核對既有紀錄與實際狀態：未完成操作不再建立另一庫；已證明資料復原成功者只接續清理；重建或匯入結果未明者先核對證據，不盲目重播。清理逐項讀回，本次備份B、暫存庫及匯出物全部移除才完成；備份A與其他操作資料不動。
+- 啟動保護由 `scripts/check_runtime_database.py` 呼叫 `restore_startup_blocked`，唯讀核對本機 sanitized 目標綁定及備份區 journal。實際 host／port／database 的復原未驗證或紀錄不完整時阻擋啟動；資料已驗證而只待清理時，不將其誤判為未驗證資料。完成後移除本機 marker，後續啟動不依賴備份區在線。狀態不含憑證、SQL 或業務原文。Local Runtime 僅消費此 guard，不擁有復原 writer。
+
+```mermaid
+flowchart TD
+    A[固定目標與操作身分] --> B[既有目標先保存備份B]
+    B --> C[唯一暫存庫匯入備份A]
+    C --> D[升級及驗證後輸出最終SQL]
+    D --> E[記錄替換進度並重建同名目標]
+    E --> F[核對目標結構、資料、帳號與版本]
+    F --> G[記錄資料復原成功]
+    G --> H[逐項清除本次B、暫存庫與匯出物]
+    H --> I[讀回確認並完成]
+    E -. 中斷或未知 .-> J[保留進度與恢復資料，阻擋啟動]
+    F -. 驗證失敗 .-> J
+    H -. 清理失敗 .-> K[保留待清理項目，只接續清理]
+```
+
 ### Windows NAS 維護交接
 
 - [Windows 管理器四種走法與前置檢查](../../local-runtime/modules/runtime-supervision.md#windows-管理器的資料庫維護入口) 由 Local Runtime 記載；本模組從 `scripts.nas_database_maintenance` 對應 mode 接手。
@@ -192,8 +218,8 @@
 
 
 ## Verification
-- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_windows_maintenance.py` — explicit opt-in/remote target, backup integrity/failure retention, original TLS/credentials, verified-only configuration switch, authenticated schedule and stale conflict, three real Windows batches.
-- integration: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_windows_maintenance_mysql.py` — opt-in uniquely owned container, full canonical source, native SQL backup/restore, upgrade, original/neighbor preservation and original credentials.
+- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_windows_maintenance.py` — explicit target、備份完整性、同名復原、升級與帳號保護失敗、逐階段接續、清理接續、原 credential、authenticated schedule 與 stale conflict、三支 Windows 批次。
+- integration: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_windows_maintenance_mysql.py` — opt-in uniquely owned MySQL 容器、full canonical source、native SQL 備份與同名復原、重複復原不累積庫／B／匯出物、鄰庫與原 credential 保留。
 - UI integration: `ui_react/src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/database_backup.test.tsx` — shell navigation and schedule UI cross the migration transport boundary; uses the existing shell integration root.
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_database_upgrade.py` — cold-backup identity/integrity, operational-source exclusion, helper network isolation and bounded configuration switching.
 

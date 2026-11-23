@@ -9,7 +9,7 @@ if not exist ".venv\Scripts\python.exe" (
   if "%~1"=="" pause
   exit /b 2
 )
-echo NAS 資料庫備份復原（先建立副本；保留原庫）
+echo 資料庫備份復原（保留原庫名；成功後清除本次暫存資料）
 ".venv\Scripts\python.exe" -m scripts.nas_database_maintenance restore %*
 set "MAINTENANCE_EXIT=%ERRORLEVEL%"
 if "%~1"=="" pause

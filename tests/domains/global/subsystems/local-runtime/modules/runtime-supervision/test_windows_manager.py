@@ -365,12 +365,13 @@ if($errors.Count){throw 'Manager syntax error'}
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
 . (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 $PythonPath='Invoke-TestPython'
-$script:running=$true;$script:pythonExit=0;$script:stops=0
+$script:running=$true;$script:orphan=$false;$script:pythonExit=0;$script:stops=0
 $script:calls=[System.Collections.Generic.List[string]]::new()
 function Test-Path {param($LiteralPath,$PathType);return $true}
 function Get-ManagedState {if($script:running){return [pscustomobject]@{runtime_status='ready'}};return $null}
 function Invoke-TestPython {$script:calls.Add(($args -join '|'));$global:LASTEXITCODE=$script:pythonExit}
 function Stop-ManagedRuntime {$script:stops++;throw 'Implicit stop forbidden'}
+function Assert-NoRemainingRuntime {if($script:orphan){throw 'Orphan runtime still alive'}}
 function Assert-ProgramEnvironment {throw 'Database tools must not require frontend dependencies'}
 Invoke-DatabaseMaintenance backup
 foreach($mode in @('upgrade','restore')){
@@ -379,7 +380,12 @@ foreach($mode in @('upgrade','restore')){
     if(-not $rejected -or $script:calls.Count -ne 1 -or $script:stops -ne 0){throw 'Live runtime admitted for database switch'}
 }
 $script:running=$false
+$script:orphan=$true
+$rejected=$false
+try{Invoke-DatabaseMaintenance restore}catch{$rejected=$true}
+if(-not $rejected -or $script:calls.Count -ne 1){throw 'Orphan runtime admitted for restore'}
 Invoke-DatabaseMaintenance upgrade
+$script:orphan=$false
 Invoke-DatabaseMaintenance restore
 if(($script:calls -join ',') -ne '-m|scripts.nas_database_maintenance|backup,-m|scripts.nas_database_maintenance|upgrade,-m|scripts.nas_database_maintenance|restore'){throw 'Wrong maintenance transport'}
 $script:pythonExit=7;$rejected=$false

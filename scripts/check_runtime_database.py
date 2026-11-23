@@ -9,6 +9,7 @@ import os
 import pymysql
 
 from infrastructure.mysql.mysql_adapter import _database_config_from_environment
+from scripts.nas_database_maintenance import MaintenanceBlocked, restore_startup_blocked
 from scripts import update_local_database as updater
 
 
@@ -74,6 +75,12 @@ def configured_database(*, require_remote=False):
 
 def check_database(*, dry_run=False, require_remote=False):
     config, database = configured_database(require_remote=require_remote)
+    try:
+        blocked = restore_startup_blocked(config.host, config.port, database)
+    except (MaintenanceBlocked, OSError) as error:
+        raise RuntimeDatabaseBlocked("MySQL restore state could not be verified") from error
+    if blocked:
+        raise RuntimeDatabaseBlocked("MySQL restore has not finished verifying the configured database")
     if dry_run:
         return {"status": "configured", "connection": "not_run", "schema": "not_run"}
     preview = updater.build_additive_preview(

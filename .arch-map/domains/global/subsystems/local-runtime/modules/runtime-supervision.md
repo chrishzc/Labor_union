@@ -17,7 +17,7 @@
 - A normal NAS/production durable cycle also runs the existing bounded controlled-file finalize runner for new shared-root 01–04 locators, including an explicit UNC root in source mode (APP_ENV=development). Local development/test, missing root configuration and check-only handshakes do not run it; no legacy file scan/migration. Root resolution and directory layout remain Global controlled-files owned.
 - entrypoint: `scripts/launchers/start_local_development.bat`
 - NAS entrypoints: `scripts/launchers/start_nas_development.bat`、`scripts/launchers/start_nas_development.sh` — 設定 development／NAS target，委派標準入口。
-- database readiness: `scripts/check_runtime_database.py` — 沿用 API 的 DB／TLS 設定，以唯讀 session 呼叫 migration canonical schema gate；不執行更新。
+- database readiness: `scripts/check_runtime_database.py` — 沿用 API 的 DB／TLS 設定，以唯讀 session 呼叫 migration canonical schema gate；不執行更新。同名復原由 [Migration 復原協調](../../migration/modules/preserved-database-upgrade.md#同名復原協調與接續) 提供 sanitized 狀態，readiness gate 於啟動前拒絕尚未完成目標驗證的復原。管理器的復原入口沿用既有管理鎖並核對殘留 runtime，獨立復原批次由 maintenance adapter 取得同一管理鎖；writer 仍由 Migration 擁有。
 - Unix entrypoint: `scripts/launchers/start_local_development.sh`
 - dependency preflight: `scripts/launcher_preflight.py`
 - Compose: `docker-compose.yml` — 工會電腦本機只管理 Redis；MySQL 由 `.env`／process environment 指定的外部／NAS 服務提供。

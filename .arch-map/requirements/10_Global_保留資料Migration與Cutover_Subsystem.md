@@ -9,7 +9,7 @@
 
 ## 2. 定位與 SSOT
 
-本 Subsystem 是 Global 基礎設施能力，不屬於任何業務 Domain。負責在不更動唯讀 source database 的前提下，建立、驗證並切換至新 candidate database（不負責業務資料補猜、ledger 修復或自動刪除來源庫）。遷移是在新候選庫套用並驗證發行內容；切換是把應用程式指向已通過驗證的候選庫。只完成遷移或驗證，不代表已切換。
+本 Subsystem 是 Global 基礎設施能力，不屬於任何業務 Domain。本檔擁有保留資料升級與切換契約：在不更動唯讀 source database 的前提下，建立、驗證並切換至新 candidate database，不負責業務資料補猜、ledger 修復或自動刪除來源庫。遷移是在新候選庫套用並驗證發行內容；切換是把應用程式指向已通過驗證的候選庫。只完成遷移或驗證，不代表已切換。Windows 備份復原另依 [同名復原契約](10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore)。
 
 | 概念 | 唯一權威 |
 |---|---|
@@ -23,6 +23,8 @@
 | rollback switch | original source identity 與 prior switch receipt |
 
 ## 3. 核心安全不變量
+
+以下來源庫唯讀、candidate 保留與 `.env` 切換不變量適用於保留資料升級與切換；Windows 備份復原的目標替換與暫存物清理以 [同名復原契約](10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore) 為準。
 
 1. Source database 全程唯讀（禁止 DDL、`UPDATE`、`DELETE`、`TRUNCATE`、`DROP`），並與寫入 candidate 分採獨立權限主體（principal）。
 2. Candidate 必須是明確的新建 database，禁止以 `DROP candidate` 作為重跑或清場策略。

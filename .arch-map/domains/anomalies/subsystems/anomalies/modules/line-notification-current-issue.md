@@ -19,7 +19,9 @@
 
 ## Verification
 - test_root: `tests/domains/anomalies/subsystems/anomalies/modules/line-notification-current-issue/`
-- 唯讀測試替身（`tests/domains/anomalies/subsystems/anomalies/integration/test_anomaly_public_detail_recovery_contract.py` L165–213）：兩個案例只呼叫 `query_current`。復原查詢檢查 `case_no`、`notification_reason` 及來源版本；公開明細案例確認 `LINE-006`，不含 timeline 或 workflow status。這些斷言不涵蓋實際投遞。
+- higher_boundary:
+  - [公開明細與復原投影整合驗證](../../../../../../tests/domains/anomalies/subsystems/anomalies/integration/test_anomaly_public_detail_recovery_contract.py) 歸屬 [Anomalies Subsystem整合驗證](../index.md#verification-routing)，此處為上位證據引用。
+  - 唯讀測試替身（L165–213）：兩個案例只呼叫 `query_current`。復原查詢檢查 `case_no`、`notification_reason` 及來源版本；公開明細案例確認 `LINE-006`，不含 timeline 或 workflow status。這些斷言不涵蓋本 Module 的 consumer、adapter、reconcile 或實際投遞。
 
 ## Change triggers
 Reconcile when LINE-006 subject identity、typed readback consumer、fail-closed reconcile或runtime composition改變。

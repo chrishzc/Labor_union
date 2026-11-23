@@ -1,14 +1,16 @@
 """Windows NAS SQL backup, candidate upgrade and disaster restore; no SSH/reset.
 
 The three launchers share this transport. Canonical migration still owns schema,
-backfills and preservation checks. Operational databases are never dropped.
+backfills and preservation checks. Restore replaces only the configured database.
 """
 from __future__ import annotations
 
 import argparse
 from collections import Counter
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from enum import Enum
 import gzip
 import hashlib
 import ipaddress
@@ -17,10 +19,11 @@ import os
 from pathlib import Path, PureWindowsPath
 import re
 import shutil
+import socket
 import subprocess
 import sys
 from threading import Timer
-from uuid import uuid4
+from uuid import UUID, uuid4
 import zipfile
 import zlib
 
@@ -69,6 +72,10 @@ class MaintenanceBlocked(RuntimeError):
 
 class ScheduleConflict(MaintenanceBlocked):
     pass
+
+
+class RestoreCleanupPending(MaintenanceBlocked):
+    """The target passed verification, and this operation still owns artifacts."""
 
 
 def require(condition, message):
@@ -442,7 +449,7 @@ def maintenance_lock(config):
         with connection.cursor() as cursor:
             cursor.execute("SELECT GET_LOCK('labor_union_nas_maintenance',0) AS acquired")
             require(cursor.fetchone()["acquired"] == 1, "另一項備份、升級或復原正在執行，請稍後再試。")
-        yield
+        yield connection
     finally:
         connection.close()
 
@@ -582,12 +589,12 @@ def _publish_backup_bundle(pending, bundle):
     pending.rename(bundle)
 
 
-def backup(settings):
+def backup(settings, *, operation_root=None, moment=None):
     print("正在備份資料，完成前請勿關閉視窗。", flush=True)
-    root = destination_ready(settings, writable=True)
+    root = operation_root if operation_root is not None else destination_ready(settings, writable=True)
     config, database = reader(settings), settings["database"]
     config.client_prefix("mysqldump")
-    moment = backup_time()
+    moment = moment or backup_time()
     month, stem = moment.strftime("%Y-%m"), moment.strftime("union_db_%Y%m%d_%H%M%S")
     archive_name = stem + ".sql.gz"
     bundle_name = stem + ".zip"
@@ -597,7 +604,8 @@ def backup(settings):
     require(not bundle.exists() and not legacy_archive.exists()
             and not legacy_archive.with_suffix(".gz.sha256").exists() and not receipt_path(legacy_archive).exists(),
             "這個時間已有備份，已停止且不覆寫；請稍後重新選擇備份。")
-    directory = nas_directory(root, "_partial", stem + "-" + uuid4().hex[:8])
+    partial_name = stem if operation_root is not None else stem + "-" + uuid4().hex[:8]
+    directory = nas_directory(root, "_partial", partial_name)
     before = schema_inventory(config, database)
     identity = migration.server_identity(config, database)
     command = migration._mysql_base(config, "mysqldump") + ["--single-transaction", "--quick", "--skip-lock-tables",
@@ -712,14 +720,19 @@ def require_event_scheduler_safe(config, receipt):
         connection.close()
 
 
-def prepare_runtime_access(settings, candidate):
+def prepare_runtime_access(settings, candidate, *, record_grant=None):
     runtime = settings["runtime"]
     require(runtime.get("DB_USER") and runtime.get("DB_PASSWORD"), "缺少工會系統原有的連線帳號。")
-    _copy_schema_access(settings, candidate, ConnectionConfig(settings, user=runtime["DB_USER"], password=runtime["DB_PASSWORD"]))
-    _copy_schema_access(settings, candidate, reader(settings))
+    app = ConnectionConfig(settings, user=runtime["DB_USER"], password=runtime["DB_PASSWORD"])
+    if record_grant is None:
+        _copy_schema_access(settings, candidate, app)
+        _copy_schema_access(settings, candidate, reader(settings))
+    else:
+        _copy_schema_access(settings, candidate, app, record_grant=record_grant)
+        _copy_schema_access(settings, candidate, reader(settings), record_grant=record_grant)
 
 
-def _copy_schema_access(settings, candidate, probe):
+def _copy_schema_access(settings, candidate, probe, *, record_grant=None):
     """Copy only the existing runtime account's schema grant to the new schema.
 
     Existing global administrators need no new grant. Passwords/global
@@ -760,7 +773,9 @@ def _copy_schema_access(settings, candidate, probe):
             if not global_admin:
                 require(privileges and privileges <= allowed, "原帳號使用特殊權限配置，未切換；請由維護人員沿用原權限政策。")
                 target_scope = candidate if partial_revokes else candidate.replace("_", r"\_")
-                cursor.execute(f"GRANT {','.join(sorted(privileges))} ON `{target_scope}`.* TO %s@%s", (user, host))
+                owned = _schema_grants(grants, target_scope) if record_grant is not None else set()
+                if record_grant is None or record_grant(account, target_scope, privileges, owned):
+                    cursor.execute(f"GRANT {','.join(sorted(privileges))} ON `{target_scope}`.* TO %s@%s", (user, host))
     finally:
         admin.close()
     connection = probe.connect(candidate)
@@ -986,69 +1001,701 @@ def require_account_receipt_conversion_target(settings):
                 "正式收據轉換需指定 NAS 目標位址、連線埠、正式資料庫及可驗證主機身分的 TLS。")
 
 
-def restore(settings, archive):
-    archive = Path(archive)
-    info = validate_backup(archive)
-    root = destination_ready(settings, writable=True)
-    print("備份檢查通過，正在建立並驗證復原副本；原庫保留。", flush=True)
-    candidate = new_candidate("restore")
-    config = writer(settings, candidate)
-    config.client_prefix("mysql")
-    require_event_scheduler_safe(config, info)
-    original_env_digest = digest(settings["environment_file"])
-    # The source may be absent/corrupt. Recovery only needs a working server.
-    require(not migration.database_exists(config, candidate), "復原副本已存在，請維護人員確認。")
-    run = nas_directory(root, "_maintenance", candidate)
-    save(run / "operation.json", {"status": "prepared", "candidate": candidate,
-         "backup_sha256": info.get("bundle_sha256", info["sha256"])})
+class RestorePhase(str, Enum):
+    PREPARED = "prepared"
+    BACKING_UP = "backing_up"
+    BACKUP_READY = "backup_ready"
+    CREATING_CANDIDATE = "creating_candidate"
+    CANDIDATE_CREATED = "candidate_created"
+    IMPORTING_CANDIDATE = "importing_candidate"
+    CANDIDATE_IMPORTED = "candidate_imported"
+    PREPARING_CANDIDATE = "preparing_candidate"
+    CANDIDATE_READY = "candidate_ready"
+    EXPORTING = "exporting"
+    EXPORT_READY = "export_ready"
+    DROPPING_TARGET = "dropping_target"
+    TARGET_DROPPED = "target_dropped"
+    CREATING_TARGET = "creating_target"
+    TARGET_CREATED = "target_created"
+    IMPORTING_TARGET = "importing_target"
+    VERIFYING_TARGET = "verifying_target"
+    CLEANUP_PENDING = "cleanup_pending"
+    COMPLETED = "completed"
+
+
+_RESTORE_FORMAT = "nas-same-name-restore/v1"
+_RESTORE_DB = re.compile(r"lu_nas_restore_\d{14}_[0-9a-f]{8}\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_RESTORE_CLEANUP = ("grants", "candidate", "before", "verified")
+_RESTORE_BLOCKED_START = {
+    RestorePhase.DROPPING_TARGET, RestorePhase.TARGET_DROPPED,
+    RestorePhase.CREATING_TARGET, RestorePhase.TARGET_CREATED,
+    RestorePhase.IMPORTING_TARGET, RestorePhase.VERIFYING_TARGET,
+}
+
+
+@dataclass(frozen=True)
+class RestoreTarget:
+    host: str
+    port: int
+    database: str
+
+    @classmethod
+    def from_connection(cls, host, port, database):
+        return cls(host.strip().casefold().rstrip("."), int(port), database)
+
+    def payload(self):
+        return {"host": self.host, "port": self.port, "database": self.database}
+
+
+def _restore_path(path):
+    path = Path(path)
+    require(path.is_absolute() and ".." not in path.parts
+            and not any(node.is_symlink() or node.is_junction() for node in (path, *path.parents)),
+            "復原檔案位置超出本次操作範圍，或包含連結或轉接點。")
+    return path
+
+
+def _restore_marker(environment_file):
+    return Path(environment_file).parent / "scratch" / "nas_database_maintenance" / "same-name-restore.json"
+
+
+def _restore_read(path):
+    _restore_path(path)
+    if not path.exists():
+        return None
+    require(path.is_file() and path.stat().st_nlink == 1,
+            "復原紀錄不是本次操作的獨立檔案。")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        require(isinstance(payload, dict) and payload.get("format") == _RESTORE_FORMAT,
+                "復原紀錄格式不符。")
+        return payload
+    except (OSError, UnicodeError, ValueError):
+        raise MaintenanceBlocked("無法讀取本次復原紀錄，請維護人員核對。") from None
+
+
+def _restore_write(path, payload):
+    pending = _restore_path(path.with_name(path.name + ".pending"))
+    _restore_path(path)
+    if pending.exists():
+        require(pending.is_file() and pending.stat().st_nlink == 1, "復原紀錄暫存檔身分不符。")
+        pending.unlink()
+    save(path, {"format": _RESTORE_FORMAT, **payload})
+
+
+def _restore_hash(value):
+    return hashlib.sha256(migration._canonical_json(value)).hexdigest()
+
+
+def _restore_phase(state):
+    try:
+        phase = RestorePhase(state["phase"])
+        target = state["target"]
+        RestoreTarget(**target)
+        require(
+            _RESTORE_DB.fullmatch(state["candidate"])
+            and state["candidate"].casefold() != target["database"].casefold()
+            and all(_SHA256.fullmatch(state[key]) for key in ("environment_sha256", "archive_sha256", "archive_path_sha256"))
+            and isinstance(state["target_existed"], bool),
+            "復原紀錄的目標或備份身分不符。",
+        )
+        UUID(state["server_uuid"])
+        if phase in _RESTORE_BLOCKED_START | {RestorePhase.CLEANUP_PENDING, RestorePhase.COMPLETED}:
+            require(isinstance(state["evidence"], dict)
+                    and _SHA256.fullmatch(state["evidence"]["schema_sha256"])
+                    and isinstance(state["evidence"]["rows"], dict)
+                    and _SHA256.fullmatch(state["verified_sha256"])
+                    and (not state["target_existed"] or _SHA256.fullmatch(state["before_sha256"])),
+                    "復原紀錄缺少目標驗證基準。")
+        return phase
+    except (TypeError, ValueError, KeyError):
+        raise MaintenanceBlocked("復原紀錄缺少有效的目標或進度。") from None
+
+
+def restore_startup_blocked(host, port, database, *, environment_file=ROOT / ".env"):
+    """Read the local binding and its journal without opening a DB connection."""
+    path = _restore_marker(environment_file)
+    marker = _restore_read(path)
+    if marker is None:
+        return _restore_path(path.with_name(path.name + ".pending")).exists()
+    try:
+        requested = RestoreTarget.from_connection(host, port, database)
+        recorded = RestoreTarget(**marker["target"])
+        if (recorded.host, recorded.port, recorded.database.casefold()) != (
+            requested.host, requested.port, requested.database.casefold(),
+        ):
+            return False
+        journal = _restore_read(Path(marker["journal"]))
+        require(journal is not None and journal["target"] == marker["target"]
+                and journal["candidate"] == marker["candidate"],
+                "本機與備份區的復原紀錄不相符。")
+        return _restore_phase(journal) not in {RestorePhase.CLEANUP_PENDING, RestorePhase.COMPLETED}
+    except (TypeError, ValueError, KeyError):
+        raise MaintenanceBlocked("無法確認本機復原狀態。") from None
+
+
+def _restore_require_stopped(settings):
+    environment = Path(settings["environment_file"])
+    state = environment.parent / "scratch" / "windows-remote" / "frontend-control" / "state.json"
+    require(not state.exists(), "請先停止此安裝的工會系統與背景服務，再復原資料庫。")
+    if os.name == "nt" and environment == ROOT / ".env":
+        for port in (8000, 5173):
+            with socket.socket() as probe:
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                try:
+                    probe.bind(("127.0.0.1", port))
+                except OSError:
+                    raise MaintenanceBlocked("工會系統的服務連接埠仍在使用，請先停止服務。") from None
+
+
+@contextmanager
+def _restore_installation_lock(settings):
+    if os.name != "nt":
+        yield
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    path = _restore_path(Path(settings["environment_file"]).parent / "scratch" / "windows-remote" / "manager.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_file = kernel.CreateFileW
+    open_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                          wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    open_file.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = open_file(str(path), 0xC0000000, 0, None, 4, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        parent_holds_lock = (ctypes.get_last_error() == 32
+                             and os.getenv("LABOR_UNION_RESTORE_MANAGER_PID") == str(os.getppid()))
+        require(parent_holds_lock, "另一項管理操作正在執行，請待該操作完成再復原。")
+        yield
+        return
+    try:
+        yield
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def _restore_server(connection):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT @@server_uuid AS server_uuid, @@hostname AS hostname")
+        row = cursor.fetchone()
+    return str(UUID(row["server_uuid"])), row["hostname"]
+
+
+def _restore_read_server(config):
     connection = config.connect()
     try:
-        with connection.cursor() as cursor:
-            charset, collation = info["inventory"]["charset"], info["inventory"]["collation"]
-            require(IDENTIFIER.fullmatch(charset) and IDENTIFIER.fullmatch(collation), "備份的資料庫字元集設定無效。")
-            cursor.execute(f"CREATE DATABASE `{candidate}` CHARACTER SET {charset} COLLATE {collation}")
+        return _restore_server(connection)
     finally:
         connection.close()
-    completed = migration.restore_sql_dump(migration._mysql_base(config, "mysql") + [candidate],
-                                           archive, migration._client_environment(config))
-    require(completed.returncode == 0, "復原匯入失敗，未切換；原庫、備份與副本皆保留。")
-    actual_inventory = schema_inventory(config, candidate, (info["database"],), reject_source_references=True)
-    verify_restored_inventory(actual_inventory, info["inventory"])
-    connection = config.connect(candidate)
+
+
+def _restore_credentials(settings):
+    runtime = settings["runtime"]
+    require(runtime.get("DB_USER") and runtime.get("DB_PASSWORD"), "缺少工會系統原有的連線帳號。")
+    return (
+        ConnectionConfig(settings, user=runtime["DB_USER"], password=runtime["DB_PASSWORD"], readonly=True),
+        reader(settings),
+    )
+
+
+def _restore_check_credentials(settings, database, server_uuid):
+    for config in _restore_credentials(settings):
+        connection = config.connect(database)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT DATABASE() AS name, @@server_uuid AS server_uuid")
+                row = cursor.fetchone()
+            require(row["name"] == database and str(UUID(row["server_uuid"])) == server_uuid,
+                    "原連線帳號無法讀取本次復原資料庫。")
+        finally:
+            connection.close()
+
+
+def _schema_grants(grants, scope):
+    privileges = set()
+    for grant in grants:
+        match = re.match(r"^GRANT ([A-Z_, ]+) ON " + '`' + re.escape(scope) + '`' + r"\.\* TO ", grant)
+        if match:
+            privileges.update(item.strip() for item in match[1].split(","))
+    return privileges
+
+
+def _restore_full_rows(config, database, tables):
+    connection = config.connect(database)
+    try:
+        result = {}
+        with connection.cursor(pymysql.cursors.SSDictCursor) as cursor:
+            for table in tables:
+                safe = table.replace('`', '`' * 2)
+                cursor.execute(f"SELECT * FROM {'`'}{safe}{'`'}")
+                # SQL collation may tie distinct values in tables without a PK.
+                rows = sorted(hashlib.sha256(migration._canonical_json(row)).digest() for row in cursor)
+                hasher = hashlib.sha256()
+                for row in rows:
+                    hasher.update(row)
+                result[table] = hasher.hexdigest()
+        return result
+    finally:
+        connection.close()
+
+
+def _restore_evidence(config, database, *, source=None, check_tables=False):
+    equivalent = (source,) if source else ()
+    inventory = schema_inventory(config, database, equivalent, reject_source_references=bool(source))
+    snapshot = migration._schema_snapshot(config, database)
+    snapshot.pop("sha256", None)
+    programs = migration._restored_schema_program_evidence(snapshot, database)
+    snapshot["triggers"] = programs["triggers"]
+    snapshot["views"] = programs["views"]
+    snapshot["show_create_tables"] = {
+        name: re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", migration._normalize_database_qualifiers(sql, (database,)))
+        for name, sql in snapshot["show_create_tables"].items()
+    }
+    tables = [item["name"] for item in inventory["tables"] if item["kind"] == "BASE TABLE"]
+    if check_tables:
+        _restore_check_tables(config, database, tables)
+    rows = migration._table_evidence(config, database)
+    full_rows = _restore_full_rows(config, database, tables)
+    require(set(rows) == set(full_rows), "復原證據的資料表範圍不相符。")
+    return {
+        "schema_sha256": _restore_hash({"inventory": inventory, "schema": snapshot}),
+        "rows": {
+            table: {"count": evidence["count"], "primary_key_sha256": evidence["primary_key_sha256"],
+                    "full_row_sha256": full_rows[table]}
+            for table, evidence in rows.items()
+        },
+    }
+
+
+def _restore_check_tables(config, database, tables):
+    connection = config.connect(database)
     try:
         with connection.cursor() as cursor:
-            for table in info["inventory"]["tables"]:
-                if table["kind"] != "BASE TABLE":
-                    continue
-                name = table["name"].replace("`", "``")
-                cursor.execute(f"CHECK TABLE `{name}`")
+            for table in tables:
+                safe = table.replace('`', '`' * 2)
+                cursor.execute(f"CHECK TABLE {'`'}{safe}{'`'}")
                 results = cursor.fetchall()
-                require(results and all(row["Msg_type"] != "error" for row in results) and any(row["Msg_text"] == "OK" for row in results),
-                        "復原資料表檢查失敗，未切換資料庫。")
+                require(results and all(row["Msg_type"] != "error" for row in results)
+                        and any(row["Msg_text"] == "OK" for row in results),
+                        "復原資料表檢查失敗，已保留本次復原紀錄。")
     finally:
         connection.close()
+
+
+def _restore_import(config, database, archive):
+    command = migration._mysql_base(config, "mysql") + ["--binary-mode", "--one-database", database]
+    result = migration.restore_sql_dump(command, archive, migration._client_environment(config))
+    require(result.returncode == 0, "復原匯入未完成，已保留原備份及本次操作紀錄。")
+
+
+def _restore_current(config, database, run, *, upgrade=False):
     from scripts import update_local_database as updater
-    current = updater.build_additive_preview(config, candidate, run)
+
+    current = updater.build_additive_preview(config, database, run)
+    if upgrade and current.get("status") == "ready" and current.get("pending_releases"):
+        current = apply_candidate_additive_migrations(config, database, run, current)
     if current.get("status") != "current":
-        if current.get("status") == "ready" and current.get("pending_releases"):
-            print("備份副本結構有效，檢測到相容的新版遷移項目，正在自動升級副本...", flush=True)
-            current = apply_candidate_additive_migrations(config, candidate, run, current)
-            print(f"副本已升級至最新版本：{current.get('release_id')}", flush=True)
-        else:
-            reason = current.get("blocked_reason") or current.get("error") or current.get("code") or "版本差異"
-            require(current.get("status") == "current",
-                    f"備份已匯入副本，但與目前程式版本不相容（狀態：{current.get('status')}，原因：{reason}），尚未切換；原資料庫不變。")
+        reason = current.get("blocked_reason") or current.get("code")
+        normalized = reason if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{1,95}", reason) else "schema_update_required"
+        raise MaintenanceBlocked(f"備份與目前程式版本不相容（{normalized}），已停止復原。")
     updater.require_current_database(current)
-    protect_account_receipts(config, candidate, apply=True)
-    prepare_runtime_access(settings, candidate)
-    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
-    _candidate_conn = config.connect(candidate)
-    try:
-        ensure_nas_procedures(_candidate_conn)
-    finally:
-        _candidate_conn.close()
-    switch_runtime(settings, candidate, original_env_digest, run)
+
+
+@dataclass
+class SameNameRestore:
+    settings: dict
+    target: RestoreTarget
+    connection: object
+    config: ConnectionConfig
+    journal: Path
+    run: Path
+    marker: Path
+    state: dict
+
+    @property
+    def candidate(self):
+        return self.state["candidate"]
+
+    @property
+    def database(self):
+        return self.target.database
+
+    @property
+    def phase(self):
+        return _restore_phase(self.state)
+
+    def record(self, phase, **evidence):
+        updated = {**self.state, **evidence, "phase": phase.value}
+        _restore_write(self.journal, updated)
+        self.state = updated
+
+    def check_identity(self):
+        _restore_require_stopped(self.settings)
+        require(
+            digest(self.settings["environment_file"]) == self.state["environment_sha256"]
+            and _restore_server(self.connection)[0] == self.state["server_uuid"],
+            "本次復原的伺服器或 .env 設定已改變，已停止。",
+        )
+
+    def object_path(self, kind):
+        moment = datetime.fromisoformat(self.state["backup_time"])
+        stem = moment.strftime("union_db_%Y%m%d_%H%M%S")
+        root = _restore_path(self.run / kind)
+        return root, moment, root / moment.strftime("%Y-%m") / (stem + ".zip"), root / "_partial" / stem
+
+    def backup_receipt(self, kind, database, *, expected=None):
+        _, _, path, _ = self.object_path(kind)
+        receipt = validate_backup(path)
+        require(
+            receipt.get("database") == database
+            and receipt.get("host") == self.settings["host"]
+            and receipt.get("port") == self.target.port
+            and receipt.get("server") == self.state["server_name"]
+            and (expected is None or receipt["bundle_sha256"] == expected),
+            "本次復原的備份或匯出檔身分不符。",
+        )
+        return receipt
+
+    def produce_backup(self, kind, database):
+        root, moment, path, partial = self.object_path(kind)
+        if not _restore_path(path).exists():
+            require(not _restore_path(partial).exists(), "本次備份或匯出結果未明，請核對本次紀錄。")
+            nas_directory(self.run, kind)
+            settings = {**self.settings, "database": database, "scheduled_backup": False}
+            require(_restore_read_server(reader(settings))[0] == self.state["server_uuid"],
+                    "備份連線的伺服器身分不符。")
+            require(backup(settings, operation_root=root, moment=moment) == path, "本次備份位置不符。")
+        return self.backup_receipt(kind, database)
+
+    def create_database(self, database, inventory):
+        charset, collation = inventory["charset"], inventory["collation"]
+        require(IDENTIFIER.fullmatch(charset) and IDENTIFIER.fullmatch(collation), "備份的資料庫字元集設定無效。")
+        self.check_identity()
+        quoted = '`' + database + '`'
+        with self.connection.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE {quoted} CHARACTER SET {charset} COLLATE {collation}")
+
+    def drop_database(self, database):
+        self.check_identity()
+        quoted = '`' + database + '`'
+        with self.connection.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE {quoted}")
+
+    def record_grant(self, account, scope, privileges, existing):
+        account_hash = _restore_hash(account)
+        entry = {"scope": scope, "privileges": sorted(privileges)}
+        grants = self.state.get("grants", {})
+        if account_hash in grants:
+            require(grants[account_hash] == entry and existing == privileges, "暫存庫的帳號權限身分不符。")
+            return False
+        require(not existing, "暫存庫已有權限，無法確認屬於本次復原。")
+        self.record(self.phase, grants={**grants, account_hash: entry})
+        return True
+
+    def revoke_grants(self):
+        entries = self.state.get("grants", {})
+        if not entries:
+            return
+        accounts = {}
+        for probe in _restore_credentials(self.settings):
+            connection = probe.connect()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT CURRENT_USER() AS account, @@server_uuid AS server_uuid")
+                    result = cursor.fetchone()
+                    require(str(UUID(result["server_uuid"])) == self.state["server_uuid"],
+                            "清理連線的伺服器身分不符。")
+                    accounts[_restore_hash(result["account"])] = result["account"].rsplit("@", 1)
+            finally:
+                connection.close()
+        require(entries.keys() <= accounts.keys(), "無法確認本次所建的暫存庫權限。")
+        with self.connection.cursor() as cursor:
+            for account, entry in entries.items():
+                scope = entry["scope"]
+                require(scope in {self.candidate, self.candidate.replace("_", r"\_")},
+                        "暫存庫的權限清理範圍不符。")
+                user, host = accounts[account]
+                cursor.execute("SHOW GRANTS FOR %s@%s", (user, host))
+                existing = _schema_grants([next(iter(row.values())) for row in cursor.fetchall()], scope)
+                if existing:
+                    require(sorted(existing) == entry["privileges"], "暫存庫的權限已有變更，未清理。")
+                    quoted = '`' + scope + '`'
+                    cursor.execute(f"REVOKE {','.join(sorted(existing))} ON {quoted}.* FROM %s@%s", (user, host))
+                    cursor.execute("SHOW GRANTS FOR %s@%s", (user, host))
+                    require(not _schema_grants([next(iter(row.values())) for row in cursor.fetchall()], scope),
+                            "本次暫存庫權限清理未完成。")
+
+    def clean_file(self, kind):
+        root, _, path, partial = self.object_path(kind)
+        expected = self.state.get(kind + "_sha256")
+        if expected is None:
+            require(kind == "before" and not self.state["target_existed"]
+                    and not _restore_path(root).exists(), "本次備份清理身分不符。")
+            return
+        path = _restore_path(path)
+        partial = _restore_path(partial)
+        if path.exists():
+            database = self.database if kind == "before" else self.candidate
+            receipt = self.backup_receipt(kind, database, expected=expected)
+            require(path.stat().st_nlink == 1
+                    and _restore_hash(str(path)) != self.state["archive_path_sha256"],
+                    "本次清理檔案與來源備份身分重疊。")
+            if partial.exists():
+                staged = _restore_path(partial / receipt["archive"])
+                require({file.name for file in partial.iterdir()} <= {staged.name},
+                        "備份暫存目錄含無法確認的檔案，未清理。")
+                if staged.exists():
+                    require(staged.is_file() and staged.stat().st_nlink == 1
+                            and digest(staged) == receipt["sha256"], "備份暫存檔身分不符。")
+                    staged.unlink()
+                partial.rmdir()
+            path.unlink()
+        require(not path.exists() and not partial.exists(), "備份或匯出檔清理未完成。")
+
+    def cleanup(self):
+        try:
+            self.check_identity()
+            require(migration.database_exists(self.config, self.database),
+                    "同名目標庫已不在，已停止清理。")
+            for item in _RESTORE_CLEANUP:
+                if item in self.state.get("cleaned", []):
+                    continue
+                self.check_identity()
+                self.record(RestorePhase.CLEANUP_PENDING, cleaning=item)
+                if item == "grants":
+                    self.revoke_grants()
+                elif item == "candidate":
+                    if migration.database_exists(self.config, self.candidate):
+                        require(_restore_evidence(self.config, self.candidate) == self.state["evidence"],
+                                "暫存驗證庫身分或內容已改變，未清理。")
+                        self.drop_database(self.candidate)
+                    require(not migration.database_exists(self.config, self.candidate), "暫存庫清理未完成。")
+                else:
+                    self.clean_file(item)
+                self.record(RestorePhase.CLEANUP_PENDING, cleaning=None, cleaned=[*self.state.get("cleaned", []), item])
+            _restore_write(self.run / "operation.json", {**self.state, "phase": RestorePhase.COMPLETED.value})
+            marker = _restore_read(self.marker)
+            require(marker is not None and marker.get("candidate") == self.candidate
+                    and marker.get("journal") == str(self.journal) and marker.get("target") == self.target.payload(),
+                    "本機復原紀錄身分已改變，未清理。")
+            self.marker.unlink()
+            require(not self.marker.exists(), "本機復原紀錄清理未完成。")
+            self.record(RestorePhase.COMPLETED)
+        except Exception:
+            raise RestoreCleanupPending("資料復原成功，清理待完成。再次執行復原只會接續清理本次暫存物。") from None
+
+    def prepare_candidate(self, info, archive):
+        if self.phase == RestorePhase.BACKUP_READY:
+            require(not migration.database_exists(self.config, self.candidate), "本次暫存庫名稱已存在，已停止。")
+            self.record(RestorePhase.CREATING_CANDIDATE)
+        if self.phase == RestorePhase.CREATING_CANDIDATE:
+            require(not migration.database_exists(self.config, self.candidate), "暫存庫建立結果未明，請核對本次紀錄。")
+            self.create_database(self.candidate, info["inventory"])
+            self.record(RestorePhase.CANDIDATE_CREATED)
+        if self.phase == RestorePhase.CANDIDATE_CREATED:
+            self.check_identity()
+            require(digest(_restore_path(archive)) == self.state["archive_sha256"],
+                    "備份 A 已改變，未開始匯入。")
+            require_event_scheduler_safe(self.config, info)
+            self.record(RestorePhase.IMPORTING_CANDIDATE)
+            _restore_import(self.config, self.candidate, archive)
+            self.record(RestorePhase.CANDIDATE_IMPORTED)
+        require(self.phase != RestorePhase.IMPORTING_CANDIDATE, "暫存庫匯入結果未明，請核對本次紀錄。")
+        if self.phase == RestorePhase.CANDIDATE_IMPORTED:
+            config = writer(self.settings, self.candidate)
+            inventory = schema_inventory(config, self.candidate, (info["database"],), reject_source_references=True)
+            verify_restored_inventory(inventory, info["inventory"])
+            self.check_identity()
+            self.record(RestorePhase.PREPARING_CANDIDATE)
+            _restore_current(config, self.candidate, self.run, upgrade=True)
+            protect_account_receipts(config, self.candidate, apply=True)
+            from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+            connection = config.connect(self.candidate)
+            try:
+                ensure_nas_procedures(connection)
+            except Exception:
+                raise MaintenanceBlocked("暫存驗證庫的固定程序準備失敗，已保留本次紀錄。") from None
+            finally:
+                connection.close()
+            prepare_runtime_access(self.settings, self.candidate, record_grant=self.record_grant)
+            _restore_check_credentials(self.settings, self.candidate, self.state["server_uuid"])
+            evidence = _restore_evidence(config, self.candidate, source=info["database"], check_tables=True)
+            self.record(RestorePhase.CANDIDATE_READY, evidence=evidence)
+        require(self.phase != RestorePhase.PREPARING_CANDIDATE, "暫存庫升級或準備結果未明，請核對本次紀錄。")
+
+    def replace_target(self, final):
+        if self.phase == RestorePhase.EXPORT_READY:
+            self.check_identity()
+            require(_restore_evidence(self.config, self.candidate) == self.state["evidence"],
+                    "暫存驗證庫內容已改變，未重建目標庫。")
+            require(migration.database_exists(self.config, self.database) == self.state["target_existed"],
+                    "目標庫狀態已改變，未重建目標庫。")
+            if self.state["target_existed"]:
+                self.backup_receipt("before", self.database, expected=self.state["before_sha256"])
+            self.record(RestorePhase.DROPPING_TARGET)
+        if self.phase == RestorePhase.DROPPING_TARGET:
+            if migration.database_exists(self.config, self.database):
+                require(self.state["target_existed"]
+                        and _restore_evidence(self.config, self.database) == self.state["before_evidence"],
+                        "待替換資料庫內容已改變，未重建目標庫。")
+                self.drop_database(self.database)
+            self.record(RestorePhase.TARGET_DROPPED)
+        if self.phase == RestorePhase.TARGET_DROPPED:
+            self.record(RestorePhase.CREATING_TARGET)
+        if self.phase == RestorePhase.CREATING_TARGET:
+            if not migration.database_exists(self.config, self.database):
+                self.create_database(self.database, final["inventory"])
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT default_character_set_name AS charset, default_collation_name AS collation "
+                    "FROM information_schema.schemata WHERE schema_name=%s "
+                    "AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema=%s) "
+                    "AND NOT EXISTS (SELECT 1 FROM information_schema.routines WHERE routine_schema=%s) "
+                    "AND NOT EXISTS (SELECT 1 FROM information_schema.events WHERE event_schema=%s)",
+                    (self.database,) * 4,
+                )
+                defaults = cursor.fetchone()
+            require(defaults == {key: final["inventory"][key] for key in ("charset", "collation")},
+                    "目標庫建立結果未明，請核對本次紀錄。")
+            self.record(RestorePhase.TARGET_CREATED)
+        if self.phase == RestorePhase.TARGET_CREATED:
+            self.check_identity()
+            self.record(RestorePhase.IMPORTING_TARGET)
+            _restore_import(self.config, self.database, self.object_path("verified")[2])
+            self.record(RestorePhase.VERIFYING_TARGET)
+        if self.phase in {RestorePhase.IMPORTING_TARGET, RestorePhase.VERIFYING_TARGET}:
+            self.check_identity()
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) AS n FROM information_schema.processlist WHERE db=%s", (self.database,))
+                require(not cursor.fetchone()["n"], "目標庫仍有連線，尚無法核對復原結果。")
+            require(_restore_evidence(self.config, self.database, source=self.candidate, check_tables=True) == self.state["evidence"],
+                    "同名目標庫結構或資料與暫存基準不符，已保留本次復原資料。")
+            _restore_check_credentials(self.settings, self.database, self.state["server_uuid"])
+            _restore_current(self.config, self.database, self.run)
+            self.record(RestorePhase.CLEANUP_PENDING, cleaned=[])
+
+    def execute(self, info, archive):
+        self.check_identity()
+        if self.phase == RestorePhase.CLEANUP_PENDING:
+            self.cleanup()
+            return
+        self.config.client_prefix("mysql")
+        require_event_scheduler_safe(self.config, info)
+        if self.phase == RestorePhase.PREPARED:
+            if self.state["target_existed"]:
+                before = _restore_evidence(self.config, self.database)
+                self.record(RestorePhase.BACKING_UP, before_evidence=before)
+            else:
+                self.record(RestorePhase.BACKUP_READY)
+        if self.phase == RestorePhase.BACKING_UP:
+            self.check_identity()
+            receipt = self.produce_backup("before", self.database)
+            require(receipt["inventory"] == schema_inventory(self.config, self.database)
+                    and _restore_evidence(self.config, self.database) == self.state["before_evidence"],
+                    "替換前備份期間的目標庫內容已改變，未重建目標庫。")
+            self.record(RestorePhase.BACKUP_READY, before_sha256=receipt["bundle_sha256"])
+        self.prepare_candidate(info, archive)
+        if self.phase == RestorePhase.CANDIDATE_READY:
+            self.record(RestorePhase.EXPORTING)
+        if self.phase == RestorePhase.EXPORTING:
+            self.check_identity()
+            final = self.produce_backup("verified", self.candidate)
+            require(final["inventory"] == schema_inventory(self.config, self.candidate)
+                    and _restore_evidence(self.config, self.candidate) == self.state["evidence"],
+                    "匯出期間的暫存驗證庫內容已改變，未重建目標庫。")
+            self.record(RestorePhase.EXPORT_READY, verified_sha256=final["bundle_sha256"])
+        final = self.backup_receipt("verified", self.candidate, expected=self.state["verified_sha256"])
+        if self.state["target_existed"]:
+            self.backup_receipt("before", self.database, expected=self.state["before_sha256"])
+        require_event_scheduler_safe(self.config, final)
+        self.replace_target(final)
+        self.cleanup()
+
+
+def _restore_locked(settings, archive, info, root, config, connection):
+    target = RestoreTarget.from_connection(settings["host"], settings["port"], settings["database"])
+    env_digest = digest(settings["environment_file"])
+    environment = dotenv_values(settings["environment_file"], encoding="utf-8", interpolate=False)
+    configured = RestoreTarget.from_connection(environment.get("DB_HOST") or "127.0.0.1",
+                                               environment.get("DB_PORT") or 3306,
+                                               (environment.get("DB_DATABASE") or "").strip())
+    require(configured == target and digest(settings["environment_file"]) == env_digest,
+            "目前 .env 與本次復原設定不符，已停止。")
+    server_uuid, hostname = _restore_server(connection)
+    controller = nas_directory(root, "_maintenance", "_same_name_restore")
+    key = _restore_hash({"server_uuid": server_uuid, "database": target.database.casefold()})
+    journal = controller / (key + ".json")
+    marker = _restore_marker(settings["environment_file"])
+    existing = _restore_read(marker)
+    if existing:
+        linked = _restore_read(Path(existing.get("journal", "")))
+        replacing_marker = linked is not None and Path(existing["journal"]) == journal and _restore_phase(linked) == RestorePhase.PREPARED
+        require(linked is not None and linked.get("target") == existing.get("target")
+                and (linked.get("candidate") == existing.get("candidate") or replacing_marker),
+                "本機與備份區的復原紀錄不相符。")
+        require(_restore_phase(linked) == RestorePhase.COMPLETED or Path(existing["journal"]) == journal,
+                "此安裝已有未完成復原，請先核對原目標、伺服器及備份位置。")
+    state = _restore_read(journal)
+    binding = {"target": target.payload(), "environment_sha256": env_digest, "server_uuid": server_uuid}
+    if info is not None:
+        binding.update(archive_path_sha256=_restore_hash(str(archive)),
+                       archive_sha256=info.get("bundle_sha256", info["sha256"]))
+    else:
+        require(state is not None and _restore_phase(state) == RestorePhase.CLEANUP_PENDING,
+                "找不到可接續的已驗證復原，請選擇備份 A。")
+    if state is None or _restore_phase(state) == RestorePhase.COMPLETED:
+        require_event_scheduler_safe(config, info)
+        candidate = new_candidate("restore")
+        require(_RESTORE_DB.fullmatch(candidate) and candidate.casefold() != target.database.casefold(),
+                "本次暫存庫名稱無效。")
+        run = nas_directory(root, "_maintenance", candidate)
+        state = {**binding, "candidate": candidate, "server_name": hostname,
+                 "backup_time": backup_time().isoformat(), "phase": RestorePhase.PREPARED.value,
+                 "target_existed": migration.database_exists(config, target.database)}
+        _restore_write(journal, state)
+    else:
+        require(all(state.get(key) == value for key, value in binding.items()),
+                "此目標已有未完成復原，請核對原 .env、備份 A 及伺服器身分。")
+        run = _restore_path(root / "_maintenance" / state["candidate"])
+        require(run.is_dir(), "本次復原紀錄的暫存目錄已遺失。")
+    if not marker.parent.is_dir():
+        _restore_path(marker)
+        private_directory(marker.parent)
+    _restore_write(marker, {"target": target.payload(), "candidate": state["candidate"], "journal": str(journal)})
+    operation = SameNameRestore(settings, target, connection, config, journal, run, marker, state)
+    operation.execute(info, archive)
     return run
+
+
+def restore(settings, archive):
+    info = None
+    if archive is not None:
+        archive = _restore_path(Path(archive).absolute())
+        info = validate_backup(archive)
+    database = settings["database"]
+    require(IDENTIFIER.fullmatch(database) and database.casefold() not in migration.LOCAL_ADDITIVE_SYSTEM_DATABASES,
+            "復原目標須為目前 .env 設定的應用資料庫。")
+    with _restore_installation_lock(settings):
+        _restore_require_stopped(settings)
+        root = _restore_path(Path(settings["backup_root"]).absolute())
+        destination_ready(settings, writable=True)
+        config = writer(settings)
+        with maintenance_lock(config) as connection:
+            return _restore_locked(settings, archive, info, root, config, connection)
+
+
+def restore_has_pending_cleanup(settings):
+    marker = _restore_read(_restore_marker(settings["environment_file"]))
+    if marker is None:
+        return False
+    state = _restore_read(Path(marker["journal"]))
+    require(state is not None and state["target"] == marker["target"]
+            and state["candidate"] == marker["candidate"], "本機與備份區的復原紀錄不相符。")
+    return _restore_phase(state) == RestorePhase.CLEANUP_PENDING
 
 
 @contextmanager
@@ -1434,13 +2081,15 @@ def main(argv=None):
                 return 0
         if args.mode in {"upgrade", "restore"}:
             print("開始內部資料庫維護，請保持工會系統與背景服務停止。")
-        config = reader(settings) if args.mode == "backup" else writer(settings)
-        selected_backup = None
         if args.mode == "restore":
-            selected_backup = args.backup_file or choose_backup(settings)
-            validate_backup(selected_backup)  # No DB connection before source validation.
-        else:
-            destination_ready(settings, create=True)
+            selected_backup = args.backup_file
+            if selected_backup is None and not restore_has_pending_cleanup(settings):
+                selected_backup = choose_backup(settings)
+            path = restore(settings, selected_backup)
+            print(f"同名資料庫復原與清理完成。請重新啟動工會系統，再確認登入與資料。紀錄：{path}")
+            return 0
+        config = reader(settings) if args.mode == "backup" else writer(settings)
+        destination_ready(settings, create=True)
         with maintenance_lock(config):
             if args.mode == "backup":
                 path = backup(settings)
@@ -1466,8 +2115,6 @@ def main(argv=None):
                         print(cleanup_warning)
             elif args.mode == "upgrade":
                 path = upgrade(settings)
-            else:
-                path = restore(settings, selected_backup)
         if args.mode == "backup":
             record_backup_result(settings, "passed", message=cleanup_warning,
                                  created_at=read_backup_receipt(path)["created_at"])
@@ -1475,11 +2122,17 @@ def main(argv=None):
         elif path is not None:
             print(f"副本驗證與設定切換完成。請重新啟動工會系統，再確認登入與資料。紀錄：{path}")
         return 0
+    except RestoreCleanupPending as error:
+        print(str(error))
+        return 2
     except (EOFError, KeyboardInterrupt):
         print("已停止；若操作已開始，請保留紀錄並通知維護人員，不要重複執行。")
         return 2
     except Exception as error:
-        message = format_maintenance_error(error, settings)
+        if args.mode == "restore" and not isinstance(error, MaintenanceBlocked):
+            message = "復原未完成。請保留備份及本次進度，由維護人員核對連線、權限或操作結果。"
+        else:
+            message = format_maintenance_error(error, settings)
         if args.mode == "backup" and settings is not None and not args.dry_run:
             try:
                 record_backup_result(settings, "failed", message=message)
