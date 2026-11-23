@@ -29,13 +29,13 @@
   - `ui_react/src/pages/StaffPage.tsx`
 
 ## Contracts
-- `document/架構重整/01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
-- `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md` §4 完整資格主檔直接編輯
+- `.arch-map/requirements/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
+- `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md` §4 完整資格主檔直接編輯
 - Apply 的 `reason` 為選填備註，省略或留白不阻擋儲存；沿用 snapshot／Preview、actor、receipt 與同鍵命令辨識。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `tests/test_staff_qualification_master.py`
+- test_root: `tests/test_staff_qualification_master.py` — 既有合成案例核對排班來源未就緒時，整體可服務性保持未知。
 - test_root: `ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-qualification-master/`
 - routing: `.arch-map/tests/domains/staff/subsystems/staff/modules/staff-qualification-master.md`
 

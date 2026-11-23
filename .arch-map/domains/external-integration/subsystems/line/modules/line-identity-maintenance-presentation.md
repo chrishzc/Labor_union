@@ -11,12 +11,12 @@
 - primary: `ui_react/src/components/LineIdentityMaintenanceActions.tsx`
 
 ## Contracts
-- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` — replacement與解除維護契約。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` — replacement與解除維護契約。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/line_identity_maintenance_actions.test.tsx`
+- test_root: `ui_react/src/tests/line_identity_maintenance_actions.test.tsx` — 既有模擬失敗案例顯示一般可讀的錯誤訊息，不顯示型別代碼或後端細節。
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/line-identity-maintenance-presentation.md`
 
 ## Change triggers

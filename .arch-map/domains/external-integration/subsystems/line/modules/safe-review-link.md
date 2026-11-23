@@ -39,5 +39,5 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/safe-review-link/`
-- test_root: `ui_react/src/tests/safe_review_link_workbench.test.tsx`
+- test_root: `ui_react/src/tests/safe_review_link_workbench.test.tsx` — 既有模擬案例核對遮蔽後的歷史查詢呈現；模擬兌換只驗證 UI 清理，不表示退役 API 已恢復。
 - evidence: PR #299 code baseline `4eb58e07e94660308ba8afd05d39931f0301fdf1`; shared regression run `34733277249` / job `103659935152`. The 29 M4 regressions are part of the recorded 53-test run, not 53 tests of this module. Owner/UoW substitutes and SQLite adapter checks do not establish MySQL locking, mobile, provider, or full one-time-link flow acceptance; those remain `NOT_RUN` for this correction.

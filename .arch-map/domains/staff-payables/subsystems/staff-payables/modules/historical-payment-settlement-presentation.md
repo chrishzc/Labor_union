@@ -14,11 +14,11 @@
 
 ## Contracts
 - `modules/historical-payment-settlement.md` — owner application/public contract。
-- `document/架構重整/01_規格基線/06_Anomalies_Domain.md` — owner work item 顯示於 owner page，`#anomalies` 只保留 15 個 current issue。
+- `.arch-map/requirements/06_Anomalies_Domain.md` — owner work item 顯示於 owner page，`#anomalies` 只保留 15 個 current issue。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/historical_staff_payout_workbench.test.tsx`
+- test_root: `ui_react/src/tests/historical_staff_payout_workbench.test.tsx` — 既有模擬案例核對儲存並離開只套用一次，畫面顯示回讀結果，且離開回呼只執行一次。
 
 ## Change triggers
 Reconcile when owner-page placement、strict client endpoint、staff／case／selection、confirmation、fresh readback或test root changes。

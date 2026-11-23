@@ -11,8 +11,8 @@
 - outbound: `anomalies` — only eligible review/projection evidence is emitted。
 
 ## Contracts
-- `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` — current HCM/BeClass/import decisions
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation contract
+- `.arch-map/requirements/15_正式規格索引與裁決總表.md` — current HCM/BeClass/import decisions
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation contract
 
 ## Verification routing
 - default_boundary: Domain

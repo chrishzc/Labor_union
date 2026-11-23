@@ -13,9 +13,9 @@
 - outbound: `anomalies` — unresolved classification may create projection/evidence, not owner state。
 
 ## Contracts
-- `document/架構重整/01_規格基線/09_Finance_Import_Domain.md` — Finance Import canonical Domain contract
-- `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` — current bank/anomaly processing contract
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation contract
+- `.arch-map/requirements/09_Finance_Import_Domain.md` — Finance Import canonical Domain contract
+- `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` — current bank/anomaly processing contract
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation contract
 
 ## Verification routing
 - layout_status: `custom_current`

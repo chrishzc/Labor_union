@@ -16,14 +16,14 @@
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
 
 ## Contracts
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders服務完成與lifecycle owner規則。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/01_Orders_Domain.md` — Orders服務完成與lifecycle owner規則。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/order_service_completion_actions.test.tsx`
 - test_root: `ui_react/src/tests/order_service_completion_client.test.ts`
-- test_root: `ui_react/src/tests/order_workbench_v2_service_completion.test.tsx` — automatic status、移除 manual completion、owner refresh callback。
+- test_root: `ui_react/src/tests/order_workbench_v2_service_completion.test.tsx` — automatic status、移除 manual completion、owner refresh callback。 既有模擬案例核對正式讀回顯示已完工後，收起原先開啟的開始日調整表單。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/service-completion-presentation.md`
 
 ## Change triggers

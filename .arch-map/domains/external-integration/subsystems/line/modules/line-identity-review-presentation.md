@@ -11,12 +11,12 @@
 - primary: `ui_react/src/components/LineIdentityReviewWorkbench.tsx`
 
 ## Contracts
-- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` — LINE identity review與role-scoped binding owner規則。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` — LINE identity review與role-scoped binding owner規則。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/line_identity_review_workbench.test.tsx`
+- test_root: `ui_react/src/tests/line_identity_review_workbench.test.tsx` — 既有模擬案例確認預覽失敗時顯示一般錯誤訊息，不顯示型別代碼或後端細節。
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/line-identity-review-presentation.md`
 
 ## Change triggers

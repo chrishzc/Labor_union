@@ -19,7 +19,7 @@
 - `has_available_admin_target` 唯讀核對 enabled target、enabled Admin 與一致 canonical bound Admin LINE；只作歷史查詢，不產生通知設定待辦。
 
 ## Contracts
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — runtime target 與 NAS-LINE-03。
+- `.arch-map/requirements/17_External_Integration_LINE_Access正式規格.md` — runtime target 與 NAS-LINE-03。
 - 分類 GET 唯讀；舊 PATCH 明確回報管理員 Push 退役，不假裝儲存、不新增偏好表。
 - 管理員個人 target 舊命令回 `line_admin_push_retired`；群組 reset／Preview／登錄回原 typed retired conflict，均不開 UoW 或寫入。
 

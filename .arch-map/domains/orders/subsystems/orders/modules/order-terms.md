@@ -60,8 +60,8 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - outbound: `case-import/case-architecture-bootstrap` — 完成進件後沿用 canonical 政策與 writer，同一 caller-owned transaction 初始化缺少的 owner roots。
 
 ## Contracts
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders Terms 與 Query／Preview／Apply 語意。
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling generation ownership。
+- `.arch-map/requirements/01_Orders_Domain.md` — Orders Terms 與 Query／Preview／Apply 語意。
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — Scheduling generation ownership。
 
 ## Verification
 - integration_root: `tests/domains/orders/subsystems/orders/integration/test_historical_accounting_scenarios_mysql.py` — 歷史採納既有收付、樓層費、補助時數／費率、原流水核銷、重送、stale 與回滾。
@@ -70,7 +70,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - test_root: `tests/test_order_terms_preassignment_correction.py`
 - test_root: `tests/domains/orders/subsystems/orders/modules/order-terms/`
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-terms/`
-- test_root: `ui_react/src/tests/order_terms_mutation_client.test.ts` — 既有 Terms typed-client 契約測試，沿用現行位置。
+- test_root: `ui_react/src/tests/order_terms_mutation_client.test.ts` — 既有 Terms typed-client 契約測試，沿用現行位置。 既有模擬案例核對一般保存不要求永久命令鍵，並拒絕案件識別不一致的正式收據。
 - test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/`
 - test_root: `tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/integration/`
 

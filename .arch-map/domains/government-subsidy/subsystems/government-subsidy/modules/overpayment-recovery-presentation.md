@@ -12,12 +12,12 @@
 - typed query decoder: `ui_react/src/api/government_subsidy/government_overpayment_recovery_schemas.ts`
 
 ## Contracts
-- `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md` — 政府溢撥 offset、stale、idempotency 與 readback 規則。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/14_Government_Subsidy_Domain.md` — 政府溢撥 offset、stale、idempotency 與 readback 規則。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/government_overpayment_recovery_workbench.test.tsx`
+- test_root: `ui_react/src/tests/government_overpayment_recovery_workbench.test.tsx` — 既有模擬案例核對舊預覽失效時重新查詢並清除舊預覽，不自動再次套用。
 - test_root: `ui_react/src/tests/government_overpayment_recovery_client.test.ts`
 - routing: `.arch-map/tests/domains/government-subsidy/subsystems/government-subsidy/modules/overpayment-recovery-presentation.md`
 

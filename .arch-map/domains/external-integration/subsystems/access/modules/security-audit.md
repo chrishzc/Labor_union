@@ -22,7 +22,7 @@
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: 既有 policy 檔案直接驗證這個唯一 query／retention owner，保留其當前位置及 discovery；本次將直接 SQL oracle 更新至同一 owner 的固定程序委派。
-- test_root: `tests/test_admin_security_audit_policy.py`
+- test_root: `tests/test_admin_security_audit_policy.py` — 既有合成案例核對位址呈現和巢狀敏感欄位的遮蔽，不等同全面匿名化。
 
 ## Provenance
 - source_observed: 現有 query／API／policy tests。

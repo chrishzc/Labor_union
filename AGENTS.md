@@ -1,6 +1,6 @@
 # Workspace Agent Rules — Lightweight
 
-本檔是 repository-wide 基線。最新人工明確指示優先，其次為 `document/架構重整/01_規格基線/` 的 current 正式規格與可追溯業務／欄位權威；程式碼、測試、附件與 Git history 只提供 evidence，不得反向創造需求或覆蓋正式語意。
+本檔是 repository-wide 基線。最新人工明確指示優先，其次為 `.arch-map/requirements/` 的 current 正式規格與可追溯業務／欄位權威；程式碼、測試、附件與 Git history 只提供 evidence，不得反向創造需求或覆蓋正式語意。
 
 Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任務分級與交付規範.md` 為準；本檔只提供 repository-wide routing。
 
@@ -21,9 +21,9 @@ Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任
 
 完成上述定位後，只有任務實際涉及下列邊界時，才讀對應的最小 current 文件：
 
-- owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `.arch-map/` 指向的單一 owning Domain／Subsystem 正式規格；只有 currentness 或裁決仍不明時才讀 `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md`。
-- concurrency／fingerprint：只讀 `document/架構重整/01_規格基線/00_Global_共同契約.md` 的相關段落。
-- schema／migration／preserve-data／cutover：只讀 `10_Global_保留資料Migration與Cutover_Subsystem.md`（NAS Fresh 初始化見 `10A_NAS_Fresh初始化與維護復原規格.md`）與直接相關 owner spec。
+- owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `.arch-map/` 指向的單一 owning Domain／Subsystem 正式規格；只有 currentness 或裁決仍不明時才讀 `.arch-map/requirements/15_正式規格索引與裁決總表.md`。
+- concurrency／fingerprint：只讀 `.arch-map/requirements/00_Global_共同契約.md` 的相關段落。
+- schema／migration／preserve-data／cutover：只讀 `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md`（NAS Fresh 初始化見 `.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md`）與直接相關 owner spec。
 - entry point retirement／replacement：只讀 `19_Global_Entry_Point_Governance.md` 的相關段落。
 - 驗證情境、測試資料與 coverage ID：沿用 `document/資料庫、資料處理/新版測試資料規則矩陣_草案.md` 與 `document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md` 追溯情境／coverage 來源；兩者仍為草案，業務語意以對應 current 正式 owner spec 為準。
 - LINE 服務說明、客服分類與 Rich Menu audience：只讀 `29_LINE服務說明、客服互動與選單角色正式規格.md` 及其上位規格 `17`、`17A`、`20`。
@@ -57,13 +57,13 @@ Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任
 
 owner／aggregate version 是 business mutation 的主要 optimistic concurrency control。`PreviewFingerprint` 只用於真正跨 request 的 `Preview → human Confirm → Apply`；新增 fingerprint／digest／snapshot token 前，必須指出具體 race、現有 version 為何不足及唯一 failure meaning。stale／version conflict 必須是 typed conflict，不得以 generic 500 或 blind retry 掩蓋。
 
-DB 變更須 additive、可追溯，並區分 fresh bootstrap、preserve-data upgrade、fixture reset 與 production migration。本機 `APP_ENV=development` 且連線目標為 localhost 時，`union_db` 與 `lu_test_*` 都可在 current task 明確 scope 內直接異動；已有 owner Query／Preview／Apply 時仍須走正式 writer 並保存 before／after 與 receipt。一般任務不包含 production、external provider、reset、replacement、`--switch` 或 destructive operation Authority。DB 任務依 `10_Global_保留資料Migration與Cutover_Subsystem.md#9-agent-與開發者-db-變更執行門` 執行並回報 `PASS | BLOCKED | NOT_RUN`。
+DB 變更須 additive、可追溯，並區分 fresh bootstrap、preserve-data upgrade、fixture reset 與 production migration。本機 `APP_ENV=development` 且連線目標為 localhost 時，`union_db` 與 `lu_test_*` 都可在 current task 明確 scope 內直接異動；已有 owner Query／Preview／Apply 時仍須走正式 writer 並保存 before／after 與 receipt。一般任務不包含 production、external provider、reset、replacement、`--switch` 或 destructive operation Authority。DB 任務依 `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md#9-agent-與開發者-db-變更執行門` 執行並回報 `PASS | BLOCKED | NOT_RUN`。
 
 ## 5. 驗證、文件與資料
 
 - 從最低受影響邊界驗證：Static → Module → Subsystem → Domain → Global。只有實際 failure signal 或整合風險才擴大到 full suite、DB、Browser、stress、security 或 performance。
 - snapshot／golden／validation dataset 不得為了過測試任意重寫；canonical change 造成 deterministic drift 時，只同步直接受影響的 current asset。
-- `document/架構重整/01_規格基線/` 是 current 正式規格的維護位置，遵守 `document/架構重整/00_規格書撰寫與生命週期規範.md` 之 Living Current Truth 原則並以 `scripts/validate_spec_hygiene.py` 檢核，但不是所有 current Markdown 的唯一位置。治理、導覽、仍有效決策、current register 與必要驗證來源依既有索引保留，不因位於基線目錄外就判定過時、搬移或刪除。新語意優先原地改寫既有 owner spec並移除失效條文；只有既有 owner 無法承接且 current acceptance 明確需要時才新增正式規格。
+- `.arch-map/requirements/` 是 current 正式規格的維護位置，遵守 `document/架構重整/00_規格書撰寫與生命週期規範.md` 之 Living Current Truth 原則並以 `scripts/validate_spec_hygiene.py` 檢核，但不是所有 current Markdown 的唯一位置。治理、導覽、仍有效決策、current register 與必要驗證來源依既有索引保留，不因位於基線目錄外就判定過時、搬移或刪除。新語意優先原地改寫既有 owner spec並移除失效條文；只有既有 owner 無法承接且 current acceptance 明確需要時才新增正式規格。
 - 非 Markdown 附件只作 input、範例或 evidence；不得因存在而升格為 SSOT。
 - 所有文字 strict UTF-8。secret、token、完整銀行帳號、raw webhook secret、credential 與不必要 PII 不得進 Git、log、command argument、UI 或 receipt。
 - 交付前確認 scope、dirty paths、必要 tests、`git diff --check`、typed conflict、外部效果上限與敏感資訊；清楚標示 `PASS | FAILED | BLOCKED | NOT_RUN`，完成 current acceptance 後停止。

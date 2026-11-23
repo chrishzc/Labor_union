@@ -10,8 +10,8 @@
 - depends_on: `scheduling` — assignment/service ownership 是 payroll 的上游根事實。
 
 ## Contracts
-- `document/架構重整/01_規格基線/03_Payroll_Domain.md` — Payroll canonical Domain contract
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation contract
+- `.arch-map/requirements/03_Payroll_Domain.md` — Payroll canonical Domain contract
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation contract
 
 ## Verification routing
 - default_boundary: Domain

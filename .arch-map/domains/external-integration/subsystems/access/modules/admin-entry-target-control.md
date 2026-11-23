@@ -10,7 +10,7 @@
 ## Implementation
 - `subsystems/access/admin_entry_target_control.py`
 - `infrastructure/file/admin_entry_target_store.py`
-- `api/routes/admin_entry_targets.py`
+- `api/routes/admin_entry_targets.py` — `query_entry_targets` 的查詢入口宣告 `require_admin` 相依，不據此推論其他入口的行為。
 - `scripts/provision_admin_entry_target_state.py`
 
 ## Verification

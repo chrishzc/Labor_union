@@ -34,19 +34,19 @@
 日期-only 分支只綁 Orders version 與該次 Preview fingerprint；若 Apply fresh-read 發現正式 assignment 已形成，回 typed conflict 並要求重新 Preview。一般 Terms reader 不得只因日期存在便投影 `service_started`。
 
 ## Contracts
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。
+- `.arch-map/requirements/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。
 - `subsystems/orders/actual_start_workflow.py` — Preview／Apply 與單一 outer UoW contract。
 
 ## Verification
 - layout_status: custom_current
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/actual-start/`
 - higher_boundary: `tests/domains/orders/subsystems/orders/integration/test_order_actual_start_workflow.py`
-- test_root: `ui_react/src/tests/order_workbench_v2_actual_start.test.tsx` — existing drawer mutation／recovery integration。
+- test_root: `ui_react/src/tests/order_workbench_v2_actual_start.test.tsx` — existing drawer mutation／recovery integration。 既有模擬案例核對正式讀回尚未符合回執時不顯示完成、不重送套用，直到讀回一致才顯示完成。
 
 ## Provenance
 - Actual Start writer and cross-owner persistence — `source_observed` — `subsystems/orders/actual_start_workflow.py`.
 - Order Workbench V2 drawer eligibility gate — `source_observed` — `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`。
-- Historical tombstone date-only 與逐段精算／快照搬移 — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4。
+- Historical tombstone date-only 與逐段精算／快照搬移 — `architecture_declared` — `.arch-map/requirements/01_Orders_Domain.md` §3.4。
 
 ## Change triggers
 Reconcile when Actual Start official-date calculation, cross-owner projection, lifecycle completion instant, or historical delegation changes.

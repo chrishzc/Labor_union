@@ -34,13 +34,13 @@
 - 已核銷款項的原額沿 current obligation event，並與 settlement identity／正式入帳核對；待收餘額歸零仍可列通知，未結清提醒仍沿原餘額。
 
 ## Contracts
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §6.7。
-- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md`。
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §6.7。
+- `.arch-map/requirements/04_Client_Finance_Domain.md`。
 - `CLIENT_DEPOSIT_BANK_CODE` 三碼銀行代碼；缺值不寄提醒。提醒 ready 同時核對既有 LIFF ID，兩端停用不可寄操作，提交仍沿原複核。`LINE_LIFF_ID` 沿用現有設定。
 
 ## Verification
 - layout_status: `custom_current` — 使用 LINE Subsystem 既有 cross-owner integration root，涵蓋 Finance／LINE 邊界。
-- integration_root: `tests/domains/external-integration/subsystems/line/integration/test_deposit_notifications.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/integration/test_deposit_notifications.py` — 既有合成案例確認正式核銷保留人工待辦、不建立自動寄送工作；核銷交易回滾後，無通知 outbox 或訂金核銷投影，背景工作不處理任何項目。
 - 共用寄送 runtime 與待辦 presentation 的回歸依原 Subsystem／mobile-assignment-review leaf 歸屬。
 
 ## Provenance

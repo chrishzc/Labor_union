@@ -94,9 +94,9 @@
 - P3 handoff: committed M3 intents carry immutable `LU96-M3-*` source identity and recipient selector; P5 owns delivery task/provider consumption.
 
 ## Contracts
-- `document/架構重整/01_規格基線/02A_媒合候選池與客戶決定及通勤規格.md` — 候選詢問與客戶推薦確認。
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling ownership.
-- `document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — matching preference/unavailability facts.
+- `.arch-map/requirements/02A_媒合候選池與客戶決定及通勤規格.md` — 候選詢問與客戶推薦確認。
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — Scheduling ownership.
+- `.arch-map/requirements/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — matching preference/unavailability facts.
 
 ## Verification
 - contract: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/unit/test_shared_weekly_information.py` — 共用週內容、recipient fingerprint、未保存阻擋及三份紀錄互不覆蓋。

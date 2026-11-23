@@ -12,9 +12,9 @@
 - depended_by: `external-integration` — LINE 請假／自助入口只建立或驅動 Scheduling-owned command。
 
 ## Contracts
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling canonical Domain contract
-- `document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — matching preferences／unavailability contract
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation contract
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — Scheduling canonical Domain contract
+- `.arch-map/requirements/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — matching preferences／unavailability contract
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation contract
 
 ## Verification routing
 - default_boundary: Domain

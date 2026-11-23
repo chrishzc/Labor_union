@@ -27,13 +27,13 @@
 ## Contracts
 - `POST /api/v1/orders/calculate-schedule` — bounded 出勤精算 request／response。
 - `custom_rest_weekdays` 可由排班畫面人工選定，僅為當次零寫入試算；拒絕七日全休，未辨識原文不得推定排休規則。
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling 服務日精算語意。
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — Scheduling 服務日精算語意。
 
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/attendance-schedule-precision/`
 - layout_status: `custom_current`
 - higher_boundary:
-  - `tests/domains/scheduling/subsystems/scheduling/integration/test_service_end_date_calculation_correctness.py`
+  - `tests/domains/scheduling/subsystems/scheduling/integration/test_service_end_date_calculation_correctness.py` — 既有案例核對明確指定休息星期時，優先於服務方式的預設休息星期。
 
 ## Provenance
 - Scheduling owns attendance-date calculation — `architecture_declared` — current Scheduling formal spec。

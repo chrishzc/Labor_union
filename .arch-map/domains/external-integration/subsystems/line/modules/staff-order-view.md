@@ -22,13 +22,13 @@
 
 ## Contracts
 - `POST /api/v1/line/staff-self-service/orders` — `api/routes/line_staff_self_service.py`
-- Staff Self-Service 訂單查詢 — `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §5.1
+- Staff Self-Service 訂單查詢 — `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §5.1
 
 ## Verification
-- test_root: `tests/domains/external-integration/subsystems/line/modules/staff-order-view/`
+- test_root: `tests/domains/external-integration/subsystems/line/modules/staff-order-view/` — 既有靜態與契約案例核對頁面初始化不要求先填篩選，且請求格式允許留白。
 
 ## Provenance
-- assignment-scoped visibility and optional in-set filtering — `architecture_declared` — `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §5.1
+- assignment-scoped visibility and optional in-set filtering — `architecture_declared` — `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §5.1
 - implementation and verification paths — `source_observed` — current repository.
 
 ## Change triggers

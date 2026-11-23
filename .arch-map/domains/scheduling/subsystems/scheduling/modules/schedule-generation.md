@@ -24,7 +24,7 @@
 - inbound: Scheduling workflows — 使用 current generation facts 建立正式重建 candidate。
 
 ## Contracts
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — generation、assignment 與 occupancy ownership。
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — generation、assignment 與 occupancy ownership。
 
 ## Verification
 - layout_status: `custom_current`

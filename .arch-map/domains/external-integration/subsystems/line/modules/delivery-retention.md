@@ -16,7 +16,7 @@ LINE 寄送內容與嘗試明細依六個臺灣日曆月到期整理，保留精
 - `api/routes/line_tasks.py` — 到期 detail typed 410，不回傳已清除內容。
 
 ## Contracts
-- `document/架構重整/01_規格基線/17A_LINE_Gateway_Inbox與通知投遞正式規格.md` §4.4、LINE-RET-01～04。
+- `.arch-map/requirements/17A_LINE_Gateway_Inbox與通知投遞正式規格.md` §4.4、LINE-RET-01～04。
 - attempt DELETE guard 的 fresh／preserve migration 歸 Global migration；保留原 registry-delete 邊界，新增精確 retention receipt 例外。
 
 ## Verification

@@ -48,8 +48,8 @@
 - outbound: `external-integration/line` — 服務中換人的意願、單人原案件群組邀請、加入證據與無按鈕正式日期表，僅建立 committed delivery。
 
 ## Contracts
-- `architecture_declared`：`document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` §3.3、§3.4.1 擁有衝突處理及人工局部代班契約，不使用代班待辦識別、版本或結案。
-- `architecture_declared`：`document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md` 擁有代班待辦分頁、歷史請假工作面及續辦入口的退役邊界；歷史記錄與成功收據保留讀取。
+- `architecture_declared`：`.arch-map/requirements/02_Assignments_Scheduling_Domain.md` §3.3、§3.4.1 擁有衝突處理及人工局部代班契約，不使用代班待辦識別、版本或結案。
+- `architecture_declared`：`.arch-map/requirements/19_Global_Entry_Point_Governance.md` 擁有代班待辦分頁、歷史請假工作面及續辦入口的退役邊界；歷史記錄與成功收據保留讀取。
 
 ## Verification routing
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/leave-substitution/`

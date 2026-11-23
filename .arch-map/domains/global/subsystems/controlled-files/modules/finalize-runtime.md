@@ -17,7 +17,7 @@ reports availability without digest-verified storage bytes.
 - Local absolute-root transport selects returned signed contracts with a 01 locator and Staff resume, certificate and health exam intents with a 03 locator.
 
 ## Verification
-- integration_root: `tests/domains/global/subsystems/controlled-files/integration/`
+- integration_root: `tests/domains/global/subsystems/controlled-files/integration/` — 既有模擬案例核對必要內容缺失時留下待核對結果，不回報完成。
 - test: `test_controlled_file_finalize_runner.py`
 
 ## Change triggers

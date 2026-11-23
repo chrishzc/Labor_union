@@ -26,14 +26,15 @@
 
 ## Contracts
 - 月嫂工作簿完成結果按成功採納的唯一身分計成功筆數，同人其他成功列計重複略過；所有來源列仍走既有逐列採納。續跑保留原逐列結果；同檔舊結果只在逐列收據完整時唯讀重新彙總，不讀目前主檔或改寫歷史收據。
-- `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` — current Case Import decisions.
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Preview／Apply、idempotency 與 receipt contract.
+- `.arch-map/requirements/15_正式規格索引與裁決總表.md` — current Case Import decisions.
+- `.arch-map/requirements/00_Global_共同契約.md` — Preview／Apply、idempotency 與 receipt contract.
 
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: Backend owner-local tests use the canonical Python root; React transport tests mirror this Module under the existing frontend test layout.
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/staff-historical-workbook-adoption/`
 - test_root: `ui_react/src/tests/domains/case-import/subsystems/case-import/modules/staff-historical-workbook-adoption/`
+- 靜態來源（`subsystems/case_import/staff_historical_workbook_adoption.py` L212–232）：重播摘要不符時回傳冪等衝突；原列數不符，或任一逐列收據缺漏或結果種類不符時，保留既有收據的統計。只有逐列收據齊備時才唯讀重投影，不讀現行主檔或改寫歷史。此處未驗證實際工作簿或資料庫。
 
 ## Provenance
 - Case Import ownership and review boundary — `architecture_declared` — Case Import Domain／Subsystem indexes and current specifications.

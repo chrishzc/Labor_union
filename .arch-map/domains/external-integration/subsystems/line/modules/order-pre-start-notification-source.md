@@ -21,8 +21,8 @@
 - outbound: Scheduling 正式開工、Client Finance 第一期款、既有付款回報與 delivery task。
 
 ## Contracts
-- `document/架構重整/01_規格基線/17A_LINE_Gateway_Inbox與通知投遞正式規格.md`
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md`
+- `.arch-map/requirements/17A_LINE_Gateway_Inbox與通知投遞正式規格.md`
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md`
 
 ## Verification routing
 layout_status: `custom_current`

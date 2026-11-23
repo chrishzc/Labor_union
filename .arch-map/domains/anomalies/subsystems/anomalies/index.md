@@ -27,7 +27,7 @@
 - `subsystems/anomalies/system_alert_projection.py` — Anomalies-owned `system_alerts` projection implementation；helper不擁有commit
 - `subsystems/anomalies/outbox_worker.py` — central composition root，將`upsert_system_alert`注入Access consumer
 - `subsystems/access/security_alert_outbox.py::SecurityAlertSink` — caller-composed projection port
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — outbox/durable job contract
+- `.arch-map/requirements/00_Global_共同契約.md` — outbox/durable job contract
 
 ## Verification routing
 - default_boundary: Subsystem

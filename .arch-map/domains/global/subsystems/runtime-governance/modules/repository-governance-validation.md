@@ -17,7 +17,7 @@
 
 - layout_status: `custom_current`
 - test_root: `tests/test_architecture_review_matrix_deployment_retirement.py`
-- test_root: `tests/test_formal_spec_index_evidence_paths.py`
+- test_root: `tests/test_formal_spec_index_evidence_paths.py` — 既有靜態檢查排除索引中的舊證據路徑，並核對受管證據目錄存在。
 - test_root: `tests/test_performance_deployment_profile_retirement.py`
 - 既有測試使用檔案所在目錄推導 repository root，沿用原路徑。
 

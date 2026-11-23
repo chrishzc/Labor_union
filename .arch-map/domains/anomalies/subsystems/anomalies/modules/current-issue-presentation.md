@@ -26,8 +26,8 @@
 - outbound: `external-integration/line` — 查詢案件通知 timeline，並執行 typed manual replay 或 snapshot-bound warning skip Preview／Apply。
 
 ## Contracts
-- `document/架構重整/01_規格基線/06_Anomalies_Domain.md` — LINE-006 current-only Query、detail、owner action與recheck契約。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/06_Anomalies_Domain.md` — LINE-006 current-only Query、detail、owner action與recheck契約。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
@@ -40,6 +40,8 @@
 - test_root: `tests/test_import_warning_tracking.py`
 - test_root: `tests/test_import_warning_tracking_api.py`
 - integration_root: `ui_react/src/tests/anomalies_entry_cutover.test.tsx`
+- 退役入口回歸（模擬 UI，L38–50）：異常審核不再出現在管理端導覽或頁面對照表，專用捷徑也不顯示；既有帳號權限入口仍可見。
+- 舊雜湊回歸（同檔 L52–62）：`#anomalies`、`#/anomalies` 都導回既有待辦看板，不渲染「異常審核」；僅在這組模擬請求的斷言中，請求路徑全為系統狀態。
 - routing: `.arch-map/tests/domains/anomalies/subsystems/anomalies/modules/current-issue-presentation.md`
 
 ## Change triggers

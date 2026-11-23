@@ -2,7 +2,7 @@
 
 狀態：completed。CS-R1～CS-R7 均 passed；99 項後端及 55 項前端 focused tests、build、桌面／手機實際元件 Browser 驗證、diff check 與 architecture closure 通過。Browser 使用合成 API 回覆，provider delivery／production 操作 not_run，且不屬本次驗收範圍。
 
-Authority：2026-10-15 使用者確認 UI 預覽並要求實作；語意以 `../01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` 的「2026-10-15 管理端獨立簽署提醒與歷史修復區塊移除」為準。
+Authority：2026-10-15 使用者確認 UI 預覽並要求實作；語意以 `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` 的「2026-10-15 管理端獨立簽署提醒與歷史修復區塊移除」為準。
 
 Owner：Contract Signing subsystem。用途：串接已授權的 API、交易、受控通知與 UI 驗收；完成本 slice 的必要驗收即關閉，不衍生後續改善。
 

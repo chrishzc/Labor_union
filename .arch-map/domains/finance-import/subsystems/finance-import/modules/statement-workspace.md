@@ -66,7 +66,7 @@
 - `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — 沿原 append-only 方案事件；伺服器保留 `bank-subsidy:<row-id>:<command-digest>` operation key 記錄銀行確認來源，人工命令不能使用該命名空間。不新增 schema 或回填歷史資料。
 
 ## Contracts
-- `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
+- `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
 - archive endpoints beneath `/api/v1/finance-import`: `GET statements/export` 只納入正式owner核銷證據，匯出分銀行原欄位並附「款項用途」（含單一項目與訂金+第一期(組合銷帳)等組合銷帳標示）與「關聯案件」，不顯示內部明細識別與資料來源欄；`GET statements/manual/export` 獨立唯讀匯出既有人工備查；`POST statements/manual` 經認證後回typed 410、無DB writer。React僅提供兩種匯出，不再提供無案件新增表單；案件正式補登仍沿規格22 §19。`POST statements/duplicates` 保留原判重契約。
 - `bank-transactions` — 顯示正式核銷的銀行流水及符合保留條件的待核對列，包含尚未確認唯一案件的台新月嫂補助及同名客戶補助退款。台新僅六碼定位但用途待確認的來源提供案件入口。案件與對象已確認的待核對列可開核銷子畫面；唯一款項預選，其餘 target 以 `requires_selection` 及同案同對象候選 IDs 要求選款。正式 owner 重驗核銷，不由 Query／UI 寫帳。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
@@ -90,7 +90,7 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py`
+- test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py` — 既有模擬案例核對現金無法跨統計範圍加總時，到期款查詢與匯出仍可使用。
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement.py`
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py` — 隔離 MySQL 驗證一般／歷史未確認補助計算、兩種台新受款方案、Preview 零寫入、原 Apply 建款核銷、同月唯一及多案選擇、原六碼備註入庫、提前確認、來源過期與失敗整筆回滾。
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement_mysql.py` — opt-in isolated MySQL：三方向正式核銷、足額／部分／手續費／超收退款／超付追償、完整回滾及同鍵重送／衝突／並行。

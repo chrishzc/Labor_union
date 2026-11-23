@@ -48,11 +48,11 @@
 - `POST /api/v1/orders/{case_no}/service-dates/schedule/apply` — 歷史重啟一次儲存班表。Query 的 `historical_schedule_pending` 投影有效空重啟世代。
 - `POST /api/v1/orders/{case_no}/service-dates/office-schedule/apply` — 一般案件從「多月嫂排班」直接儲存首份正式班表。允許交錯日期，委派 `scheduling/service-start` 共用正式排班 writer。既有 `office-schedule/preview` API 可獨立查閱，不是該畫面的儲存前置。
 - `POST /api/v1/orders/{case_no}/service-dates/arrangement/{preview,apply}` — 既有獨立正式安排 API。`arrangement_pending` 投影有效空重啟世代與已確認日期版本。
-- `document/架構重整/01_規格基線/01A_訂單看板與事前日期及歷史採納規格.md` §3.2 — 日期確認與歷史重啟儲存班表。
+- `.arch-map/requirements/01A_訂單看板與事前日期及歷史採納規格.md` §3.2 — 日期確認與歷史重啟儲存班表。
 
 ## Verification
 - layout_status: custom_current
-- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/`
+- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/` — 既有模擬案例核對正式讀回案件不符時，不試算、不預覽，也不套用。
 - static:
   - `git diff --check`
 - test_root: `tests/domains/orders/subsystems/orders/modules/service-date-confirmation/`
@@ -61,7 +61,7 @@
   - `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/order_workbench_v2_service_dates.test.tsx`
 
 ## Provenance
-- Orders owns confirmed-date Q/P/A — `architecture_declared` — `document/架構重整/01_規格基線/01A_訂單看板與事前日期及歷史採納規格.md` §3.2。
+- Orders owns confirmed-date Q/P/A — `architecture_declared` — `.arch-map/requirements/01A_訂單看板與事前日期及歷史採納規格.md` §3.2。
 - Scheduling owns generation replacement and `staff_schedule` — `source_observed` — `infrastructure/mysql/scheduling_replacement_writer.py`。
 - 歷史重啟班表 outer UoW — `source_observed` — `subsystems/orders/historical_restart_arrangement.py`。
 

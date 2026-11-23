@@ -14,7 +14,7 @@ BeClass rate correction 保留 Scheduling identity，未付款的 replacement ob
 - primary:
   - `domains/payroll/payment_due_date.py` — 既有 assignment／歷史帳務共同使用的純付款日與社福資格規則；新分段資金來源期程由 tiered-payroll 擁有。
   - `subsystems/payroll/terms_impact.py`
-  - `subsystems/payroll/assignment_reconciliation.py` — 唯讀核對指派、正式服務日與薪資事實，由呼叫方持有 cursor 與交易。
+  - `subsystems/payroll/assignment_reconciliation.py` — 唯讀核對指派、正式服務日與薪資事實，由呼叫方持有 cursor 與交易。 待處理換人事件所屬案件不符時拒絕，不混入其他案件資料。
   - `infrastructure/mysql/payroll_terms_writer.py`
 
 ## Dependencies
@@ -27,13 +27,13 @@ BeClass rate correction 保留 Scheduling identity，未付款的 replacement ob
 ## Verification
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/assignment-terms-impact/`
 - test_root: `tests/domains/payroll/subsystems/payroll/integration/test_staff_payment_due_date.py`
-- handover contract: `document/架構重整/01_規格基線/03_Payroll_Domain.md` §9；沿同月嫂家族追溯 obligation／adjustment，append entitlement delta，Staff Payables 獨立處理超付，不以原全額重建。
+- handover contract: `.arch-map/requirements/03_Payroll_Domain.md` §9；沿同月嫂家族追溯 obligation／adjustment，append entitlement delta，Staff Payables 獨立處理超付，不以原全額重建。
 
 ## Provenance
 - Assignment-owned rate snapshots 由 Payroll writer 保存 — `source_observed` — `infrastructure/mysql/payroll_terms_writer.py`。
 - Payroll Terms impact candidate 與 Orders-to-Payroll typed conversion 由 Payroll workflow 保存 — `source_observed` — `subsystems/payroll/terms_impact.py`。
-- Restart-specific current assignment 必須可被 ordinary Actual Start read model 消費 — `requirement_declared` — current task acceptance 與 `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4.1。
-- Actual Start successor snapshot carry-forward 不改 Payroll root — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4、`03_Payroll_Domain.md`。
+- Restart-specific current assignment 必須可被 ordinary Actual Start read model 消費 — `requirement_declared` — current task acceptance 與 `.arch-map/requirements/01_Orders_Domain.md` §3.4.1。
+- Actual Start successor snapshot carry-forward 不改 Payroll root — `architecture_declared` — `.arch-map/requirements/01_Orders_Domain.md` §3.4、`03_Payroll_Domain.md`。
 
 ## Change triggers
 Reconcile when assignment rate carry-forward、case-policy fallback、Payroll versioning or assignment identity resolution changes.

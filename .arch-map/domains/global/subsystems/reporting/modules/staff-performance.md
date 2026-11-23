@@ -30,13 +30,13 @@ Compose monthly, quarterly and annual read-only staff performance. Credit each c
 - inbound: `staff/staff-roster-profile` — named staff performance shortcut.
 
 ## Contracts
-- `document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md` §6 STAFF-PERF-01..05, `staff-performance.v2`; XLSX includes period/ranking metadata, full-case and recognized amounts separately.
+- `.arch-map/requirements/34_營運報表與統計口徑正式規格.md` §6 STAFF-PERF-01..05, `staff-performance.v2`; XLSX includes period/ranking metadata, full-case and recognized amounts separately.
 - No transaction ownership, DB writes, schema changes or external provider effects.
 
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: Reporting tests use module roots; React mirrors the same owner in the existing Vitest runtime.
-- test_root: `tests/domains/global/subsystems/reporting/modules/staff-performance/`
+- test_root: `tests/domains/global/subsystems/reporting/modules/staff-performance/` — 既有合成案例核對缺正式開工日仍保留服務時數，案件數與金額標待確認。
 - test_root: `ui_react/src/tests/domains/global/subsystems/reporting/modules/staff-performance/`
 - routing: `.arch-map/tests/domains/global/subsystems/reporting/modules/staff-performance.md`
 

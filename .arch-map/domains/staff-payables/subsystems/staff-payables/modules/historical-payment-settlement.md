@@ -22,7 +22,7 @@
 
 ## Contracts
 - `document/架構重整/02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md`
-- `document/架構重整/01_規格基線/05_Staff_Payables_Export_Domain.md`
+- `.arch-map/requirements/05_Staff_Payables_Export_Domain.md`
 - authenticated owner API — `Query → Preview → Apply → fresh readback`; no Client Finance inference or cross-owner transaction.
 
 ## Verification

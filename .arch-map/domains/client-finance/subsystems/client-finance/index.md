@@ -12,7 +12,7 @@
 ## Contracts
 - `domains/client_finance/` — Client Finance rules
 - `subsystems/client_finance/` — Client Finance workflows
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — outer UoW
+- `.arch-map/requirements/00_Global_共同契約.md` — outer UoW
 
 ## Modules
 - `pricing-configuration` — versioned four-rate policies and explicit case repricing; path: `modules/pricing-configuration.md`

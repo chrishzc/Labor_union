@@ -14,10 +14,10 @@
 - transport: `api/routes/orders.py`
 
 ## Contracts
-- `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` — CASESTAT 與現行身分映射。
+- `.arch-map/requirements/15_正式規格索引與裁決總表.md` — CASESTAT 與現行身分映射。
 
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: Existing bounded form-management query and isolated MySQL oracles remain at their original entrypoints.
-- test_root: `tests/test_form_management_query.py`
+- test_root: `tests/test_form_management_query.py` — 既有合成案例核對只回傳既有表單欄位；統計缺漏或為負值、情境出現非正式欄位時回報錯誤。
 - integration_root: `tests/test_form_management_query_disposable_mysql_e2e.py`

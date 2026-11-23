@@ -12,7 +12,7 @@
 ## Contracts
 - `domains/staff_payables/` — Staff Payables rules
 - `subsystems/staff_payables/` — Staff Payables workflows
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
+- `.arch-map/requirements/00_Global_共同契約.md` — transaction/replay contract
 
 ## Modules
 - `payout-reconciliation` — 既有銀行出款核銷、退匯／沖正 writer 與精確義務連結；path: `modules/payout-reconciliation.md`

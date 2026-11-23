@@ -33,4 +33,5 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/test_case_architecture_bootstrap_workflow.py` — 保留既有跨 owner workflow 測試位置，新增同步 seam；不搬移。
+- 既有 workflow 測試替身（上列測試 L75–107）：單次 ensure 只記錄一個建立候選，沿用既有 Scheduling 版本與世代，保存收據，並由記錄型 UoW 確認提交。此案例不驗證真實交易或付款。
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/case-architecture-bootstrap/`

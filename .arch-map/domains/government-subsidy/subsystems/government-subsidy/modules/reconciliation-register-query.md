@@ -28,8 +28,8 @@
 
 ## Contracts
 - 報表沿同一 Staff join 額外輸出 nullable 公會編號（API `staff_union_no`），僅供管理畫面標籤；既有姓名、金額計算、年季歸屬及 XLSX 欄位保持原契約。
-- Government Subsidy reconciliation formula — `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md`
-- 營運報表專用年度補助統計契約 — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §15.1。
+- Government Subsidy reconciliation formula — `.arch-map/requirements/14_Government_Subsidy_Domain.md`
+- 營運報表專用年度補助統計契約 — `.arch-map/requirements/15_正式規格索引與裁決總表.md` §15.1。
 
 ## Verification
 - test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/`

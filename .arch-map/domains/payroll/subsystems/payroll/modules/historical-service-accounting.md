@@ -9,14 +9,14 @@
 歷史服務完成的基準應付讀取 HCM 登記天數／每日時數、已採納唯一指派、歷史結束日、正式費率及付款來源，借用既有 Payroll rebuild 事件、投影與收據 writer。採納、到期推進和既有同步入口共用同一流程。
 
 ## Implementation
-- `domains/payroll/historical_calculation.py`
+- `domains/payroll/historical_calculation.py` — 候選要求服務事實與費率快照逐筆對應，快照缺漏、重複或多出時拒絕。
 - `subsystems/payroll/historical_baseline_obligation_sync.py` — historical source synchronization in the caller's transaction.
 - `api/routes/accounting_differences.py`、`scripts/sync_historical_staff_obligations.py` — existing historical synchronization entry points.
 - `infrastructure/mysql/historical_service_accounting_repository.py` — reads calculation inputs and persists the Orders comparison snapshot.
 
 ## Contracts
-- `document/架構重整/01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md`
-- `document/架構重整/01_規格基線/03_Payroll_Domain.md` §2.2、§3.2
+- `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md`
+- `.arch-map/requirements/03_Payroll_Domain.md` §2.2、§3.2
 
 ## Verification
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/`

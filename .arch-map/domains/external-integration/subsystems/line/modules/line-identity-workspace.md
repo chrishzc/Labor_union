@@ -15,7 +15,7 @@ React 身分綁定、待審核、待配對三任務工作區；只呈現 owner-b
 - schema: `ui_react/src/api/line_identity/line_identity_schemas.ts`
 
 ## Contracts
-- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §8 2026-10-15 React 介面裁決。
+- `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` §8 2026-10-15 React 介面裁決。
 - 身分綁定列表獨立顯示 LINE 端個人選單同步結果，使用既有 binding query。
 - 已綁定列可送出單筆選單重新同步，沿既有身分管理 typed client 顯示受理及同步結果。
 - 身分綁定清單使用列內動作與確認視窗，不提供綁定明細抽屜。客戶列提供更正綁定對象，使用既有候選查詢、角色限定 Preview／Apply 及回讀；解除中與已解除的綁定都可永久刪除。
@@ -26,7 +26,7 @@ React 身分綁定、待審核、待配對三任務工作區；只呈現 owner-b
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/line_identity_client.test.ts` — 既有 typed identity transport 的嚴格契約、Session、版本、原因選填與錯誤映射。
-- UI coverage: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_identity_workbench.test.tsx`；沿用上層 LINE integration 歸屬。
+- UI coverage: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_identity_workbench.test.tsx`；沿用上層 LINE integration 歸屬。 — 既有模擬案例確認載入中或查詢失敗時不顯示無紀錄，只有成功回傳空清單才顯示無紀錄。
 - Parent regression: `ui_react/src/tests/line_management_page_real_data.test.tsx`。
 
 ## Boundaries

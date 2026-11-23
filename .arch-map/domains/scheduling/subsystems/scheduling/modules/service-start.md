@@ -29,8 +29,8 @@
 - `db/schema_parts/1054_scheduling_service_start.sql`
 
 ## Contracts
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — SSTART-01～08。
-- `architecture_declared`：開工與延期衝突不建立代班需求、待辦或意願／邀請流程，依 Scheduling §3.3 由管理員直接調整原案排班。`document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md` 擁有頁籤、深連結及退役入口契約。
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — SSTART-01～08。
+- `architecture_declared`：開工與延期衝突不建立代班需求、待辦或意願／邀請流程，依 Scheduling §3.3 由管理員直接調整原案排班。`.arch-map/requirements/19_Global_Entry_Point_Governance.md` 擁有頁籤、深連結及退役入口契約。
 - owner: Scheduling owns decisions, replacement selection and results; Orders owns actual start/lifecycle, Finance owns payment dates, LINE owns group binding/membership/delivery.
 - Committed delivery only; no provider call in commands; one outer transaction borrows canonical owner writers.
 

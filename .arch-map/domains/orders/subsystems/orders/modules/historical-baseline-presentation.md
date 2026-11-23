@@ -11,12 +11,12 @@
 - primary: `ui_react/src/components/HistoricalOperationalBaselineReadback.tsx`
 
 ## Contracts
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — Historical Orders baseline與step projection規則。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/01_Orders_Domain.md` — Historical Orders baseline與step projection規則。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/historical_operational_baseline_readback.test.tsx`
+- test_root: `ui_react/src/tests/historical_operational_baseline_readback.test.tsx` — 既有模擬案例核對切換案件後，先前案件延遲回傳不會覆蓋目前畫面。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-baseline-presentation.md`
 
 ## Change triggers

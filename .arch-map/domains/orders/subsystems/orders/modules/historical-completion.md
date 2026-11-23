@@ -36,12 +36,12 @@
 ## Contracts
 - `document/架構重整/02_決策與退役執行記錄/PROV-20260828-historical-baseline-projector-work-packages.md` — HOB-E composition與UI boundary。
 - `document/架構重整/02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md` — payment、owner settlement與Step 11分離。
-- `document/架構重整/01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md` — 歷史帳務完成 Q/P/A、fresh settlement 與 fail-closed lifecycle transition。
+- `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md` — 歷史帳務完成 Q/P/A、fresh settlement 與 fail-closed lifecycle transition。
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-completion/`
-- integration_root: `ui_react/src/tests/historical_completion.test.tsx`
+- integration_root: `ui_react/src/tests/historical_completion.test.tsx` — 既有模擬案例核對儲存只套用一次，完成後才通知上層。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-completion.md`
 
 ## Provenance

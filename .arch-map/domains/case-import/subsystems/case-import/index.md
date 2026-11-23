@@ -18,7 +18,7 @@
 ## Contracts
 - `domains/case_import/` — Case Import rules
 - `subsystems/case_import/` — Case Import workflows
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — idempotency/receipt/outbox
+- `.arch-map/requirements/00_Global_共同契約.md` — idempotency/receipt/outbox
 
 ## Modules
 - `provisional-registration` — shared LINE provisional registration candidate normalization and persistence boundary；path: `modules/provisional-registration.md`

@@ -16,7 +16,7 @@
 - entrypoint: `api/routes/finance_reports.py` — `/api/v1/finance-reports/client-subsidy-returns` GET；其餘既有應付帳款入口維持原 owner。
 
 ## Contracts
-- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — 2026-10-01 案件查詢裁決。
+- `.arch-map/requirements/04_Client_Finance_Domain.md` — 2026-10-01 案件查詢裁決。
 - `domains/client_finance/subsidy_coverage.py` 與 `subsidy_advance.py` — 既有補助時數／日期政策。
 - outbound: `orders` — canonical lifecycle、服務條件及實際結案日期。
 - outbound: `client-finance/pricing-configuration` — adapter 重用 `CASE_PRICING_FACTS_SQL`，typed facts 帶 `CasePricingTerms` 至 Domain，Query 不寫政策／個案設定。
@@ -24,6 +24,7 @@
 
 ## Verification
 - test_root: `tests/domains/client-finance/subsystems/client-finance/modules/client-subsidy-return-query/`
+- 靜態來源（`subsystems/client_finance/subsidy_return_query.py` L57–78）：應用層呼叫 `query_facts` 後，以正式退款資訊等 facts 產生投影、回傳 `is_estimate`，並在指定月份時依到期月份篩選；這段未呼叫 repository 寫入。此處不驗證 adapter、HTTP 端點或實際退款。
 
 ## Change triggers
 案件資格、正式／預估金額來源、日期來源、GET contract、分頁或寫入邊界改變時重核。

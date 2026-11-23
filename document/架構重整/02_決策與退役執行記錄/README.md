@@ -4,7 +4,7 @@
 in-progress Work Package。completed／superseded 文件確認無 current consumer 後自工作樹移除，
 由 Git 歷史保存，不得繼續出現在日常 active 表。
 
-正式業務語意以 `../01_規格基線/` 為準；Task 96 已達 repository-local／remote-CI terminal closeout，完整舊 register 與 terminal pointer 已退出 current task／evidence Authority；terminal結果與明示external exclusions由正式索引 `15` 的 Git-history provenance 精準路由至 `901b337aa26795ae270baf8662c3286c5014d774`，不再由current working-tree pointer承擔Authority。2026-08-30 Task 97亦已完成repository-local architecture closeout。舊 session、舊 gap register、已封存 Work Package 與 archive evidence 不得重新建立待辦或完成 gate。
+正式業務語意以 `.arch-map/requirements/` 為準；Task 96 已達 repository-local／remote-CI terminal closeout，完整舊 register 與 terminal pointer 已退出 current task／evidence Authority；terminal結果與明示external exclusions由正式索引 `15` 的 Git-history provenance 精準路由至 `901b337aa26795ae270baf8662c3286c5014d774`，不再由current working-tree pointer承擔Authority。2026-08-30 Task 97亦已完成repository-local architecture closeout。舊 session、舊 gap register、已封存 Work Package 與 archive evidence 不得重新建立待辦或完成 gate。
 
 依 [Agent 任務分級與交付規範](../00_Agent任務分級與交付規範.md)，本目錄不是每個 implementation
 slice 的日誌區。T1 不建立 Work Package；T2 只有確需跨步驟 coverage／handoff 時才維護一份 living parent
@@ -55,7 +55,7 @@ M1 binding ownership、M3 matching coordination、M4 human escalation 的 backen
 
 2026-09-01第二批再封存已完成的Task 96 bounded Work Package、被single-code Anomalies契約取代的
 42／33-code計畫，以及沒有current consumer的per-slice中間文件。移除前基準為
-`06b1c72de2a49bebfeb6d75fe6ef077f98fafd4d`；current owner語意只讀`01_規格基線/`，不得從Git歷史
+`06b1c72de2a49bebfeb6d75fe6ef077f98fafd4d`；current owner語意只讀`.arch-map/requirements/`，不得從Git歷史
 復活舊package Authority。
 
 ## 維護規則

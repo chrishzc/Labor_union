@@ -16,7 +16,7 @@
   - `infrastructure/cache/redis_projection_cache.py`
 
 ## Contracts
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` §3（G15）— 快取僅能加速唯讀 Query／ViewModel 投影，嚴禁參與正式 Command／Preview／Apply fresh-fact 驗證；提交成功後以明確鍵或命名前綴同步失效 L1 與 L2，Redis 不可用時無副作用退回 L1／DB。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` §3（G15）— 快取僅能加速唯讀 Query／ViewModel 投影，嚴禁參與正式 Command／Preview／Apply fresh-fact 驗證；提交成功後以明確鍵或命名前綴同步失效 L1 與 L2，Redis 不可用時無副作用退回 L1／DB。
 
 ## Verification
 - default_boundary: Module

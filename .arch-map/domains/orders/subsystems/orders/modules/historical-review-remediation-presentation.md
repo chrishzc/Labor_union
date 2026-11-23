@@ -14,12 +14,12 @@
 - inbound: `global/application-shell/module:data-import-composition` — historical needs-review receipt 以既有 review identity 直接開啟工作台。
 
 ## Contracts
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — 歷史review更正來源重新匯入與owner readback規則。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/01_Orders_Domain.md` — 歷史review更正來源重新匯入與owner readback規則。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/historical_order_review_remediation.test.tsx`
+- test_root: `ui_react/src/tests/historical_order_review_remediation.test.tsx` — 既有模擬案例核對預覽未回傳時停用處理原因欄位且不套用，取得預覽後只套用一次。
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-review-remediation-presentation.md`
 
 ## Change triggers

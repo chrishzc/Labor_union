@@ -28,12 +28,12 @@
 - outbound: `anomalies` — unresolved source evidence 僅供 projection/recheck，不改 owner root。
 
 ## Contracts
-- `document/架構重整/01_規格基線/09_Finance_Import_Domain.md` — Finance Import correction ownership。
-- `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` — correction and owner delegation boundary。
+- `.arch-map/requirements/09_Finance_Import_Domain.md` — Finance Import correction ownership。
+- `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` — correction and owner delegation boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/finance_import_correction_client.test.ts`
+- test_root: `ui_react/src/tests/finance_import_correction_client.test.ts` — 既有模擬案例核對預覽、提交拒絕與背景結果代碼是否映射到同一文案。
 - test_root: `ui_react/src/tests/finance_source_review_list.test.tsx`
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/finance-import-correction/`
 

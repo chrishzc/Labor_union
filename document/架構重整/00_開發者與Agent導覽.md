@@ -2,7 +2,7 @@
 
 ## Current authority
 
-使用者最新明確裁決優先。正式業務語意依 `01_規格基線/15_正式規格索引與裁決總表.md` 路由至唯一 owning current spec，並遵守 [規格書撰寫與生命週期規範](./00_規格書撰寫與生命週期規範.md) 之 Living Current Truth 原則；既有業務規格、狀態機與欄位權威依正式規格保留來源追溯。
+使用者最新明確裁決優先。正式業務語意依 `.arch-map/requirements/15_正式規格索引與裁決總表.md` 路由至唯一 owning current spec，並遵守 [規格書撰寫與生命週期規範](./00_規格書撰寫與生命週期規範.md) 之 Living Current Truth 原則；既有業務規格、狀態機與欄位權威依正式規格保留來源追溯。
 
 `AGENTS.md` 與 [Agent 任務分級與交付規範](./00_Agent任務分級與交付規範.md) 決定工作範圍、停止條件與最小交付，不取代正式業務語意。
 

@@ -5,7 +5,7 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-依 effective assignment 的正式服務日與 service-time terms 產生目前服務期間狀態；日期型歷史資料缺少完整時間時，以最後正式服務日的台北日終判定完成。
+依 effective assignment 的正式服務日與 service-time terms 產生目前服務期間狀態；日期型歷史資料的服務時間三欄皆未設定時，以最後正式服務日的台北日終判定完成；只有部分缺漏時，回報時間驗證錯誤。
 
 ## Implementation
 - primary:

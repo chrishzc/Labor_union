@@ -14,8 +14,8 @@
 - depends_on: `controlled_files` current source boundary — staged/immutable PDF bytes 與 opaque file identity；該 source boundary 尚未獨立建模成 Domain。
 
 ## Contracts
-- `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — Contract Signing ownership、state machine、Q/P/A、transaction 與 evidence contract
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation、receipt、outbox、idempotency contract
+- `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — Contract Signing ownership、state machine、Q/P/A、transaction 與 evidence contract
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation、receipt、outbox、idempotency contract
 
 ## Verification routing
 - default_boundary: Domain

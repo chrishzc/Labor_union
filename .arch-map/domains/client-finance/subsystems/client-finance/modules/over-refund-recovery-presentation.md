@@ -6,14 +6,15 @@
 
 ## Responsibility
 呈現客戶退款超額追償的既有 Query／Preview／Apply 與 fresh owner readback。一般畫面只顯示案件、追償餘額、closed狀態、處理方式與安全錯誤；配對identity/version只保留在預設收合的技術操作欄位。不得改寫Client Finance完成predicate或建立虛構銀行入款。
+Apply 後只以重新讀取的 owner 結果判定是否顯示異常可解除：追償餘額為零，且狀態為 `recovered` 或 `adjusted`。Apply 收據不替代此判定。
 
 ## Implementation
 - primary: `ui_react/src/components/ClientOverRefundRecoveryWorkbench.tsx`
 - inbound: `ui_react/src/components/AccountingDifferencePanel.tsx` — 案件帳務的未清客戶超退款提供實際追回入口；`cashOnly` 僅提供銀行配對／收回，非現金損失與工會承擔仍由現行差額 owner 處理。
 
 ## Contracts
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Client Finance追償、結清與fresh readback規則。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — Client Finance追償、結清與fresh readback規則。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`

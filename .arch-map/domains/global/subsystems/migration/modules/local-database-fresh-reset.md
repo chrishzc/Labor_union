@@ -39,11 +39,12 @@ readback. Sessions and non-root accounts are not preserved; no MFA seed is gener
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/`
+- 產物驗證區分檔案缺少與內容不符，比對基準是固定版本的來源。
 - 完整驗證 SQL 由 `python -m scripts.build_validation_schema_release` 產生。重建已移出目前版本的歷史 SQL 時，先用 `git log --diff-filter=AM -1 --format=%H -- <原路徑>` 找到對應版本，再於該版本的獨立副本執行同一命令並指定 `--output <輸出路徑>`。
 
 ## Provenance
 - Fresh bootstrap 與 preserve-data upgrade 是分離流程 — `architecture_declared` —
-  `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
+  `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md`
 - Flat tests prove release／schema／migration and operator-entry behavior —
   `architecture_declared` — `.arch-map/tests/index.md`
 

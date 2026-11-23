@@ -32,4 +32,4 @@
 
 LINE legacy retirement、provider cutover及其他未完成能力不因舊計畫移除而自動完成；若恢復，必須由新current successor依live source重新盤點。
 
-本清理不刪除Git歷史、current formal specs、source、tests、validation canonical assets、schema、migration release、production data或外部artifact。現行契約與工作邊界仍以`../01_規格基線/`、必要的`../02_決策與退役執行記錄/`、`../03_追蹤清單與證據/`、`validation/`及production code為準。
+本清理不刪除Git歷史、current formal specs、source、tests、validation canonical assets、schema、migration release、production data或外部artifact。現行契約與工作邊界仍以`.arch-map/requirements/`、必要的`../02_決策與退役執行記錄/`、`../03_追蹤清單與證據/`、`validation/`及production code為準。

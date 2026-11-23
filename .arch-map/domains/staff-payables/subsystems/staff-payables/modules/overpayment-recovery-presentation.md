@@ -12,12 +12,12 @@
 - inbound: `ui_react/src/components/AccountingDifferencePanel.tsx` — 案件帳務依正式 staff recovery identity／staff_id 提供實際追回入口；`cashOnly` 不顯示舊精確人工調整，非現金處理由現行差額 owner 承接。
 
 ## Contracts
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables超額付款追償與結清規則。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables超額付款追償與結清規則。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/staff_overpayment_recovery_actions.test.tsx`
+- test_root: `ui_react/src/tests/staff_overpayment_recovery_actions.test.tsx` — 既有模擬案例核對查得多筆目前配對時顯示提示，不提供收款核銷儲存。
 - routing: `.arch-map/tests/domains/staff-payables/subsystems/staff-payables/modules/overpayment-recovery-presentation.md`
 
 ## Change triggers

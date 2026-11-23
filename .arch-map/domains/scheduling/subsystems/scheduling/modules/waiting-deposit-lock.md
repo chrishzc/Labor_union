@@ -29,8 +29,8 @@
 - inbound: `scheduling/matching-coordination` — 工會確認的 matching plan 與 current confirmed service dates 提供檔期鎖候選事實；月嫂意願是推薦輸入，不以簽約或 precontract commitment 作為鎖定前置條件。
 
 ## Contracts
-- Waiting-deposit lock ownership and cancellation — `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md`.
-- Cancellation must remove future Scheduling occupancy — `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.5.
+- Waiting-deposit lock ownership and cancellation — `.arch-map/requirements/02_Assignments_Scheduling_Domain.md`.
+- Cancellation must remove future Scheduling occupancy — `.arch-map/requirements/01_Orders_Domain.md` §3.5.
 
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/waiting-deposit-lock/`.

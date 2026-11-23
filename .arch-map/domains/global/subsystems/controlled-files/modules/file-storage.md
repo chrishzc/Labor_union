@@ -16,7 +16,7 @@
 - Explicit Windows UNC roots also enable the unified layout in the manager's source-mode APP_ENV=development process. Explicit local absolute roots archive new returned signed contracts in 01, Staff documents in 03 and uploaded Rich Menu assets in 04. Legacy reads retain their existing roots.
 
 ## Contracts
-- `document/架構重整/01_規格基線/30_Controlled_File_Storage_NAS正式規格.md` §13B — shared root, backup subtree exclusion, no SQL attachment download.
+- `.arch-map/requirements/30_Controlled_File_Storage_NAS正式規格.md` §13B — shared root, backup subtree exclusion, no SQL attachment download.
 - `subsystems/controlled_files/contracts.py` — typed storage port results and errors.
 
 ## Verification

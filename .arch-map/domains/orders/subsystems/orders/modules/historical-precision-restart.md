@@ -28,7 +28,7 @@
 - inbound: authenticated historical-order administration only.
 
 ## Contracts
-- `document/架構重整/01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md` §8／§9
+- `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md` §8／§9
 
 ## Verification
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-precision-restart/`
