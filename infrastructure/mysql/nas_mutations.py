@@ -328,12 +328,17 @@ def relation_snapshot(values, columns) -> str:
 
 
 CASE_DELETION_PROCEDURE = "lu_nas_delete_unsigned_case_v2"
-# Exact bodies compiled from each historical revision's code and fresh schema.
+# Exact bodies compiled from published revisions' code and fresh schema.
+# Register the current body too so the next graph change retains its predecessor.
 _CASE_DELETION_PREDECESSOR_SHA256 = frozenset({
     # 0f5c10ad15fbbe28192f0f23dcaa778a1f7da37b
     "53baa97fcab6e4fd24fd9aa71e301303c8ad9ad3c962ad7ea35a6b4e19b67192",
     # b0d487a94de7d811fd42ef630260655ff1000e27
     "be4df02013ccf0c1d2d81643354fa2693b3843d44aff91b46cf7ef165889026c",
+    # 59b63777917bb0dcd7ad559a2778669bb393d4a4
+    "e2c3ec258717fc4cfc3fe1fc5e43c69374a6bef4e68aed5a81db09835df3f0e5",
+    # cdf1350b6da5cad6f4d8b2819f4e57701f29cc41
+    "5b12d660c2468e5341b8c8c988a65f98a0345fbddaa9e32d1636554684eb38cf",
 })
 
 

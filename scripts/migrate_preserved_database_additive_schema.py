@@ -5340,7 +5340,19 @@ def build_plan(
         source_objects, allowed_partial_artifacts
     )
     source_recovery = None
-    if blocking_states and source_recovery_root is not None:
+    registry_signing_artifacts = {
+        "1060_registry_case_deletion_guards.sql",
+        _LINE_GROUP_HISTORY_DELETE_ARTIFACT,
+        _LINE_DELIVERY_RETENTION_ARTIFACT,
+        _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT,
+    }
+    if (
+        source_recovery_root is not None
+        and source_objects.get(_REGISTRY_CASE_DELETION_SIGNING_ARTIFACT) == "partial"
+        and blocking_states
+        and all(name in registry_signing_artifacts and state == "partial"
+                for name, state in blocking_states.items())
+    ):
         source_recovery = qualify_registry_signing_source_recovery(
             config, source, source_snapshot, receipt_root=source_recovery_root,
         )
@@ -8582,7 +8594,7 @@ def _allowed_later_artifact_checks(
     part_name: str,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
-    if part_name in {"104_order_lifecycle_state_history.sql", "1013_order_lifecycle_pending_status_constraint.sql", "215_historical_service_accounting.sql", "1028_historical_service_accounting.sql"} and any(path.name == "1081_order_established_unserved_status.sql" for path in SCHEMA_PARTS):
+    if part_name in {"1013_order_lifecycle_pending_status_constraint.sql", "215_historical_service_accounting.sql", "1028_historical_service_accounting.sql"} and any(path.name == "1081_order_established_unserved_status.sql" for path in SCHEMA_PARTS):
         successor = _canonical_artifact_descriptor("1081_order_established_unserved_status.sql")
         return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name == "124_case_architecture_bootstrap.sql" and any(
@@ -8613,11 +8625,16 @@ def _allowed_later_artifact_checks(
         historical_accounting_successor = _canonical_artifact_descriptor(
             "1028_historical_service_accounting.sql"
         )
-        allowed: dict[tuple[str, str], list[str]] = {}
-        for successor in (
+        successors = [
             pending_status_successor["checks"],
             historical_accounting_successor["checks"],
-        ):
+        ]
+        if any(path.name == "1081_order_established_unserved_status.sql" for path in SCHEMA_PARTS):
+            successors.append(_canonical_artifact_descriptor(
+                "1081_order_established_unserved_status.sql"
+            )["checks"])
+        allowed: dict[tuple[str, str], list[str]] = {}
+        for successor in successors:
             for key, clause in successor.items():
                 allowed.setdefault(key, []).append(clause)
         return {key: tuple(clauses) for key, clauses in allowed.items()}

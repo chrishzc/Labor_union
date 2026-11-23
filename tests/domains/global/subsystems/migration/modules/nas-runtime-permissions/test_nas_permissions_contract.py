@@ -300,17 +300,8 @@ def _case_parameters():
             for part in PROCEDURES[CASE_DELETION_PROCEDURE][0].split(",")]
 
 
-def _predecessor_body():
-    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE
-    # The installer independently pins this complete historical body by SHA-256.
-    body = "BEGIN\n" + PROCEDURES[CASE_DELETION_PROCEDURE][1].strip() + "\nEND"
-    receipt = "\n        OR EXISTS(SELECT 1 FROM admin_command_receipts WHERE command_family='registry_delete/v1'\n        AND idempotency_key=p_command_key)"
-    body = body.replace(receipt, "")
-    signing = """      IF EXISTS(SELECT 1 FROM contract_signing_events WHERE case_no=p_case AND event_type='signed_received' FOR UPDATE)
-         OR EXISTS(SELECT 1 FROM order_contract_flow_events WHERE case_no=p_case AND event_type='contract_completed' FOR UPDATE) THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='registry_deletion_signed'; END IF;
-"""
-    return body.replace("      IF NOT EXISTS(SELECT 1 FROM application_command_claims", signing + "      IF NOT EXISTS(SELECT 1 FROM application_command_claims")
+def _published_unsigned_predecessor_body():
+    return (Path(__file__).parent / "fixtures" / "case_deletion_59b637779.sql").read_text(encoding="utf-8").strip()
 
 
 def _deployed_predecessor_body():
@@ -322,7 +313,29 @@ def test_deployed_predecessor_fixture_has_the_exact_historical_body():
     assert hashlib.sha256(_deployed_predecessor_body().encode("utf-8")).hexdigest() == "be4df02013ccf0c1d2d81643354fa2693b3843d44aff91b46cf7ef165889026c"
 
 
-@pytest.mark.parametrize("predecessor", [_predecessor_body, _deployed_predecessor_body])
+def test_published_unsigned_predecessor_fixture_has_the_exact_historical_body():
+    import hashlib
+    from infrastructure.mysql.nas_mutations import case_deletion_body_state
+    body = _published_unsigned_predecessor_body()
+    assert hashlib.sha256(body.encode("utf-8")).hexdigest() == "e2c3ec258717fc4cfc3fe1fc5e43c69374a6bef4e68aed5a81db09835df3f0e5"
+    assert case_deletion_body_state(body) == "replace"
+
+
+def test_current_case_body_is_registered_before_the_next_schema_graph_release():
+    import hashlib
+    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE, _CASE_DELETION_PREDECESSOR_SHA256
+    body = "BEGIN\n" + PROCEDURES[CASE_DELETION_PROCEDURE][1].strip() + "\nEND"
+    assert hashlib.sha256(body.encode("utf-8")).hexdigest() in _CASE_DELETION_PREDECESSOR_SHA256
+    published_hashes = {
+        "53baa97fcab6e4fd24fd9aa71e301303c8ad9ad3c962ad7ea35a6b4e19b67192",
+        "be4df02013ccf0c1d2d81643354fa2693b3843d44aff91b46cf7ef165889026c",
+        "e2c3ec258717fc4cfc3fe1fc5e43c69374a6bef4e68aed5a81db09835df3f0e5",
+        "5b12d660c2468e5341b8c8c988a65f98a0345fbddaa9e32d1636554684eb38cf",
+    }
+    assert published_hashes <= _CASE_DELETION_PREDECESSOR_SHA256
+
+
+@pytest.mark.parametrize("predecessor", [_deployed_predecessor_body, _published_unsigned_predecessor_body])
 def test_ensure_upgrades_only_known_case_predecessor_and_preserves_definer_and_execute_grants(predecessor):
     from unittest.mock import MagicMock
     from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE, ensure_nas_procedures
@@ -349,6 +362,11 @@ def test_ensure_upgrades_only_known_case_predecessor_and_preserves_definer_and_e
     assert "FROM mysql.procs_priv WHERE Db=DATABASE()" in grant_query.args[0]
     assert grant_query.args[1] == (CASE_DELETION_PROCEDURE,)
     connection.commit.assert_not_called()
+    cursor.reset_mock()
+    cursor.fetchall.side_effect = [_routine_rows(), [], _case_parameters()]
+    assert ensure_nas_procedures(connection) == []
+    assert all(call.args[0].startswith("SELECT ") for call in cursor.execute.call_args_list)
+    connection.commit.assert_not_called()
 
 
 def test_ensure_refuses_unreadable_case_grants_before_any_ddl():
@@ -357,7 +375,7 @@ def test_ensure_refuses_unreadable_case_grants_before_any_ddl():
     from infrastructure.mysql.nas_mutations import ensure_nas_procedures
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchall.side_effect = [_routine_rows(case_body=_predecessor_body()), [], _case_parameters()]
+    cursor.fetchall.side_effect = [_routine_rows(case_body=_deployed_predecessor_body()), [], _case_parameters()]
     cursor.execute.side_effect = [None, None, None, pymysql.OperationalError(1142, "SELECT denied")]
     with pytest.raises(pymysql.OperationalError, match="SELECT denied"):
         ensure_nas_procedures(connection)
@@ -370,7 +388,7 @@ def test_ensure_refuses_unknown_case_grants_before_any_ddl(privileges):
     from infrastructure.mysql.nas_mutations import ensure_nas_procedures
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchall.side_effect = [_routine_rows(case_body=_predecessor_body()), [], _case_parameters(),
+    cursor.fetchall.side_effect = [_routine_rows(case_body=_deployed_predecessor_body()), [], _case_parameters(),
                                   [{"user": "fixture", "host": "%", "privileges": privileges}]]
     with pytest.raises(ValueError, match="procedure grants drift"):
         ensure_nas_procedures(connection)
@@ -378,13 +396,17 @@ def test_ensure_refuses_unknown_case_grants_before_any_ddl(privileges):
 
 
 @pytest.mark.parametrize("force,stale", [(False, False), (True, False), (False, True)])
-@pytest.mark.parametrize("predecessor", [_predecessor_body, _deployed_predecessor_body])
-def test_ensure_refuses_unknown_case_body_before_any_ddl_even_with_force_or_stale_collation(force, stale, predecessor):
+@pytest.mark.parametrize("predecessor", [_deployed_predecessor_body, _published_unsigned_predecessor_body])
+@pytest.mark.parametrize("change", ["suffix", "version_check"])
+def test_ensure_refuses_unknown_case_body_before_any_ddl_even_with_force_or_stale_collation(force, stale, predecessor, change):
     from unittest.mock import MagicMock
     from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE, ensure_nas_procedures
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchall.side_effect = [_routine_rows(case_body=predecessor() + "\n-- unknown change"),
+    original = predecessor()
+    body = original + "\n-- unknown change" if change == "suffix" else original.replace("lifecycle_version=p_version", "lifecycle_version>=p_version", 1)
+    assert body != original
+    cursor.fetchall.side_effect = [_routine_rows(case_body=body),
                                   [{"name": CASE_DELETION_PROCEDURE}] if stale else []]
     with pytest.raises(ValueError, match="procedure drift"):
         ensure_nas_procedures(connection, force=force)
@@ -402,11 +424,11 @@ def test_permission_plan_accepts_only_exact_case_bodies_without_writes(body_kind
     tables = DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "order_lifecycle_control_state", "scheduling_generations",
         "staff_matching_preference_profiles", "staff_matching_preference_definitions", "admin_audit_log_archive",
         "application_command_claims", "admin_command_receipts"}
-    body = _predecessor_body() if body_kind == "predecessor" else None
+    body = _deployed_predecessor_body() if body_kind == "predecessor" else None
     if body_kind == "deployed":
-        body = _deployed_predecessor_body()
+        body = _published_unsigned_predecessor_body()
     if body_kind == "unknown":
-        body = _predecessor_body() + "\n-- drift"
+        body = _published_unsigned_predecessor_body() + "\n-- drift"
     params = [{"name": name, "mode": part.strip().split()[0], "parameter": part.strip().split()[1],
                "type": " ".join(part.strip().split()[2:])}
               for name, (signature, _, _) in PROCEDURES.items() for part in signature.split(",")]

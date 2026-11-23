@@ -72,9 +72,14 @@ def test_group_history_delete_guards_compose_with_registry_guards_without_hiding
 
 
 def test_signing_guard_release_matches_fresh_and_preserves_latest_guard_conditions():
-    assert m._local_ordered_upgrade_entries()[-1]["artifact"]["name"] == SIGNING_ARTIFACT
-    assert load_schema_assembly().active_artifact_paths[-1].name == SIGNING_ARTIFACT
-    assert load_compact_plan()["release_id"] == "labor-union-validation-schema-registry-case-deletion-signing-v1"
+    assert sum(entry["artifact"]["name"] == SIGNING_ARTIFACT
+               for entry in m._local_ordered_upgrade_entries()) == 1
+    assert sum(path.name == SIGNING_ARTIFACT
+               for path in load_schema_assembly().active_artifact_paths) == 1
+    validation_manifest = json.loads(
+        (m.ROOT / "db/cutover_releases/labor_union_validation_schema_v1.json").read_text(encoding="utf-8")
+    )
+    assert load_compact_plan()["release_id"] == validation_manifest["release_id"]
     successor, latest, _, _ = m._registry_case_deletion_signing_metadata()
     descriptor = m._canonical_artifact_descriptor(SIGNING_ARTIFACT)
     assert successor == descriptor["triggers"]
@@ -359,6 +364,27 @@ def test_interrupted_signing_plan_evidence_is_fingerprint_bound():
     fresh = {**plan, "source_recovery": {"journal_event_digest": "changed"}}
     with pytest.raises(m.UpgradeBlocked, match="source_recovery"):
         m._validate_plan_integrity(plan, fresh)
+
+
+@pytest.mark.parametrize("signing_state,blocking_part,blocking_state", [
+    ("exact", "104_order_lifecycle_state_history.sql", "drift"),
+    ("partial", "104_order_lifecycle_state_history.sql", "drift"),
+    ("partial", "104_order_lifecycle_state_history.sql", "partial"),
+    ("drift", ARTIFACT, "partial"),
+    ("absent", ARTIFACT, "partial"),
+])
+def test_unrelated_or_drifted_source_reports_actual_objects_without_signing_recovery(
+    monkeypatch, tmp_path, signing_state, blocking_part, blocking_state,
+):
+    states = {SIGNING_ARTIFACT: signing_state, blocking_part: blocking_state}
+    monkeypatch.setattr(m, "server_identity", lambda *_: {})
+    monkeypatch.setattr(m, "_schema_snapshot", lambda *_: {"sha256": "fixture"})
+    monkeypatch.setattr(m, "_upgrade_admission_states", lambda *_: states)
+    monkeypatch.setattr(m, "qualify_registry_signing_source_recovery", lambda *_args, **_kwargs:
+                        pytest.fail("unrelated drift cannot request a registry signing journal"))
+    with pytest.raises(m.UpgradeBlocked, match="source contains partial/drift owned objects") as caught:
+        m.build_plan(None, "lu_test_source", "lu_test_candidate", source_recovery_root=tmp_path)
+    assert blocking_part in str(caught.value)
 
 
 @pytest.mark.parametrize("completed", [False, True])

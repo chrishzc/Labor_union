@@ -162,30 +162,69 @@ def test_1013_accepts_exact_historical_accounting_check_successor() -> None:
     ) == "drift"
 
 
-def test_104_accepts_exact_historical_accounting_check_successor() -> None:
+@pytest.mark.parametrize("successor", [
+    ORDER_LIFECYCLE_ARTIFACT, HISTORICAL_ACCOUNTING_ARTIFACT,
+    "1081_order_established_unserved_status.sql",
+])
+def test_104_accepts_exact_selected_lifecycle_check_successor(monkeypatch, successor) -> None:
     predecessor = "104_order_lifecycle_state_history.sql"
-    historical_descriptor = migration._canonical_artifact_descriptor(
-        HISTORICAL_ACCOUNTING_ARTIFACT
-    )
-    allowed_successors = migration._allowed_later_artifact_checks(predecessor)
-    check_keys = (
-        (
-            "order_lifecycle_state_events",
-            "chk_order_lifecycle_state_event_before_status",
-        ),
-        (
-            "order_lifecycle_state_events",
-            "chk_order_lifecycle_state_event_after_status",
-        ),
-    )
+    descriptor = migration._canonical_artifact_descriptor(predecessor)
+    historical_descriptor = migration._canonical_artifact_descriptor(successor)
+    assert any(path.name == "1081_order_established_unserved_status.sql"
+               for path in migration.SCHEMA_PARTS)
+    snapshot = _empty_snapshot()
+    for table, columns in descriptor["tables"].items():
+        for name, contract in columns.items():
+            snapshot["columns"].append({"table_name": table, "column_name": name, **contract})
+    for (table, name), contract in descriptor["indexes"].items():
+        snapshot["indexes"].append({
+            "table_name": table, "index_name": name, "non_unique": contract["non_unique"],
+            "columns": ",".join(contract["columns"]),
+        })
+    for (table, name), contract in descriptor["foreign_keys"].items():
+        snapshot["constraints"].append({
+            "table_name": table, "constraint_name": name, "constraint_type": "FOREIGN KEY",
+        })
+        snapshot["foreign_keys"].append({
+            "table_name": table, "constraint_name": name,
+            "update_rule": contract["update_rule"], "delete_rule": contract["delete_rule"],
+        })
+        for column, referenced in zip(contract["columns"], contract["referenced_columns"], strict=True):
+            snapshot["key_columns"].append({
+                "table_name": table, "constraint_name": name, "column_name": column,
+                "referenced_table_name": contract["referenced_table"],
+                "referenced_column_name": referenced,
+            })
+    for (table, name), clause in descriptor["checks"].items():
+        snapshot["constraints"].append({
+            "table_name": table, "constraint_name": name, "constraint_type": "CHECK",
+            "check_clause": historical_descriptor["checks"].get((table, name), clause),
+            "enforced": "YES",
+        })
+    snapshot["triggers"] = [
+        {"trigger_name": name, **contract} for name, contract in descriptor["triggers"].items()
+    ]
+    assert migration._canonical_artifact_metadata_state(snapshot, predecessor) == "exact"
 
-    assert {
-        key: allowed_successors[key][-1]
-        for key in check_keys
-    } == {
-        key: historical_descriptor["checks"][key]
-        for key in check_keys
-    }
+    before_status = next(row for row in snapshot["constraints"]
+                         if row["constraint_name"] == "chk_order_lifecycle_state_event_before_status")
+    clause = before_status["check_clause"]
+    before_status["check_clause"] = "before_status IN ('待補件','未發布狀態')"
+    assert migration._canonical_artifact_metadata_state(snapshot, predecessor) == "drift"
+    before_status["check_clause"] = clause
+    before_status["enforced"] = "NO"
+    assert migration._canonical_artifact_metadata_state(snapshot, predecessor) == "drift"
+    before_status["enforced"] = "YES"
+    snapshot["constraints"].remove(before_status)
+    assert migration._canonical_artifact_metadata_state(snapshot, predecessor) == "partial"
+    snapshot["constraints"].append(before_status)
+
+    monkeypatch.setattr(migration, "SCHEMA_PARTS", tuple(
+        path for path in migration.SCHEMA_PARTS
+        if path.name != "1081_order_established_unserved_status.sql"
+    ))
+    expected = "drift" if successor == "1081_order_established_unserved_status.sql" else "exact"
+    assert migration._canonical_artifact_metadata_state(snapshot, predecessor) == expected
 
 
 def test_refund_overage_local_runner_accepts_only_the_ordinal_preserving_append():
