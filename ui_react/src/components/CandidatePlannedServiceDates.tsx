@@ -150,7 +150,6 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
     {formal && <p role="status">目前已有正式安排，請到服務安排調整日期。</p>}
     {busy === 'calculate' && <p role="status">正在重算每週服務時間…</p>}
     {error && <p role="alert">{error}</p>}
-    {dates.length > 0 && <details><summary>預計服務日期：{dates.length} 天（{dates[0]}～{dates.at(-1)}）</summary><p>{dates.join('、')}</p></details>}
     {unresolved && <p role="status">保存結果尚未完成回讀，請先接續原操作。</p>}
     {draft?.status === 'outcome_unknown' && <button type="button" disabled={busy !== null} onClick={() => void save('apply')}>接續保存預計日期</button>}
     {draft?.status === 'observation_failed' && <button type="button" disabled={busy !== null} onClick={() => void save('observe')}>重新取得保存結果</button>}

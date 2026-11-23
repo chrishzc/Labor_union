@@ -176,7 +176,7 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認套用更正' })).not.toBeInTheDocument();
 
-    expect(await screen.findByText('原 review 尚未解除的欄位衝突')).toBeInTheDocument();
+    expect(await screen.findByText('原覆核尚未解除的欄位衝突')).toBeInTheDocument();
     expect(screen.getByText('更正已提交，等待異常重新檢核')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新檢核異常狀態' })).toBeInTheDocument();
   });

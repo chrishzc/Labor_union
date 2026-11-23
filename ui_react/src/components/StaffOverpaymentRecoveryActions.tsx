@@ -156,7 +156,7 @@ export function StaffOverpaymentRecoveryActions({
         const input: StaffOverpaymentRecoveryMatchingInput = { recovery_identity: recoveryIdentity, finance_import_row_id: id, evidence_reference: evidenceReference };
         const checked: PreviewState = { kind, value: await staffOverpaymentRecoveryClient.previewMatching(input) }; setPreview(checked); await runApply(checked);
       } else if (kind === 'collection') {
-        if (multipleMatchings || uniqueMatching === null || collectionRowId === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_MATCHING_AMBIGUOUS', 'current matching 不唯一或缺少 owner bank binding，已停止操作。');
+        if (multipleMatchings || uniqueMatching === null || collectionRowId === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_MATCHING_AMBIGUOUS', '目前入款配對不唯一或缺少銀行流水綁定，已停止操作。');
         const input: StaffOverpaymentRecoveryCollectionInput = { recovery_identity: recoveryIdentity, finance_import_row_id: collectionRowId, matching_identity: uniqueMatching.matching_identity, matching_version: uniqueMatching.matching_version, evidence_reference: evidenceReference };
         const checked: PreviewState = { kind, value: await staffOverpaymentRecoveryClient.previewCollection(input) }; setPreview(checked); await runApply(checked);
       } else {
@@ -183,11 +183,11 @@ export function StaffOverpaymentRecoveryActions({
         if (id === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_BANK_ROW_INVALID', '銀行流水編號已失效，請重新查詢。');
         await staffOverpaymentRecoveryClient.applyMatching(preview.value, { recovery_identity: recoveryIdentity, finance_import_row_id: id, evidence_reference: evidenceReference, reason }, commandFor(identities.current, 'matching-apply'));
       } else if (preview.kind === 'collection') {
-        if (multipleMatchings || uniqueMatching === null || collectionRowId === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_MATCHING_AMBIGUOUS', 'current matching 已不唯一，請重新查詢。');
+        if (multipleMatchings || uniqueMatching === null || collectionRowId === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_MATCHING_AMBIGUOUS', '目前入款配對已不唯一，請重新查詢。');
         await staffOverpaymentRecoveryClient.applyCollection(preview.value, { recovery_identity: recoveryIdentity, finance_import_row_id: collectionRowId, matching_identity: uniqueMatching.matching_identity, matching_version: uniqueMatching.matching_version, evidence_reference: evidenceReference, reason }, commandFor(identities.current, 'collection-apply'));
         terminal = true;
       } else {
-        if (preview.value.adjustment_amount_ntd !== query.remaining_amount_ntd) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_AMOUNT_STALE', 'remaining 已變更，不能套用舊 adjustment。');
+        if (preview.value.adjustment_amount_ntd !== query.remaining_amount_ntd) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_AMOUNT_STALE', '剩餘金額已變更，不能套用舊的調整預覽。');
         await staffOverpaymentRecoveryClient.applyAdjustment(preview.value, { recovery_identity: recoveryIdentity, adjustment_amount_ntd: query.remaining_amount_ntd, evidence_reference: evidenceReference, reason }, commandFor(identities.current, 'adjustment-apply'));
         terminal = true;
       }
@@ -197,7 +197,7 @@ export function StaffOverpaymentRecoveryActions({
         setNotice('已重新確認追償餘額歸零且完成處理，異常可解除。');
         await onCommitted?.();
       } else if (terminal) {
-        setNotice(`Staff recovery 仍在處理中，剩餘 NT$ ${readback.remaining_amount_ntd.toLocaleString('en-US')}；異常保留。`);
+        setNotice(`月嫂超付追償仍在處理中，剩餘 NT$ ${readback.remaining_amount_ntd.toLocaleString('en-US')}；異常保留。`);
       } else {
         setNotice('入款配對已建立；配對本身不解除異常，請依最新追償資料繼續收款。');
       }
@@ -264,7 +264,6 @@ export function StaffOverpaymentRecoveryActions({
       {query && active && uniqueMatching && !multipleMatchings && (
         <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
           <legend>核銷已配對退回入款</legend>
-          <details><summary>技術操作欄位</summary><p>配對識別值：{uniqueMatching.matching_identity}（資料版本 {uniqueMatching.matching_version}）</p></details>
           {collectionRowId === null && <p role="alert">目前配對缺少可提交的銀行流水編號，已停止操作。</p>}
           {collectionRowId !== null && <p>銀行流水編號：{collectionRowId}</p>}
           <button type="button" className="finance-btn-secondary" disabled={!collectionReady} onClick={() => void runPreview('collection')}>儲存收款核銷</button>

@@ -20,7 +20,7 @@ function operationIdentity(prefix: string): string {
 
 function errorText(error: unknown): string {
   if (error instanceof SafeReviewLinkClientError) return `${error.publicCode ?? error.code}：${error.message}`;
-  return '安全審核連結操作失敗，請依 readback 的失敗原因處理。';
+  return '安全審核連結操作失敗，請依回讀的失敗原因處理。';
 }
 
 function statusLabel(status: SafeReviewLink['status']): string {
@@ -86,7 +86,7 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
       <div className="line-section-heading">
         <div>
           <h3><LockKeyhole aria-hidden="true" /> M4 安全審核連結</h3>
-          <p>管理端／行動端只讀回去敏目標與一次性結果；原 token 不會由回應或畫面保存。</p>
+          <p>管理端／行動端只讀回去敏目標與一次性結果；原授權碼不會由回應或畫面保存。</p>
         </div>
       </div>
       <div className="line-detail-grid">
@@ -96,7 +96,7 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
         <label>審核能力 <input className="line-search-input" value={capability} onChange={(event) => setCapability(event.target.value)} /></label>
       </div>
       <div className="line-detail-grid" style={{ marginTop: '10px' }}>
-        <label>一次性 token（僅本次記憶體操作） <input className="line-search-input" type="password" value={rawToken} onChange={(event) => setRawToken(event.target.value)} autoComplete="off" /></label>
+        <label>一次性授權碼（僅本次記憶體操作） <input className="line-search-input" type="password" value={rawToken} onChange={(event) => setRawToken(event.target.value)} autoComplete="off" /></label>
         <label>撤銷原因（選填） <input className="line-search-input" value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} maxLength={500} /></label>
       </div>
       <div className="line-row-actions" style={{ marginTop: '12px' }}>
@@ -105,7 +105,7 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
         <button type="button" className="line-secondary-btn" onClick={() => void revoke()} disabled={busy || !linkId.trim()}>撤銷審核連結</button>
       </div>
       {error && <p className="line-error" role="alert">{error}</p>}
-      {receipt && <p className="line-success" role="status">已收到 {receipt.outcome} readback；receipt：{receipt.receipt_id}{receipt.replayed ? '（重播）' : ''}</p>}
+      {receipt && <p className="line-success" role="status">已收到 {receipt.outcome} 回讀；收據：{receipt.receipt_id}{receipt.replayed ? '（重播）' : ''}</p>}
       {view && <dl className="line-detail-grid" data-surface-id="line.safe-review-link.readback">
         <div><dt>目前狀態</dt><dd>{statusLabel(view.status)}</dd></div>
         <div><dt>審核目標</dt><dd>{view.canonical_internal_target}</dd></div>

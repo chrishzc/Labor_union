@@ -318,6 +318,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     const view = render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
     await screen.findByRole('region', { name: '正式補件入口' });
     expect(screen.queryByText('訂單異動申請紀錄')).not.toBeInTheDocument();
+    expect(screen.queryByText('查看十三階段紀錄')).not.toBeInTheDocument();
     const summary = screen.getByRole('region', { name: '案件摘要' });
     const recordsRegion = screen.getByRole('region', { name: '案件聯絡、服務資料與 LINE 歷程' });
     const body = view.container.querySelector('.order-case-task-body') as HTMLElement;
@@ -500,8 +501,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     expect(within(dialog).getByText('服務日期工作區')).toBeVisible();
     expect(within(dialog).queryByText(/lineage_source_assignment_ids/)).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: /確認客戶與服務需求/ }));
-    fireEvent.click(within(dialog).getByText('查看十三階段紀錄'));
-    expect(dialog.querySelectorAll('.order-case-progress li')).toHaveLength(13);
+    expect(within(dialog).queryByText('查看十三階段紀錄')).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/source_projection_digest/)).not.toBeInTheDocument();
 
     expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledWith(

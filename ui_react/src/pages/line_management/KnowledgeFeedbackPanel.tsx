@@ -177,7 +177,6 @@ export const KnowledgeFeedbackPanel: React.FC<{
           {displayStatus(selectedQuestion) === 'needs_improvement' && <p className="knowledge-gap-reason">用戶回饋此回答未解決問題，建議檢查命中題目、答案內容或新增知識。</p>}
           {selectedQuestion.request_status === 'unsupported' && <p className="knowledge-gap-reason">題庫中沒有足夠相符的已發布答案。</p>}
           {selectedQuestion.request_status === 'failed' && <p className="knowledge-system-failure">處理失敗：{selectedQuestion.failure_code || '原因待查'}</p>}
-          <details className="studio-technical"><summary>命中題目與版本資訊</summary><p>{qaIdentity(selectedQuestion.source_identity) ? `命中題目：${qaIdentity(selectedQuestion.source_identity)} v${selectedQuestion.source_version ?? '—'}` : '沒有命中題目'}</p><p>索引版本：{selectedQuestion.index_version ?? '—'}</p></details>
         </div>}
       </Drawer>
     </div>

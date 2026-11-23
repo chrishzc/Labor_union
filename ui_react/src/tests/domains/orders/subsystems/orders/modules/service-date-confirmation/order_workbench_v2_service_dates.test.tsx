@@ -158,8 +158,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
     expect(mocks.previewServiceDates.mock.invocationCallOrder[0]).toBeLessThan(mocks.applyServiceDates.mock.invocationCallOrder[0]);
     expect(mocks.getServiceDates.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.applyServiceDates.mock.invocationCallOrder[0]);
-    fireEvent.click(screen.getByText('查看已保存日期與版本'));
-    expect(screen.getByLabelText('已確認的服務日期')).toHaveTextContent(revisedDates.join('、'));
+    expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(onObserved).toHaveBeenCalledTimes(1);
     expect(onOpenActualStart).not.toHaveBeenCalled();
   });
@@ -181,10 +180,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       expect(within(calendar).getByRole('button', { name: `服務日期 ${date}` })).toBeDisabled();
     }
     expect(within(calendar).getByRole('button', { name: '服務日期 2026-10-01' })).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(screen.getByText('查看已保存日期與版本'));
-    const readback = screen.getByLabelText('先前確認的日期與目前排班');
-    expect(readback).toHaveTextContent(initialDates.join('、'));
-    expect(readback).toHaveTextContent('目前排班服務日2026-10-05、2026-10-06、2026-10-07');
+    expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '儲存服務日期' })).not.toBeInTheDocument();
     expect(mocks.calculate).not.toHaveBeenCalled();
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
@@ -206,10 +202,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(removedDay).toHaveAttribute('aria-pressed', 'false');
     expect(replacementDay).toHaveAttribute('aria-pressed', 'true');
     expect(replacementDay).toBeDisabled();
-    fireEvent.click(screen.getByText('查看已保存日期與版本'));
-    const history = screen.getByLabelText('先前確認的日期與目前排班');
-    expect(history).toHaveTextContent(`先前確認版本#2先前確認日期${initialDates.join('、')}`);
-    expect(history).toHaveTextContent(`目前排班服務日${revisedDates.join('、')}`);
+    expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '儲存服務日期' })).not.toBeInTheDocument();
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });

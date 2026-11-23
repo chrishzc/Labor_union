@@ -287,7 +287,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     <CasePricingAdjustmentPanel caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy || intakeState.busy || accountState.busy} onCommitted={refreshRelated} onStateChange={setPricingState} />
     <section className="registry-editor"><h3>客戶帳務</h3>{detail.finance.status === 'ready' && detail.finance.values
       ? <dl className="registry-information-fields">{Object.entries(financeLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{display(detail.finance.values![field as keyof typeof detail.finance.values])}</dd></div>)}</dl>
-      : <><p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>{detail.finance.code && <details><summary>技術資訊</summary><code>{detail.finance.code}</code></details>}</>}
+      : <p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>}
       <ClientRegistryAccountingSummary caseNo={detail.case_no} revision={detail} />
       <div className="historical-days-box" style={{ marginTop: 16, padding: '14px 16px', background: '#faf6f3', border: '1px solid #ebdcd3', borderRadius: 8 }}>
         <details open style={{ border: 0, padding: 0, margin: 0 }}>

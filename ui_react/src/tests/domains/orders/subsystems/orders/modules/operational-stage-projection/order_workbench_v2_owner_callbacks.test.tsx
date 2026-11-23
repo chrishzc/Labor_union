@@ -108,8 +108,9 @@ describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
     mocks.active.mockRejectedValue(new ApiHttpError(404, 'resource_not_found', '無媒合方案'));
     const onObserved = vi.fn(); render(<OrderAssignmentPlanPanel caseNo={CASE} onObserved={onObserved} />);
     await screen.findByRole('region', { name: `案件 ${CASE} 正式指派與排班回讀` });
-    fireEvent.click(await screen.findByText('查看目前月嫂與排班明細'));
-    await screen.findByText('尚無正式指派'); expect(onObserved).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.assignment).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('查看目前月嫂與排班明細')).not.toBeInTheDocument();
+    expect(onObserved).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '服務前更換月嫂' }));
     fireEvent.click(screen.getByRole('button', { name: '模擬正式更換完成' }));
     await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1)); expect(mocks.assignment).toHaveBeenCalledTimes(2);

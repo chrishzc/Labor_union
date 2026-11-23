@@ -17,6 +17,9 @@ const closePreviewSchema=z.strictObject({
   tasks:z.array(z.strictObject({task_id:z.number().int().positive(),status:z.string()})),
 });
 
+const statusLabel=(status:string)=>({pending:'待寄送',processing:'寄送中',failed:'寄送失敗',retryable_failed:'等待重試',cancelled:'已取消',sent:'已送出'})[status]??status;
+const reasonLabel=(reason:string)=>reason==='recipient_unavailable'?'收件對象待確認':reason==='template_or_schedule_invalid'?'通知設定待確認':reason;
+
 export function LineNotificationFailureActions({issueKey,onCommitted,showRelatedTasks=true}:{issueKey:string;onCommitted:()=>Promise<void>;showRelatedTasks?:boolean}) {
   const [detail,setDetail]=useState<z.infer<typeof failureDetailSchema>|null>(null);
   const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [revision,setRevision]=useState(0);
@@ -92,9 +95,9 @@ export function LineNotificationFailureActions({issueKey,onCommitted,showRelated
     {detail?.handling.blocked_reason && <p role="status">{detail.handling.blocked_reason}</p>}
     {detail?.handling.allowed_actions.includes('close') && <button className="np-button" disabled={busy || !!recoveryError || closeIntent.current!==null} onClick={()=>void close(false)}>不再寄送／結清</button>}
     {preview && <div aria-label="原通知結清範圍">
-      <p>案件 {preview.case_no}，原通知 {preview.notification_reason}。停止以下範圍的後續寄送，保留通知與寄送歷史。</p>
+      <p>案件 {preview.case_no}，原通知 {reasonLabel(preview.notification_reason)}。停止以下範圍的後續寄送，保留通知與寄送歷史。</p>
       <p>來源事件：{preview.source_event_ids.join('、') || '無'}</p>
-      {preview.tasks.map(task=><p key={task.task_id}>寄送工作 #{task.task_id}：{task.status}</p>)}
+      {preview.tasks.map(task=><p key={task.task_id}>寄送工作 #{task.task_id}：{statusLabel(task.status)}</p>)}
       <label>結清原因<input value={reason} disabled={busy || closeIntent.current!==null} onChange={event=>setReason(event.target.value)} /></label>
       <button className="np-button" disabled={busy || !!recoveryError || !reason.trim()} onClick={()=>void close(true)}>確認結清原通知</button>
     </div>}

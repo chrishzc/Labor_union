@@ -236,7 +236,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     await waitFor(() => expect(client.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(client.query).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/套用後狀態：抵扣已完成/)).not.toBeInTheDocument();
-    expect(screen.getByText(/舊 Preview 已清除，請重新檢查處置影響/)).toBeInTheDocument();
+    expect(screen.getByText(/舊預覽已清除，請重新檢查處置影響/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '儲存處置' })).toBeEnabled();
     expect(client.apply).toHaveBeenCalledTimes(1);
   });

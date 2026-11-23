@@ -51,6 +51,108 @@ function recordTime(value: string): string {
   return new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
 }
 
+const EVENT_CODE_LABELS: Record<string, string> = {
+  'gateway.identity_mismatch.second_attempt': '身分核對連續兩次失敗',
+  'scheduling.leave.extension_requested': '月嫂請假－請客戶確認',
+  'staff.retirement.committed': '月嫂辦理退休生效',
+  'router.deterministic.reply_committed': 'AI 確定性指令回覆',
+  'feedback.resolved.recorded': '客服回答評為已解決',
+  'feedback.unresolved.recorded': '客服回答評為未解決',
+  'matching.zero_pool.preview_applied': '候選池協調建議',
+  'client.leave.extension_agreed': '產婦同意服務順延',
+  'client.leave.extension_rejected': '產婦不同意順延需代班',
+  'runtime.alert.review_required': '系統重大異常',
+  'complaint.ingress.hold_high_ticket': '重大客訴告警',
+  'payroll.substitute.obligation_projected': '代班出勤薪資拆帳結算',
+  order_lifecycle_transition: '訂單生命週期變更',
+  service_time_checkpoint: '服務時間檢查點',
+  beclass_completion_changed: 'BeClass 完成狀態變更',
+  deposit_confirmed: '訂金確認',
+  'order.service_start_day': '服務當天群組繳款與服務狀況',
+  'client.second_payment_due': '第二期款到期當天原群組提醒',
+  'client.second_payment_settled': '第二期款核銷成功原群組通知',
+  'fixture.created': '測試通知事件',
+};
+
+function eventCodeLabel(code: string): string {
+  return EVENT_CODE_LABELS[code] ?? 'LINE 通知事件';
+}
+
+const RECIPIENT_TYPE_LABELS: Record<string, string> = {
+  client: '客戶',
+  staff: '月嫂',
+  assigned_caregiver: '已指派月嫂',
+  case_group: '案件群組',
+  admin: '管理員',
+  'customer_service.ticket_owner': '客服工單專員',
+  'client.bound_case': '案件產婦',
+  'staff.binding_owner': '綁定月嫂',
+  'conversation.bound_actor': '對話使用者',
+  'matching.request.participants': '媒合相關對象',
+  'assignment.client_snapshot': '指派產婦',
+  'assignment.staff_snapshot': '指派月嫂',
+  'scheduling.owner': '排班調度負責人',
+  'admin.review_actor': '工會幹部審核群',
+  'customer_service.claim_owner': '客訴專責處理人',
+  'staff_payables.anomaly_owner': '財務核銷專員',
+};
+
+function recipientLabel(identity?: string | null, type?: string | null): string {
+  if (identity) return RECIPIENT_TYPE_LABELS[identity] ?? identity;
+  if (type) return RECIPIENT_TYPE_LABELS[type] ?? type;
+  return '尚無通知對象';
+}
+
+function decisionStatusLabel(status?: string | null): string {
+  if (!status) return '尚無決策紀錄';
+  return ({
+    matched: '符合規則',
+    allowed: '允許發送',
+    suppressed: '不發送',
+    skipped: '已略過',
+    blocked: '受阻',
+    pending: '待決策',
+  } as Record<string, string>)[status] ?? status;
+}
+
+function intentStatusLabel(status?: string | null): string {
+  if (!status) return '尚無排程紀錄';
+  return ({
+    scheduled: '已排程',
+    pending: '待排程',
+    processing: '處理中',
+    sent: '已送出',
+    suppressed: '已靜默略過',
+    cancelled: '已取消',
+    failed: '排程失敗',
+    skipped: '已略過',
+  } as Record<string, string>)[status] ?? status;
+}
+
+function deliveryStatusLabel(status?: string | null): string {
+  if (!status) return '尚無投遞紀錄';
+  return ({
+    pending: '待寄送',
+    processing: '寄送中',
+    sent: '已送出',
+    failed: '寄送失敗',
+    retryable_failed: '等待重試',
+    cancelled: '已取消',
+    skipped: '不寄送',
+  } as Record<string, string>)[status] ?? status;
+}
+
+function reasonCodeLabel(code: string): string {
+  return ({
+    historical_silent: '歷史靜默事件',
+    recipient_unavailable: '收件對象不可用',
+    template_or_schedule_invalid: '範本或排程設定無效',
+    duplicate_suppressed: '重複通知已略過',
+    rule_disabled: '通知規則已停用',
+    predicate_not_matched: '未符合觸發條件',
+  } as Record<string, string>)[code] ?? code;
+}
+
 function revealRecords(panel: HTMLDivElement | null) {
   if (!panel || !panel.previousElementSibling) return;
   const summaryBottom = panel.previousElementSibling.getBoundingClientRect().bottom;
@@ -203,14 +305,14 @@ export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps>
             {notifications.status === 'ready' && notifications.data.records.length === 0 && <p>尚無 LINE 通知事件。</p>}
             {notifications.status === 'ready' && notifications.data.records.map((record, index) => (
               <article key={`${record.source_event_id}:${record.rule_id ?? 'none'}:${record.occurrence_number ?? 0}:${index}`}>
-                <strong>{record.event_code}</strong>
+                <strong>{eventCodeLabel(record.event_code)}</strong>
                 <dl>
                   <div><dt>事件時間</dt><dd>{record.occurred_at_utc ?? '尚無事件時間'}</dd></div>
-                  <div><dt>通知對象</dt><dd>{record.recipient_identity ?? record.recipient_type ?? '尚無通知對象'}</dd></div>
-                  <div><dt>規則決策</dt><dd>{record.decision_status ?? '尚無決策紀錄'}</dd></div>
-                  <div><dt>通知排程</dt><dd>{record.intent_status ?? '尚無排程紀錄'}</dd></div>
-                  <div><dt>投遞狀態</dt><dd>{record.delivery_status ?? '尚無投遞紀錄'}</dd></div>
-                  {record.reason_code && <div><dt>原因</dt><dd>{record.reason_code}</dd></div>}
+                  <div><dt>通知對象</dt><dd>{recipientLabel(record.recipient_identity, record.recipient_type)}</dd></div>
+                  <div><dt>規則決策</dt><dd>{decisionStatusLabel(record.decision_status)}</dd></div>
+                  <div><dt>通知排程</dt><dd>{intentStatusLabel(record.intent_status)}</dd></div>
+                  <div><dt>投遞狀態</dt><dd>{deliveryStatusLabel(record.delivery_status)}</dd></div>
+                  {record.reason_code && <div><dt>原因</dt><dd>{reasonCodeLabel(record.reason_code)}</dd></div>}
                 </dl>
                 {record.historical_silent && <p>歷史靜默事件；不補發通知。</p>}
               </article>

@@ -171,7 +171,6 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     </button>}
     {preview && <div style={{ display: 'grid', gap: '6px' }}>
       <span>客戶時薪：{preview.client_hourly_rate_ntd} 元；月嫂時薪：{preview.payroll_hourly_rate_ntd} 元。</span>
-      <details><summary>技術資訊</summary>薪資政策：{preview.payroll_policy_kind}</details>
 
     </div>}
     {message && <p role="status">{message}</p>}

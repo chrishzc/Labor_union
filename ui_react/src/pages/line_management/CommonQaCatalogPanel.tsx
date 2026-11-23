@@ -327,7 +327,6 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
                 {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={() => void transition(item, 'publish')}>發布</button>}
                 {item.lifecycle_status === 'published' && <button type="button" className="line-danger-btn" disabled={busy} onClick={() => void transition(item, 'retire')}>停用</button>}
               </div>
-              <details className="studio-technical"><summary>題號、版本與來源資訊</summary><small>{item.qa.id} · v{item.current_version} · {item.qa.category} / {item.qa.tag}<br />Knowledge #{item.id} · {item.source_identity} · 來源 {item.qa.source_ref}</small></details>
             </div>
           </details>
           <button type="button" className="studio-text-button studio-row-edit" disabled={busy} title="編輯此題目" aria-label={`編輯問答：${item.qa.question}`} onClick={() => openEdit(item)}><Pencil aria-hidden="true" />編輯</button>

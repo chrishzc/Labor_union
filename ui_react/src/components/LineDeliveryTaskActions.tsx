@@ -8,6 +8,9 @@ import type { LineDeliveryDetail } from '../api/line_delivery/line_delivery_quer
 import { LineNotificationFailureActions } from './LineNotificationFailureActions';
 import { z } from 'zod';
 
+const statusLabel=(status:string)=>({pending:'待寄送',processing:'寄送中',failed:'寄送失敗',retryable_failed:'等待重試',cancelled:'已取消',sent:'已送出'})[status]??status;
+const sourceLabel=(source:string)=>({finance:'帳務通知',identity:'身分通知',identity_review:'身分審核',contract:'契約通知',order:'訂單通知',assignment:'排班通知',general_push:'一般通知',matching:'媒合通知',customer_service:'客服通知',group_invitation:'群組邀請',follow_schedule:'追蹤通知',system:'系統通知',webhook_reply:'訊息回覆',rich_menu:'選單設定',rich_menu_link:'選單綁定',rich_menu_unlink:'選單解除'})[source]??source;
+
 export function LineDeliveryTaskActions({id,onCommitted}:{id:number;onCommitted:()=>Promise<void>}) {
   const [view,setView]=useState<LineDeliveryDetail|null>(null);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[reason,setReason]=useState('');
@@ -68,7 +71,7 @@ export function LineDeliveryTaskActions({id,onCommitted}:{id:number;onCommitted:
         : handling.allowed_actions.some(action=>action==='cancel'||action==='close') && <>
           <button className="np-button" disabled={busy || !!recoveryError} onClick={()=>setReview(true)}>不再寄送／結清</button>
           {review && <div aria-label="結清範圍">
-            <p>僅結清寄送工作 #{id}，來源 {view.task.source_type}，目前狀態 {view.task.status}。停止該工作的後續寄送，保留寄送歷史。</p>
+            <p>僅結清寄送工作 #{id}，來源 {sourceLabel(view.task.source_type)}，目前狀態 {statusLabel(view.task.status)}。停止該工作的後續寄送，保留寄送歷史。</p>
             <label>結清原因<input value={reason} disabled={busy || intent.current!==null} onChange={event=>setReason(event.target.value)} /></label>
             <button className="np-button" disabled={busy || !reason.trim()} onClick={()=>void control('cancel')}>確認結清寄送工作</button>
           </div>}

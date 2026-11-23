@@ -105,11 +105,11 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
     try {
       if (target.kind === 'receivable') {
         const value = await client.previewReceipt(target.caseNo, { payment_stage: stage, finance_import_row_ids: bankIds, obligation_identities: obligationIds }, requestOptions);
-        if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', 'Preview 版本與 Query 不一致。');
+        if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', '預覽版本與目前查詢不一致。');
         const checked: Preview = { kind: 'receivable', value }; setPreview(checked); await applyAction(checked);
       } else {
         const value = await client.previewPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: target.kind === 'refund' && partialRefund }, requestOptions);
-        if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', 'Preview 版本與 Query 不一致。');
+        if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', '預覽版本與目前查詢不一致。');
         const checked: Preview = { kind: 'payable', value }; setPreview(checked); await applyAction(checked);
       }
     } catch (caught) { setError(settlementErrorMessage(caught)); setPreview(null); }
@@ -126,7 +126,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
         await client.applyReceipt(target.caseNo, { payment_stage: stage, finance_import_row_ids: bankIds, obligation_identities: obligationIds, expected_account_version: preview.value.account_version, preview_fingerprint: fingerprint, reason: reason.trim() }, { ...requestOptions, idempotencyKey: command.current.idempotencyKey, correlationId: command.current.correlationId });
       } else if (target.kind !== 'receivable' && preview.kind === 'payable') {
         await client.applyPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: target.kind === 'refund' && partialRefund, expected_account_version: preview.value.account_version, preview_fingerprint: fingerprint, reason: reason.trim() }, { ...requestOptions, idempotencyKey: command.current.idempotencyKey, correlationId: command.current.correlationId });
-      } else throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_BRANCH_MISMATCH', '異常分支與 Preview 不一致。');
+      } else throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_BRANCH_MISMATCH', '異常分支與預覽不一致。');
       setUnknownOutcome(false); setObligationIds([]); setBankIds([]); setPreview(null);
       await reload(false);
       setNotice((current) => current ?? '本次核銷已重新查詢確認；若仍有其他同類逾期義務，提醒會保留。');

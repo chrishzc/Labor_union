@@ -58,6 +58,6 @@ export function adaptLineRichMenuPublicationReceipt(
     configurationRevision: mutation.configuration_revision,
     status: mutation.status,
     statusLabel: statusLabel(mutation.status),
-    durableNotice: '後端 durable 發布工作已建立；本頁未直接呼叫 LINE provider。',
+    durableNotice: '後端背景發布工作已建立；本頁未直接呼叫 LINE 官方帳號平台。',
   };
 }

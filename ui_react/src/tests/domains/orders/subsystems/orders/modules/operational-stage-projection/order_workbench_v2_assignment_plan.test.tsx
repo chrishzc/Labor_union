@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderAssignmentPlanPanel } from '../../../../../../../components/OrderAssignmentPlanPanel';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
@@ -104,9 +104,8 @@ describe('正式指派自動回讀與排班明細', () => {
     mocks.getAssignmentPlan.mockResolvedValue(assignmentPlan());
     mocks.queryPlan.mockRejectedValue(new ApiHttpError(404, 'resource_not_found', '找不到要求的資源'));
     render(<OrderAssignmentPlanPanel caseNo="CASE-ASSIGNMENT-PLAN" />);
-    fireEvent.click(await screen.findByText('查看目前月嫂與排班明細'));
-    expect(await screen.findByText('2 段')).toBeInTheDocument();
-    expect(screen.getByText(/尚無有效媒合方案/)).toBeInTheDocument();
+    expect(await screen.findByText(/尚無有效媒合方案/)).toBeInTheDocument();
+    expect(screen.queryByText('查看目前月嫂與排班明細')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('matching plan 0');
     expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('2026-09-10、2026-09-11、2026-09-12、2026-09-13');
@@ -126,29 +125,14 @@ describe('正式指派自動回讀與排班明細', () => {
     mocks.getAssignmentPlan.mockResolvedValue(assignmentPlan());
 
     render(<OrderAssignmentPlanPanel caseNo="CASE-ASSIGNMENT-PLAN" />);
-    fireEvent.click(await screen.findByText('查看目前月嫂與排班明細'));
-
     await waitFor(() => expect(mocks.getAssignmentPlan).toHaveBeenCalledWith('CASE-ASSIGNMENT-PLAN'));
-    expect(await screen.findByText('2 段')).toBeInTheDocument();
-    expect(screen.queryByText('#12')).not.toBeInTheDocument();
-    expect(screen.queryByText('#3')).not.toBeInTheDocument();
-    expect(screen.getByText('4 天 × 8 小時')).toBeInTheDocument();
-
-    const first = screen.getByLabelText('第 1 段正式指派');
-    expect(await within(first).findByText('A010 同名月嫂')).toBeInTheDocument();
-    expect(within(first).getByText('2026-09-10 ~ 2026-09-11')).toBeInTheDocument();
-    expect(within(first).getByText('2 天')).toBeInTheDocument();
-    expect(within(first).getByText('2026-09-10、2026-09-11')).toBeInTheDocument();
-
-    const second = screen.getByLabelText('第 2 段正式指派');
-    expect(await within(second).findByText('A002 同名月嫂')).toBeInTheDocument();
-    expect(within(second).getByText('2026-09-12 ~ 2026-09-13')).toBeInTheDocument();
-    expect(within(second).getByText('2 天')).toBeInTheDocument();
-    expect(screen.queryByText(/待開工|服務進行中/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('matching plan 51');
+    expect(screen.queryByText('查看目前月嫂與排班明細')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('mock 日期表確認與排班')).toHaveTextContent('matching plan 51');
     expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('2026-09-10、2026-09-11、2026-09-12、2026-09-13');
-    expect(mocks.queryStaff).toHaveBeenCalledWith({ staffId: 8891 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(mocks.queryStaff).toHaveBeenCalledWith({ staffId: 8892 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    await waitFor(() => {
+      expect(mocks.queryStaff).toHaveBeenCalledWith({ staffId: 8891 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(mocks.queryStaff).toHaveBeenCalledWith({ staffId: 8892 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    });
   });
 
   it('只有明確點擊服務前更換月嫂後才展開既有 workflow，完成後重新讀取正式指派', async () => {

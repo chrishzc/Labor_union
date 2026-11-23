@@ -121,7 +121,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     try {
       const data = await orderActualStartClient.preview(caseNo, { new_actual_start_date: date });
       const previewCaseNo = data.operation === 'date_only' ? data.case_no : data.actual_start.case_no;
-      if (previewCaseNo !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽 identity 不一致。');
+      if (previewCaseNo !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽識別資訊不一致。');
       if (!isActive(request, caseNo)) return;
       if (data.operation === 'reschedule') {
         setPreview(data);
@@ -169,7 +169,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     const saved = orderMutationFlowStore.getActualStart(caseNo);
     const receipt = saved?.receipt;
     if (!saved || !receipt || receipt.case_no !== caseNo || receipt.preview_fingerprint !== command.payload.preview_fingerprint) {
-      throw new Error('實際開始日收據 identity 不一致，已停止操作。');
+      throw new Error('實際開始日收據識別資訊不一致，已停止操作。');
     }
     orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observing', error: null });
     let data: ActualStart;

@@ -453,7 +453,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       if (receipt === null || receipt.case_no !== command.caseNo || receipt.actor !== command.actor
         || receipt.as_of !== command.asOf || receipt.event_key !== command.key
         || !hasExactPlanReceiptSegments(receipt.segments, command.segments)) {
-        throw new Error('正式媒合方案建立收據 identity 不一致；只能重新讀取。');
+        throw new Error('正式媒合方案建立收據識別資訊不一致；只能重新讀取。');
       }
       const data = await readCurrentPlan(command.caseNo, receipt.plan_id);
       if (!ownsObservation()) return;

@@ -227,7 +227,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
       if (receipt === null || receipt.case_no !== command.caseNo || receipt.actor !== command.actor
         || receipt.as_of !== command.asOf || receipt.event_key !== command.key
         || !hasExactReceiptSegments(receipt.segments, command.segments)) {
-        throw new Error('多月嫂方案收據 identity 不一致；只能重新讀取。');
+        throw new Error('多月嫂方案收據識別資訊不一致；只能重新讀取。');
       }
       const observed = await waitingDepositLockClient.queryPlan(command.caseNo);
       if (!ownsObservation()) return;

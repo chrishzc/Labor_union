@@ -51,6 +51,16 @@ function capacityLabel(source: RetentionSource): string {
   return '尚未設定容量上限';
 }
 
+function outcomeLabel(outcome: string | null): string {
+  if (!outcome) return '尚無';
+  return ({
+    completed: '已完成',
+    noop: '無需清理',
+    partial: '部分完成',
+    failed: '清理失敗',
+  } as Record<string, string>)[outcome] ?? outcome;
+}
+
 interface PreparedCleanup {
   readonly preview: RetentionPreview;
   readonly idempotencyKey: string;
@@ -194,7 +204,7 @@ export const StorageManagementPage: React.FC = () => {
               <div><dt>預估可回收</dt><dd>{formatBytes(source.estimated_reclaimable_bytes)}</dd></div>
               <div><dt>最舊候選</dt><dd>{formatTime(source.oldest_eligible_at_utc)}</dd></div>
               <div><dt>最近清理</dt><dd>{formatTime(source.last_run_at_utc)}</dd></div>
-              <div><dt>最近結果</dt><dd>{source.last_outcome ?? '尚無'}</dd></div>
+              <div><dt>最近結果</dt><dd>{outcomeLabel(source.last_outcome)}</dd></div>
             </dl>
             {source.blocked_reason && <p className="storage-blocked">{source.blocked_reason}</p>}
             <button
@@ -240,10 +250,10 @@ export const StorageManagementPage: React.FC = () => {
       )}
 
       {receipt && (
-        <section className={`storage-receipt ${receipt.outcome}`} aria-label="清理 readback" role="status">
-          <h2>清理 readback</h2>
-          <p>結果：{receipt.outcome}；刪除 {receipt.deleted_count}，失敗 {receipt.failed_count}，釋放可重新使用的空間 {formatBytes(receipt.deleted_logical_bytes)}。</p>
-          <p>Correlation：{receipt.correlation_id}</p>
+        <section className={`storage-receipt ${receipt.outcome}`} aria-label="清理結果" role="status">
+          <h2>清理結果</h2>
+          <p>結果：{outcomeLabel(receipt.outcome)}；刪除 {receipt.deleted_count}，失敗 {receipt.failed_count}，釋放可重新使用的空間 {formatBytes(receipt.deleted_logical_bytes)}。</p>
+          <p>作業編號：{receipt.correlation_id}</p>
         </section>
       )}
     </main>

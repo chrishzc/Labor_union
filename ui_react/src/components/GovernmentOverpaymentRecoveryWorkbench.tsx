@@ -173,7 +173,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
     setPreview(null);
     try {
       const result = await client.preview(request, requestOptions);
-      if (result.overpayment_version !== query.overpayment_version) throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_PREVIEW_VERSION_MISMATCH', 'Preview 版本與 Query 不一致。');
+      if (result.overpayment_version !== query.overpayment_version) throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_PREVIEW_VERSION_MISMATCH', '預覽版本與目前查詢不一致。');
       setPreview(result);
       await applyDisposition(result);
     } catch (caught) {
@@ -185,7 +185,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   const observeCompletion = async (ownerQuery?: GovernmentOverpaymentQuery): Promise<boolean> => {
     const freshOwner = ownerQuery ?? await client.query(overpaymentIdentity, requestOptions);
     if (freshOwner.overpayment_identity !== overpaymentIdentity) {
-      throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_IDENTITY_MISMATCH', 'owner readback identity 與原命令不一致。');
+      throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_IDENTITY_MISMATCH', '回讀識別資訊與原操作不一致。');
     }
     setReadback(freshOwner);
     setQuery(freshOwner);
@@ -197,7 +197,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
     }
 
     if (!/^[0-9a-f]{64}$/.test(anomalyFingerprint)) {
-      throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_ANOMALY_FINGERPRINT_INVALID', '缺少原異常 exact fingerprint，無法確認解除。');
+      throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_ANOMALY_FINGERPRINT_INVALID', '缺少原異常比對代碼，無法確認解除。');
     }
     const anomaly = await anomalyClient.queryAnomalyDetail({ fingerprint: anomalyFingerprint });
     if (!anomalyPredicateCleared(anomaly, anomalyFingerprint)) {
@@ -263,13 +263,13 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
         try {
           const freshOwner = await client.query(overpaymentIdentity, requestOptions);
           if (freshOwner.overpayment_identity !== overpaymentIdentity) {
-            throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_IDENTITY_MISMATCH', 'owner readback identity 與原命令不一致。');
+            throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_IDENTITY_MISMATCH', '回讀識別資訊與原操作不一致。');
           }
           setQuery(freshOwner);
           setReadback(freshOwner);
           setStaleOwnerRefreshRequired(false);
           setStatus('ready');
-          setError('資料已更新；舊 Preview 已清除，請重新檢查處置影響後再套用。');
+          setError('資料已更新；舊預覽已清除，請重新檢查處置影響後再套用。');
         } catch (readbackError) {
           setStatus('failed');
           setError(`資料已更新，但最新資料查詢失敗；請重新查詢後再檢查處置影響。${errorMessage(readbackError)}`);

@@ -852,7 +852,6 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
             <p>確認後，新條件將套用到已服務及後續日期的有效資料。請核對既有排班、統計及帳務影響。</p>
             {!outcomeUnknown && <button type="button" disabled={savingLocked || !startedChangeReady} onClick={() => void applyTerms()}>確認並儲存</button>}
           </div>}
-          <details><summary>技術資訊</summary><p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version ?? '未讀取'} · Payroll {preview.payroll_version ?? '未讀取'}</p></details>
 
         </div>
       )}

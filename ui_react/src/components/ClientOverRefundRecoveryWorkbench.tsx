@@ -196,7 +196,6 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
       {!cashOnly && <button type="button" className="finance-btn-secondary" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'adjustment'} onClick={() => { setAction('adjustment'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>授權人工調整</button>}
     </div>
     {action !== 'adjustment' && <label>入款流水紀錄編號<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={rowId} onChange={invalidate(setRowId)} /></label>}
-    {action === 'collection' && <details><summary>技術操作欄位</summary><label>配對識別值<input disabled={busy || applyCommand.current !== null} value={matchingIdentity} onChange={invalidate(setMatchingIdentity)} /></label><label>配對資料版本<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={matchingVersion} onChange={invalidate(setMatchingVersion)} /></label></details>}
     {action === 'adjustment' && <label>調整金額（元）<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={amount} onChange={invalidate(setAmount)} /></label>}
     <label>處理原因（選填）<textarea disabled={busy || applyCommand.current !== null} value={reason} onChange={invalidate(setReason)} /></label>
     <label>佐證紀錄（必填，可填電話／紙本紀錄索引）<input disabled={busy || applyCommand.current !== null} value={evidence} onChange={invalidate(setEvidence)} /></label>

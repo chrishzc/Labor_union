@@ -29,7 +29,7 @@ describe('M3 媒合協調操作台', () => {
     fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-M3-001' } });
     fireEvent.click(screen.getByRole('button', { name: '查詢媒合資料' }));
     await screen.findByText(`第 ${MATCHING_SNAPSHOT.criteria_version} 版`);
-    expect(screen.getByText(`條件快照：${MATCHING_SNAPSHOT.snapshot_id}`).closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText(`條件快照：${MATCHING_SNAPSHOT.snapshot_id}`)).not.toBeInTheDocument();
     expect(query).toHaveBeenCalledWith('CASE-M3-001', { expected_source_versions: null });
     expect(screen.getByLabelText('目前要處理的業務').querySelectorAll('option')).toHaveLength(17);
 
@@ -44,12 +44,18 @@ describe('M3 媒合協調操作台', () => {
     );
 
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyInitialCriteria' } });
-    expect((screen.getByLabelText('系統交換欄位') as HTMLTextAreaElement).value).toContain(MATCHING_SNAPSHOT.fingerprint);
-    expect((screen.getByLabelText('系統交換欄位') as HTMLTextAreaElement).value).toContain('orders_terms');
     expect(screen.queryByRole('checkbox', { name: '我已核對試算結果、來源版本與即將提交的決定' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '確認提交此業務決定' }));
     await waitFor(() => expect(screen.getByText('媒合決定已完成並回讀')).toBeInTheDocument());
-    expect(screen.getByText(`receipt：${MATCHING_APPLY_RECEIPT.receipt_id}`).closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText(`receipt：${MATCHING_APPLY_RECEIPT.receipt_id}`)).not.toBeInTheDocument();
+    expect(apply).toHaveBeenCalledWith(
+      'CASE-M3-001',
+      expect.objectContaining({
+        preview_fingerprint: MATCHING_SNAPSHOT.fingerprint,
+        expected_source_versions: MATCHING_QUERY_DATA.source_versions,
+      }),
+      expect.anything(),
+    );
     expect(apply).toHaveBeenCalledTimes(1);
     expect(query).toHaveBeenCalledTimes(2);
   });
@@ -70,15 +76,10 @@ describe('M3 媒合協調操作台', () => {
     await screen.findByText('已建立');
 
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'previewZeroCandidateConfirmation' } });
-    const previewPayload = (screen.getByLabelText('系統交換欄位') as HTMLTextAreaElement).value;
-    expect(previewPayload).toContain('fresh_pool_query_empty');
-    expect(previewPayload).not.toContain('candidate_count');
-    expect(previewPayload).not.toContain('disposition');
-    expect(previewPayload).not.toContain('"state"');
     fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
 
-    await screen.findByText('Step 2 受阻');
-    expect(screen.getByText('原始處置：blocked_no_candidate').closest('details')).not.toHaveAttribute('open');
+    await screen.findByText('步驟 2 受阻');
+    expect(screen.queryByText('原始處置：blocked_no_candidate')).not.toBeInTheDocument();
     expect(screen.getByText('這只記錄目前的受阻事實，不代表異常已解除')).toBeInTheDocument();
     expect(preview).toHaveBeenCalledWith(
       'CASE-R07-001',
@@ -89,6 +90,9 @@ describe('M3 媒合協調操作台', () => {
       }),
       expect.anything(),
     );
+    expect(preview.mock.calls[0]?.[1]).not.toHaveProperty('candidate_count');
+    expect(preview.mock.calls[0]?.[1]).not.toHaveProperty('disposition');
+    expect(preview.mock.calls[0]?.[1]).not.toHaveProperty('state');
 
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyZeroCandidateConfirmation' } });
     expect(screen.queryByRole('checkbox', { name: '我已核對試算結果、來源版本與即將提交的決定' })).not.toBeInTheDocument();
@@ -115,25 +119,10 @@ describe('M3 媒合協調操作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '查詢媒合資料' }));
     await screen.findByText('尚未建立');
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'previewMatchingPackage' } });
-    fireEvent.change(screen.getByLabelText('系統交換欄位'), {
-      target: {
-        value: JSON.stringify({
-          reason: 'confirm first package',
-          expected_source_versions: MATCHING_QUERY_DATA.source_versions,
-          criteria_snapshot_id: MATCHING_SNAPSHOT.snapshot_id,
-          required_service_dates: MATCHING_PACKAGE.required_service_dates,
-          segments: MATCHING_PACKAGE.segments,
-        }),
-      },
-    });
     fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
     await screen.findByText('媒合方案');
 
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyCaregiverSelection' } });
-    const applyPayload = (screen.getByLabelText('系統交換欄位') as HTMLTextAreaElement).value;
-    expect(applyPayload).toContain(MATCHING_PACKAGE.package_id);
-    expect(applyPayload).toContain(MATCHING_PACKAGE.segments[0].staff_id.toString());
-    expect(applyPayload).toContain('required_service_dates');
     expect(screen.queryByRole('checkbox', { name: '我已核對試算結果、來源版本與即將提交的決定' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '確認提交此業務決定' }));
     await screen.findByText('媒合決定已完成並回讀');
@@ -165,7 +154,7 @@ describe('M3 媒合協調操作台', () => {
     await screen.findByText('已建立');
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'previewZeroCandidateConfirmation' } });
     fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
-    await screen.findByText('Step 2 受阻');
+    await screen.findByText('步驟 2 受阻');
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyZeroCandidateConfirmation' } });
     expect(screen.queryByRole('checkbox', { name: '我已核對試算結果、來源版本與即將提交的決定' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '確認提交此業務決定' }));
@@ -180,6 +169,8 @@ describe('M3 媒合協調操作台', () => {
 
   it('無舊快照時，初始 Preview 會交由後端 fresh-read 來源版本', async () => {
     const preview = vi.spyOn(matchingCoordinationClient, 'previewInitialCriteria').mockResolvedValue(MATCHING_SNAPSHOT);
+    const apply = vi.spyOn(matchingCoordinationClient, 'applyInitialCriteria').mockResolvedValue(MATCHING_APPLY_RECEIPT);
+    vi.spyOn(matchingCoordinationClient, 'query').mockResolvedValue(MATCHING_QUERY_DATA);
     render(<MatchingCoordinationWorkbench />);
 
     fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-M3-LEGACY' } });
@@ -194,9 +185,15 @@ describe('M3 媒合協調操作台', () => {
     );
 
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyInitialCriteria' } });
-    const applyPayload = (screen.getByLabelText('系統交換欄位') as HTMLTextAreaElement).value;
-    expect(applyPayload).toContain('orders_terms');
-    expect(applyPayload).toContain(MATCHING_SNAPSHOT.fingerprint);
+    fireEvent.click(screen.getByRole('button', { name: '確認提交此業務決定' }));
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(
+      'CASE-M3-LEGACY',
+      expect.objectContaining({
+        preview_fingerprint: MATCHING_SNAPSHOT.fingerprint,
+        expected_source_versions: { items: MATCHING_SNAPSHOT.source_versions },
+      }),
+      expect.anything(),
+    ));
   });
 
   it('提交業務決定沿用自動核對來源版本的單次儲存入口', () => {
@@ -231,12 +228,12 @@ describe('M3 媒合協調操作台', () => {
     vi.spyOn(matchingCoordinationClient, 'previewInitialCriteria').mockResolvedValue(MATCHING_SNAPSHOT);
     render(<MatchingCoordinationWorkbench />);
 
-    expect(screen.getByText('技術操作欄位').closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText('技術操作欄位')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-M3-DETAILS' } });
     fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'previewInitialCriteria' } });
     fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
     await screen.findByText('初始條件快照');
-    expect(screen.getByText(`identity：${MATCHING_SNAPSHOT.snapshot_id}`).closest('details')).not.toHaveAttribute('open');
-    expect(screen.getByText(`fingerprint：${MATCHING_SNAPSHOT.fingerprint}`).closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText(`identity：${MATCHING_SNAPSHOT.snapshot_id}`)).not.toBeInTheDocument();
+    expect(screen.queryByText(`fingerprint：${MATCHING_SNAPSHOT.fingerprint}`)).not.toBeInTheDocument();
   });
 });

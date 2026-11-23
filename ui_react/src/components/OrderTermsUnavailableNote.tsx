@@ -23,5 +23,5 @@ export const OrderTermsUnavailableNote: React.FC<{ caseNo: string; code: string 
     }
     return () => controller.abort();
   }, [caseNo, code]);
-  return <><p role="status">{message}</p>{code && <details><summary>技術資訊</summary><code>{code}</code></details>}</>;
+  return <p role="status">{message}</p>;
 };

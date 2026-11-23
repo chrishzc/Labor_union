@@ -69,7 +69,7 @@ describe('AI 客服回饋與知識補強', () => {
     expect(screen.getByText('用戶認為有幫助')).toBeInTheDocument();
     expect(screen.getByText('用戶認為沒有解決')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看提問：回答已送出但尚未回饋' }));
-    expect(screen.getByText('命中題目：QA-030 v1')).toBeInTheDocument();
+    expect(screen.queryByText('命中題目與版本資訊')).not.toBeInTheDocument();
     expect(screen.getByText(/尚未收到用戶回饋，無法判定是否解決問題/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉提問明細' }));
     expect(screen.getAllByText('等待用戶回饋').length).toBeGreaterThanOrEqual(2);

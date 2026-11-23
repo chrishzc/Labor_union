@@ -201,16 +201,16 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
         applyCommand.current = null;
       const fresh = await readOwner();
       if (fresh?.prior_alert_active === true) {
-        setNotice('更正已提交；異常投影仍在重新檢核，原警示會保留到 readback 確認解除。');
+        setNotice('更正已提交；異常狀態仍在重新檢核，原警示會保留到回讀確認解除。');
       } else {
         setApplyResult({ ...result, prior_alert_active: false, readback: { ...result.readback, prior_alert_active: false } });
         onResolved?.(result);
-        setNotice(result.replayed ? '已讀回原 remediation receipt；原警示已解除。' : '更正已套用並由 owner readback 確認原警示解除。');
+        setNotice(result.replayed ? '已讀回原更正收據；原警示已解除。' : '更正已套用並經回讀確認原警示已解除。');
       }
     } catch (caught) {
       setUnknownOutcome(true);
       const fresh = await readOwner();
-      if (fresh?.prior_alert_active === false) setNotice('結果已由 owner readback 確認，原警示已解除。');
+      if (fresh?.prior_alert_active === false) setNotice('結果已經回讀確認，原警示已解除。');
       else setError(errorMessage(mapHistoricalReviewRemediationApplyError(caught)));
     } finally {
       setBusy(false);
@@ -232,18 +232,18 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
       setNotice('異常重新檢核完成，原警示已解除。');
       onResolved?.(resolved);
     } else {
-      setNotice('異常仍在重新檢核；根事實未確認解除前會繼續保留警示。');
+      setNotice('異常仍在重新檢核；原始紀錄未確認解除前會繼續保留警示。');
     }
     setBusy(false);
   };
   useUnsavedDraft('歷史訂單覆核', { '檔案': fileName, '原因': reason, '佐證': evidence }, { busy: busy || unknownOutcome, enabled: !applyResult, baseline: { '檔案': '', '原因': '', '佐證': '' } });
 
 
-  if (loading && !context) return <section aria-label="歷史訂單 review 更正"><p>正在讀取歷史訂單 review 根事實…</p></section>;
-  if (queryError && !context) return <section aria-label="歷史訂單 review 更正"><p role="alert">{queryError}</p><button type="button" onClick={() => void readOwner()}>重新查詢</button></section>;
+  if (loading && !context) return <section aria-label="歷史訂單覆核更正"><p>正在讀取歷史訂單覆核資料…</p></section>;
+  if (queryError && !context) return <section aria-label="歷史訂單覆核更正"><p role="alert">{queryError}</p><button type="button" onClick={() => void readOwner()}>重新查詢</button></section>;
   if (!context) return null;
 
-  return <section aria-label="歷史訂單 review 更正" data-review-identity={context.review_identity}>
+  return <section aria-label="歷史訂單覆核更正" data-review-identity={context.review_identity}>
     <h3>歷史訂單欄位衝突更正</h3>
     <p>案件：{context.case_identity}</p>
     <p>完成條件：{context.completion_condition}</p>
@@ -259,10 +259,10 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
 
       {applyResult.prior_alert_active && renderIssues(
         applyResult.readback.remaining_issues,
-        '原 review 尚未解除的欄位衝突',
+        '原覆核尚未解除的欄位衝突',
       )}
       {applyResult.prior_alert_active && <button type="button" onClick={() => void reconcileProjection()} disabled={busy}>重新檢核異常狀態</button>}
-      {applyResult.successor ? <div>{renderIssues(applyResult.successor.issues, `後續 review：${applyResult.successor.case_identity}`)}<p>請使用後續 review 的新修正入口。</p></div> : <p>後續流程可繼續推進；原 review 僅保留於歷史紀錄。</p>}
+      {applyResult.successor ? <div>{renderIssues(applyResult.successor.issues, `後續覆核：${applyResult.successor.case_identity}`)}<p>請使用後續覆核的新修正入口。</p></div> : <p>後續流程可繼續推進；原覆核僅保留於歷史紀錄。</p>}
     </div> : <>
       <label>單列更正 .xlsx（必須符合上述契約）<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void selectWorkbook(event)} disabled={busy || unknownOutcome} /></label>
       {fileName && <><p>已選檔案：{fileName}</p></>}

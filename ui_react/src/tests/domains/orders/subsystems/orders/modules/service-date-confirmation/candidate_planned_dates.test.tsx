@@ -70,7 +70,7 @@ it('即時試算零寫入，一次保存日期，無第二步確認；重開使�
   expect(mocks.apply.mock.calls[0][1]).not.toHaveProperty('custom_rest_weekdays');
   expect(screen.queryByRole('button', { name: /確認/ })).not.toBeInTheDocument();
   view.unmount(); const count = mocks.calculate.mock.calls.length;
-  open(); await screen.findByText(/預計服務日期：3 天/);
+  open(); await screen.findByRole('checkbox', { name: '星期五' }); expect(screen.queryByText(/預計服務日期：/)).not.toBeInTheDocument();
   expect(screen.getByRole('checkbox', { name: '星期五' })).not.toBeChecked();
   expect(mocks.calculate).toHaveBeenCalledTimes(count);
   expect(onSaved).toHaveBeenCalledTimes(1);

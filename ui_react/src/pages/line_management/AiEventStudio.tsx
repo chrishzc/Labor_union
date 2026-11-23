@@ -7,7 +7,6 @@ import {
   Bot,
   CheckCircle2,
   ExternalLink,
-  Laptop,
   Navigation,
   Pencil,
   Play,
@@ -155,14 +154,6 @@ export const AiEventStudio: React.FC = () => {
     const queryIdx = publicRoute.indexOf('?');
     const query = queryIdx !== -1 ? publicRoute.slice(queryIdx) : '';
     return `https://liff.line.me/${liffId}${query ? `/${query}` : ''}`;
-  };
-
-  const getLocalTestUrl = (publicRoute: string | null) => {
-    if (!publicRoute) return '#';
-    if (publicRoute.startsWith('http://') || publicRoute.startsWith('https://')) {
-      return publicRoute;
-    }
-    return publicRoute;
   };
 
   const startEditing = () => {
@@ -539,37 +530,6 @@ export const AiEventStudio: React.FC = () => {
               </div>
             )}
 
-            <details className="studio-technical">
-              <summary>連結與技術資訊</summary>
-              <dl className="studio-facts">
-                <dt>動作代碼</dt>
-                <dd><code>{selectedRule.routeKey}</code></dd>
-                <dt>分類</dt>
-                <dd>{TIER_LABELS[selectedRule.tier] || selectedRule.tier} ({selectedRule.tier})</dd>
-                <dt>版本與來源</dt>
-                <dd>Rev {selectedRule.revision} · {selectedRule.sourceIdentity}</dd>
-                <dt>目錄版本</dt>
-                <dd>規則版本 {catalog?.revision}</dd>
-                <dt>目標路徑</dt>
-                <dd>{selectedRule.publicRoute || '未設定跳轉頁面'}</dd>
-              </dl>
-              {selectedRule.publicRoute && (
-                <div className="ai-route-actions">
-                  {getTrueLiffUrl(selectedRule.publicRoute) && (
-                    <a href={getTrueLiffUrl(selectedRule.publicRoute)!} target="_blank" rel="noreferrer" className="ai-route-link is-liff">
-                      <ExternalLink aria-hidden="true" />開啟真實 LIFF
-                    </a>
-                  )}
-                  <a href={getLocalTestUrl(selectedRule.publicRoute)} target="_blank" rel="noreferrer" className="ai-route-link">
-                    <Laptop aria-hidden="true" />本機預覽
-                  </a>
-                </div>
-              )}
-              {selectedRule.publicRoute && getTrueLiffUrl(selectedRule.publicRoute) && (
-                <p className="ai-liff-url">正式 LIFF 連結：{getTrueLiffUrl(selectedRule.publicRoute)}</p>
-              )}
-              {!liffId && <p className="studio-description">尚未取得 LIFF ID，目前無法顯示正式服務連結。</p>}
-            </details>
           </div>
         ) : (
           <div className="ai-editor-card">
@@ -615,15 +575,6 @@ export const AiEventStudio: React.FC = () => {
                     {catalog?.entries.find((entry) => entry.route_key === routerPreview.route_key)?.alias || '已命中系統引導動作'}
                   </p>
                 )}
-                <details className="studio-technical">
-                  <summary>詳細結果</summary>
-                  <div className="ai-router-result">
-                    <div><span>問句分類</span><strong>{routerPreview.semantic_bucket}</strong></div>
-                    <div><span>引導動作代碼</span><strong>{routerPreview.route_key ?? '未命中固定動作'}</strong></div>
-                    <div><span>信心度</span><strong>{routerPreview.confidence}%</strong></div>
-                    <div><span>結果類型</span><strong>{routerPreview.kind}</strong></div>
-                  </div>
-                </details>
               </div>
             )}
           </section>

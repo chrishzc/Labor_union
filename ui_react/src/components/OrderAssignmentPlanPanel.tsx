@@ -130,37 +130,6 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
           : '尚無有效媒合方案；請至「推薦確認」確認人選。既有正式指派資料仍顯示於下方。'}</p>
       )}
 
-      {plan !== null && (plan.assignments.length > 0 || matchingPlan === null || historicalArrangementPending) && (
-        <details className="service-arrangement-assignment-details"><summary>查看目前月嫂與排班明細</summary>
-          <dl className="order-v2-business-summary" aria-label="正式指派與排班摘要">
-            <div><dt>正式指派</dt><dd>{plan.assignments.length > 0 ? `${plan.assignments.length} 段` : '尚未建立'}</dd></div>
-            <div><dt>合約服務</dt><dd>{plan.contracted_service_days} 天 × {plan.service_hours_per_day} 小時</dd></div>
-          </dl>
-
-          {plan.assignments.length === 0 ? (
-            <div className="order-v2-notice blocked" role="status">
-              <strong>尚無正式指派</strong>
-              <span>{historicalArrangementPending ? '請在上方沿用既定月嫂建立正式安排。' : '此案件尚未安排正式服務人員。'}</span>
-            </div>
-          ) : (
-            plan.assignments.map((segment) => (
-              <dl
-                className="order-v2-business-summary"
-                key={segment.assignment_id ?? segment.candidate_key ?? `${segment.staff_id}-${segment.sequence}`}
-                aria-label={`第 ${segment.sequence} 段正式指派`}
-              >
-                <div><dt>月嫂</dt><dd>{names[segment.staff_id] ?? '月嫂資料待確認'}</dd></div>
-                <div><dt>指派起訖</dt><dd>{segment.assigned_start_date} ~ {segment.assigned_end_date}</dd></div>
-                <div><dt>服務日</dt><dd>{segment.official_service_dates.length > 0 ? `${segment.official_service_dates.length} 天` : '尚未回傳'}</dd></div>
-                {segment.official_service_dates.length > 0 && <div>
-                  <dt>實際排班日期</dt><dd>{segment.official_service_dates.join('、')}</dd>
-                </div>}
-              </dl>
-            ))
-          )}
-        </details>
-      )}
-
       {showScheduleActions && plan !== null && !historicalArrangementPending && (!historicalBinding || plan.assignments.length > 0) && (
         <MatchingScheduleAndAssignmentActions
           caseNo={caseNo}

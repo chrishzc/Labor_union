@@ -65,8 +65,8 @@ describe('ClientOverRefundRecoveryWorkbench', () => {
     render(<ClientOverRefundRecoveryWorkbench caseNo="CASE-1" recoveryIdentity="recovery:1" client={owner} />);
     await waitFor(() => expect(screen.getByText(/目前餘額：500/)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '核銷已配對入款' })).toBeInTheDocument();
-    expect(await screen.findByText('技術操作欄位')).toBeInTheDocument();
-    expect(screen.queryByDisplayValue('match:1')).not.toBeVisible();
+    expect(screen.queryByText('技術操作欄位')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('match:1')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /解除異常/ })).not.toBeInTheDocument();
   });
 });

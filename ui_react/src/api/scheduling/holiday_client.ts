@@ -211,7 +211,7 @@ function decode<T>(
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     throw new ApiDecodeError(
-      `國定假日 ${operation} 回應結構異常。`,
+      `國定假日 ${({ Query: '查詢', Preview: '預覽', Apply: '套用', query: '查詢', preview: '預覽', apply: '套用' } as Record<string, string>)[operation] ?? operation} 回應結構異常。`,
       parsed.error.issues.map((issue) => ({
         path: issue.path.join('.') || '(root)',
         message: issue.message,

@@ -174,7 +174,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     const saved = orderMutationFlowStore.getCancellation(command.caseNo);
     const receipt = saved?.receipt;
     if (!saved || !receipt || receipt.case_no !== command.caseNo || receipt.preview_fingerprint !== command.payload.preview_fingerprint) {
-      throw new Error('訂單取消收據 identity 不一致，已停止操作。');
+      throw new Error('訂單取消收據識別資訊不一致，已停止操作。');
     }
     orderMutationFlowStore.setCancellation(command.caseNo, { ...saved, status: 'observing', error: null });
     readbackController.current?.abort();

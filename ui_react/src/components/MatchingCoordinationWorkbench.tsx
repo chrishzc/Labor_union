@@ -109,7 +109,7 @@ function operationIdentity(prefix: string): string {
 function displayMatchingError(caught: unknown, fallback: string): string {
   const message = caught instanceof Error ? caught.message : '';
   if (message.includes('orders_service_dates not_confirmed')) return '案件服務日期尚未確認，請先到訂單管理完成服務日期確認後再查詢。';
-  if (message.includes('matching_criteria_snapshot unavailable')) return '本案件尚未建立媒合條件快照；請先執行初始條件 Preview，核對後再提交。';
+  if (message.includes('matching_criteria_snapshot unavailable')) return '本案件尚未建立媒合條件快照；請先執行初始條件預覽，核對後再提交。';
   if (message.includes('source') && message.includes('unavailable')) return '此案件的媒合來源資料尚未完整，請依錯誤來源補正後重試。';
   return message || fallback;
 }
@@ -238,12 +238,6 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
   const invalidateZeroCandidateConfirmationAttempt = () => {
     zeroCandidateConfirmationAttempt.current = null;
     setOutcomeUnknown(false);
-  };
-
-  const loadTemplate = (nextOperation = operation) => {
-    setPayloadText(templateFor(nextOperation, query, lastPreviewFingerprint, initialPreviewSourceVersions, previewPackage));
-    setError(null);
-    invalidateZeroCandidateConfirmationAttempt();
   };
 
   const runQuery = async () => {
@@ -375,7 +369,7 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
           const value = await matchingCoordinationClient.previewZeroCandidateConfirmation(caseNo.trim(), parsed as PreviewZeroCandidateConfirmationRequest, options);
           summary = {
             title: '確認目前確實無候選',
-            status: 'Step 2 受阻',
+            status: '步驟 2 受阻',
             identity: value.package_id,
             fingerprint: value.fingerprint,
             details: [
@@ -439,24 +433,19 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
         {embeddedInOrderWorkflow ? <p className="matching-coordination-case-context">案件 {caseNo}</p> : <label htmlFor="matching-case-no">案件編號<input id="matching-case-no" disabled={busy || outcomeUnknown} value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setQuery(null); setPreviewPackage(null); setInitialPreviewSourceVersions(null); invalidateZeroCandidateConfirmationAttempt(); }} /></label>}
         <button type="button" disabled={!caseNo.trim() || busy || outcomeUnknown} onClick={() => void runQuery()}>{busy ? '處理中…' : embeddedInOrderWorkflow ? '重新核對案件資料' : '查詢媒合資料'}</button>
       </div>
-      {query && <><div className="matching-coordination-facts"><div><span>已讀取的條件版本</span><strong>第 {query.snapshot.criteria_version} 版</strong></div><div><span>媒合方案</span><strong>{query.matchingPackage ? '已建立' : '尚未建立'}</strong></div><div><span>來源版本</span><strong>{query.expectedSourceVersionsMatch ? '一致，可繼續' : '已變更，請重新核對'}</strong></div><div><span>候選人</span><strong>{query.candidates.length}</strong></div><div><span>拒絕歷史</span><strong>{query.refusalHistory.length}</strong></div></div>{!embeddedInOrderWorkflow && <details><summary>技術詳情與資料來源</summary><div>條件快照：{query.snapshot.snapshot_id}</div><div>媒合方案：{query.matchingPackage?.package_id ?? '尚未建立'}</div></details>}{!embeddedInOrderWorkflow && query.candidates.length > 0 && <div className="matching-coordination-table"><table><thead><tr><th>服務人員</th><th>資格</th><th>意願</th><th>拒絕原因</th></tr></thead><tbody>{query.candidates.map((candidate) => <tr key={candidate.candidate_id}><td>{candidate.staff_name}</td><td>{eligibilityLabel(candidate.eligibility)}</td><td>{willingnessLabel(candidate.willingness)}</td><td>{candidate.rejection_reasons.join('、') || '無'}</td></tr>)}</tbody></table></div>}</>}
+      {query && <><div className="matching-coordination-facts"><div><span>已讀取的條件版本</span><strong>第 {query.snapshot.criteria_version} 版</strong></div><div><span>媒合方案</span><strong>{query.matchingPackage ? '已建立' : '尚未建立'}</strong></div><div><span>來源版本</span><strong>{query.expectedSourceVersionsMatch ? '一致，可繼續' : '已變更，請重新核對'}</strong></div><div><span>候選人</span><strong>{query.candidates.length}</strong></div><div><span>拒絕歷史</span><strong>{query.refusalHistory.length}</strong></div></div>{!embeddedInOrderWorkflow && query.candidates.length > 0 && <div className="matching-coordination-table"><table><thead><tr><th>服務人員</th><th>資格</th><th>意願</th><th>拒絕原因</th></tr></thead><tbody>{query.candidates.map((candidate) => <tr key={candidate.candidate_id}><td>{candidate.staff_name}</td><td>{eligibilityLabel(candidate.eligibility)}</td><td>{willingnessLabel(candidate.willingness)}</td><td>{candidate.rejection_reasons.join('、') || '無'}</td></tr>)}</tbody></table></div>}</>}
       {embeddedInOrderWorkflow ? <div className="matching-coordination-business-panel">
-        <div><strong>本步要確認什麼？</strong><p>服務日期、服務區域、每日時段、承接天數與料理需求是否可作為候選篩選條件。檔期衝突仍會由下一步的正式 gate 判定。</p></div>
+        <div><strong>本步要確認什麼？</strong><p>服務日期、服務區域、每日時段、承接天數與料理需求是否可作為候選篩選條件。檔期衝突仍會由下一步的正式檢核判定。</p></div>
         <button type="button" className="matching-coordination-primary" disabled={!caseNo.trim() || busy} onClick={() => { setOperation('applyInitialCriteria'); const text = templateFor('applyInitialCriteria', query, null); setPayloadText(text); void runOperation('applyInitialCriteria', text); }}>{busy ? '處理中…' : '儲存媒合條件'}</button>
         {preview?.title === '初始條件快照' && <div className="matching-coordination-next-step" role="status"><strong>條件已核對</strong><span>{preview.details.join('｜')}</span><span>下一步：在下方「查詢合格月嫂清單」取得符合條件的候選人。</span></div>}
         <details className="matching-coordination-exception"><summary>條件變更、無候選或月嫂請假的處理</summary><p>發生例外時，先在既有媒合步驟更新案件條件或候選資料，再重新核對；不在此直接變更正式指派或契約。</p></details>
       </div> : <div className="matching-coordination-action-panel">
         <label htmlFor="matching-operation">目前要處理的業務<select id="matching-operation" disabled={busy || outcomeUnknown} value={operation} onChange={(event) => { const next = event.target.value as Operation; setOperation(next); setPayloadText(templateFor(next, query, lastPreviewFingerprint, initialPreviewSourceVersions, previewPackage)); invalidateZeroCandidateConfirmationAttempt(); }}>{OPERATION_GROUPS.map(([groupLabel, operations]) => <optgroup key={groupLabel} label={groupLabel}>{operations.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select></label>
         <p className="matching-coordination-flow-note">儲存時自動核對目前資料與版本；原因可留空。</p>
-        <details>
-          <summary>技術操作欄位</summary>
-          <button type="button" className="matching-coordination-secondary" disabled={busy || outcomeUnknown} onClick={() => loadTemplate()}>依目前查詢重建欄位</button>
-          <label className="matching-coordination-payload" htmlFor="matching-payload">系統交換欄位<textarea id="matching-payload" disabled={busy || outcomeUnknown} rows={12} spellCheck={false} value={payloadText} onChange={(event) => { setPayloadText(event.target.value); if (operation === 'previewMatchingPackage') { setPreviewPackage(null); setLastPreviewFingerprint(null); } invalidateZeroCandidateConfirmationAttempt(); }} /></label>
-        </details>
         <button type="button" className="matching-coordination-primary" disabled={!caseNo.trim() || busy} onClick={() => void runOperation()}>{busy ? '處理中…' : outcomeUnknown ? '安全重試原操作' : isApply ? '確認提交此業務決定' : '執行試算'}</button>
       </div>}
-      {!embeddedInOrderWorkflow && preview && <div className="matching-coordination-preview" role="status"><h3>{preview.title}</h3><p>{preview.status}</p><ul>{preview.details.map((detail, index) => <li key={`${detail}-${index}`}>{detail}</li>)}</ul><details><summary>技術詳情與資料來源</summary><p>identity：{preview.identity}</p>{preview.fingerprint && <p>fingerprint：{preview.fingerprint}</p>}{preview.technicalDetails?.map((detail, index) => <p key={`${detail}-${index}`}>{detail}</p>)}</details></div>}
-      {receipt && <div className="matching-coordination-success" role="status"><h3>媒合決定已完成並回讀</h3><p>{resultStateLabel(receipt.resultState)}</p>{receipt.commandName === 'ApplyZeroCandidateConfirmation' && <><p>目前仍停在步驟 2，沒有合法候選</p><p>本次只完成受阻事實紀錄，不代表異常已解除。</p></>}<details><summary>技術詳情與資料來源</summary><p>{receipt.commandName}｜{receipt.resultState}</p><p>receipt：{receipt.receiptId}</p></details></div>}
+      {!embeddedInOrderWorkflow && preview && <div className="matching-coordination-preview" role="status"><h3>{preview.title}</h3><p>{preview.status}</p><ul>{preview.details.map((detail, index) => <li key={`${detail}-${index}`}>{detail}</li>)}</ul></div>}
+      {receipt && <div className="matching-coordination-success" role="status"><h3>媒合決定已完成並回讀</h3><p>{resultStateLabel(receipt.resultState)}</p>{receipt.commandName === 'ApplyZeroCandidateConfirmation' && <><p>目前仍停在步驟 2，沒有合法候選</p><p>本次只完成受阻事實紀錄，不代表異常已解除。</p></>}</div>}
       {error && <div className="matching-coordination-error" role="alert">{error}</div>}
     </section>
   );

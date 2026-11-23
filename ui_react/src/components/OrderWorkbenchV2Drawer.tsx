@@ -553,7 +553,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               </li>
             ))}
           </ol>
-          {timeline.status === 'ready' && !terminalStatus && workbenchScope === 'in_progress' && <details className="order-case-progress"><summary>查看十三階段紀錄</summary><ol>{timeline.data.core_stages.map((stage) => <li key={stage.code}><span>{stage.ordinal}. {stage.label}</span><small>{stage.status === 'completed' ? '已完成' : stage.status === 'blocked' ? '需要處理' : stage.status === 'unavailable' ? '暫無資料' : '可繼續辦理'}</small></li>)}</ol></details>}
         </aside>
         <div className="order-case-task-body">
           <div className="order-case-work-heading"><div><p className="order-case-eyebrow">{terminalStatus ? '案件紀錄' : activeGroup === suggestedGroup ? '目前待辦' : '其他辦理事項'}</p><h2>{groupTitle}</h2>{activeGroup !== 'intake' && !showCompletion && groupDefinition.description && <p>{groupDefinition.description}</p>}</div>

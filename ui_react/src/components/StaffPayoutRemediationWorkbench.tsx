@@ -180,7 +180,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     setError(null);
     try {
       const fresh = await client.query(target.staffId, requestOptions);
-      if (!targetPresent(fresh, target)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', 'owner Query 找不到原異常義務。');
+      if (!targetPresent(fresh, target)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', '重新查詢找不到原異常應付項目。');
       if (current === generation.current && mounted.current) {
         setQuery(fresh);
         if (resolveOnSettled && targetSettled(fresh, target)) {
@@ -200,7 +200,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     setRowIdsText(financeImportRowId === undefined ? '' : String(financeImportRowId)); setDifferenceMode(''); setReason(''); setError(null); setNotice(null); setUnknownOutcome(false); command.current = null;
     const current = generation.current;
     void client.query(target.staffId, requestOptions).then((fresh) => {
-      if (!targetPresent(fresh, target)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', 'owner Query 找不到原異常義務。');
+      if (!targetPresent(fresh, target)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', '重新查詢找不到原異常應付項目。');
       if (current === generation.current && mounted.current) { setQuery(fresh); setBusy(null); }
     }).catch((caught: unknown) => {
       if (current === generation.current && mounted.current) { setBusy(null); setError(displayError(caught,sourceBank)); }
@@ -227,7 +227,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     try {
       const value = await client.preview(selected, requestOptions);
       if (selected.differenceMode === 'subsidy_split' && !value.subsidy_split) throw new StaffPayoutRemediationError('STAFF_PAYOUT_SCHEMA_MISMATCH', '方案一預覽缺少正式補助分配。');
-      if (!previewMatchesTarget(value, target, query)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_IDENTITY_MISMATCH', 'Preview 未回傳同一 Staff 與原義務。');
+      if (!previewMatchesTarget(value, target, query)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_IDENTITY_MISMATCH', '預覽未回傳同一月嫂與原應付項目。');
       setPreviewRemainingBefore(remainingTotal);
       setPreview(value);
       if (!needsConfirmation) await runApply(value);
@@ -269,14 +269,14 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       if (attempt + 1 < maxPollAttempts && pollIntervalMs > 0) await waitForPoll(pollIntervalMs);
     }
     if (!latest || (latest.status !== 'succeeded' && latest.status !== 'failed' && latest.status !== 'cancelled')) {
-      throw new StaffPayoutRemediationError('STAFF_PAYOUT_JOB_TIMEOUT', 'Job 在期限內沒有 terminal 結果。', true);
+      throw new StaffPayoutRemediationError('STAFF_PAYOUT_JOB_TIMEOUT', '背景作業在期限內沒有完成結果。', true);
     }
     if (latest.status !== 'succeeded') {
       setPreview(null); setAccepted(null); command.current = null; setNotice(terminalMessage(latest,sourceBank));
       return;
     }
     if (latest.outcome?.kind !== 'success' || latest.outcome.result_reference !== `staff_payout:${target.staffId}`) {
-      throw new StaffPayoutRemediationError('STAFF_PAYOUT_JOB_RESULT_MISMATCH', 'Job 成功結果未指向同一 Staff Payables root。');
+      throw new StaffPayoutRemediationError('STAFF_PAYOUT_JOB_RESULT_MISMATCH', '背景作業成功結果未指向同一月嫂應付帳戶。');
     }
     await readbackAfterSuccess();
   };

@@ -254,7 +254,7 @@ export function adaptCustomerServiceReplyReceipt(
     deliveryDelivered: receipt.delivery_delivered,
     replayed: receipt.replayed,
     readback: adaptCustomerServiceDetail(receipt.readback),
-    notice: '後端已建立 durable delivery task；排入佇列不等於 LINE provider 已送出、使用者已收件或已讀。',
+    notice: '後端已建立待發送排程工作；排入佇列不等於 LINE 官方帳號已送出、使用者已收件或已讀。',
   };
 }
 

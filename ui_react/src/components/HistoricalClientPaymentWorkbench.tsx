@@ -125,7 +125,7 @@ export const HistoricalClientPaymentWorkbench: React.FC<{ caseNo: string }> = ({
     let receipt: HistoricalClientPaymentFlowState['receipt'];
     try {
       receipt = await historicalClientPaymentClient.apply(command.intent, command.preview, command.reason, command.key, { expectedActor: command.actor });
-      if (!receiptMatches(command, receipt)) throw new Error('歷史客戶付款收據 identity 不一致。');
+      if (!receiptMatches(command, receipt)) throw new Error('歷史客戶付款收據識別資訊不一致。');
     } catch (error) {
       if (!recovery && definitiveRejection(error)) {
         orderMutationFlowStore.clearHistoricalClientPayment(caseNo);

@@ -287,7 +287,7 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     description: ANOMALY_DESCRIPTIONS[dto.definition_code]
       ?? `請核對${relatedEntity}的目前資料與可採取的處理方式。`,
     suggestedAction: dto.definition_code === 'HISTORICAL-ORDER-001'
-      ? '開啟處理方式，上傳只含此 review 對應列的更正工作簿。'
+      ? '開啟處理方式，上傳只含此覆核對應列的更正工作簿。'
       : '開啟詳情查看可執行的處置。',
     rootEvidence: `影響對象：${relatedEntity}`,
     staffCalendarNavigation: dto.staff_calendar_navigation ?? null,

@@ -94,7 +94,7 @@ describe('AI 事件工作室正式規則 readback', () => {
       expect(screen.getByText(/月嫂認證.*預約與登記/)).toBeInTheDocument();
       expect(screen.getByText(/修改個人資料或訂單內容.*留言/)).toBeInTheDocument();
       expect(screen.getByText(/小幫手選單.*雙方合意延期/)).toBeInTheDocument();
-      expect(screen.getByText(/規則版本 3/)).toBeInTheDocument();
+      expect(screen.queryByText('連結與技術資訊')).not.toBeInTheDocument();
     });
     fireEvent.change(screen.getByRole('searchbox', { name: '搜尋引導動作' }), {
       target: { value: '恢復自動回答' },
@@ -128,8 +128,8 @@ describe('AI 事件工作室正式規則 readback', () => {
     fireEvent.click(screen.getByRole('button', { name: '預覽引導動作' }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText('問句處理預覽結果')).toHaveTextContent('問句分類route');
-      expect(screen.getByLabelText('問句處理預覽結果')).toHaveTextContent('引導動作代碼customer_binding');
+      expect(screen.getByLabelText('問句處理預覽結果')).toHaveTextContent('綁定訂單');
+      expect(screen.queryByText('詳細結果')).not.toBeInTheDocument();
       expect(screen.getByText(/此動作沒有可在這裡維護的指令/)).toBeInTheDocument();
       expect(screen.getByRole('heading', { name: '綁定後台帳號' })).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: '綁定訂單' })).not.toBeInTheDocument();

@@ -81,7 +81,7 @@ it('結清先核對範圍及原因，未知結果不假成功並沿用原命令'
   window.location.hash=`#line-management?tab=delivery&view=failures&issue=${key}`;
   render(<LineDeliveryOperationsWorkbench/>);
   fireEvent.click(await screen.findByRole('button',{name:'不再寄送／結清'}));
-  expect(await screen.findByText('寄送工作 #7：failed')).toBeVisible();
+  expect(await screen.findByText('寄送工作 #7：寄送失敗')).toBeVisible();
   expect(screen.getByRole('button',{name:'確認結清原通知'})).toBeDisabled();
   fireEvent.change(screen.getByRole('textbox',{name:'結清原因'}),{target:{value:'已人工通知'}});
   fireEvent.click(screen.getByRole('button',{name:'確認結清原通知'}));

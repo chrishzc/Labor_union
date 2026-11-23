@@ -132,8 +132,8 @@ describe('Beta reuses legacy canonical owner readbacks', () => {
     render(<OrderWorkbenchV2OwnerContext caseNo="CASE-A" />);
     openContext();
 
-    expect(await screen.findByText('fixture.created')).toBeInTheDocument();
-    expect(screen.getByText('scheduled')).toBeInTheDocument();
+    expect(await screen.findByText('測試通知事件')).toBeInTheDocument();
+    expect(screen.getByText('已排程')).toBeInTheDocument();
     expect(screen.getByText('尚無投遞紀錄')).toBeInTheDocument();
     expect(screen.getByText('歷史靜默事件；不補發通知。')).toBeInTheDocument();
   });

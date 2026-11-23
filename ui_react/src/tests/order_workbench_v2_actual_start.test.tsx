@@ -99,7 +99,7 @@ describe('Beta 實際開始日正式操作', () => {
     render(<OrderActualStartPanel caseNo={CASE} />); await open();
     fireEvent.change(screen.getByLabelText('更正實際開始日期'), { target: { value: '2026-09-02' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽日期與逐段排班' }));
-    await screen.findByText('實際開始日預覽 identity 不一致。'); expect(mocks.apply).not.toHaveBeenCalled();
+    await screen.findByText('實際開始日預覽識別資訊不一致。'); expect(mocks.apply).not.toHaveBeenCalled();
   });
 
   it('422 會顯示後端驗證代碼，不再只顯示通用訊息', async () => {
