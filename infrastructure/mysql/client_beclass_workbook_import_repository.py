@@ -191,25 +191,27 @@ class ClientBeClassWorkbookImportRepository:
 
     def case_availability(
         self, name: str, phone: str, *, for_update: bool, case_no: str | None = None,
+        allow_partial_match: bool = False,
     ) -> ClientBeClassCaseAvailability:
         if not name or not phone:
             return ClientBeClassCaseAvailability((), {})
         case_clause = " AND o.case_no=%s" if case_no is not None else ""
         params = (name, phone) if case_no is None else (name, phone, case_no)
         lock = " FOR UPDATE" if for_update else ""
+        identity_clause = "(c.name=%s OR c.phone=%s)" if allow_partial_match else "(c.name=%s AND c.phone=%s)"
         with self.connection.cursor() as cursor:
             cursor.execute(
                 "SELECT o.case_no, c.id AS client_id, c.name, c.phone, c.city, "
                 "hcm.id AS hcm_client_id, hcm.created_at, o.start_date "
                 "FROM clients c STRAIGHT_JOIN orders o ON o.client_id=c.id "
                 "LEFT JOIN clients hcm ON hcm.case_no=o.case_no "
-                "WHERE c.name=%s AND c.phone=%s"
-                f"{case_clause} ORDER BY o.case_no{lock}",
+                f"WHERE {identity_clause}{case_clause} ORDER BY o.case_no{lock}",
                 params,
             )
             rows = tuple(
                 row for row in cursor.fetchall()
-                if row["name"] == name and row["phone"] == phone
+                if ((row["name"] == name and row["phone"] == phone)
+                    or (allow_partial_match and (row["name"] == name or row["phone"] == phone)))
                 and (case_no is None or row["case_no"] == case_no)
             )
             if not rows:
@@ -240,10 +242,11 @@ class ClientBeClassWorkbookImportRepository:
                 unavailable[number] = ClientBeClassCaseUnavailableReason.HCM_CASE_MISSING
             else:
                 candidates.append(ClientBeClassCaseCandidate(
-                    number, row["client_id"], row["name"],
-                    mask_client_beclass_phone(row["phone"]), row["city"],
+                    number, row["client_id"], row["name"] or "",
+                    mask_client_beclass_phone(row["phone"] or ""), row["city"],
                     None if row["created_at"] is None else str(row["created_at"]),
                     None if row["start_date"] is None else str(row["start_date"]),
+                    full_identity_match=row["name"] == name and row["phone"] == phone,
                 ))
         return ClientBeClassCaseAvailability(tuple(candidates), unavailable)
 

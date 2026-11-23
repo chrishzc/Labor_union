@@ -51,7 +51,11 @@ class MySqlImportFieldIssuesRepository:
             warnings = tuple(cursor.fetchall())
             if not warnings:
                 return tuple(issues)
-            cursor.execute("SELECT c.email,c.city FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s", (case_no,))
+            cursor.execute(
+                "SELECT c.email,c.city,o.requires_cooking "
+                "FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s",
+                (case_no,),
+            )
             profile = cursor.fetchone()
             if profile is None:
                 raise RuntimeError("import_field_issues_client_root_missing")
@@ -82,6 +86,7 @@ class MySqlImportFieldIssuesRepository:
         for warning in warnings:
             values = {field: warning.get(field) for field in ("refund_bank_code", "refund_account_no")}
             values.update({field: corrections[field] for field in corrected_fields if field in corrections})
+            values["requires_cooking"] = profile.get("requires_cooking")
             issues.extend(current_beclass_field_issues(tuple(_json(warning["issue_codes"], [])), values, profile, cleared_fields=corrected_fields & frozenset(corrections)))
         return tuple({(issue.source, issue.owner, issue.field, issue.code): issue for issue in issues}.values())
 

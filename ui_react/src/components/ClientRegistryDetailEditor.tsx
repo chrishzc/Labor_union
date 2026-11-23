@@ -1,5 +1,5 @@
 import { useUnsavedChanges } from './UnsavedChanges';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { clientRegistryClient } from '../api/client_registry/client_registry_client';
 import type { BeClassChanges, ClientProfileChanges, ClientRegistryChangeHistoryItem, ClientRegistryDetail, RegistryMutationPreview } from '../api/client_registry/client_registry_schemas';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -111,6 +111,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   const [confirmedBlankRefunds, setConfirmedBlankRefunds] = useState<RefundField[]>([]);
   const [termsState, setTermsState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [intakeNeeded, setIntakeNeeded] = useState(true);
+  const cookingIssueId = useId();
   const [intakeState, setIntakeState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [intakeOpened, setIntakeOpened] = useState(() => focusField === 'intake' || ['order_terms_service_hours_per_day_required', 'order_terms_start_date_required', 'order_terms_service_days_required'].includes(detail.order_terms.code ?? ''));
   const [repairState, setRepairState] = useState<RegistryEditState>({ dirty: false, busy: false });
@@ -146,6 +147,10 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     }));
   }, [detail]);
   useEffect(() => {
+    if (focusField === 'requires_cooking') {
+      document.getElementById('registry-order-terms')?.focus();
+      return;
+    }
     if (focusField) (document.getElementById(`registry-profile-${focusField}`) ?? document.getElementById(`registry-identity-${focusField}`) ?? document.getElementById(`registry-beclass-${focusField}`) ?? document.getElementById(`registry-care-${focusField}`))?.focus();
   }, [detail.case_no, focusField]);
   const changes = useMemo(() => ({ profile: diff(drafts.profile, source(detail, 'profile'), 'profile'), identity: diff(drafts.identity, source(detail, 'identity'), 'identity'), beclass: { ...diff(drafts.beclass, source(detail, 'beclass'), 'beclass'), ...Object.fromEntries(confirmedBlankRefunds.filter(field => canConfirmRefundBlank(detail, field, drafts.beclass[field])).map(field => [field, null])) }, care: diff(drafts.care, source(detail, 'care'), 'care') }), [drafts, detail, confirmedBlankRefunds]);
@@ -264,6 +269,9 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     </section>;
   };
   const bootstrapRequired = ['client_finance_bootstrap_required', 'order_terms_start_date_required', 'order_terms_service_days_required'].includes(detail.order_terms.code ?? '') || detail.finance.code === 'client_finance_bootstrap_required';
+  const orderTermsIssues = (detail.import_field_issues ?? []).filter((issue) => issue.owner === 'order_terms');
+  const cookingIssue = orderTermsIssues.filter((issue) => issue.field === 'requires_cooking').map((issue) => issue.message).join('；');
+  const editableTerms = detail.order_terms.status === 'ready' && !intakeOpened ? detail.order_terms.data : null;
   const refreshRelated = async () => {
     try { await onRefresh(); setRefreshError(''); }
     catch (error) { setRefreshError(`最新案件資料讀取失敗：${errorText(error)}`); }
@@ -276,9 +284,14 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     {refreshError && <p role="alert">{refreshError}<button type="button" onClick={() => void refreshRelated()}>重新讀取案件資料</button></p>}
     {renderSection('profile')}
     {renderSection('beclass')}{renderSection('care')}
-    <section id="registry-order-terms" className="registry-editor"><h3>目前訂單條件</h3><dl className="registry-information-fields">{Object.entries({planned_start_date: '整案預計開始日', planned_end_date: '整案預計結束日', actual_start_date: '整案實際開始日', actual_end_date: '整案實際結束日'}).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{detail.order_dates?.[field as keyof NonNullable<typeof detail.order_dates>] ?? '尚未登錄'}</dd></div>)}</dl><p>服務方式（排班參考）：{detail.service_type ?? '尚未登錄'}</p>
-      <fieldset disabled={pending && !intakeState.busy} className="registry-terms-fieldset">{intakeOpened ? <OrderIntakeRepairPanel caseNo={detail.case_no} repairServiceTime registry issues={(detail.import_field_issues ?? []).filter((issue) => issue.owner === 'order_terms')} focusMissing={focusField === 'intake'} onChanged={refreshIntake} onEditStateChange={setIntakeState} onNeedsRepair={setIntakeNeeded} /> : detail.order_terms.status === 'ready' && detail.order_terms.data
-        ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} fromRegistry onObserved={refreshRelated} onEditStateChange={setTermsState} />
+    <section id="registry-order-terms" className="registry-editor" tabIndex={focusField === 'requires_cooking' ? -1 : undefined}><h3>目前訂單條件</h3><dl className="registry-information-fields">{Object.entries({planned_start_date: '整案預計開始日', planned_end_date: '整案預計結束日', actual_start_date: '整案實際開始日', actual_end_date: '整案實際結束日'}).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{detail.order_dates?.[field as keyof NonNullable<typeof detail.order_dates>] ?? '尚未登錄'}</dd></div>)}</dl><p>服務方式（排班參考）：{detail.service_type ?? '尚未登錄'}</p>
+      {!editableTerms && cookingIssue && <div className="registry-fields"><div>
+        <label htmlFor={cookingIssueId}>下廚料理需求</label>
+        <input id={cookingIssueId} value="尚未確認" readOnly aria-invalid="true" aria-describedby={`${cookingIssueId}-message`} />
+        <small id={`${cookingIssueId}-message`} className="source-issue">{cookingIssue}</small>
+      </div></div>}
+      <fieldset disabled={pending && !intakeState.busy} className="registry-terms-fieldset">{intakeOpened ? <OrderIntakeRepairPanel caseNo={detail.case_no} repairServiceTime registry issues={orderTermsIssues} focusMissing={focusField === 'intake'} onChanged={refreshIntake} onEditStateChange={setIntakeState} onNeedsRepair={setIntakeNeeded} /> : editableTerms
+        ? <OrderTermsMutationPanel caseNo={detail.case_no} query={editableTerms} cookingIssue={cookingIssue} fromRegistry onObserved={refreshRelated} onEditStateChange={setTermsState} />
         : <OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} />}
       </fieldset>{bootstrapRequired && (!intakeOpened || !intakeNeeded) && <fieldset disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || intakeState.busy || accountState.busy || pricingState.busy} className="registry-terms-fieldset"><CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={async () => { await onRefresh(); }} onEditStateChange={setRepairState} /></fieldset>}
       {intakeOpened && !intakeNeeded && detail.order_terms.status === 'ready' && <button type="button" disabled={pending || intakeState.dirty} onClick={() => setIntakeOpened(false)}>編輯完整服務條件</button>}

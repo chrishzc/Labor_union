@@ -408,8 +408,9 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           const tdProps = tableLayout.getTdProps(col.id);
           const content = renderCellContent(item, col.id);
           const cellTitle = typeof content === 'string' && content ? content : typeof content === 'number' ? String(content) : undefined;
-          const issues = (listIssues.get(item.case_no)?.issues ?? []).filter(issue => issue.field === col.id && issue.owner !== 'order_terms');
-          return <td key={col.id} className={tdProps.className} style={tdProps.style} title={cellTitle}>{content}{issues.length > 0 && <small className="source-issue"> {issues.map(issue => issue.message).join('；')}</small>}</td>;
+          const issues = (listIssues.get(item.case_no)?.issues ?? []).filter(issue => issue.field === col.id && (issue.owner !== 'order_terms' || col.id === 'requires_cooking'));
+          const hasCookingIssue = col.id === 'requires_cooking' && issues.length > 0;
+          return <td key={col.id} className={tdProps.className} style={tdProps.style} title={cellTitle} data-source-issue={hasCookingIssue || undefined}>{content}{issues.length > 0 && <small className="source-issue"> {issues.map(issue => issue.message).join('；')}</small>}</td>;
         })}
       </tr>)}</tbody>
     </table></div>}

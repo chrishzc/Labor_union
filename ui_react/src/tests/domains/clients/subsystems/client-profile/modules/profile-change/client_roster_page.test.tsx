@@ -5,6 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
+import { importFieldIssueHref, loadCurrentImportFieldIssuesForCases, type ImportFieldIssue } from '../../../../../../../api/case_import/import_field_issues';
 import { orderCancellationClient } from '../../../../../../../api/orders/order_cancellation_client';
 import { orderTermsMutationClient, type OrderTermsQuery } from '../../../../../../../api/orders/order_terms_mutation_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
@@ -19,6 +20,10 @@ const intakeMocks = vi.hoisted(() => ({ previewCompletion: vi.fn(), previewTerms
 const accountMocks = vi.hoisted(() => ({ query: vi.fn(), apply: vi.fn() }));
 vi.mock('../../../../../../../api/client_finance/case_virtual_account_client', () => ({ caseVirtualAccountClient: accountMocks }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
+vi.mock('../../../../../../../api/case_import/import_field_issues', async (original) => ({
+  ...await original<typeof import('../../../../../../../api/case_import/import_field_issues')>(),
+  loadCurrentImportFieldIssuesForCases: vi.fn().mockResolvedValue([]),
+}));
 vi.mock('../../../../../../../api/case_import/case_architecture_bootstrap_client', () => ({ caseArchitectureBootstrapClient: bootstrapMocks }));
 vi.mock('../../../../../../../api/orders/order_intake_completion_client', () => ({
   orderIntakeCompletionClient: intakeMocks,
@@ -40,6 +45,11 @@ const orderTerms: OrderTermsQuery = {
     requires_cooking: true, floor_fee_ntd: 0,
     service_time: { start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 },
   },
+};
+
+const cookingIssue: ImportFieldIssue = {
+  source: 'client_beclass', owner: 'order_terms', field: 'requires_cooking', source_field: '煮食需求',
+  code: 'service_data_locked', message: '案件服務資料已鎖定，無法補寫煮食需求。',
 };
 
 describe('ClientRosterPage', () => {
@@ -112,6 +122,31 @@ describe('ClientRosterPage', () => {
   });
 
   afterEach(() => { termsQuery.mockRestore(); });
+
+  it('顯示 BeClass 煮食鎖定警示在名冊的下廚料理欄', async () => {
+    mocks.list.mockResolvedValue({ items: [{ ...item, requires_cooking: null }], next_cursor: null, next_offset: null });
+    vi.mocked(loadCurrentImportFieldIssuesForCases).mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ case_no: item.case_no, issues: [cookingIssue] }]);
+    render(<ClientRosterPage />);
+    const warning = await screen.findByText(cookingIssue.message);
+    expect(warning.closest('td')).toHaveTextContent('未登錄');
+  });
+
+  it('顯示 BeClass 煮食鎖定警示在案件詳情的下廚料理欄', async () => {
+    const detail = await mocks.query();
+    const lockedTerms = { ...orderTerms, service_data_locked: true, terms: { ...orderTerms.terms, requires_cooking: null } };
+    termsQuery.mockResolvedValue(lockedTerms);
+    mocks.query.mockResolvedValue({
+      ...detail, order_terms: { ...detail.order_terms, data: lockedTerms }, import_field_issues: [cookingIssue],
+    });
+    const target = new URLSearchParams(importFieldIssueHref(item.case_no, cookingIssue).split('?')[1]);
+    render(<ClientRosterPage initialCaseNo={item.case_no} focusField={target.get('field') ?? undefined} />);
+    const cooking = await screen.findByRole('combobox', { name: '下廚料理需求' });
+    expect(cooking).toBeDisabled();
+    expect(cooking).toHaveAttribute('aria-invalid', 'true');
+    expect(cooking).toHaveAccessibleDescription(cookingIssue.message);
+    expect(screen.getByLabelText('服務天數')).not.toHaveAttribute('aria-invalid');
+  });
 
   it('opens the formal cancellation for a non-root operator from the selected roster case', async () => {
     const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({

@@ -111,3 +111,5 @@
 .client-roster-page button:not(:where(th button, .client-roster-filter-chip button)):disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
 
 .client-roster-table-wrap .source-issue { display: block; color: #b42318; }
+.client-roster-table-wrap .roster-table-adjustable td[data-source-issue] { background-color: #fee2e2; }
+.client-roster-table-wrap td[data-source-issue] .source-issue { white-space: normal; overflow-wrap: anywhere; }

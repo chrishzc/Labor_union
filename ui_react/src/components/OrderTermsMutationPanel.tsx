@@ -8,7 +8,7 @@ import './OrderWorkbenchV2Drawer.css';
  * Description: 訂單條款編輯、排班試算、預覽與套用。
  */
 
-import { useEffect, useRef, useState, type FC } from 'react';
+import { useEffect, useId, useRef, useState, type FC } from 'react';
 import {
   orderTermsMutationClient,
   type OrderTermsPreview,
@@ -22,6 +22,7 @@ import type { OrderTerms } from '../api/orders/order_query_schemas';
 interface OrderTermsMutationPanelProps {
   caseNo: string;
   query: OrderTerms;
+  cookingIssue?: string;
   fromRegistry?: boolean;
   onObserved?: () => void | Promise<void>;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
@@ -217,7 +218,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = (props)
   return <RegistryOrderTermsEditor key={revision} {...props} />;
 };
 
-const RegistryOrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, onObserved, onEditStateChange }) => {
+const RegistryOrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, cookingIssue, onObserved, onEditStateChange }) => {
   const [query, setQuery] = useState<OrderTerms | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -239,11 +240,12 @@ const RegistryOrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, on
     </div>;
   }
   if (!query) return <p role="status">正在讀取服務條件…</p>;
-  return <OrderTermsEditor caseNo={caseNo} query={query} onObserved={onObserved} onEditStateChange={onEditStateChange} />;
+  return <OrderTermsEditor caseNo={caseNo} query={query} cookingIssue={cookingIssue} onObserved={onObserved} onEditStateChange={onEditStateChange} />;
 };
 
-const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onObserved, onEditStateChange }) => {
+const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, cookingIssue, onObserved, onEditStateChange }) => {
   const staffIdentity = useStaffIdentityLabels();
+  const cookingIssueId = useId();
   const [draft, setDraft] = useState<OrderTermsDraft>(() => draftFromQuery(query));
   const [preview, setPreview] = useState<OrderTermsPreview | null>(null);
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
@@ -632,7 +634,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
   };
   useUnsavedDraft('訂單條件', termsDraftValues(draft, hasDateDraft),
     { baseline: termsDraftValues(draftFromQuery(currentQuery)), busy: status !== 'idle' });
-
+  const visibleCookingIssue = currentQuery.terms.requires_cooking === null ? cookingIssue : undefined;
 
   return (
     <section className="order-v2-drawer-section order-terms-editor" aria-labelledby="order-v2-terms-mutation-heading">
@@ -693,11 +695,12 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
           />
         </label>
         <label>下廚料理需求
-          <select aria-label="下廚料理需求" value={draft.requiresCooking} disabled={locked || startedServiceUnlocked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
+          <select aria-label="下廚料理需求" aria-invalid={visibleCookingIssue ? true : undefined} aria-describedby={visibleCookingIssue ? cookingIssueId : undefined} value={draft.requiresCooking} disabled={locked || startedServiceUnlocked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
             <option value="">尚未確認（可先保留）</option>
             <option value="yes">需要下廚</option>
             <option value="no">不需下廚</option>
           </select>
+          {visibleCookingIssue && <small id={cookingIssueId} className="source-issue">{visibleCookingIssue}</small>}
         </label>
         <label>樓層加給（NTD）
           <input aria-label="樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={floorCorrection ? savingLocked : locked || startedServiceUnlocked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />

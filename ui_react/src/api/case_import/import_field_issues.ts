@@ -34,6 +34,6 @@ export async function loadCurrentImportFieldIssuesForCases(caseNos: readonly str
 }
 
 export function importFieldIssueHref(caseNo: string, issue?: ImportFieldIssue): string {
-  const field = issue && issue.owner !== 'order_terms' ? issue.field : 'intake';
+  const field = issue && (issue.owner !== 'order_terms' || issue.field === 'requires_cooking') ? issue.field : 'intake';
   return `#clients?case=${encodeURIComponent(caseNo)}&field=${encodeURIComponent(field)}&from=workbench`;
 }

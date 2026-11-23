@@ -27,6 +27,7 @@ BECLASS_FIELD_TARGETS = {
     "補助款退款:銀行代號+分行代號": ("client_beclass", "refund_bank_code"),
     "銀行帳號": ("client_beclass", "refund_account_no"),
 }
+CLIENT_BECLASS_COOKING_LOCKED_ISSUE = "service_data_locked"
 
 # These keys name the existing owner controls. Source labels remain available
 # for fields which the owner presents as read-only or explicitly skips.
@@ -55,6 +56,13 @@ def current_beclass_field_issues(codes: tuple[str, ...], values: Mapping[str, ob
                                  profile: Mapping[str, object], *, cleared_fields: frozenset[str] = frozenset()) -> tuple[ImportFieldIssue, ...]:
     issues = []
     for code in codes:
+        if code == CLIENT_BECLASS_COOKING_LOCKED_ISSUE:
+            if values.get("requires_cooking") is None:
+                issues.append(ImportFieldIssue(
+                    "client_beclass", "order_terms", "requires_cooking", "煮食需求", code,
+                    "案件服務資料已鎖定，無法補寫煮食需求。",
+                ))
+            continue
         kind, separator, label = code.partition(":")
         if not separator or kind not in {"client_field_invalid", "client_field_missing"} or label not in BECLASS_FIELD_TARGETS:
             continue

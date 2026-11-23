@@ -142,6 +142,27 @@ def test_mysql_accepted_receipt_binding_and_current_correction_are_both_required
     assert receipt_params == ("client_beclass_correction/v1", "17", "CASE-17", 1)
 
 
+@pytest.mark.parametrize("requires_cooking", [None, 0, 1])
+def test_mysql_locked_cooking_issue_uses_current_order_value(requires_cooking):
+    from infrastructure.mysql.import_field_issues_repository import MySqlImportFieldIssuesRepository
+    connection = Connection([
+        None,
+        [{"id": 17, "issue_codes": ["service_data_locked"]}],
+        {"email": None, "city": None, "requires_cooking": requires_cooking},
+        [{"id": 17}],
+        None,
+        [],
+    ])
+    issues = MySqlImportFieldIssuesRepository(connection).query_case("CASE-17")
+    if requires_cooking is None:
+        assert [(issue.source, issue.owner, issue.field, issue.code) for issue in issues] == [
+            ("client_beclass", "order_terms", "requires_cooking", "service_data_locked"),
+        ]
+    else:
+        assert issues == ()
+    assert "o.requires_cooking" in connection.calls[2][0]
+
+
 def _correction_receipt(version, fields, *, record_id=17, case_no="CASE-17"):
     return {"result_snapshot": {"beclass_record_id": record_id, "case_no": case_no,
                                 "resulting_version": version, "changed_fields": fields}}
@@ -232,7 +253,11 @@ def test_mysql_receipted_bank_values_keep_leading_zeroes(monkeypatch):
         {"refund_bank_code": "0041234", "refund_account_no": "00123456789"},
         [_correction_receipt(1, ["refund_bank_code", "refund_account_no"])],
     ) == ()
-    assert projected == [{"refund_bank_code": "0041234", "refund_account_no": "00123456789"}]
+    assert projected == [{
+        "refund_bank_code": "0041234",
+        "refund_account_no": "00123456789",
+        "requires_cooking": None,
+    }]
 
 
 def test_mysql_current_hcm_query_reuses_skip_and_root_rules(monkeypatch):
