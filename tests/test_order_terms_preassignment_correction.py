@@ -978,6 +978,18 @@ def test_terms_day_replacement_uses_one_target_before_assignment():
     assert facts.confirmed_service_date_version == 3
 
 
+@pytest.mark.parametrize("target_days", [3, 7])
+def test_preassignment_day_change_requires_complete_replacement_dates(target_days):
+    facts = replace(_facts(), confirmed_service_date_version=3,
+                    confirmed_service_dates=tuple(date(2026, 9, 10 + n) for n in range(5)))
+    repository = _AssignedPersistenceRepository(facts)
+    workflow = terms_workflow.OrderTermsWorkflow(repository, object(), _Clock())
+    with pytest.raises(ValueError, match="^confirmed_service_dates_reconfirmation_required$"):
+        workflow.preview(facts.order.case_no, _terms(requires_cooking=False, service_days=target_days))
+    assert repository.writes == []
+    assert repository.facts == facts
+
+
 def test_terms_day_replacement_requires_explicit_existing_assignment_allocation():
     facts = _assigned_facts()
     proposed = _terms(requires_cooking=False, service_days=3)

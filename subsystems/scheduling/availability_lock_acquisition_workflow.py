@@ -134,10 +134,6 @@ def _canonical_snapshot(
         raise ValueError("case is not eligible for pre-execution availability lock")
     if set(plan_row) != {"id", "case_no", "status", "is_active", "start_date", "end_date"}:
         raise ValueError("invalid matching plan row")
-    if plan_row["start_date"] != order_row["start_date"] or (
-        order_row["end_date"] is not None and plan_row["end_date"] != order_row["end_date"]
-    ):
-        raise ValueError("plan dates do not match order")
     return normalize_plan_snapshot(case_no, plan_id, plan_row, segment_rows)
 
 

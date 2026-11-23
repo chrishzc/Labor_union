@@ -346,6 +346,26 @@ def record_matching_customer_decision_route(
     except ValueError as error:
         if str(error) == "automatic_waiting_deposit_occupancy_conflict":
             raise typed_http_error(409, "domain_blocked", str(error), "月嫂檔期衝突，無法自動保留，請更換月嫂或調整服務日期。", "matching-decision") from error
+        if str(error) == "current confirmed service dates are required":
+            response = typed_http_error(
+                409, "domain_blocked", "confirmed_service_dates_required",
+                "尚未保存完整服務日期，本次客戶決定未保存。請先確認並保存服務日期，再重新記錄客戶決定。",
+                "matching-decision",
+            )
+            response.detail["error"]["domain_blockers"] = ["confirmed_service_dates_required"]
+            raise response from error
+        if str(error) in {
+            "current confirmed service dates mismatch",
+            "invalid current confirmed service dates",
+            "current confirmed service dates do not match plan segments",
+        }:
+            response = typed_http_error(
+                409, "domain_blocked", "confirmed_service_dates_mismatch",
+                "已保存服務日期與訂單天數或推薦分段不一致，本次客戶決定未保存。請重新確認並保存完整服務日期及分段後再操作。",
+                "matching-decision",
+            )
+            response.detail["error"]["domain_blockers"] = ["confirmed_service_dates_mismatch"]
+            raise response from error
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

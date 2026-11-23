@@ -1,6 +1,6 @@
 """Automatic reservation borrows the fact writer's transaction and canonical lock writer."""
 import json
-from datetime import date, time
+from datetime import date, time, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -8,19 +8,28 @@ from subsystems.scheduling import availability_lock_acquisition_workflow as work
 
 
 @pytest.mark.parametrize(
-    'scenario', ['ready', 'not_ready', 'unavailable', 'available_outside_block', 'changed_staff', 'occupied']
+    'scenario', [
+        'ready', 'not_ready', 'unavailable', 'available_outside_block', 'changed_staff', 'occupied',
+        'shortened', 'extended', 'shifted', 'day_count_mismatch', 'missing_saved_day',
+    ]
 )
 def test_auto_reservation_is_scoped_idempotent_and_never_owns_commit(scenario):
     statements = []
     writes = []
     service_day = date(2026, 8, 10)
+    service_dates = {
+        'shortened': (service_day,),
+        'extended': tuple(service_day + timedelta(days=offset) for offset in range(4)),
+        'shifted': (date(2026, 9, 14), date(2026, 9, 16)),
+    }.get(scenario, (service_day,))
+    original_end = service_day + timedelta(days=2) if scenario in {'shortened', 'extended', 'shifted'} else service_day
     plan = {
         'id': 8, 'case_no': 'CASE-1', 'status': 'proposed', 'is_active': 1,
-        'start_date': service_day, 'end_date': service_day,
+        'start_date': service_day, 'end_date': original_end,
     }
     segments = [{
         'id': 4, 'plan_id': 8, 'segment_order': 1, 'staff_id': 99,
-        'assigned_start_date': service_day, 'assigned_end_date': service_day,
+        'assigned_start_date': service_day, 'assigned_end_date': original_end,
     }]
     service_time = {
         'service_start_time': time(9), 'service_end_time': time(17), 'service_end_day_offset': 0,
@@ -51,11 +60,13 @@ def test_auto_reservation_is_scoped_idempotent_and_never_owns_commit(scenario):
                 self.rows = [{'id': 99}]
             elif sql.startswith('SELECT case_no, status, start_date'):
                 self.rows = [{'case_no': 'CASE-1', 'status': '訂單成立',
-                              'start_date': service_day, 'end_date': service_day}]
+                              'start_date': service_dates[0], 'end_date': service_dates[-1]}]
             elif sql.startswith('SELECT version.id,version.service_day_count'):
-                self.rows = [{'id': 14, 'service_day_count': 1, 'service_days': 1}]
+                self.rows = [{'id': 14, 'service_day_count': len(service_dates),
+                              'service_days': len(service_dates) + (scenario == 'day_count_mismatch')}]
             elif sql.startswith('SELECT day.service_date'):
-                self.rows = [{'service_date': service_day}]
+                saved_dates = service_dates[:-1] if scenario == 'missing_saved_day' else service_dates
+                self.rows = [{'service_date': value} for value in saved_dates]
             elif sql.startswith('SELECT response_value'):
                 self.rows = [{'response_value': 'accepted'}]
             elif sql.startswith('SELECT service_start_time,service_end_time'):
@@ -83,7 +94,11 @@ def test_auto_reservation_is_scoped_idempotent_and_never_owns_commit(scenario):
     # The caller owns commit and rollback. Either call on this connection would fail.
     connection = SimpleNamespace(cursor=Cursor)
     locked_staff = (100,) if scenario == 'changed_staff' else (99,)
-    if scenario in {'unavailable', 'changed_staff', 'occupied'}:
+    if scenario in {'day_count_mismatch', 'missing_saved_day'}:
+        with pytest.raises(ValueError, match='^current confirmed service dates mismatch$'):
+            workflow.reserve_confirmed_matching_plan(connection, 'CASE-1', 'admin:1', locked_staff)
+        assert writes == []
+    elif scenario in {'unavailable', 'changed_staff', 'occupied'}:
         code = 'stale_plan' if scenario == 'changed_staff' else 'occupancy_conflict'
         with pytest.raises(ValueError, match=f'^automatic_waiting_deposit_{code}$') as error:
             workflow.reserve_confirmed_matching_plan(connection, 'CASE-1', 'admin:1', locked_staff)
@@ -101,12 +116,14 @@ def test_auto_reservation_is_scoped_idempotent_and_never_owns_commit(scenario):
         else:
             assert result == {
                 'lock_id': 17, 'result': 'created', 'case_no': 'CASE-1', 'plan_id': 8,
-                'lock_rows': [{'segment_id': 4, 'staff_id': 99, 'lock_date': service_day.isoformat()}],
+                'lock_rows': [{'segment_id': 4, 'staff_id': 99, 'lock_date': value.isoformat()} for value in service_dates],
             }
-            assert len(writes) == 4
+            assert len(writes) == len(service_dates) + 3
+            assert plan['end_date'] == original_end
+            assert segments[0]['assigned_end_date'] == original_end
             event_sql, event_params = writes[-1]
             assert event_sql.startswith('INSERT INTO caregiver_availability_lock_events ')
             assert event_params[:3] == (17, 'auto-waiting-deposit:8:14', 'admin:1')
             assert workflow.reserve_confirmed_matching_plan(connection, 'CASE-1', 'admin:1', locked_staff) is None
-            assert len(writes) == 4
+            assert len(writes) == len(service_dates) + 3
     assert statements[0][1] == ('CASE-1',)

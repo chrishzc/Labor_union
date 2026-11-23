@@ -181,3 +181,47 @@ def test_matching_receipts_reject_unowned_extra_fields(model, payload):
 
     with pytest.raises(ValidationError):
         model.model_validate({**payload, "raw_database_row": {"secret": "leak"}})
+
+
+@pytest.mark.parametrize("reason,code", [
+    ("current confirmed service dates are required", "confirmed_service_dates_required"),
+    ("current confirmed service dates mismatch", "confirmed_service_dates_mismatch"),
+    ("invalid current confirmed service dates", "confirmed_service_dates_mismatch"),
+    ("current confirmed service dates do not match plan segments", "confirmed_service_dates_mismatch"),
+])
+def test_customer_decision_date_blockers_remain_typed(monkeypatch, reason, code):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.exception_handlers.typed_errors import (
+        CorrelationBoundaryMiddleware,
+        install_typed_error_handlers,
+    )
+    from api.routes import matches as routes
+    from subsystems.access.authentication_session import AdminPrincipal
+
+    def reject(_command):
+        raise ValueError(reason)
+
+    monkeypatch.setattr(routes.matching_notifications, "record_manual_response", reject)
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.add_middleware(CorrelationBoundaryMiddleware)
+    install_typed_error_handlers(app)
+    app.dependency_overrides[routes.require_line_matching_override] = lambda: AdminPrincipal(
+        1, "operator", "Test operator", "system_admin",
+    )
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/v1/orders/CASE-1/matching-plans/8/customer-decision",
+            json={"decision": "accepted", "expected_version": 2, "reason": "",
+                  "actor": "operator", "event_key": "manual-decision-date-error"},
+        )
+
+    assert response.status_code == 409
+    error = response.json()["detail"]["error"]
+    assert error["category"] == "domain_blocked"
+    assert error["code"] == code
+    assert error["domain_blockers"] == [code]
+    assert "本次客戶決定未保存" in error["message"]
+    assert error["retryable"] is False
