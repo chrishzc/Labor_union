@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pymysql.err import IntegrityError
@@ -20,23 +19,22 @@ from pymysql.err import IntegrityError
 from api.routes import client_beclass_import as workbook_route
 from api.schemas.client_beclass_import import ClientBeClassWorkbookPreviewView, ClientBeClassWorkbookReceiptView
 from shared_kernel.errors import ErrorCategory, TypedError
-from shared_kernel.identities import CorrelationId
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.terms_workflow import TermsWorkflowError
 
-from domains.orders.terms import OrderCookingRequirementFacts, OrderTerms, ServiceTimeTerms
 from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
 from infrastructure.mysql.client_beclass_workbook_import_repository import ClientBeClassWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
-from shared_kernel.identities import ExpectedVersion
-from shared_kernel.money import MoneyNTD
 from domains.case_import.client_beclass_binding import (
     ClientCaseBindingResolution,
     ClientCaseBindingStatus,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.case_import import client_beclass_workbook_import as intake
+from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionWorkflow
+from subsystems.case_import.hcm_beclass_reconciliation import reconcile_hcm_beclass_cooking
 
 
 _DIGEST = "a" * 64
@@ -112,58 +110,6 @@ def test_workbook_preserves_terms_errors_and_removes_temporary_upload(tmp_path, 
     assert not uploaded.exists()
 
 
-@pytest.mark.parametrize("versions", [(None, None), (0, 0), (4, 7), (None, 7)])
-@pytest.mark.parametrize("requires_formal_apply", [False, True])
-def test_cooking_reconciliation_preserves_preview_contract(monkeypatch, versions, requires_formal_apply):
-    terms = OrderTerms(
-        date(2026, 9, 10), 5, 8, MoneyNTD(0),
-        ServiceTimeTerms(None, None, None), False,
-    )
-    connection = object()
-    repository = SimpleNamespace(
-        load_for_preview=lambda case_no: SimpleNamespace(order=SimpleNamespace(terms=terms)),
-        load_cooking_requirement=lambda case_no: OrderCookingRequirementFacts(case_no, 2, False, False),
-    )
-    requests = []
-
-    class Workflow:
-        def __init__(self, selected_repository, uow_factory, clock):
-            assert selected_repository is repository
-
-        def preview(self, case_no, proposed_terms):
-            assert case_no == "CASE-7"
-            assert proposed_terms.requires_cooking is True
-            return SimpleNamespace(
-                after=proposed_terms, order_version=2, scheduling_version=0,
-                client_finance_version=versions[0], payroll_version=versions[1],
-                fingerprint="preview",
-                requires_formal_apply=requires_formal_apply,
-            )
-
-        def apply_in_current_uow(self, request):
-            requests.append(request)
-
-    monkeypatch.setattr(
-        reconciliation_adapter, "MySqlOrderTermsRepository", lambda selected_connection: repository
-    )
-    monkeypatch.setattr(reconciliation_adapter, "OrderTermsWorkflow", Workflow)
-
-    reconciliation_adapter.MySqlHcmBeClassReconciliationAdapter(connection).apply_cooking_terms(
-        "CASE-7", 7, True
-    )
-
-    assert len(requests) == 1
-    request = requests[0]
-    assert request.expected_order_version == ExpectedVersion(2)
-    assert request.expected_scheduling_version == ExpectedVersion(0)
-    for actual, version in zip(
-        (request.expected_client_finance_version, request.expected_payroll_version), versions
-    ):
-        assert actual == (None if version is None else ExpectedVersion(version))
-    assert request.proposed_terms.requires_cooking is True
-    assert request.requires_formal_apply is requires_formal_apply
-
-
 class _Connection:
     def __init__(self) -> None:
         self.begins = 0
@@ -189,7 +135,6 @@ class _Repository:
         self.saved_workbook = None
         self.locks = []
         self.binding_lock_modes = []
-        self.replay_bound_cases = ()
         self.binding_resolution = ClientCaseBindingResolution(
             ClientCaseBindingStatus.UNIQUE, 1, 1, 7, "HCM-0007"
         )
@@ -219,6 +164,15 @@ class _Repository:
         self.binding_lock_modes.append(for_update)
         return self.binding_resolution
 
+    def case_availability(self, name, phone, *, for_update, case_no=None):
+        number = case_no or self.binding_resolution.case_no
+        return intake.ClientBeClassCaseAvailability(
+            (intake.ClientBeClassCaseCandidate(
+                number, 7, name, intake.mask_client_beclass_phone(phone), None, None, None,
+            ),),
+            {},
+        )
+
     def claim_workbook(self, key, fingerprint, correlation):
         return "created"
 
@@ -242,10 +196,6 @@ class _Repository:
 
     def bound_sources_for_query(self, query_no):
         return ({"root_id": 77, "case_no": "HCM-0007"},)
-
-    def bound_case_nos_for_workbook(self, digest):
-        del digest
-        return self.replay_bound_cases
 
     def save_row_receipt(self, key, fingerprint, root_id, outcome, review_identity, actor):
         result_identity = f"admin_command_receipt:{len(self.rows) + 1}"
@@ -423,6 +373,65 @@ def test_row_receipt_replays_without_creating_a_second_root(monkeypatch):
     assert len(repository.created) == 1
 
 
+@pytest.mark.parametrize("replay_kind", ["same_key", "new_key", "same_source"])
+@pytest.mark.parametrize("manual_value", [False, None])
+def test_reimport_preserves_manual_cooking_edit(monkeypatch, replay_kind, manual_value):
+    repository = _Repository()
+
+    class CookingReconciliation:
+        requires_cooking = None
+        version = 1
+
+        def reconcile(self, case_no):
+            return reconcile_hcm_beclass_cooking(self, case_no)
+
+        def load_pair_facts(self, case_no):
+            source = repository.created[0]
+            assert source["bound_case_no"] == case_no
+            return {
+                "hcm_count": 1, "beclass_count": 1, "beclass_id": 1,
+                "requires_cooking": self.requires_cooking, "survey_details": source["survey_details"],
+            }
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("The survey has an explicit cooking answer")
+
+        def apply_cooking_terms(self, _case_no, _source_id, requires_cooking):
+            self.requires_cooking = requires_cooking
+            self.version += 1
+
+    reconciliation = CookingReconciliation()
+    service = _service(repository, reconciliation)
+    source_row = {**_valid_row(), "是否需要下廚：": "需要下廚"}
+    workbook = _workbook(source_row)
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: workbook)
+    preview = service.preview("ignored.xlsx")
+    first = service.apply("ignored.xlsx", "first", preview.preview_fingerprint, "admin", "corr")
+    assert first.created_count == 1
+    assert (reconciliation.requires_cooking, reconciliation.version) == (True, 2)
+
+    reconciliation.requires_cooking = manual_value
+    reconciliation.version += 1
+    saved_source = dict(repository.created[0])
+    saved_first_receipt = dict(repository.workbook_receipts["first"])
+    key = "first" if replay_kind == "same_key" else "again"
+    if replay_kind == "same_source":
+        workbook = intake._Workbook("c" * 64, workbook.sheet_identity, workbook.rows)
+        monkeypatch.setattr(repository, "source_state", lambda _payload: "exact")
+    if replay_kind != "same_key":
+        preview = service.preview("ignored.xlsx")
+    replay = service.apply("ignored.xlsx", key, preview.preview_fingerprint, "admin", "corr")
+
+    assert replay.replayed_workbook is (replay_kind == "same_key")
+    assert (replay.created_count, replay.exact_replay_count, replay.existing_source_count) == (
+        int(replay_kind == "same_key"), int(replay_kind == "new_key"), int(replay_kind == "same_source"),
+    )
+    assert reconciliation.requires_cooking is manual_value
+    assert reconciliation.version == 3
+    assert repository.created == [saved_source]
+    assert repository.workbook_receipts["first"] == saved_first_receipt
+
+
 @pytest.mark.parametrize("locked_after_acceptance", [False, True])
 def test_same_workbook_replay_preserves_receipt_without_duplicate_event(
     monkeypatch, locked_after_acceptance,
@@ -436,7 +445,6 @@ def test_same_workbook_replay_preserves_receipt_without_duplicate_event(
     first = service.apply(
         "ignored.xlsx", "same-key", preview.preview_fingerprint, "admin", "corr"
     )
-    repository.replay_bound_cases = ("HCM-0007",)
     if locked_after_acceptance:
         reconciliation.error = ValueError("service_data_locked")
     replay = service.apply(
@@ -447,9 +455,9 @@ def test_same_workbook_replay_preserves_receipt_without_duplicate_event(
     assert replay.replayed_workbook is True
     assert replay.created_count == first.created_count == 1
     assert replay.row_issues == first.row_issues == ()
-    assert reconciliation.calls == ["HCM-0007", "HCM-0007"]
+    assert reconciliation.calls == ["HCM-0007"]
     assert reconciliation.event_count == 1
-    assert repository.connection.rollbacks == int(locked_after_acceptance)
+    assert repository.connection.rollbacks == 0
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
@@ -499,8 +507,11 @@ def test_automatic_row_lock_keeps_existing_source_and_imports_later_row(monkeypa
     assert receipt.row_issues == (
         intake.ClientBeClassWorkbookRowIssue(3, "BC-LOCKED", ("煮食需求",), ("service_data_locked",)),
     )
-    assert tuple(repository.rows) == (f"client-beclass-workbook:{_DIGEST}:row:4",)
-    assert repository.connection.rollbacks == 2
+    assert tuple(repository.rows) == (
+        f"client-beclass-workbook:{_DIGEST}:row:2",
+        f"client-beclass-workbook:{_DIGEST}:row:4",
+    )
+    assert repository.connection.rollbacks == 1
 
 
 def test_existing_query_number_is_reported_as_existing_source_not_a_binding_conflict(monkeypatch):
@@ -766,19 +777,18 @@ def test_workbook_reports_current_case_unavailability(
     repository.binding_resolution = ClientCaseBindingResolution(
         ClientCaseBindingStatus.UNIQUE, 1, 1, 7, case_a,
     )
-    assert service.preview("ignored.xlsx", manual_pairing=True).create_count == 1
+    assert service.preview("ignored.xlsx").create_count == 1
     cursor.blocked = True
-    preview = service.preview("ignored.xlsx", manual_pairing=True)
+    preview = service.preview("ignored.xlsx")
     assert preview.existing_conflict_count == 1
     assert preview.row_issues[0].issue_codes == (issue_code,)
 
     cursor.blocked = False
-    automatic_preview = service.preview("ignored.xlsx", manual_pairing=True)
+    automatic_preview = service.preview("ignored.xlsx")
     with monkeypatch.context() as patch:
         patch.setattr(service, "_claim_workbook", lambda *_: setattr(cursor, "blocked", True))
         automatic = service.apply(
             "ignored.xlsx", "automatic-key", automatic_preview.preview_fingerprint, "admin", "corr",
-            manual_pairings=(),
         )
     assert automatic.existing_conflict_count == 1
     assert automatic.row_issues[0].issue_codes == (issue_code,)
@@ -940,6 +950,9 @@ def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
     query_no = f"BC-{scenario}"
     source_row = _valid_row(query_no)
     source_row["姓名"] = f"測試客戶-{scenario}"
+    source_row["管理者註記事項"] = "來源註記"
+    source_row["市話"] = "0212345678"
+    source_row["是否需要下廚："] = "需要下廚"
     file = Workbook()
     file.active.append(list(source_row))
     file.active.append(list(source_row.values()))
@@ -951,8 +964,8 @@ def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO clients (case_no,name,phone) VALUES (%s,%s,%s)",
-                (case_a, source_row["姓名"], source_row["行動電話"]),
+                "INSERT INTO clients (case_no,name,phone,email) VALUES (%s,%s,%s,%s)",
+                (case_a, source_row["姓名"], source_row["行動電話"], source_row["Email"]),
             )
             client_id = int(cursor.lastrowid)
             cursor.execute(
@@ -961,9 +974,14 @@ def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
             )
             second_client_id = int(cursor.lastrowid)
             cursor.executemany(
-                "INSERT INTO orders (case_no,client_id,status) VALUES (%s,%s,'洽談中')",
-                [(case_a, client_id), (case_b, second_client_id)],
+                "INSERT INTO orders (case_no,client_id,status,requires_cooking) VALUES (%s,%s,'洽談中',%s)",
+                [(case_a, client_id, None), (case_b, second_client_id, False)],
             )
+            cursor.execute(
+                "SELECT case_no,lifecycle_version FROM orders WHERE case_no IN (%s,%s) ORDER BY case_no",
+                (case_a, case_b),
+            )
+            initial_order_versions = tuple(row["lifecycle_version"] for row in cursor.fetchall())
         connection.commit()
 
         repository = ClientBeClassWorkbookImportRepository(connection)
@@ -983,17 +1001,96 @@ def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
         receipt = apply()
         assert receipt.created_count == 1
         assert [(item.source_row, item.case_no) for item in receipt.manual_bindings] == list(selected)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT requires_cooking,lifecycle_version FROM orders WHERE case_no IN (%s,%s) ORDER BY case_no",
+                (case_a, case_b),
+            )
+            assert tuple((row["requires_cooking"], row["lifecycle_version"]) for row in cursor.fetchall()) == (
+                (True, initial_order_versions[0] + 1), (False, initial_order_versions[1]),
+            )
+
+        correction_key = f"{scenario}-correction"
+        corrections = BeClassCorrectionWorkflow(
+            MySqlBeClassCorrectionRepository(connection), lambda: MySqlUnitOfWork(connection),
+        )
+        changes = {"admin_notes": "承辦補正", "tel": None}
+        expected = ExpectedVersion(0)
+        correction = corrections.preview(case_a, changes, expected)
+        assert correction.before == {"admin_notes": "來源註記", "tel": "0212345678"}
+        corrected = corrections.apply(
+            case_a, changes, expected, correction.preview_fingerprint, IdempotencyKey(correction_key),
+            ActorContext("test"), "驗證既有補正", CorrelationId(scenario),
+        )
+        assert corrected.resulting_version == 1
+        assert {field: corrected.readback.effective[field] for field in changes} == changes
+
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                "UPDATE orders SET requires_cooking=%s,lifecycle_version=lifecycle_version+1 WHERE case_no=%s",
+                [(False, case_a), (None, case_b)],
+            )
+            cursor.execute("UPDATE clients SET email=NULL,city=%s WHERE id=%s", ("臺北市", client_id))
+            cursor.execute("UPDATE clients SET name=%s WHERE id=%s", (f"測試改名-{scenario}", second_client_id))
+        connection.commit()
+
+        stored = repository.bound_sources_for_query(query_no)
+        assert [item["case_no"] for item in stored] == [case_a, case_b]
+        roots = tuple(item["root_id"] for item in stored)
+        assert roots[0] != roots[1]
+
+        def owner_snapshot():
+            with connection.cursor() as cursor:
+                snapshots = []
+                for query, params in (
+                    ("SELECT * FROM clients WHERE id IN (%s,%s) ORDER BY id", (client_id, second_client_id)),
+                    ("SELECT * FROM orders WHERE case_no IN (%s,%s) ORDER BY case_no", (case_a, case_b)),
+                    ("SELECT * FROM beclass_records WHERE bound_case_no IN (%s,%s) ORDER BY id", (case_a, case_b)),
+                    ("SELECT * FROM beclass_record_correction_states WHERE beclass_record_id IN (%s,%s)", roots),
+                    ("SELECT * FROM beclass_record_correction_events WHERE beclass_record_id IN (%s,%s) ORDER BY id", roots),
+                    ("SELECT * FROM admin_command_receipts WHERE idempotency_key IN (%s,%s) ORDER BY id",
+                     (scenario, correction_key)),
+                ):
+                    cursor.execute(query, params)
+                    snapshots.append(tuple(cursor.fetchall()))
+            return tuple(snapshots), tuple(corrections.query(case_no) for case_no in (case_a, case_b))
+
+        before = owner_snapshot()
         assert apply().manual_bindings == receipt.manual_bindings
+        assert owner_snapshot() == before
+
         repeated_preview = service.preview(upload, manual_pairing=True)
         assert repeated_preview.existing_source_count == 1
         repeated = service.apply(upload, f"{scenario}-new", repeated_preview.preview_fingerprint,
                                  "test", scenario, manual_pairings=())
         assert repeated.existing_source_count == 1
-        stored = repository.bound_sources_for_query(query_no)
-        assert [item["case_no"] for item in stored] == [case_a, case_b]
-        corrections = MySqlBeClassCorrectionRepository(connection)
-        roots = [corrections.load(case_no, for_update=False)["beclass_record_id"] for case_no in (case_a, case_b)]
-        assert roots == [item["root_id"] for item in stored] and roots[0] != roots[1]
+        assert owner_snapshot() == before
+
+        file = load_workbook(upload)
+        file.properties.title = "同來源另存活頁簿"
+        resaved = str(tmp_path / "resaved.xlsx")
+        file.save(resaved)
+        resaved_preview = service.preview(resaved)
+        assert resaved_preview.source_content_digest != initial.source_content_digest
+        resaved_receipt = service.apply(
+            resaved, f"{scenario}-resaved", resaved_preview.preview_fingerprint, "test", scenario,
+        )
+        assert resaved_receipt.existing_source_count == 1
+        assert owner_snapshot() == before
+
+        file.active["A2"] = f"new-{query_no}"
+        duplicate_case = str(tmp_path / "duplicate-case.xlsx")
+        file.save(duplicate_case)
+        file.close()
+        occupied_preview = service.preview(duplicate_case)
+        assert occupied_preview.existing_conflict_count == 1
+        occupied = service.apply(
+            duplicate_case, f"{scenario}-duplicate", occupied_preview.preview_fingerprint, "test", scenario,
+        )
+        assert occupied.existing_conflict_count == 1
+        assert occupied.row_issues[0].issue_codes == ("client_beclass_case_already_bound",)
+        assert owner_snapshot() == before
+
         with connection.cursor() as cursor, pytest.raises(IntegrityError) as duplicate:
             cursor.execute(
                 "INSERT INTO beclass_records (query_no,client_id,bound_case_no) VALUES (%s,%s,%s)",
@@ -1005,13 +1102,17 @@ def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
 
 
 @pytest.mark.parametrize("bank, account, expected_bank, expected_account, warning_fields", [
-    ("中文0041234", "00123456789", None, "00123456789", ("補助款退款:銀行代號+分行代號",)),
-    ("0041234", "中文001234", "0041234", None, ("銀行帳號",)),
+    ("中文0041234", "00123456789", "0041234", "00123456789", ()),
+    ("銀行 ００４／分行 １-２３４", "001234", "0041234", "001234", ()),
+    ("銀行004，分行1234", "中文001234", "0041234", None, ("銀行帳號",)),
     ("銀行", "帳號", None, None, ("補助款退款:銀行代號+分行代號", "銀行帳號")),
+    ("銀行004／分行123", "001234", None, "001234", ("補助款退款:銀行代號+分行代號",)),
+    ("銀行004／分行12345", "001234", None, "001234", ("補助款退款:銀行代號+分行代號",)),
     ("００４-１２３４", "００１-２３４", "0041234", "001234", ()),
     ("0041234", "", "0041234", None, ()),
     ("", "001234", None, "001234", ()),
     ("", "", None, None, ()),
+    (" - - ", "001234", None, "001234", ()),
 ])
 def test_repairable_bank_fields_import_independently_and_keep_created_receipt(
     monkeypatch, bank, account, expected_bank, expected_account, warning_fields,

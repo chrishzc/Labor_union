@@ -67,8 +67,8 @@ def reconcile_hcm_beclass_cooking(
     except CookingRequirementDomainError as error:
         port.record_cooking_review(case_no, facts, error.issue.value)
         return HcmBeClassReconciliationResult("cooking_review_required")
-    if facts["requires_cooking"] is not None and bool(facts["requires_cooking"]) == requires_cooking:
-        return HcmBeClassReconciliationResult("reconciled", requires_cooking)
+    if facts["requires_cooking"] is not None:
+        return HcmBeClassReconciliationResult("reconciled", bool(facts["requires_cooking"]))
     port.apply_cooking_terms(case_no, int(facts["beclass_id"]), requires_cooking)
     return HcmBeClassReconciliationResult("reconciled", requires_cooking)
 

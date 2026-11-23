@@ -26,6 +26,8 @@ def normalize_refund_field(value: object, *, bank: bool) -> str | None:
     value = re.sub(r"[\s-]", "", value)
     if not value:
         return None
+    if bank:
+        value = re.sub(r"[^0-9]", "", value)
     if not re.fullmatch(r"[0-9]+", value) or (len(value) != 7 if bank else len(value) > 50):
         raise ValueError("refund_bank_code_invalid" if bank else "refund_account_no_invalid")
     return value

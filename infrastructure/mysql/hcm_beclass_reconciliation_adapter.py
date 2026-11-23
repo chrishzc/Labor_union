@@ -5,18 +5,14 @@ Description: 以同一 MySQL 工作單元提供 HCM／BeClass 配對與 Orders �
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
 from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import (
-    ActorContext,
     CorrelationId,
     ExpectedVersion,
-    IdempotencyKey,
 )
 from subsystems.case_import.beclass_review_intake import (
     canonical_review_identifier,
@@ -27,7 +23,6 @@ from subsystems.case_import.hcm_beclass_reconciliation import (
 )
 from subsystems.orders.terms_workflow import (
     OrderCookingRequirementCorrectionRequest,
-    OrderTermsApplyRequest,
     OrderTermsWorkflow,
 )
 
@@ -91,67 +86,18 @@ class MySqlHcmBeClassReconciliationAdapter:
         self, case_no: str, beclass_id: int, requires_cooking: bool
     ) -> None:
         repository = MySqlOrderTermsRepository(self._connection)
+        cooking_facts = repository.load_cooking_requirement(case_no, for_update=True)
+        if cooking_facts.requires_cooking is not None:
+            return
         workflow = OrderTermsWorkflow(
             repository,
             _nested_uow_forbidden,
             SystemBusinessClock(),
         )
-        cooking_facts = repository.load_cooking_requirement(case_no)
-        if cooking_facts.requires_cooking is requires_cooking:
-            return
-        if cooking_facts.requires_cooking is None:
-            workflow.correct_cooking_requirement_in_current_uow(
-                OrderCookingRequirementCorrectionRequest(
-                    case_no, requires_cooking, ExpectedVersion(cooking_facts.version),
-                    CorrelationId(f"case-import-cooking:{beclass_id}"),
-                )
-            )
-            return
-        try:
-            preview_facts = repository.load_for_preview(case_no)
-        except ValueError as error:
-            if str(error) == "client_finance_bootstrap_required":
-                with self._connection.cursor() as cursor:
-                    cursor.execute(
-                        "UPDATE orders SET requires_cooking=%s WHERE case_no=%s",
-                        (requires_cooking, case_no),
-                    )
-                return
-            raise
-        proposed_terms = replace(
-            preview_facts.order.terms,
-            requires_cooking=requires_cooking,
-        )
-        preview = workflow.preview(case_no, proposed_terms)
-        identity = fingerprint_payload(
-            {
-                "beclass_id": beclass_id,
-                "case_no": case_no,
-                "requires_cooking": requires_cooking,
-            }
-        ).value
-        workflow.apply_in_current_uow(
-            OrderTermsApplyRequest(
-                case_no,
-                preview.after,
-                ExpectedVersion(preview.order_version),
-                ExpectedVersion(preview.scheduling_version),
-                (
-                    ExpectedVersion(preview.client_finance_version)
-                    if preview.client_finance_version is not None
-                    else None
-                ),
-                (
-                    ExpectedVersion(preview.payroll_version)
-                    if preview.payroll_version is not None
-                    else None
-                ),
-                preview.fingerprint,
-                IdempotencyKey(f"case-import-cooking:{identity}"),
-                ActorContext("case-import-reconciliation"),
-                "Reconcile uniquely paired Client BeClass cooking requirement.",
-                CorrelationId(f"case-import-cooking:{identity}"),
-                requires_formal_apply=preview.requires_formal_apply,
+        workflow.correct_cooking_requirement_in_current_uow(
+            OrderCookingRequirementCorrectionRequest(
+                case_no, requires_cooking, ExpectedVersion(cooking_facts.version),
+                CorrelationId(f"case-import-cooking:{beclass_id}"),
             )
         )
 

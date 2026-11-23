@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any, Callable, Iterable, Protocol
+from typing import Any, Callable, Protocol
 
 import pandas as pd
 
@@ -209,7 +209,6 @@ class ClientBeClassWorkbookImportRepositoryPort(Protocol):
     def require_matching_client_root(self, receipt) -> None: ...
     def bound_case_no_for_root(self, root_id: int | None) -> str | None: ...
     def bound_sources_for_query(self, query_no: str): ...
-    def bound_case_nos_for_workbook(self, digest: str) -> tuple[str, ...]: ...
     def save_row_receipt(self, *args) -> str | None: ...
     def save_workbook_receipt(
         self, *args
@@ -257,9 +256,8 @@ class ClientBeClassWorkbookImportService:
                 outcomes["manual"] += 1
                 continue
             outcome, issue = self._preview_row(row_number, row)
-            if manual_pairing and (
-                outcome == "create"
-                or issue and issue.issue_codes[0] in _AMBIGUOUS_BINDINGS
+            if outcome == "create" or (
+                manual_pairing and issue and issue.issue_codes[0] in _AMBIGUOUS_BINDINGS
             ):
                 payload = _normalized_payload(row)
                 availability = self._repository.case_availability(
@@ -321,7 +319,7 @@ class ClientBeClassWorkbookImportService:
                     "preview": supplied_preview,
                     "pairings": sorted(pairings),
                 }).value
-            replay = self._stored_replay_and_reconcile(key, workbook.digest, request_fingerprint)
+            replay = self._stored_replay(key, request_fingerprint)
             if replay is not None:
                 return replay
             prior_claim = self._workbook_claim(key) if selections else None
@@ -347,7 +345,6 @@ class ClientBeClassWorkbookImportService:
                     else:
                         outcome = self._apply_row(
                             workbook, row_number, row, actor, correlation_id, row_issues,
-                            check_case_availability=manual_pairings is not None,
                         )
                 except _CookingServiceDataLocked:
                     row_issues.append(ClientBeClassWorkbookRowIssue(
@@ -484,8 +481,6 @@ class ClientBeClassWorkbookImportService:
         actor: str,
         correlation_id: str,
         row_issues: list[ClientBeClassWorkbookRowIssue] | None = None,
-        *,
-        check_case_availability: bool = False,
     ) -> str:
         source_identity = _source_identity(workbook.digest, row_number)
         payload = _normalized_payload(row)
@@ -495,11 +490,7 @@ class ClientBeClassWorkbookImportService:
             if stored is not None:
                 _require_same_fingerprint(stored, fingerprint)
                 self._repository.require_matching_client_root(stored)
-                case_no = self._repository.bound_case_no_for_root(
-                    stored.get("root_id")
-                )
-                if case_no is None or self._recheck_accepted_cases((case_no,)):
-                    unit_of_work.commit()
+                unit_of_work.commit()
                 return "exact_replay"
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
             errors = blocking_client_beclass_errors(row)
@@ -521,8 +512,6 @@ class ClientBeClassWorkbookImportService:
                 bound_sources = self._repository.bound_sources_for_query(
                     str(payload["query_no"])
                 )
-                if not self._recheck_accepted_cases(source["case_no"] for source in bound_sources):
-                    return "existing_source"
                 self._repository.save_row_receipt(
                     source_identity,
                     fingerprint,
@@ -556,17 +545,16 @@ class ClientBeClassWorkbookImportService:
                 unit_of_work.commit()
                 return outcome
             bound_root = resolution.bound_root()
-            if check_case_availability:
-                case_no = str(bound_root["case_no"])
-                availability = self._repository.case_availability(
-                    payload["name"], payload["phone"], case_no=case_no, for_update=True
-                )
-                if not availability.candidates:
-                    if row_issues is not None:
-                        row_issues.append(_case_unavailable_issue(
-                            row_number, payload["query_no"], availability.reason_for(case_no)
-                        ))
-                    return "existing_conflict"
+            case_no = str(bound_root["case_no"])
+            availability = self._repository.case_availability(
+                payload["name"], payload["phone"], case_no=case_no, for_update=True
+            )
+            if not availability.candidates:
+                if row_issues is not None:
+                    row_issues.append(_case_unavailable_issue(
+                        row_number, payload["query_no"], availability.reason_for(case_no)
+                    ))
+                return "existing_conflict"
             source_id = self._repository.create_bound_source_if_absent(
                 payload, bound_root
             )
@@ -584,7 +572,7 @@ class ClientBeClassWorkbookImportService:
                 self._repository.save_row_receipt(source_identity, fingerprint, None, outcome, review_identity, actor)
                 unit_of_work.commit()
                 return outcome
-            self._reconcile_cooking(str(bound_root["case_no"]))
+            self._reconcile_cooking(case_no)
             review_identity = self._record_field_warnings(workbook, row_number, row, payload)
             self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", review_identity, actor)
             unit_of_work.commit()
@@ -630,10 +618,9 @@ class ClientBeClassWorkbookImportService:
             issue_codes=(issue_code,),
         )
 
-    def _stored_replay_and_reconcile(
+    def _stored_replay(
         self,
         key: str,
-        digest: str,
         request_fingerprint: str,
     ) -> ClientBeClassWorkbookReceipt | None:
         with self._unit_of_work_factory() as unit_of_work:
@@ -651,8 +638,7 @@ class ClientBeClassWorkbookImportService:
             payload["manual_bindings"] = tuple(
                 ClientBeClassManualBinding(**item) for item in payload.get("manual_bindings", ())
             )
-            if self._recheck_accepted_cases(self._repository.bound_case_nos_for_workbook(digest)):
-                unit_of_work.commit()
+            unit_of_work.commit()
             return ClientBeClassWorkbookReceipt(
                 **{
                     **payload,
@@ -671,14 +657,6 @@ class ClientBeClassWorkbookImportService:
             if error.args != ("service_data_locked",):
                 raise
             raise _CookingServiceDataLocked from error
-
-    def _recheck_accepted_cases(self, case_nos: Iterable[str]) -> bool:
-        try:
-            for case_no in case_nos:
-                self._reconcile_cooking(case_no)
-        except _CookingServiceDataLocked:
-            return False
-        return True
 
     def _claim_workbook(self, key: str, digest: str, correlation_id: str) -> None:
         with self._unit_of_work_factory() as unit_of_work:

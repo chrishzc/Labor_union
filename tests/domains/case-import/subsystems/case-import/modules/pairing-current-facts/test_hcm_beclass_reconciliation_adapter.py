@@ -3,15 +3,13 @@ File: test_hcm_beclass_reconciliation_adapter.py
 Description: 驗證 reconciliation adapter 借用 caller UoW，且 standalone wrapper 唯一提交。
 """
 
-from datetime import date, time
 from types import SimpleNamespace
 
 import pytest
 
-from domains.orders.terms import OrderTerms, ServiceTimeTerms
+from domains.orders.terms import OrderCookingRequirementFacts
 from infrastructure.mysql import hcm_beclass_reconciliation_adapter as adapter
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from shared_kernel.money import MoneyNTD
 from subsystems.case_import.hcm_beclass_reconciliation import (
     CaseImportReconciliationApplication,
     reconcile_hcm_beclass_cooking,
@@ -34,18 +32,8 @@ class _Connection:
         self.rollbacks += 1
 
 
-def _terms(requires_cooking=None):
-    return OrderTerms(
-        date(2026, 9, 1),
-        5,
-        8,
-        MoneyNTD(0),
-        ServiceTimeTerms(time(9), time(17), 0),
-        requires_cooking,
-    )
-
-
-def test_apply_cooking_terms_uses_current_uow_without_hidden_commit(monkeypatch):
+@pytest.mark.parametrize("initial", [None, False, True])
+def test_apply_cooking_terms_only_fills_unknown_in_current_uow(monkeypatch, initial):
     connection = _Connection()
     calls = []
 
@@ -53,46 +41,21 @@ def test_apply_cooking_terms_uses_current_uow_without_hidden_commit(monkeypatch)
         def __init__(self, supplied_connection):
             assert supplied_connection is connection
 
-        def load_cooking_requirement(self, _case_no):
-            return SimpleNamespace(requires_cooking=False, version=1)
+        def load_cooking_requirement(self, case_no, *, for_update):
+            assert for_update
+            return OrderCookingRequirementFacts(case_no, 1, initial, False)
 
-        def load_for_preview(self, _case_no):
-            return SimpleNamespace(order=SimpleNamespace(terms=_terms(False)))
-
-    class Workflow:
-        def __init__(self, repository, factory, _clock):
-            self.repository = repository
-            with pytest.raises(
-                RuntimeError, match="hcm_reconciliation_requires_caller_owned_uow"
-            ):
-                factory()
-
-        def preview(self, _case_no, proposed_terms):
-            return SimpleNamespace(
-                after=proposed_terms,
-                order_version=1,
-                scheduling_version=2,
-                client_finance_version=3,
-                payroll_version=4,
-                fingerprint=SimpleNamespace(value="f" * 64),
-                requires_formal_apply=True,
-            )
-
-        def apply(self, _request):
-            raise AssertionError("adapter must not own a nested UoW")
-
-        def apply_in_current_uow(self, request):
-            calls.append(request)
+        def update_cooking_requirement(self, case_no, requires_cooking, expected_version):
+            calls.append((case_no, requires_cooking, expected_version))
+            return True
 
     monkeypatch.setattr(adapter, "MySqlOrderTermsRepository", Repository)
-    monkeypatch.setattr(adapter, "OrderTermsWorkflow", Workflow)
 
     adapter.MySqlHcmBeClassReconciliationAdapter(connection).apply_cooking_terms(
         "115990823", 9, True
     )
 
-    assert calls[0].case_no == "115990823"
-    assert calls[0].proposed_terms.requires_cooking is True
+    assert calls == ([("115990823", True, 1)] if initial is None else [])
     assert connection.begins == connection.commits == connection.rollbacks == 0
 
 
@@ -183,10 +146,11 @@ def test_stale_owner_version_is_zero_write_and_rolls_back_outer_uow():
     assert connection.rollbacks == 1
 
 
-def test_reconciliation_replay_does_not_repeat_typed_terms_apply():
+@pytest.mark.parametrize("initial", [None, False, True])
+def test_reconciliation_only_fills_unknown_cooking_requirement(initial):
     class Port:
         def __init__(self):
-            self.requires_cooking = None
+            self.requires_cooking = initial
             self.apply_count = 0
 
         def load_pair_facts(self, _case_no):
@@ -210,11 +174,13 @@ def test_reconciliation_replay_does_not_repeat_typed_terms_apply():
 
     port = Port()
 
-    first = reconcile_hcm_beclass_cooking(port, "115990823")
-    replay = reconcile_hcm_beclass_cooking(port, "115990823")
+    result = reconcile_hcm_beclass_cooking(port, "115990823")
+    repeated = reconcile_hcm_beclass_cooking(port, "115990823")
 
-    assert first.requires_cooking is replay.requires_cooking is True
-    assert port.apply_count == 1
+    expected = True if initial is None else initial
+    assert result.requires_cooking is repeated.requires_cooking is expected
+    assert port.requires_cooking is expected
+    assert port.apply_count == int(initial is None)
 
 
 @pytest.mark.parametrize(
@@ -362,43 +328,3 @@ def test_reconciliation_does_not_create_retired_anomaly_rechecks(monkeypatch):
     reconciliation.reconcile("115990823")
 
     assert requests == []
-
-
-def test_apply_cooking_terms_falls_back_to_direct_update_when_client_finance_bootstrap_required(monkeypatch):
-    executed = []
-
-    class Cursor:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def execute(self, statement, params):
-            executed.append((statement, params))
-
-    class Connection(_Connection):
-        def cursor(self):
-            return Cursor()
-
-    class Repository:
-        def __init__(self, _connection):
-            pass
-
-        def load_cooking_requirement(self, _case_no):
-            return SimpleNamespace(requires_cooking=False, version=1)
-
-        def load_for_preview(self, _case_no):
-            raise ValueError("client_finance_bootstrap_required")
-
-    monkeypatch.setattr(adapter, "MySqlOrderTermsRepository", Repository)
-
-    connection = Connection()
-    adapter.MySqlHcmBeClassReconciliationAdapter(connection).apply_cooking_terms(
-        "115990823", 9, True
-    )
-
-    assert executed == [
-        ("UPDATE orders SET requires_cooking=%s WHERE case_no=%s", (True, "115990823"))
-    ]
-    assert connection.begins == connection.commits == connection.rollbacks == 0
