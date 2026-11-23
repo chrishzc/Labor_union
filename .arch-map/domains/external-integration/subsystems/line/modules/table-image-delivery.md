@@ -22,8 +22,8 @@
 - preview: `notification-rules-presentation` injects same renderer, only embeds sample/authorized preview PNG data; no delivery URL or token is exposed.
 
 ## Contracts
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — LINE table image and display-only preview boundaries.
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — current confirmation package and recipient rules.
+- `.arch-map/requirements/17_External_Integration_LINE_Access正式規格.md` — LINE table image and display-only preview boundaries.
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — current confirmation package and recipient rules.
 
 ## Verification
 - test_root: `tests/domains/external-integration/subsystems/line/modules/table-image-delivery/`

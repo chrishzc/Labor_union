@@ -5,7 +5,7 @@
 - subsystem: `contract-signing`
 
 ## Responsibility
-管理上傳 XLSX 的 typed 欄位映射、零寫入示範預覽與不可變核准版本。保存及啟用只更新模板目錄，不改既有案件、文件或其他 owner facts。正式產製依單一模板／映射 pair，歷史來源依保存摘要解析。
+管理上傳 XLSX 的 typed 欄位映射、零寫入示範預覽與不可變核准版本。`ContractTemplateManagement.inspect` 先檢查檔名及欄位映射；示範模式產生範例值並回傳 `WorkbookPreview`，此方法不直接呼叫模板儲存寫入。保存及啟用另走模板目錄，不改既有案件、文件或其他 owner facts。正式產製依單一模板／映射 pair，歷史來源依保存摘要解析。
 
 ## Implementation
 - `domains/contract_signing/template_management.py`
@@ -23,7 +23,7 @@
 - `ui_react/src/api/contract_templates/contract_templates_client.ts`
 
 ## Contracts
-- `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — CTM-01～06。
+- `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — CTM-01～06。
 
 ## Verification
 - layout_status: `custom_current`

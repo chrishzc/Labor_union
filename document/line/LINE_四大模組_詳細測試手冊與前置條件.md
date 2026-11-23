@@ -3,7 +3,7 @@
 > **文件版本**：v2.9（2026-09-18，新增 #325 寶寶日誌／餐食照片提醒的真人 LIFF 與 provider 驗收；#313、#314、#325 的程式驗收留在 Issue）
 > **原始對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`；包含 PR #299 及後續對齊修訂。開始測試前須確認實際執行版本已包含修正，PR 存在不等於 main 已合併或環境已部署。
 > **適用範圍**：LINE 官方帳號、LIFF、Rich Menu、LINE OA 與 React 管理介面的人工／手機／provider 驗收；FastAPI、MySQL、owner/readback 只作人測前置或證據背景，#313／#314 的程式 acceptance 留在 Issue。
-> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`、同目錄現行正式規格及其後續修訂；最新明確使用者決定優先。M3-04 幹部群簽約通知、Zero Pool 幹部群告警、M4-01 告警群與 M4-03 告警 Safe Review Link 已取消，不得因舊手冊或舊實作恢復。
+> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`、`.arch-map/requirements/` 的現行正式規格及其後續修訂；最新明確使用者決定優先。M3-04 幹部群簽約通知、Zero Pool 幹部群告警、M4-01 告警群與 M4-03 告警 Safe Review Link 已取消，不得因舊手冊或舊實作恢復。
 > **目的**：本手冊集中記錄真人／手機／provider 可見效果的驗收步驟。Agent 段落只負責準備人測前置資料與測試包，不承擔 #313／#314 的程式驗收；程式、DB、owner receipt/readback 的 acceptance 留在對應 Issue。
 
 ---
@@ -290,7 +290,7 @@ LINE 官方帳號在生產環境中依「每月主動發送的 Push 訊息則數
 
 ### 2.5.3 額度防禦支柱三：群組通知取代終端用戶多重 Push
 
-1. **Match_Success 媒合成功**。客戶接受配對後，工會專員接手簽約，依 [簽約正式規格](../架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md) 驗收外部送交與回收文件。
+1. **Match_Success 媒合成功**。客戶接受配對後，工會專員接手簽約，依 [簽約正式規格](../../.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md) 驗收外部送交與回收文件。
 2. **Zero-Pool 拒絕降維**：客戶回覆無法調整條件時，向「工會管理群組」推播人工介入協調卡片。
 3. **成效**：大幅減少對終端用戶的付費 Push 則數，集中由工會群組協調處理。
 

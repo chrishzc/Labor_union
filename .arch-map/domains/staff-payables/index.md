@@ -10,9 +10,9 @@
 - depended_by: `finance-import` — bank facts may delegate payables owner commands。
 
 ## Contracts
-- `document/架構重整/01_規格基線/05_Staff_Payables_Export_Domain.md` — Staff Payables Domain contract
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — payables/refund executable boundary
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation contract
+- `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` — Staff Payables Domain contract
+- `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — payables/refund executable boundary
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation contract
 
 ## Verification routing
 - default_boundary: Domain

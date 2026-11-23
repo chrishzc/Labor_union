@@ -23,7 +23,7 @@
 - `subsystems/anomalies/outbox_worker.py` — central composition caller
 - `subsystems/anomalies/system_alert_projection.py` — Anomalies-owned `system_alerts` projection；not an Access SSOT
 - `api/` — FastAPI auth/dependency adapters
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — Access contract
+- `.arch-map/requirements/17_External_Integration_LINE_Access正式規格.md` — Access contract
 
 ## Verification routing
 - default_boundary: Subsystem

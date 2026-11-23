@@ -12,7 +12,7 @@ from pathlib import Path
 REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "AGENTS.md": (
         "00_Agent任務分級與交付規範.md",
-        "10_Global_保留資料Migration與Cutover_Subsystem.md#9-agent-與開發者-db-變更執行門",
+        ".arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md#9-agent-與開發者-db-變更執行門",
     ),
     "document/架構重整/00_Agent任務分級與交付規範.md": (
         "| T0 |",
@@ -26,12 +26,12 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "document/架構重整/00_規格書撰寫與生命週期規範.md": (
         "Living Current Truth",
         "scripts/validate_spec_hygiene.py",
-        "01_規格基線/",
+        ".arch-map/requirements/",
     ),
     "document/架構重整/00_開發者與Agent導覽.md": (
         "00_Agent任務分級與交付規範.md",
     ),
-    "document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md": (
+    ".arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md": (
         "## 6. Agent 與開發者 DB 變更執行門（§9）",
         "9-agent-與開發者-db-變更執行門",
         "`pass` / `blocked` / `not_run`",

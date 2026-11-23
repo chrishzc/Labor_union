@@ -32,7 +32,7 @@
 
 - layout_status: `custom_current`
 - test_root: `tests/test_validation_dataset_scripts.py`
-- test_root: `tests/test_verify_finance_manual_review_scenario.py`
+- test_root: `tests/test_verify_finance_manual_review_scenario.py` — 既有合成案例核對先有人工審閱，再有財務權責方的更正事件。
 
 ## Provenance
 

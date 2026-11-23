@@ -20,11 +20,11 @@
 - outbound: `scheduling` — matching segment／commitment facts。
 
 ## Contracts
-- `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — staff contract and precontract commitment boundary。
+- `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — staff contract and precontract commitment boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `tests/test_staff_contract_signing_application.py`
+- test_root: `tests/test_staff_contract_signing_application.py`（既有合成案例：無休、連續服務或空白輸入分配為連續服務日；無法辨識的非空服務方式會拋出帶有 `precontract_service_mode_invalid` 的 `ValueError`。）
 
 ## Provenance
 - Staff contract application ownership — `architecture_declared` — Contract Signing subsystem contract and current source。

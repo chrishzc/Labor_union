@@ -20,7 +20,7 @@ reconciliation orchestration。各資料 Domain／Subsystem 只提供 typed sour
 
 ## Contracts
 
-- `document/架構重整/01_規格基線/18_Global_Deployment與治理正式規格.md` §7.1、§9、§10
+- `.arch-map/requirements/18_Global_Deployment與治理正式規格.md` §7.1、§9、§10
 
 ## Verification routing
 

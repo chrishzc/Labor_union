@@ -21,11 +21,11 @@
 - CHECK 3819 提供狀態、收據一致性、配對關聯的封閉說明與安全規則代碼；保留原命令人工查詢，不自動重送。
 - Preview／Apply 顯示 `historical_order_database_*` 的封閉原因與 MySQL 數字，保留舊通用錯誤碼支援；Apply 維持同命令結果未確認與人工查詢，資料庫資料鎖／死結不自動重送。
 - 當次 `import_counts` 投影成功寫入、資料已一致與未匯入，另顯示檔外取消筆數。主動重匯建立新操作，結果未知時提示查核正式訂單與異動紀錄，不自動重送。
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.7 — Historical Order Adoption。
+- `.arch-map/requirements/01_Orders_Domain.md` §3.7 — Historical Order Adoption。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/historical_order_workbook_client.test.ts`
+- test_root: `ui_react/src/tests/historical_order_workbook_client.test.ts` — 既有模擬案例區分 Apply 暫時不可用與 Preview 錯誤。
 
 ## Provenance
 - Presentation 不重算 owner facts — `architecture_declared` — Orders historical adoption contract。

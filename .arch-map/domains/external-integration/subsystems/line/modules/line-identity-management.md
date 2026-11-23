@@ -58,8 +58,8 @@
 ## Contracts
 - `POST /api/v1/line/notification-task-actions/customer-binding-reminder/dismiss` — identity-management application 以本案客戶鎖、既有 command receipt 及 audit 保存誤報消除，binding-reminders count/items 同一範圍排除；不修改 owner facts。
 - `binding_reminders(LineIdentityCandidateQuery)` — existing identity application/repository owns bounded unbound current-customer and active-staff reminder query; typed name/phone/case projection excludes active canonical claims and creates no state or delivery task. Notification workbench uses the original binding-read capability.
-- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9 — one role-scoped contract, selected-role state and bounded failure streak.
-- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.5 — Orders terminal closure is the source; LINE fresh-reads role bindings and active client cases before a single staff default-menu intent.
+- `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` §9 — one role-scoped contract, selected-role state and bounded failure streak.
+- `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` §9.5 — Orders terminal closure is the source; LINE fresh-reads role bindings and active client cases before a single staff default-menu intent.
 - `domains/line/identity_binding.py` — role-scoped claim/snapshot plus bounded streak transition.
 - `db/schema_parts/1019_line_identity_role_scope.sql` — additive shared root/event successor, selected-role column and streak root.
 - Staff retirement committed receipt 在同一 outer UoW 建立 staff-role revocation／default-menu intent；只有 current `staff.retirement.committed` rule 有效且退役前 binding 可核對時，才由 notification registry 建立 source／decision／intent／delivery task，不由 effect 自建 rule 或 template。
@@ -77,7 +77,7 @@
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/line-identity-management/` — identity presentation adapter masking and strict typed-state coverage.
 
 ## Provenance
-- `line_identity_role_bindings` and `line_identity_role_binding_events` are the single shared role-scoped successor; legacy roots/events are migration/compatibility input only — `architecture_declared` — `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.
+- `line_identity_role_bindings` and `line_identity_role_binding_events` are the single shared role-scoped successor; legacy roots/events are migration/compatibility input only — `architecture_declared` — `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` §9.
 - Role selection, bounded streak and same-type replacement tests are owned by this Module test root — `source_observed` — `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`.
 - Terminal closure ordinary-customer no-staff no-op（含 source subject NULL 且 owner 未綁定時，先驗版本／terminal／capability 再記原 noop receipt）／receipt-filtered pending scan and restore/replay/stale/revocation tests are owned by this Module test root — `source_observed` — `tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/test_terminal_closure_restore.py`.
 

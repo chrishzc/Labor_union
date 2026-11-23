@@ -54,8 +54,8 @@
 - `/summaries` 同樣支援 optional `lifecycle_state=active|retired`，供排班及代班的新選項使用 active；省略仍保留全部人員，`StaffIdentityProvider` 不套用篩選，以保留歷史案件的退役人員名稱與公會編號。
 - 履歷維持既有 staging／Preview／Apply、版本及 authenticated download。`StaffRegistryEditor` 提供 PDF 選檔、上傳、下載及獨立 loading／error／empty 狀態，不提供名冊內嵌履歷預覽；上傳保存驗證與客戶確認／正式寄送的履歷依賴保留。`staff_resume_client.ts` 讀 controlled-files runtime settings，檔案操作使用專用 timeout。
 - 規格 33 §3.2：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
-- `document/架構重整/01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
-- `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md`
+- `.arch-map/requirements/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
+- `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md`
 - Profile、Bank Account 與資格修改皆為一次點擊儲存；`reason` 為選填備註，省略預設空字串。內部仍使用既有 Preview／Apply，保留 actor／before／after／receipt／idempotency，無人工預覽或核對勾選門檻（Global §2.4）。
 
 ## Verification
@@ -66,7 +66,7 @@
 - integration_root: `tests/test_staff_summary_query.py` — 既有 bounded summary projection 契約。
 - integration_root: `tests/test_staff_summary_routes.py` — 既有 authenticated cursor route 契約。
 - integration_root: `ui_react/src/tests/staff_directory_adapter.test.ts`
-- integration_root: `ui_react/src/tests/staff_directory_client.test.ts`
+- integration_root: `ui_react/src/tests/staff_directory_client.test.ts` — 既有模擬案例核對分頁游標未前進時拒絕結果，不自動重試。
 
 ## Change triggers
 Reconcile when Staff personal-profile or bank-account fields, complete-value boundary, authenticated entrypoint, UI consumer, or test roots change.

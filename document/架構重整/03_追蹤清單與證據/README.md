@@ -1,6 +1,6 @@
 # 追蹤清單與證據索引
 
-本目錄只保存仍有 current consumer 的 review queue、release／migration gate、aggregate final receipt 與目前回歸需要的 evidence。這些資料提供可驗證事實，不建立業務 Authority；正式 owner、contract 與 current status 仍由 `01_規格基線/`、最新人工裁決及 current successor register 擁有。
+本目錄只保存仍有 current consumer 的 review queue、release／migration gate、aggregate final receipt 與目前回歸需要的 evidence。這些資料提供可驗證事實，不建立業務 Authority；正式 owner、contract 與 current status 仍由 `.arch-map/requirements/`、最新人工裁決及 current successor register 擁有。
 
 一般 T1／T2 工作不按 slice 建立 tracked receipt；依 [00_Agent任務分級與交付規範.md](../00_Agent任務分級與交付規範.md) 的 artifact 邊界，不按 slice 建 tracked receipt。Intermediate plan、handoff、progress note、raw log、HTTP dump、重複 candidate receipt 與已關閉 defect摘要應放在 ignored `scratch/`，或在完成後由 Git 歷史保存。大型 raw evidence、個資、secret、DB dump 與不必要 payload 不加入 Git。
 
@@ -8,7 +8,7 @@
 
 | 文件 | 用途 |
 |---|---|
-| [正式規格索引](../01_規格基線/15_正式規格索引與裁決總表.md) | current正式規格、owner、Task 96／97 terminal boundary與裁決入口；Task 96 excluded／deferred項目只能由新的current successor重新啟動。 |
+| [正式規格索引](../../../.arch-map/requirements/15_正式規格索引與裁決總表.md) | current正式規格、owner、Task 96／97 terminal boundary與裁決入口；Task 96 excluded／deferred項目只能由新的current successor重新啟動。 |
 | [Task 97 repository-local closeout receipt](evidence/task97_repository_local_closeout_receipt_a48caa8.md) | 2026-08-30 Task 97 repository-local完成的歷史 aggregate receipt；只能證明其綁定 source revision 的結案事實，不得作為後續 source revision 或新增 writer 的持續核准 Authority。production、DB engine與external acceptance仍不得外推。 |
 | [HCAT／RPRE aggregate receipt](evidence/2026-08-28_task96_hcat_rpre_aggregate_final_receipt.md) | 歷史分類／remediation projection的整合證據與未完成gate。 |
 | [LDU 1003→1012 aggregate receipt](evidence/2026-08-28_task96_ldu_1003_to_1012_final_receipt.md) | 限定於1003→1012的歷史release證據；不得外推為current preserve-upgrade PASS。 |
@@ -21,8 +21,8 @@
 
 ## 通知事項驗證進度
 
-- LINE 共用處理投影、單筆與批次結清已實作。依 [LINE 結清契約](../01_規格基線/17A_LINE_Gateway_Inbox與通知投遞正式規格.md#41-共用待辦判定與操作資格)，已用原生 MySQL synthetic 資料及正式 HTTP 路由驗證同來源完整範圍、處理中阻擋、原因與權限、原鍵重送及來源結清後禁止重建；另完成瀏覽器結清、批次選取及回應遺失後恢復。沒有操作既有測試庫積存事項，也沒有實際寄送 LINE。
-- 歷史案件通知接續資格與舊逾期款截止邊界已實作；依 [歷史案件通知接續責任分界](../01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md#81-歷史案件接續通知的責任分界) 驗證 owner Query、通知查詢 count/items 及付款資格。完整實際開始日確認、正式排班、完工的產品操作流程尚未端到端驗證，不能以 synthetic fixture 狀態轉換替代；下一責任人為整合驗證負責人。
+- LINE 共用處理投影、單筆與批次結清已實作。依 [LINE 結清契約](../../../.arch-map/requirements/17A_LINE_Gateway_Inbox與通知投遞正式規格.md#41-共用待辦判定與操作資格)，已用原生 MySQL synthetic 資料及正式 HTTP 路由驗證同來源完整範圍、處理中阻擋、原因與權限、原鍵重送及來源結清後禁止重建；另完成瀏覽器結清、批次選取及回應遺失後恢復。沒有操作既有測試庫積存事項，也沒有實際寄送 LINE。
+- 歷史案件通知接續資格與舊逾期款截止邊界已實作；依 [歷史案件通知接續責任分界](../../../.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#81-歷史案件接續通知的責任分界) 驗證 owner Query、通知查詢 count/items 及付款資格。完整實際開始日確認、正式排班、完工的產品操作流程尚未端到端驗證，不能以 synthetic fixture 狀態轉換替代；下一責任人為整合驗證負責人。
 - 分類已改為「款項與群組」，直接相關 UI 測試與桌面瀏覽器核對通過。桌面 14／手機 13 類入口由既有投影與測試覆蓋；本次隔離資料未逐類建立完整案件，手機實機及全部來源的完整瀏覽器流程尚未驗證，下一責任人為整合驗證負責人。
 
 ## 2026-09-01 清理批次

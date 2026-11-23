@@ -14,7 +14,7 @@ import re
 from typing import Sequence
 
 
-DEFAULT_TARGET = Path("document/架構重整/01_規格基線")
+DEFAULT_TARGET = Path(".arch-map/requirements")
 DEFAULT_MAX_LINES = 600
 TOP_PATCH_SCAN_LINES = 35
 

@@ -31,7 +31,7 @@
 ## Contracts
 - `domains/scheduling/` — Scheduling domain rules
 - `subsystems/scheduling/` — Scheduling workflows
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — outer UoW／typed errors
+- `.arch-map/requirements/00_Global_共同契約.md` — outer UoW／typed errors
 
 ## Verification routing
 - default_boundary: Subsystem

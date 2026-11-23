@@ -27,7 +27,7 @@
 - shared composition: `infrastructure/mysql/accounting_workspace_repository.py::query_subsidy_payable_handoff` — 與案件查詢共用typed Client Finance funding及正式方案，清冊／cash planning不另算資格或S。
 
 ## Contracts
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — §2.5、§2.5.1、§2.5.5。
+- `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — §2.5、§2.5.1、§2.5.5。
 - `api/routes/finance_reports.py` — accounts-payable query/export。
 - `api/routes/finance_reports.py` — 歷史月嫂款可用案號、月嫂完整姓名或公會編號查未列入原因，讀取同一案件應付查核來源。
 - `api/routes/finance_reports.py` — authenticated bounded `/accounts-payable/cash-requirements` GET；既有 query/export 與付款入口不變。

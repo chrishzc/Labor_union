@@ -9,7 +9,7 @@
 的導覽，不再投影 current issue、不計算delta、不寫Payroll或Staff Payables root。
 
 ## Verification
-- test_root: `tests/domains/anomalies/subsystems/anomalies/modules/payroll-current-issue/`
+- 固定版未定位本 leaf 的專屬測試目錄。`domains/anomalies/registry.py` 的預設 registry 只登錄 LINE；既有 `PAYOUT-002` 輔助定義不是執行期登錄。這是靜態來源核對，不是測試覆蓋。
 
 ## Lifecycle
 - `superseded_candidate`: 無 current runtime anomaly consumer；若 source／test retirement完成，移除本 leaf及其 inbound route。

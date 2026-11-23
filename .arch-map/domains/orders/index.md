@@ -11,8 +11,8 @@
 - depended_by: `case-import` — formal case bootstrap 最終必須進入 Orders-owned lifecycle。
 
 ## Contracts
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders canonical Domain contract
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation／transaction contract
+- `.arch-map/requirements/01_Orders_Domain.md` — Orders canonical Domain contract
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation／transaction contract
 
 ## Verification routing
 - default_boundary: Domain

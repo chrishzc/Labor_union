@@ -30,10 +30,10 @@ workflow／repository／storage port 保護。
   `modules/file-storage.md`
 
 ## Contracts
-- `document/架構重整/01_規格基線/30_Controlled_File_Storage_NAS正式規格.md` §4–§13 — current formal
+- `.arch-map/requirements/30_Controlled_File_Storage_NAS正式規格.md` §4–§13 — current formal
   controlled-file routes, authenticated management boundary, opaque projection and
   Preview/Apply/receipt contract.
-- `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md` §9 —
+- `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md` §9 —
   additive schema and developer DB change gates.
 
 ## Verification routing

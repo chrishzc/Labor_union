@@ -85,8 +85,8 @@ db/                   schema parts、migration releases 與模板
 scripts/              匯入、migration、維運與 worker entry points
 tests/                Python Module／Subsystem／Domain／Global 驗證
 validation/           版本化 scenario、manifest 與 readback artifacts
-.arch-map/            current architecture 與 focused-test 導航索引
-document/架構重整/   正式規格、仍有效決策與必要證據
+.arch-map/            正式規格、current architecture 與 focused-test 導航索引
+document/架構重整/   仍有效的決策、追蹤清單與必要證據
 ```
 
 ## Agent 與開發者閱讀順序
@@ -95,7 +95,7 @@ document/架構重整/   正式規格、仍有效決策與必要證據
 2. 已知精確 path／symbol 時直接開檔；只有功能描述時，優先用新版 Archmap 外掛 `arch-map@personal-tips` 的 `arch-map:arch-map-entry` 限域定位。外掛不可用或未涵蓋查詢時，才按 `AGENTS.md` 對 `.arch-map/` 做限域搜尋；仍不明時，只沿 `.arch-map/index.md` 的單一最短路徑定位。
 3. leaf 已指出 owner、source、adapter 與 focused test 後停止擴大搜尋。
 4. 只有修改 owner、SSOT、public contract、Unit of Work、schema／migration 或跨 Domain invariant 時，才讀對應正式規格。
-5. 正式規格索引為 `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md`。
+5. 正式規格索引為 `.arch-map/requirements/15_正式規格索引與裁決總表.md`。
 
 歷史計畫、封存 evidence、舊測試名稱與 Git 歷史不是 current implementation authority。
 

@@ -14,12 +14,12 @@
 - outbound: committed provider delivery — external failure cannot rollback committed Domain transaction。
 
 ## Contracts
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — Access/LINE external integration contract
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — LINE customer/staff self-service contract
-- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` — LINE identity lifecycle
-- `document/架構重整/01_規格基線/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md` — Access production cutover boundary
+- `.arch-map/requirements/17_External_Integration_LINE_Access正式規格.md` — Access/LINE external integration contract
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` — LINE customer/staff self-service contract
+- `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` — LINE identity lifecycle
+- `.arch-map/requirements/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md` — Access production cutover boundary
 - `document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` — LINE module acceptance baseline
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global actor/outbox contract
+- `.arch-map/requirements/00_Global_共同契約.md` — Global actor/outbox contract
 
 ## Verification routing
 - layout_status: `custom_current`

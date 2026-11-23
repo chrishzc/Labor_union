@@ -11,7 +11,7 @@
 
 ## Implementation
 - primary:
-  - `domains/orders/historical_service_accounting.py`
+  - `domains/orders/historical_service_accounting.py` — 候選要求傳入的每筆指派恰有一筆正整數天數；缺漏、重複或人員不符會拒絕。
   - `domains/orders/floor_fee.py`
   - `subsystems/orders/historical_service_accounting_workflow.py`
   - `infrastructure/mysql/historical_service_accounting_repository.py`
@@ -35,7 +35,7 @@
 - inbound: authenticated historical-order administration（查詢／人工處理）。
 
 ## Contracts
-- `document/架構重整/01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md`
+- `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md`
 
 ## Verification
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-service-accounting/`

@@ -30,7 +30,7 @@ Query 依注入的台北業務日期排除未來排班，人員核對當日是�
 - outbound: `government-subsidy/government-subsidy` — 已保存取消狀態與實際結束日後，在原 outer UoW 委派既有補助金額同步；保留整期快照，另列更正差額。
 
 ## Contracts
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — §3.5 cancellation 與 Preview／Apply typed errors。
+- `.arch-map/requirements/01_Orders_Domain.md` — §3.5 cancellation 與 Preview／Apply typed errors。
 - `/api/v1/orders/{case_no}/cancellation/{preview,apply}` — `api/routes/order_cancellation.py`。
 - 正式取消視窗先讀全案結算預覽，再由人員確認 Apply。Client Finance 在既有交易關卡建立一般退款或調整款，案件帳務以正式結算識別回讀，銀行核銷沿各原 owner。
 - 取消完成及重新讀取已取消案件時提供原案資料帶入非市民新案的導覽入口；只導向 Case Import 手動建案，不自動建案或更動綁定，沿用既有 busy 與未儲存離頁保護。
@@ -47,7 +47,7 @@ Query 依注入的台北業務日期排除未來排班，人員核對當日是�
   - `ui_react/src/tests/orders_page_real_data.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_cancellation.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_reopen.test.tsx`
-- test_root: `ui_react/src/tests/order_cancellation_client.test.ts`
+- test_root: `ui_react/src/tests/order_cancellation_client.test.ts` — 既有 schema 案例區分合法的 `null` 與漏欄，必要欄位不能省略。
 
 ## Provenance
 - Cancellation workflow ownership — `architecture_declared` — Orders §3.5 and existing Orders subsystem map.

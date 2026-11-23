@@ -9,7 +9,7 @@
 
 ## Implementation
 - primary:
-  - `domains/orders/historical_adoption.py`
+  - `domains/orders/historical_adoption.py` — 採納候選只有在案件狀態改變或日期有修正時才推進 Orders lifecycle version；這是候選結果，不代表已寫入。
   - `subsystems/orders/historical_adoption_workflow.py`
   - `subsystems/orders/historical_order_workbook.py`
   - `subsystems/orders/historical_order_workbook_import.py`
@@ -50,8 +50,8 @@
 - 現行逐筆採納資料仍承載可採納時段、指派及帳務的正式引用。`27` §12.1 定義搬遷至 owner 資料及轉接查詢與外鍵後的清除條件。
 - MySQL 3819 沿 `historical_order_database_check_<constraint>` 保留 bounded、去 schema 的規則識別，不辨識時回 `check_rejected`；不以規則失敗直接推定 migration 或來源修正。
 - 歷史工作簿資料庫錯誤以 `historical_order_database_*` 區分連線、權限、結構、資料鎖及指令／資料限制，保留數字與 correlation，不回傳或記錄 raw SQL／provider message；資料鎖與死結不觸發自動重送。
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — historical adoption semantics and Orders ownership.
-- `document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md` — script/API entry lifecycle.
+- `.arch-map/requirements/01_Orders_Domain.md` — historical adoption semantics and Orders ownership.
+- `.arch-map/requirements/19_Global_Entry_Point_Governance.md` — script/API entry lifecycle.
 
 ## Verification
 - static:

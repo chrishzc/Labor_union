@@ -13,7 +13,7 @@
 - transport: `api/routes/jobs.py`、`api/schemas/jobs.py`
 
 ## Contracts
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` §2.1。
+- `.arch-map/requirements/00_Global_共同契約.md` §2.1。
 - Public failure category 沿用 `shared_kernel/errors.py:ErrorCategory`；closed schema 拒絕額外 raw receipt／error 欄位。
 
 ## Verification

@@ -66,3 +66,4 @@
 - layout_basis: Backend owner-local tests use the canonical Python root; React transport tests mirror this Module under the existing frontend test layout.
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/`
 - test_root: `ui_react/src/tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/` — Client BeClass transport 與逾時結果確認。
+- 靜態來源（`subsystems/case_import/pairing_current_facts.py` L69–79）：owner 讀回不完整可與配對原因並列；零筆對應、多筆對應、唯一對應但映射不一致分別回傳不同的型別化原因。這段不驗證實際配對、匯入或資料庫。

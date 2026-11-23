@@ -8,9 +8,9 @@
 
 | Owner | 正式規格與驗收 |
 | --- | --- |
-| Case Import | [§3.1.1 原案資料帶入與獨立操作](../01_規格基線/17B_Case_Import與非市民Redis待審正式規格.md)，NC-MANUAL-01～04、NC-SEPARATE-01 |
-| LINE Identity | [§8.1 管理介面](../01_規格基線/23_LINE身分管理與解除正式規格.md)，NC-BIND-01～02 |
-| Reporting | [§3 統計口徑](../01_規格基線/34_營運報表與統計口徑正式規格.md)，NC-REPORT-01 |
+| Case Import | [§3.1.1 原案資料帶入與獨立操作](../../../.arch-map/requirements/17B_Case_Import與非市民Redis待審正式規格.md)，NC-MANUAL-01～04、NC-SEPARATE-01 |
+| LINE Identity | [§8.1 管理介面](../../../.arch-map/requirements/23_LINE身分管理與解除正式規格.md)，NC-BIND-01～02 |
+| Reporting | [§3 統計口徑](../../../.arch-map/requirements/34_營運報表與統計口徑正式規格.md)，NC-REPORT-01 |
 
 ## 2. 執行順序與證據
 
@@ -53,7 +53,7 @@
 
 ## 4. 手動建案服務時數與起訖範圍
 
-- 使用者已手動更新前端並成功帶入原案，要求同日起訖時間差由等於改為至少涵蓋所選服務時數。正式契約及 STAR 已同步 [Case Import §3.1、NC-MANUAL-05](../01_規格基線/17B_Case_Import與非市民Redis待審正式規格.md)。本節僅記錄施工與證據。
+- 使用者已手動更新前端並成功帶入原案，要求同日起訖時間差由等於改為至少涵蓋所選服務時數。正式契約及 STAR 已同步 [Case Import §3.1、NC-MANUAL-05](../../../.arch-map/requirements/17B_Case_Import與非市民Redis待審正式規格.md)。本節僅記錄施工與證據。
 - 變更既有手動建案 Domain validator 及 React 驗證。手動選單改名為「每日服務時數（預設時段）」，四選項先顯時數再註明預設起訖，內部值及選取行為保留。實際起訖由下方欄位保存。
 - 已核對表單差異：LIFF 是固定四個服務時段；手動新案是 4／8 小時加可調起訖；Orders Terms 為可編輯的每日時數與分開保存的起訖，常用班次提供建議值。本次不修改 LIFF 或 Orders 規則，不把時間跨度視為自動加計服務時數。
 - 修正前新增正例重現：Python 3 failed／2 passed；React targeted 3 failed／1 passed。修正後獨立驗證為 Python 37 passed、React 15 passed；API seam 確認 08:00–17:00、8 小時建案仍保存每日 8 小時及原起訖。小於、反向、空值及非法時間拒絕；LIFF allowlist 不變。

@@ -1,7 +1,7 @@
 # 變更紀錄
 
 本檔記錄可供 reviewer 與部署負責人快速理解的版本差異。正式業務語意仍以
-`document/架構重整/01_規格基線/`、release manifest 與驗收 evidence 為準。
+`.arch-map/requirements/`、release manifest 與驗收 evidence 為準。
 
 ## 2026-08-13 — 開發者本機資料庫維護與啟動腳本收斂
 

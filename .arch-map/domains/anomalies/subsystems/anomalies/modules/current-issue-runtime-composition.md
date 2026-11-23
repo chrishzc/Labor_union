@@ -22,4 +22,5 @@ mutation、business predicate或public entry。
 - layout_status: `custom_current`
 - layout_basis: Existing outbox composition regression keeps its original entrypoint; new owner tests use the canonical module root.
 - integration_root: `tests/test_subsidy_advance_worker_wiring.py`
+- Worker 接線回歸（L23–54，monkeypatch）：其餘已接線的 consumer 結果仍被聚合，測試連線會關閉；測試替身若被要求建立已退役的逐案補助復原 repository 會直接失敗。此斷言不代表已驗證真實資料庫或所有 owner reader。
 - test_root: `tests/domains/anomalies/subsystems/anomalies/modules/current-issue-runtime-composition/`

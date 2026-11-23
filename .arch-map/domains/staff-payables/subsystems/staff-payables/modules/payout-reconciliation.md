@@ -20,10 +20,10 @@
 
 ## Contracts
 - 台新原始備註的唯一月嫂姓名與正式案件／指派關聯，可於原 Preview 投影方案一分期，選填六碼須與該案一致。交易月份由 Finance Import 自動配對檢查；六碼指定案件的跨月流水可走單筆人工核對，沿原 Preview／Apply 重驗對象、案件及款項。Apply 沿原 outer UoW 鎖來源、確認銀行方案及原 Payroll 分期，再核銷原月嫂義務。一般／歷史訂單同用資格，無方案或分期不直接視為無款；未達資格明示阻擋，方案不得使月嫂總應收增加。既有永豐自備款限制保留。
-- `document/架構重整/01_規格基線/05_Staff_Payables_Export_Domain.md` §2–3。
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md`。
+- `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3。
+- `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md`。
 
 ## Verification
-- integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py`
+- integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py` — 既有合成案例核對相同命令重送回傳原收據，不增加寫入。
 - integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_repository_recovery.py`
 - integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_subsidy_split_mysql.py` — 無方案／無分期共同確認、已有分期、先前部分付款、原日期、來源衝突、同鍵異命令及中途失敗整筆回滾；補助先付時銀行別餘額與月清冊／逐案查核一致，含自備款小於補助款。

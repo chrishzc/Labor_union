@@ -10,7 +10,7 @@
 
 ## Implementation
 - primary:
-  - `subsystems/staff_payables/staff_payout_self_service_query.py`
+  - `subsystems/staff_payables/staff_payout_self_service_query.py` — 基本查詢參數不合法時先拒絕，不呼叫儲存庫。
   - `infrastructure/mysql/staff_payout_self_service_query_repository.py`
 
 ## Dependencies
@@ -18,7 +18,7 @@
 - outbound: Staff Payables canonical obligations, projections and ledger.
 
 ## Contracts
-- `document/架構重整/01_規格基線/05_Staff_Payables_Export_Domain.md` §2–3.
+- `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3.
 
 ## Verification
 - test_root: `tests/domains/staff-payables/subsystems/staff-payables/modules/staff-payout-self-service-query/`

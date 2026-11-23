@@ -23,9 +23,9 @@ outbox 與 runtime governance；不擁有各 business Domain 的根事實或公�
 
 ## Contracts
 - Global migration／cutover contract —
-  `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
+  `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md`
 - Global deployment／operational retention contract —
-  `document/架構重整/01_規格基線/18_Global_Deployment與治理正式規格.md`
+  `.arch-map/requirements/18_Global_Deployment與治理正式規格.md`
 
 ## Verification routing
 - default_boundary: Subsystem

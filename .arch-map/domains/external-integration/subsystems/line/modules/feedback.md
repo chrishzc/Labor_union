@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-LINE Integration owns the bounded `resolved | unresolved` feedback root, immutable terminal receipt, fixed catalog/reply revision linkage and recomputable aggregate. Unresolved feedback delegates exact ticket creation to the Customer Service owner and stores only the resulting ticket reference.
+LINE Integration owns the bounded `resolved | unresolved` feedback root, immutable terminal receipt, fixed catalog/reply revision linkage and recomputable aggregate. An unresolved feedback decision persists its own receipt but does not itself create a ticket. Customer Service owns ticket creation.
 2026-11-14 擴充：`navigation_catalog.py`、`deterministic_ai_router.py` 與 `AiEventStudio.tsx` 統一涵蓋所有於 LINE 1 對 1 與案件群組聊天室觸發動作之文字指令（含身分綁定、案件群組綁定／邀請、群組小幫手與結案／合意延期、圖文選單切換、轉接專人／恢復自動助理、問答回饋），各 handler 統一由 `route_aliases()` 讀取自訂指令；`customer_binding` 與 `order_group_bind` 允許依 1 對 1 精確／群組前綴跨情境共用「綁定訂單」。
 
 ## Source
@@ -43,4 +43,4 @@ The adapter reuses immutable `line_notification_source_events` and `line_command
 - `tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_feedback_page.py`
 - `ui_react/src/tests/ai_event_studio_local_preview.test.tsx`
 
-Required negative cases are wrong terminal outcome, idempotency replay, unresolved ticket linkage and fixed catalog/window aggregate.
+Required checks distinguish wrong terminal outcome, idempotency replay, unresolved feedback without automatic ticket creation, and fixed catalog/window aggregates.

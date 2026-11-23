@@ -14,8 +14,8 @@
   - `infrastructure/mysql/multi_caregiver_schedule_query_repository.py`
 
 ## Contracts
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md`
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md`
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `tests/test_multi_caregiver_schedule_read.py`
+- test_root: `tests/test_multi_caregiver_schedule_read.py` — 既有合成案例核對同一人有多筆指派時，只回傳指定指派的班次。

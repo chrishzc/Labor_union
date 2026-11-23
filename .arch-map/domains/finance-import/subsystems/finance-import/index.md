@@ -13,7 +13,7 @@
 ## Contracts
 - `domains/finance_import/` — Finance Import rules
 - `subsystems/finance_import/` — Finance Import workflows
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — receipt/outbox/idempotency
+- `.arch-map/requirements/00_Global_共同契約.md` — receipt/outbox/idempotency
 
 ## Modules
 - `statement-workspace` — successful bank archive, manual statements, case accounting and persistent warning acknowledgement; path: `modules/statement-workspace.md`

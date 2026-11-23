@@ -24,8 +24,8 @@
 - outbound: `line-identity-management` — resolves the verified LINE user to the canonical active staff binding before any payment query.
 
 ## Contracts
-- `document/架構重整/01_規格基線/05_Staff_Payables_Export_Domain.md` §2–3 — target payment month and Staff Payables ownership.
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — verified staff self-service boundary.
+- `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3 — target payment month and Staff Payables ownership.
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` — verified staff self-service boundary.
 
 ## Verification
 - test_root: `tests/domains/external-integration/subsystems/line/modules/staff-payout-view/`

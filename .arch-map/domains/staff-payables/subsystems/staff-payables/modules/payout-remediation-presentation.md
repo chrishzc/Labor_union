@@ -14,13 +14,13 @@
 - 永豐核銷方式可明選「補助方案一：核銷自備款，補助款保留待付」；帶 `confirm_subsidy_split` 至原 payout endpoint，必須取得含正式 T／S／兩來源待付及日期的預覽後再確認。方案／分期與付款一起成功才回讀並提示已保存；未知結果保留原背景命令，不拆成前端兩次儲存。
 
 ## Contracts
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables owner workflow與結清條件。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables owner workflow與結清條件。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/staff_payout_remediation_workbench.test.tsx`
-- test_root: `ui_react/src/tests/staff_payout_remediation_client.test.ts`
+- test_root: `ui_react/src/tests/staff_payout_remediation_client.test.ts` — 既有模擬案例核對背景工作結果的命令類型不符時拒絕解碼。
 - routing: `.arch-map/tests/domains/staff-payables/subsystems/staff-payables/modules/payout-remediation-presentation.md`
 
 ## Change triggers

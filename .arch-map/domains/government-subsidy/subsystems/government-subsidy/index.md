@@ -12,7 +12,7 @@
 ## Contracts
 - `domains/government_subsidy/` — Subsidy rules
 - `subsystems/government_subsidy/` — Subsidy workflows
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
+- `.arch-map/requirements/00_Global_共同契約.md` — transaction/replay contract
 
 ## Modules
 - `period-reconciliation` — 整期銀行核銷、跨單位涵蓋與移期防重；path: `modules/period-reconciliation.md`

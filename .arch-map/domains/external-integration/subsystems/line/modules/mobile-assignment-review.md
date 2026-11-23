@@ -56,11 +56,11 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 - 建立前通知阻擋沿既有 LINE-006／Notification owner；兩端同列 source、去重確切 task identity，原 manual replay 薄轉接及資格預覽。手機管理操作一次點擊內部 Preview／Apply，細部回應亦依事項／generation 忽略晚到結果。
 
 ## Contracts
-- `architecture_declared`：`document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §2、§5.1.1 與 §5.2 規定客服工單待辦退役、留言由 LINE 官方帳號處理，舊手機入口導向待辦工作台。舊 Query 與歷史保留依 `19_Global_Entry_Point_Governance.md` §3.2。
-- `architecture_declared`：`document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §5.1.1 的 `service_start` 來源只呈現服務中換人需求。開工、延期衝突與局部代班不列通知待辦及總數，入口退役依 `19_Global_Entry_Point_Governance.md`。
+- `architecture_declared`：`.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §2、§5.1.1 與 §5.2 規定客服工單待辦退役、留言由 LINE 官方帳號處理，舊手機入口導向待辦工作台。舊 Query 與歷史保留依 `19_Global_Entry_Point_Governance.md` §3.2。
+- `architecture_declared`：`.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §5.1.1 的 `service_start` 來源只呈現服務中換人需求。開工、延期衝突與局部代班不列通知待辦及總數，入口退役依 `19_Global_Entry_Point_Governance.md`。
 
 ## Verification
-- integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/notification_tasks_sync.test.tsx`
+- integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/notification_tasks_sync.test.tsx` — 既有模擬案例確認回到通知頁會重新查詢推薦待辦；來源回傳零筆時移除先前項目。
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_notification_workbench.py`
 - integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/notification_tasks_page.test.tsx`
 - integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/notification_destinations.test.tsx`

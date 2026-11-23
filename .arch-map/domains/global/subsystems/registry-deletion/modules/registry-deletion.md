@@ -34,14 +34,14 @@ Append-only trigger 例外要求同案 pending claim 與 row ownership。connect
 - `POST /api/v1/admin/registries/clients/{case_no}/deletion/apply`
 
 ## Contracts
-- `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md` RD-1／RD-A1～A5。
+- `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md` RD-1／RD-A1～A5。
 
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: 共用 coordinator／UI 的 root 與交易 oracle 歸 Global；Case canonical Client binding oracle 留在 Client Profile 模組。
 - test_root: `tests/domains/global/subsystems/registry-deletion/modules/registry-deletion/`
 - test_root: `ui_react/src/tests/domains/global/subsystems/registry-deletion/modules/registry-deletion/`
-- integration_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_case_registry_deletion.py`
+- integration_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_case_registry_deletion.py` — 既有合成案例核對客戶版本不符時不寫入、不提交；協調器也核對案件版本。
 
 ## Change triggers
 Reconcile when authority、deletion targets、relation guards、entrypoints、receipt or verification roots change.

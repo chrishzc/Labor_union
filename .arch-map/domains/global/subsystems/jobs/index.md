@@ -10,7 +10,7 @@
 - `durable-command-queue` — command acceptance、worker lifecycle 與公開終態回讀；path: `modules/durable-command-queue.md`
 
 ## Contracts
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` §2.1。
+- `.arch-map/requirements/00_Global_共同契約.md` §2.1。
 
 ## Verification routing
 - default_boundary: Module

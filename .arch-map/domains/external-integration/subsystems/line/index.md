@@ -50,11 +50,11 @@
 - `subsystems/line/notification_failure_current_fact.py`與`infrastructure/mysql/line_notification_repository.py::current_failure_fact` — LINE-006 group typed readback；無aggregate persistence。
 - `api/routes/line_identity_management.py::GET /api/v1/line/identity-bindings/{line_user_id}/current-fact` — reader-protected current-fact entry；external caller evidence仍deferred
 - `line/` — LINE transport/provider adapter root
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — integration、delivery、runtime target與safe-review-link邊界。
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — self-service contract
-- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` — identity contract
+- `.arch-map/requirements/17_External_Integration_LINE_Access正式規格.md` — integration、delivery、runtime target與safe-review-link邊界。
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` — self-service contract
+- `.arch-map/requirements/23_LINE身分管理與解除正式規格.md` — identity contract
 - `document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` — required direct-flow acceptance；source存在或局部測試通過不取代流程驗收。
-- `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` — 加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統僅維護好友狀態、不於 follow 建立身分流程或發送歡迎訊息；聊天室主動輸入綁定關鍵字仍依 `line_webhook_reply` 回覆。
+- `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` — 加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統僅維護好友狀態、不於 follow 建立身分流程或發送歡迎訊息；聊天室主動輸入綁定關鍵字仍依 `line_webhook_reply` 回覆。
 
 ### 第一批資訊回覆（2026-10-30 人工核准）
 

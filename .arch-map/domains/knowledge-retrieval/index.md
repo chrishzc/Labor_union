@@ -10,7 +10,7 @@
 
 ## Contracts
 
-- `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` — Knowledge source、治理、published-only retrieval 與 READY index contract。
+- `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` — Knowledge source、治理、published-only retrieval 與 READY index contract。
 - `domains/knowledge_retrieval/` — lifecycle、structured content 與 citation rules。
 
 ## Verification routing

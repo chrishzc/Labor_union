@@ -32,12 +32,13 @@
 - `modules/client-subsidy-return-query.md` — 補助退款案件查詢 owner。
 - `staff-payables/staff-payables/module:accounts-payable-export` — 預估資金需求與已確定款項清冊的 reporting owner；presentation 不計算薪資或退款資格。
 - `modules/historical-payment-settlement.md` — owner application/public contract。
-- `document/架構重整/01_規格基線/06_Anomalies_Domain.md` — owner work item 顯示於 owner page，`#anomalies` 只保留 15 個 current issue。
-- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` 與 `16_Staff_Payables與Client_Refund正式規格.md` — 客戶補助退還義務與月期應付清單；不重定義退款資格、金額、日期或核銷。
+- `.arch-map/requirements/06_Anomalies_Domain.md` — owner work item 顯示於 owner page，`#anomalies` 只保留 15 個 current issue。
+- `.arch-map/requirements/04_Client_Finance_Domain.md` 與 `16_Staff_Payables與Client_Refund正式規格.md` — 客戶補助退還義務與月期應付清單；不重定義退款資格、金額、日期或核銷。
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/historical_client_payment_workbench.test.tsx`
+- 模擬 UI 案例（上列測試 L43–74）：以替身提供 owner Query、Preview、Apply 與讀回；選定義務後儲存並離開，斷言只呼叫一次 Apply、顯示重新讀取的結果，離開回呼只觸發一次。此案例不涵蓋全部失敗分支或實際財務操作。
 - test_root: `ui_react/src/tests/finance_query_transport_identity.test.ts`
 - test_root: `ui_react/src/tests/finance_query_clients.test.ts`
 - test_root: `ui_react/src/tests/finance_request_lifecycle.test.tsx`

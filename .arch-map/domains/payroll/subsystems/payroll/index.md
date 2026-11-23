@@ -12,7 +12,7 @@
 ## Contracts
 - `domains/payroll/` — Payroll rules
 - `subsystems/payroll/` — Payroll workflows
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
+- `.arch-map/requirements/00_Global_共同契約.md` — transaction/replay contract
 
 ## Modules
 - `tiered-payroll` — case-wide subsidy consumption and funding installments; path: `modules/tiered-payroll.md`

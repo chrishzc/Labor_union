@@ -4,7 +4,7 @@ declared_status: blocked
 updated: 2026-09-09
 owner: Customer Service / Knowledge Retrieval / LINE Integration
 domain: Customer Service / Knowledge Retrieval / LINE Integration
-formal_authority: document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md
+formal_authority: .arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md
 source_artifact: document/line/AI客服QA題庫.jsonl
 source_artifact_role: review-input-and-migration-evidence
 db_change: not-authorized-by-this-document
@@ -18,7 +18,7 @@ db_change: not-authorized-by-this-document
 
 LINE 服務說明、客服回答 catalog、人工轉接、automation boundary 與 Rich Menu audience 的正式語意，以：
 
-`document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md`
+`.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md`
 
 為準。
 

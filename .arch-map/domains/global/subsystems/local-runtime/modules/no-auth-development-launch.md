@@ -5,7 +5,7 @@
 - subsystem: `local-runtime`
 
 ## Responsibility
-以明確 local-bypass profile 啟動 Vite source runtime，並排除 inherited immutable React artifact bindings，避免未完成 artifact configuration 阻止本機 no-auth 開發。
+本模組僅保留已退役開發入口的相容封裝；不代表舊設定仍受支援。
 
 ## Implementation
 - primary: `scripts/launchers/start_local_development_no_auth.sh`

@@ -54,11 +54,11 @@
 - Configuration: existing versioned MESSAGE_SCHEDULES／MESSAGE_TEMPLATES; no new table or kind.
 
 ## Contracts
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §4.5 — GET `/api/v1/line/payment-overdue-reminders/cancellation-notices/{case_no}` 預覽，POST 同路徑加 `/send` 建立既有寄送工作。
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §6.7～6.11。
-- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — 款項期別、正式到期日及餘額。
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §4.5 — GET `/api/v1/line/payment-overdue-reminders/cancellation-notices/{case_no}` 預覽，POST 同路徑加 `/send` 建立既有寄送工作。
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §6.7～6.11。
+- `.arch-map/requirements/04_Client_Finance_Domain.md` — 款項期別、正式到期日及餘額。
 
-- `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §18.4 — GET `/api/v1/line/payment-overdue-reminders/cases/{case_no}` and POST `/cases/send`; manual case reminders may precede due date but retain current contract, unique recipient, positive balance, queue pending and fresh provider guards. All entries share existing delivery tasks and audit/history; requested/queued time never becomes sent time, original automatic schedule unchanged.
+- `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` §18.4 — GET `/api/v1/line/payment-overdue-reminders/cases/{case_no}` and POST `/cases/send`; manual case reminders may precede due date but retain current contract, unique recipient, positive balance, queue pending and fresh provider guards. All entries share existing delivery tasks and audit/history; requested/queued time never becomes sent time, original automatic schedule unchanged.
 
 ## Verification
 - layout_status: `custom_current`
@@ -68,4 +68,4 @@
 - ui_test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/payment-overdue-reminders/`
 - layout_basis: 沿用 LINE 現有 module unit／React mirror 與 native MySQL cross-owner infrastructure 驗證邊界。
 
-- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_payment_receipt_notifications_mysql.py` — isolated native manual-only receipt queue, concurrency, reversal／binding guards and no automatic send.
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_payment_receipt_notifications_mysql.py` — isolated native manual-only receipt queue, concurrency, reversal／binding guards and no automatic send. — 既有案例核對指定案件與期別精確命中；期別不符或案件不存在時回傳空結果，不替用其他案件或期別。

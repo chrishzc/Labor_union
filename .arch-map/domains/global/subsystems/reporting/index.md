@@ -16,7 +16,7 @@
 - outbound: `scheduling` — 查詢期間內的effective正式工作日。
 
 ## Contracts
-- 正式契約：自選 `start_date`／`end_date`、唯讀Query與三分頁export — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §15.1。
+- 正式契約：自選 `start_date`／`end_date`、唯讀Query與三分頁export — `.arch-map/requirements/34_營運報表與統計口徑正式規格.md` §2。
 - 現行接線：`api/routes/operations_reports.py` 同時包含週報GET／export及批次POST／PATCH；這是 `source_observed`，不代表已符合上述契約。詳細entrypoints、writer與差異見 `modules/weekly-operations-report.md`。
 
 ## Verification routing

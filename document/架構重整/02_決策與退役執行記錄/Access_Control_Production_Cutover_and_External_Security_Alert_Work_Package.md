@@ -25,7 +25,7 @@ predecessor: Access Control TOTP Account Management 歷史 Work Package（原文
 5. `AC-P7-01` 至 `AC-P7-06` 的 target deployment、雙人 MFA enrollment、keyring／時鐘／migration
    preflight、維護窗 smoke、machine identity scan 與相容 rollback。
 
-正式語意以 [`25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md`](../01_規格基線/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md)
+正式語意以 [`25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md`](../../../.arch-map/requirements/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md)
 為準；本文件不重複定義 account、MFA 或 human authorization 的根事實。
 
 ## 2. 現在明確排除的寫入與副作用

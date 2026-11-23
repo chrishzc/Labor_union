@@ -10,8 +10,8 @@
 - depended_by: `finance-import` — bank evidence may be classified/delegated into subsidy owner flow。
 
 ## Contracts
-- `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md` — Government Subsidy canonical Domain contract
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation contract
+- `.arch-map/requirements/14_Government_Subsidy_Domain.md` — Government Subsidy canonical Domain contract
+- `.arch-map/requirements/00_Global_共同契約.md` — Global mutation contract
 
 ## Verification routing
 - default_boundary: Domain

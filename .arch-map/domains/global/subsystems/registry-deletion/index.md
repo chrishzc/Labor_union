@@ -10,7 +10,7 @@
 - `registry-deletion` — typed eligibility、fresh-lock Apply、receipt replay 與管理端確認；path: `modules/registry-deletion.md`
 
 ## Contracts
-- `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md` RD-1
+- `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md` RD-1
 
 ## Verification routing
 - default_boundary: Module

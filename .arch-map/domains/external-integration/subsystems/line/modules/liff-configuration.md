@@ -19,7 +19,7 @@ Owns current LIFF page/theme configuration through the existing versioned LINE c
 - `config/liff_settings.json` — bootstrap only
 
 ## Contracts
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §6 — LIFF configuration SSOT
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §6 — LIFF configuration SSOT
 
 ## Verification
 - test_root: `tests/domains/external-integration/subsystems/line/modules/liff-configuration/`

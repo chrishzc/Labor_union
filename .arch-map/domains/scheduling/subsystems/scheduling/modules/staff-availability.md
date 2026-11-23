@@ -9,7 +9,7 @@
 
 ## Implementation
 - primary:
-  - `domains/scheduling/staff_availability.py`
+  - `domains/scheduling/staff_availability.py` — 長假須明確給起訖日；恢復接案須指定暫停紀錄及恢復日，不混用建立時的起訖欄位。
   - `subsystems/scheduling/staff_availability_workflow.py`
   - `infrastructure/mysql/staff_availability_repository.py`
   - `ui_react/src/pages/StaffPage.tsx`
@@ -21,7 +21,7 @@
   - `ui_react/src/api/staff_availability/`
 
 ## Contracts
-- `document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md`
+- `.arch-map/requirements/24_Staff_Matching_Preferences與不可服務期間正式規格.md`
 - 同一 authenticated GET 省略日期時以 `after_id`／`limit`（最多 200）分頁讀取所有紀錄；既有 366 天日期查詢保留。抽屜自動載入完整紀錄，新增日期獨立；有限期／無期限暫停共用既有 writer，新增與恢復設定按操作展開。
 
 ## Verification

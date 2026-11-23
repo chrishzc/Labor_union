@@ -63,13 +63,13 @@
 - 直接歸檔後的一般首排由 Orders `service-date-confirmation` 借用 `subsystems/contract_signing/final_document_workflow.py` 的 `ArchivedCommitmentPort`，由 `infrastructure/db/external_staff_completion_port.py` 投影並建立缺少的精確人日承諾。沿同一 adapter 原 commitment writer，不補造簽回 session、事件或訂金；歸檔入口本身仍不要求服務承諾。
 - 瀏覽器列印與案件層級交接後的同次回收銜接見正式規格 21 §3.2／§3.3；工作台沿用既有產製、交接及回讀入口。
 - 管理端文件清單、核對摘要與回收以 current target 的 canonical Staff id 借用公會編號及姓名；選擇月嫂的選單按編號自然排序，保留 segment identity。已保存 PDF 與歷史寄送 payload 保留原內容。
-- `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md`
+- `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md`
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/`
-- `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx`
+- `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx` — L546–550 的既有介面測試斷言：後端未提供本機測試能力時，不顯示測試跳過操作。此案例不驗證後端授權或正式環境拒絕。
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts`
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_signing_mutation_client.test.ts`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_full_contract_preview.py`

@@ -20,8 +20,8 @@
 - automatic adapter: `infrastructure/mysql/automatic_client_accounting.py` — 沿 caller transaction，同步應付與應退補助；不 commit、不發送。
 
 ## Contracts
-- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — Client Finance direction 與未結清 obligation 規則。
-- `document/架構重整/01_規格基線/01_Orders_Domain.md` — Actual Start 重建未結清 Client Finance projection 與日期，不建立付款或收款事實。
+- `.arch-map/requirements/04_Client_Finance_Domain.md` — Client Finance direction 與未結清 obligation 規則。
+- `.arch-map/requirements/01_Orders_Domain.md` — Actual Start 重建未結清 Client Finance projection 與日期，不建立付款或收款事實。
 - cross-owner evidence: `tests/domains/orders/subsystems/orders/integration/test_order_cancellation_absent_roots_disposable_mysql.py` — deposit refund without Scheduling or Payroll, replay and controlled reopen; Orders owns this integration proof.
 
 ## Verification
@@ -30,6 +30,7 @@
 - integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_order_amount_calculator.py`
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py`
+- 既有日期案例（上列測試 L60–98）：第二期有應繳金額時，日期由第一期預計入帳日加 15 個曆日（含跨年／閏年案例）；第二期金額為零時不產生日期；已收第二期取消並形成退款候選時，保留原義務到期日，原本未知則仍無日期。僅核對候選層斷言，未驗證資料庫或實際付款／退款。
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`
 
 ## Provenance

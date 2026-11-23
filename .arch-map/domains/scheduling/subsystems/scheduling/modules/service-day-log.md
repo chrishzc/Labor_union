@@ -34,4 +34,4 @@
 - routing: `.arch-map/domains/scheduling/subsystems/scheduling/index.md`
 
 ## Provenance
-- retirement decision (2026-11-10) — `architecture_declared` — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §19, `20_LINE客服與月嫂自助服務正式規格.md` §5.4。
+- retirement decision (2026-11-10) — `architecture_declared` — `.arch-map/requirements/15_正式規格索引與裁決總表.md` §19, `20_LINE客服與月嫂自助服務正式規格.md` §5.4。

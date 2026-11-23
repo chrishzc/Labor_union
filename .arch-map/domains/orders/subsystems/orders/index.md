@@ -36,7 +36,7 @@
 ## Contracts
 - `domains/orders/` — Orders business rules
 - `subsystems/orders/` — Orders workflows／queries
-- `document/架構重整/01_規格基線/00_Global_共同契約.md` — outer UoW／receipt-outbox
+- `.arch-map/requirements/00_Global_共同契約.md` — outer UoW／receipt-outbox
 
 ## Verification routing
 - default_boundary: Subsystem

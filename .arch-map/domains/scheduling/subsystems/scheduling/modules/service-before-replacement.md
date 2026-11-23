@@ -38,8 +38,8 @@
 - inbound: `clients/profile-change` — 客戶名冊 Drawer 組合同一 Q/P/A，完成後重讀 effective assignments 與案件歷程，不新增 writer 或改變換人分流。
 
 ## Contracts
-- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling owner facts.
-- Global Query/Preview/Apply, UoW, idempotency and outbox contract — `document/架構重整/01_規格基線/00_Global_共同契約.md`.
+- `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — Scheduling owner facts.
+- Global Query/Preview/Apply, UoW, idempotency and outbox contract — `.arch-map/requirements/00_Global_共同契約.md`.
 
 ## Verification
 - static:
@@ -47,7 +47,7 @@
   - `db/migration_releases/labor_union_2026_08_28_service_before_replacement_v1.json`
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/`
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/service_before_replacement_actions.test.tsx`
+- test_root: `ui_react/src/tests/service_before_replacement_actions.test.tsx` — 既有模擬案例核對切換案件時中止舊查詢，晚到的舊回應不覆蓋目前案件。
 - higher_boundary:
   - tests/integration/ (shared legacy higher-boundary root)
 - cross_owner:

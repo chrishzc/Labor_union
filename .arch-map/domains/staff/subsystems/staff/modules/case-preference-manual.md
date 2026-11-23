@@ -28,9 +28,9 @@ Staff owner Query／Preview／Apply for the six canonical service-capability rel
 
 ## Verification
 
-Contract: `document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — PREF-21-01～05；兩項服務偏好與其餘匯入資料保留。
+Contract: `.arch-map/requirements/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — PREF-21-01～05；兩項服務偏好與其餘匯入資料保留。
 - layout_status: `custom_current`
 - layout_basis: `.arch-map/tests/index.md` permits documented frontend test exceptions; the canonical Staff component oracle remains under `ui_react/src/tests/` and the owner Python oracles remain under the Staff module test root.
 - test_root: `tests/domains/staff/subsystems/staff/modules/case-preference-manual/`
 - test_root: `ui_react/src/tests/domains/staff/subsystems/staff/modules/case-preference-manual/`
-- test_root: `ui_react/src/tests/staff_preferences_flow.test.tsx`
+- test_root: `ui_react/src/tests/staff_preferences_flow.test.tsx` — 既有模擬案例核對套用遇到舊快照時不顯示儲存成功，並提供重新查詢。

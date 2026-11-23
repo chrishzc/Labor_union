@@ -17,14 +17,14 @@
 - transport: `api/routes/client_refund_reversal.py`
 
 ## Contracts
-- `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — Client Finance obligations、immutable ledger／allocation及reconciliation Preview／Apply。
-- `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — 客戶退款／補助退還與銀行根事實核銷契約。
-- `document/架構重整/01_規格基線/06_Anomalies_Domain.md` §1–2 — current runtime只保留 `LINE-006`；舊三碼source／test不形成新的Anomalies產品需求。
-- `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
+- `.arch-map/requirements/04_Client_Finance_Domain.md` — Client Finance obligations、immutable ledger／allocation及reconciliation Preview／Apply。
+- `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — 客戶退款／補助退還與銀行根事實核銷契約。
+- `.arch-map/requirements/06_Anomalies_Domain.md` §1–2 — current runtime只保留 `LINE-006`；舊三碼source／test不形成新的Anomalies產品需求。
+- `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/client_settlement_remediation.test.tsx`
+- test_root: `ui_react/src/tests/client_settlement_remediation.test.tsx` — L97–108 的替身案例以 fresh owner Query 回讀無同碼逾期義務，斷言 `onResolved` 呼叫一次並顯示「已無這類逾期未清義務」。
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/modules/settlement-remediation-presentation.md`
 
 ## Change triggers
