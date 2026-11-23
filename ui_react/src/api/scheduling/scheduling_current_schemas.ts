@@ -33,8 +33,8 @@ export const SchedulingCurrentAssignmentSchema = z
     status: SchedulingAssignmentStatusSchema,
     assigned_start_date: SchedulingIsoDateSchema,
     assigned_end_date: SchedulingIsoDateSchema,
-    first_service_at: SchedulingIsoDateTimeSchema,
-    completion_at: SchedulingIsoDateTimeSchema,
+    first_service_at: SchedulingIsoDateTimeSchema.nullable(),
+    completion_at: SchedulingIsoDateTimeSchema.nullable(),
     official_service_day_count: z.number().int().positive(),
     actual_hours: z.number().positive().multipleOf(0.5),
   })
@@ -53,6 +53,7 @@ export const SchedulingCurrentDayEntrySchema = z
     unavailability_reason: z.string().max(500).nullable(),
     actual_start_date: SchedulingIsoDateSchema.nullish(),
     service_start_at: SchedulingIsoDateTimeSchema.nullish(),
+    service_hours_override: z.number().nullish(),
     service_end_at: SchedulingIsoDateTimeSchema.nullish(),
   })
   .strict()

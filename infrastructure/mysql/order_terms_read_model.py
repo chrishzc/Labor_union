@@ -93,7 +93,7 @@ def load_terms_query_facts(cursor: Any, case_no: str) -> OrderTermsQueryFacts:
     generation = _select_generation(cursor, aggregate, lock=False)
     assignments = _select_assignments(cursor, generation, lock=False)
     schedules = _select_schedules(cursor, generation, lock=False)
-    segments = _segments(assignments, _service_dates_by_assignment(schedules))
+    segments = _segments(assignments, _service_dates_by_assignment(schedules), schedules)
     confirmed_version, confirmed_dates = _select_confirmed_service_dates(
         cursor, case_no, False,
     )
@@ -589,7 +589,7 @@ def _select_schedules(cursor: Any, generation_row, lock: bool):
         return ()
     lock_clause = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT id,assignment_id,work_date,is_work_day "
+        "SELECT id,assignment_id,work_date,is_work_day,service_hours_override "
         "FROM staff_schedule "
         "WHERE generation_id=%s AND effective_marker=1 "
         "ORDER BY work_date,id" + lock_clause,
@@ -627,7 +627,7 @@ def _facts_from_rows(
     confirmed_service_dates,
 ) -> TermsWorkflowFacts:
     service_dates_by_assignment = _service_dates_by_assignment(schedule_rows)
-    segments = _segments(assignment_rows, service_dates_by_assignment)
+    segments = _segments(assignment_rows, service_dates_by_assignment, schedule_rows)
     official_dates = tuple(
         row["work_date"] for row in schedule_rows if bool(row["is_work_day"])
     )
@@ -1129,30 +1129,34 @@ def _service_dates_by_assignment(schedule_rows) -> dict[int, tuple]:
     }
 
 
-def _segments(assignment_rows, service_dates_by_assignment):
+def _segments(assignment_rows, service_dates_by_assignment, schedule_rows=()):
     ordered_rows = sorted(
         assignment_rows,
         key=lambda row: int(row["assignment_sequence"]),
     )
-    return tuple(
-        _segment(row, service_dates_by_assignment)
-        for row in ordered_rows
-    )
+    overrides = {}
+    for row in schedule_rows:
+        if bool(row["is_work_day"]) and row.get("service_hours_override") is not None:
+            overrides.setdefault(int(row["assignment_id"]), []).append((row["work_date"], int(row["service_hours_override"])))
+    return tuple(_segment(row, service_dates_by_assignment, tuple(overrides.get(int(row["id"]), ())), bool(overrides))
+                 for row in ordered_rows)
 
 
-def _segment(row, service_dates_by_assignment) -> EffectiveAssignmentSegment:
+def _segment(row, service_dates_by_assignment, overrides=(), date_adjusted=False) -> EffectiveAssignmentSegment:
     assignment_id = int(row["id"])
     service_dates = service_dates_by_assignment.get(assignment_id, ())
-    if not service_dates:
+    if not service_dates and not date_adjusted:
         raise ValueError("assignment_service_days_required")
     return EffectiveAssignmentSegment(
         assignment_id=assignment_id,
         staff_id=int(row["staff_id"]),
         sequence=int(row["assignment_sequence"]),
         service_day_count=len(service_dates),
-        assigned_start_date=row["assigned_start_date"],
-        assigned_end_date=row["assigned_end_date"],
+        assigned_start_date=service_dates[0] if date_adjusted and service_dates else row["assigned_start_date"],
+        assigned_end_date=service_dates[-1] if date_adjusted and service_dates else row["assigned_end_date"],
         official_service_dates=service_dates,
+        service_hours_overrides=overrides,
+        date_adjusted=date_adjusted,
     )
 
 

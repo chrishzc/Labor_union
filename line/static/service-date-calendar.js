@@ -76,7 +76,8 @@ export function calendarOccupancyDetailsByDate(entries, { caseNo, actualStartDat
     const lastOccupiedDate = period?.lastOccupiedDate ?? entry.date;
     for (let day = entry.date < firstDate ? firstDate : entry.date; day <= lastDate && day <= lastOccupiedDate; day = shiftCalendarDate(day, 1)) {
       const items = days.get(day) ?? [];
-      const detail = { label: dayLabel, caseNo: entry.caseNo, period, continues: day !== entry.date };
+      const detail = { label: dayLabel, caseNo: entry.caseNo, period, continues: day !== entry.date,
+        ...(entry.serviceHoursOverride == null ? {} : { serviceHoursOverride: entry.serviceHoursOverride }) };
       if (items.some(item => item.caseNo === detail.caseNo && item.label === detail.label && item.period?.full === period?.full)) continue;
       items.push(detail);
       days.set(day, items);

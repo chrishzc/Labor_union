@@ -128,6 +128,8 @@ class ActualStartAssignmentFacts:
     assigned_start_date: date
     assigned_end_date: date
     service_dates: tuple[date, ...]
+    service_hours_overrides: tuple[tuple[date, int], ...] = ()
+    date_adjusted: bool = False
 
     def __post_init__(self) -> None:
         require_positive_integer(self.assignment_id, "assignment id")
@@ -187,6 +189,7 @@ class ActualStartAssignmentCandidate:
     assigned_end_date: date
     service_dates: tuple[date, ...]
     actual_hours: float | int
+    service_hours_overrides: tuple[tuple[date, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,7 +313,7 @@ def to_scheduling_generation_candidate(
         _to_scheduling_assignment(actual_start, assignment, generation_number)
         for assignment in actual_start.assignments
     )
-    buffers = tuple(_inactive_buffer(assignment) for assignment in assignments)
+    buffers = tuple(_inactive_buffer(assignment) for assignment in assignments if assignment.service_dates)
     return SchedulingGenerationCandidate(
         case_no=actual_start.case_no,
         generation_number=generation_number,
@@ -351,6 +354,7 @@ def _to_scheduling_assignment(
         assigned_end_date=assignment.assigned_end_date,
         service_dates=assignment.service_dates,
         actual_hours=assignment.actual_hours,
+        service_hours_overrides=assignment.service_hours_overrides,
     )
 
 
@@ -390,7 +394,8 @@ def _ordered_assignments(
         sorted(scheduling.assignments, key=lambda assignment: assignment.sequence)
     )
     _validate_assignment_identities(assignments)
-    if not _first_assignment_starts_at_root(assignments, scheduling.root_date):
+    if (not any(assignment.date_adjusted or assignment.service_hours_overrides for assignment in assignments)
+            and not _first_assignment_starts_at_root(assignments, scheduling.root_date)):
         raise ActualStartCandidateError(
             ActualStartBlocker.SCHEDULING_ROOT_MISMATCH
         )
@@ -431,14 +436,9 @@ def _shift_assignment(
     service_dates = tuple(
         service_date + shift for service_date in assignment.service_dates
     )
-    return ActualStartAssignmentCandidate(
-        source_assignment_id=assignment.assignment_id,
-        staff_id=assignment.staff_id,
-        sequence=assignment.sequence,
-        assigned_start_date=assignment.assigned_start_date + shift,
-        assigned_end_date=assignment.assigned_end_date + shift,
-        service_dates=service_dates,
-        actual_hours=len(service_dates) * service_hours_per_day,
+    return _replacement_assignment(
+        assignment, assignment.assigned_start_date + shift, assignment.assigned_end_date + shift,
+        service_dates, service_hours_per_day,
     )
 
 
@@ -523,6 +523,8 @@ def calculate_progressive_segment_service_dates(
     cursor = new_actual_start_date
     result: list[date] = []
     for assignment in assignments:
+        if not assignment.service_dates:
+            continue
         segment_dates = calculate_service_dates(
             cursor,
             len(assignment.service_dates),
@@ -563,13 +565,16 @@ def date_bound_manual_overrides(
     manual_rest: set[tuple[int, date]] = set()
     for assignment in assignments:
         official = set(assignment.service_dates)
+        if not official:
+            continue
+        adjusted_days = dict(assignment.service_hours_overrides)
         current = max(assignment.assigned_start_date, from_date)
         end = min(assignment.assigned_end_date, to_date)
         while current <= end:
             identity = (assignment.staff_id, current)
             default_rest = current.weekday() in rest_weekdays or current in holidays
             if current in official and default_rest:
-                if current not in confirmed:
+                if current not in confirmed and current not in adjusted_days:
                     raise ValueError("actual_start_manual_work_confirmation_required")
                 manual_work.add(identity)
             elif current not in official and current not in confirmed and not default_rest and confirmed:
@@ -601,23 +606,37 @@ def _recalculate_assignments(
         count = len(assignment.service_dates)
         assigned_dates = service_dates[offset:offset + count]
         offset += count
-        if assigned_dates[0] < segment_start:
+        if assigned_dates and assigned_dates[0] < segment_start:
             raise ActualStartCandidateError(
                 ActualStartBlocker.SCHEDULING_SERVICE_DATES_INVALID
             )
         result.append(
-            ActualStartAssignmentCandidate(
-                source_assignment_id=assignment.assignment_id,
-                staff_id=assignment.staff_id,
-                sequence=assignment.sequence,
-                assigned_start_date=segment_start,
-                assigned_end_date=assigned_dates[-1],
-                service_dates=assigned_dates,
-                actual_hours=len(assigned_dates) * service_hours_per_day,
+            _replacement_assignment(
+                assignment,
+                segment_start if assigned_dates else assignment.assigned_start_date,
+                assigned_dates[-1] if assigned_dates else assignment.assigned_end_date,
+                assigned_dates,
+                service_hours_per_day,
             )
         )
-        segment_start = assigned_dates[-1] + timedelta(days=1)
+        if assigned_dates:
+            segment_start = assigned_dates[-1] + timedelta(days=1)
     return tuple(result)
+
+
+def _replacement_assignment(assignment, start, end, service_dates, service_hours_per_day):
+    source_hours = dict(assignment.service_hours_overrides)
+    overrides = {new: source_hours[old] for old, new in zip(assignment.service_dates, service_dates) if old in source_hours}
+    return ActualStartAssignmentCandidate(
+        source_assignment_id=assignment.assignment_id,
+        staff_id=assignment.staff_id,
+        sequence=assignment.sequence,
+        assigned_start_date=start,
+        assigned_end_date=end,
+        service_dates=service_dates,
+        actual_hours=sum(overrides.get(day, service_hours_per_day) for day in service_dates),
+        service_hours_overrides=tuple(overrides.items()),
+    )
 
 
 def _official_service_dates(
@@ -628,7 +647,7 @@ def _official_service_dates(
         for assignment in assignments
         for service_date in assignment.service_dates
     )
-    if service_dates != tuple(sorted(set(service_dates))):
+    if not service_dates or service_dates != tuple(sorted(set(service_dates))):
         raise ActualStartCandidateError(
             ActualStartBlocker.SCHEDULING_SERVICE_DATES_INVALID
         )
@@ -698,6 +717,8 @@ def _assignment_payload(
             service_date.isoformat() for service_date in assignment.service_dates
         ),
         "actual_hours": assignment.actual_hours,
+        **({"service_hours_overrides": tuple((day.isoformat(), hours) for day, hours in assignment.service_hours_overrides)}
+           if assignment.service_hours_overrides else {}),
     }
 
 
@@ -705,7 +726,7 @@ def _validate_assignment_service_dates(
     assignment: ActualStartAssignmentFacts,
 ) -> None:
     service_dates = assignment.service_dates
-    if not isinstance(service_dates, tuple) or not service_dates:
+    if not isinstance(service_dates, tuple) or (not service_dates and not assignment.date_adjusted):
         raise ValueError("assignment service dates must be a nonempty tuple")
     if any(not _is_date(service_date) for service_date in service_dates):
         raise TypeError("assignment service dates must contain dates")
@@ -717,6 +738,9 @@ def _validate_assignment_service_dates(
         for service_date in service_dates
     ):
         raise ValueError("assignment service date is outside its interval")
+    if (len(dict(assignment.service_hours_overrides)) != len(assignment.service_hours_overrides)
+            or any(day not in service_dates or hours not in (4, 8) for day, hours in assignment.service_hours_overrides)):
+        raise ValueError("invalid actual start assignment daily service hours")
 
 
 def _candidate_kind(actual_start_date: date | None) -> ActualStartCandidateKind:

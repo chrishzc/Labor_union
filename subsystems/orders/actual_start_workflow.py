@@ -856,6 +856,8 @@ def _actual_start_assignments(facts):
             segment.assigned_start_date,
             segment.assigned_end_date,
             segment.official_service_dates,
+            segment.service_hours_overrides,
+            segment.date_adjusted,
         )
         for segment in sorted(facts.scheduling.segments, key=lambda item: item.sequence)
     )

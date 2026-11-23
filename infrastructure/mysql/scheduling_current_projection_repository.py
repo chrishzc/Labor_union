@@ -106,7 +106,7 @@ def _assignments(cursor, rows):
     case_first_service_dates = _case_first_service_dates(cursor, generation_ids)
     if (
         any(generation_id not in case_first_service_dates for generation_id in generation_ids)
-        or any(assignment_id not in official_dates for assignment_id in assignment_ids)
+        or any(int(row["assignment_id"]) not in official_dates and not row.get("daily_projection") for row in rows)
     ):
         raise ValueError("official_service_dates_incomplete")
     return tuple(
@@ -117,6 +117,7 @@ def _assignments(cursor, rows):
             buffer_dates.get(int(row["assignment_id"]), ()),
         )
         for row in rows
+        if int(row["assignment_id"]) in official_dates
     )
 
 
@@ -142,13 +143,13 @@ def _official_service_dates(cursor, assignment_ids):
         ),
         assignment_ids,
     )
-    grouped: dict[int, list[date]] = {}
+    grouped: dict[int, list[tuple[date, int | None]]] = {}
     for row in _mapping_rows(cursor.fetchall(), "official schedules"):
         grouped.setdefault(int(row["assignment_id"]), []).append(
-            _as_date(row["work_date"], "work date")
+            (_as_date(row["work_date"], "work date"), row.get("service_hours_override"))
         )
     return {
-        key: tuple(sorted(set(values))) for key, values in grouped.items()
+        key: tuple(values) for key, values in grouped.items()
     }
 
 
@@ -173,6 +174,7 @@ def _stored_occupancy(cursor, assignments):
     if not assignments:
         return ()
     assignment_ids = tuple(item.assignment_id for item in assignments)
+    daily_occupancy = {item.assignment_id: set(item.official_service_dates) for item in assignments if item.daily_projection}
     cursor.execute(
         _OCCUPANCY_SELECT_SQL.format(
             placeholders=_placeholders(assignment_ids)
@@ -188,6 +190,9 @@ def _stored_occupancy(cursor, assignments):
             str(row["occupancy_type"]),
         )
         for row in _mapping_rows(cursor.fetchall(), "effective occupancy")
+        if (int(row["assignment_id"]) not in daily_occupancy
+            or row["occupancy_type"] != "assignment_interval"
+            or row["occupancy_date"] in daily_occupancy[int(row["assignment_id"])])
     )
 
 
@@ -246,6 +251,9 @@ def _group_waiting_lock_dates(rows):
 
 
 def _assignment_fact(row, case_first_service_date, official_dates, buffer_dates):
+    daily_projection = bool(row.get("daily_projection"))
+    dates = tuple(sorted({day for day, _ in official_dates}))
+    overrides = tuple((day, int(hours)) for day, hours in official_dates if hours is not None)
     service_time = _service_time_terms(row)
     return EffectiveAssignmentCurrentFact(
         int(row["assignment_id"]),
@@ -253,14 +261,16 @@ def _assignment_fact(row, case_first_service_date, official_dates, buffer_dates)
         int(row["generation_id"]),
         int(row["scheduling_version"]),
         int(row["staff_id"]),
-        _as_date(row["assigned_start_date"], "assigned start date"),
-        _as_date(row["assigned_end_date"], "assigned end date"),
+        dates[0] if daily_projection else _as_date(row["assigned_start_date"], "assigned start date"),
+        dates[-1] if daily_projection else _as_date(row["assigned_end_date"], "assigned end date"),
         case_first_service_date,
-        official_dates,
+        dates,
         buffer_dates,
         float(row["service_hours_per_day"]),
         service_time,
         row.get("actual_start_date"),
+        daily_projection,
+        overrides,
     )
 
 
@@ -332,6 +342,8 @@ def _placeholders(values):
 _ASSIGNMENT_SELECT_SQL = (
     "SELECT a.id AS assignment_id,a.case_no,a.generation_id,a.staff_id,"
     "a.assigned_start_date,a.assigned_end_date,"
+    "EXISTS(SELECT 1 FROM staff_schedule changed WHERE changed.generation_id=a.generation_id "
+    "AND changed.service_hours_override IS NOT NULL) AS daily_projection,"
     "sa.aggregate_version AS scheduling_version,"
     "o.service_hours_per_day,o.service_start_time,o.service_end_time,"
     "o.service_end_day_offset,o.actual_start_date "
@@ -342,14 +354,17 @@ _ASSIGNMENT_SELECT_SQL = (
     "AND sa.effective_generation_id=g.id "
     "JOIN orders o ON o.case_no=a.case_no "
     "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced') "
-    "AND ((a.assigned_start_date<=%s AND a.assigned_end_date>=%s) "
+    "AND ((LEAST(a.assigned_start_date,COALESCE((SELECT MIN(day.work_date) FROM staff_schedule day "
+    "WHERE day.assignment_id=a.id AND day.effective_marker=1 AND day.is_work_day=1),a.assigned_start_date))<=%s "
+    "AND GREATEST(a.assigned_end_date,COALESCE((SELECT MAX(day.work_date) FROM staff_schedule day "
+    "WHERE day.assignment_id=a.id AND day.effective_marker=1 AND day.is_work_day=1),a.assigned_end_date))>=%s) "
     "OR EXISTS (SELECT 1 FROM scheduling_buffer_days b "
     "WHERE b.assignment_id=a.id AND b.active_marker=1 "
     "AND b.buffer_date BETWEEN %s AND %s)) "
     "ORDER BY a.case_no,a.id"
 )
 _SCHEDULE_SELECT_SQL = (
-    "SELECT assignment_id,work_date FROM staff_schedule "
+    "SELECT assignment_id,work_date,service_hours_override FROM staff_schedule "
     "WHERE assignment_id IN ({placeholders}) "
     "AND effective_marker=1 AND is_work_day=1 "
     "ORDER BY assignment_id,work_date"

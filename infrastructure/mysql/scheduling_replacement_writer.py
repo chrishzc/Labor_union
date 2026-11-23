@@ -53,6 +53,7 @@ def persist_scheduling_replacement(
     _insert_buffers(cursor, command, generation_id, assignment_ids)
     _activate_new_generation(cursor, generation_id)
     _insert_occupancy(cursor, command, generation_id, assignment_ids)
+    _carry_confirmed_service_date_adjustment(cursor, command, previous_generation_id, generation_id)
     _advance_aggregate(cursor, command, previous_generation_id, generation_id)
     rebuild_event_id = _append_rebuild_event(
         cursor,
@@ -86,6 +87,28 @@ def persist_scheduling_replacement(
         scheduling_receipt_id=receipt_id,
         assignment_resolution=_assignment_resolution(command, assignment_ids),
     )
+
+
+def _carry_confirmed_service_date_adjustment(cursor, command, previous_generation_id, generation_id):
+    if command.command_family not in {"scheduling_assignment_plan", "orders_historical_restart_arrangement"}:
+        return
+    from infrastructure.mysql.service_date_adjustment_repository import carry_first_schedule_dates, load_first_schedule_dates
+
+    if previous_generation_id:
+        cursor.execute(
+            "SELECT 1 FROM staff_schedule WHERE generation_id=%s AND is_work_day=1 LIMIT 1",
+            (previous_generation_id,),
+        )
+        if cursor.fetchone():
+            return
+    baseline, planned = load_first_schedule_dates(cursor, command.candidate.case_no, lock=True)
+    if not planned:
+        return
+    owner_by_date = {day: assignment.staff_id for assignment in command.candidate.assignments for day in assignment.service_dates}
+    if (owner_by_date.keys() != {day.service_date for day in baseline}
+            or any(day.staff_id is not None and owner_by_date[day.service_date] != day.staff_id for day in baseline)):
+        raise ValueError("service_date_adjustment_first_schedule_ownership_conflict")
+    carry_first_schedule_dates(cursor, command.candidate.case_no, generation_id, planned)
 
 
 def _assignment_resolution(command, assignment_ids):
@@ -212,13 +235,14 @@ def _insert_schedules(cursor, command, generation_id, assignment_ids) -> None:
     cursor.executemany(
         "INSERT INTO staff_schedule "
         "(case_no,staff_id,assignment_id,generation_id,work_date,"
-        "is_work_day,is_double_pay,effective_marker) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,NULL)",
+        "is_work_day,is_double_pay,effective_marker,service_hours_override) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,NULL,%s)",
         schedule_rows,
     )
 
 
 def _assignment_schedule_rows(case_no, generation_id, assignment, assignment_id):
+    overrides = dict(assignment.service_hours_overrides)
     for schedule_date in assignment.service_dates:
         yield (
             case_no,
@@ -228,6 +252,7 @@ def _assignment_schedule_rows(case_no, generation_id, assignment, assignment_id)
             schedule_date,
             True,
             schedule_date in assignment.double_pay_dates,
+            overrides.get(schedule_date),
         )
 
 
@@ -444,6 +469,8 @@ def _insert_occupancy(cursor, command, generation_id, assignment_ids) -> None:
 
 def _assignment_occupancy_rows(command, generation_id, assignment_ids):
     for assignment in command.candidate.assignments:
+        if not assignment.service_dates:
+            continue
         for occupied_date in _inclusive_dates(
             assignment.assigned_start_date,
             assignment.assigned_end_date,

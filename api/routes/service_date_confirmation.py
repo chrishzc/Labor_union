@@ -23,19 +23,24 @@ from api.dependencies.service_date_confirmation import (
     get_office_schedule_save,
     get_office_schedule_preview,
     get_service_date_confirmation_workflow,
+    get_service_date_adjustment_workflow,
 )
 from api.schemas.base import BaseResponse
 from domains.scheduling.service_start import ServiceStartConflict
+from domains.scheduling.service_date_adjustment import AdjustmentTarget
 from api.schemas.service_date_confirmation import (
     ServiceDateConfirmationPreviewView,
     ServiceDateConfirmationQueryView,
     ServiceDateConfirmationReceiptView,
     HistoricalArrangementPreviewView,
     HistoricalArrangementReceiptView,
+    ServiceDateAdjustmentPreviewView,
+    ServiceDateAdjustmentReceiptView,
 )
 from subsystems.orders.historical_restart_arrangement import ArrangementSegmentIntent
 from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
 from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanWorkflowError
+from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentIntent, service_day_payload
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
@@ -105,6 +110,66 @@ class HistoricalScheduleSaveBody(HistoricalArrangementPreviewBody):
 
 class OfficeScheduleSaveBody(HistoricalScheduleSaveBody):
     preview_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class ServiceDateAdjustmentTargetBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    service_date: date
+    staff_id: int = Field(gt=0)
+
+
+class ServiceDateAdjustmentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_dates: list[date] = Field(min_length=1, max_length=2)
+    targets: list[ServiceDateAdjustmentTargetBody] = Field(default_factory=list, max_length=2)
+    reverse_receipt_id: int | None = Field(default=None, gt=0)
+    initial_dates: list[date] = Field(default_factory=list)
+
+    def intent(self) -> ServiceDateAdjustmentIntent:
+        return ServiceDateAdjustmentIntent(
+            tuple(self.source_dates), tuple(AdjustmentTarget(item.service_date, item.staff_id) for item in self.targets),
+            self.reverse_receipt_id, tuple(self.initial_dates),
+        )
+
+
+class ServiceDateAdjustmentApplyBody(ServiceDateAdjustmentBody):
+    expected_order_version: int = Field(ge=0)
+    expected_scheduling_version: int = Field(ge=0)
+    expected_confirmed_version: int | None = Field(ge=1)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+@router.post("/{case_no}/service-dates/adjustment/preview", response_model=BaseResponse[ServiceDateAdjustmentPreviewView])
+def preview_service_date_adjustment(
+    body: ServiceDateAdjustmentBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+    workflow=Depends(get_service_date_adjustment_workflow),
+):
+    del principal
+    return _call_endpoint(
+        lambda: _adjustment_preview_payload(workflow.preview(case_no, body.intent())),
+        "已預覽服務日期調整", CorrelationId(f"service-date-adjustment-preview:{case_no}"),
+    )
+
+
+@router.post("/{case_no}/service-dates/adjustment/apply", response_model=BaseResponse[ServiceDateAdjustmentReceiptView])
+def apply_service_date_adjustment(
+    body: ServiceDateAdjustmentApplyBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+    workflow=Depends(get_service_date_adjustment_workflow),
+):
+    return _call_endpoint(
+        lambda: workflow.apply(
+            case_no, body.intent(),
+            versions=(body.expected_order_version, body.expected_scheduling_version, body.expected_confirmed_version),
+            preview_fingerprint=body.preview_fingerprint, key=idempotency_key, actor=str(principal.username or "").strip(),
+        ),
+        "服務日期調整已儲存", CorrelationId(correlation_id),
+    )
 
 
 @router.get(
@@ -318,6 +383,35 @@ def _query_payload(facts) -> dict[str, Any]:
             and facts.current_version is not None
         ),
         "historical_schedule_pending": facts.restart_generation_number is not None,
+        "date_adjustment": _adjustment_query_payload(facts.date_adjustment) if facts.date_adjustment else None,
+    }
+
+
+def _adjusted_days(facts, days):
+    return [{**service_day_payload(day), "service_hours": day.hours(facts.daily_hours)} for day in days]
+
+
+def _adjustment_query_payload(facts):
+    return {
+        "days": _adjusted_days(facts, facts.days),
+        "staff": [{"staff_id": staff_id, "staff_name": name} for staff_id, name in facts.staff],
+        "pairs": [
+            {"receipt_id": pair.receipt_id, "removed": _adjusted_days(facts, pair.change.removed),
+             "inserted": _adjusted_days(facts, pair.change.inserted)}
+            for pair in facts.pairs
+        ],
+        "total_hours": sum(day.hours(facts.daily_hours) for day in facts.days),
+        "contracted_daily_hours": facts.daily_hours,
+        "first_schedule_days": _adjusted_days(facts, facts.first_schedule_days),
+    }
+
+
+def _adjustment_preview_payload(preview):
+    return {
+        "order_version": preview.facts.order_version, "scheduling_version": preview.facts.scheduling_version,
+        "confirmed_version": preview.facts.confirmed_version, "preview_fingerprint": preview.fingerprint,
+        "removed": _adjusted_days(preview.facts, preview.change.removed),
+        "inserted": _adjusted_days(preview.facts, preview.change.inserted),
     }
 
 

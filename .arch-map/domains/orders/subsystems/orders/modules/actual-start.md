@@ -34,6 +34,7 @@
 日期-only 分支只綁 Orders version 與該次 Preview fingerprint；若 Apply fresh-read 發現正式 assignment 已形成，回 typed conflict 並要求重新 Preview。一般 Terms reader 不得只因日期存在便投影 `service_started`。
 
 ## Contracts
+- 日期合併／分裂後的逐日 `service_hours_override` 隨各段新舊服務日的順序承接；只允許有明確日期調整事實的零服務日指派保留來源 identity 與計薪快照，不替它建立班次或緩衝日。原訂每日時段及帳務基準不變。規則見 `02_Assignments_Scheduling_Domain.md#service-date-merge-split`。
 - `.arch-map/requirements/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。
 - `subsystems/orders/actual_start_workflow.py` — Preview／Apply 與單一 outer UoW contract。
 
@@ -44,6 +45,7 @@
 - test_root: `ui_react/src/tests/order_workbench_v2_actual_start.test.tsx` — existing drawer mutation／recovery integration。 既有模擬案例核對正式讀回尚未符合回執時不顯示完成、不重送套用，直到讀回一致才顯示完成。
 
 ## Provenance
+- 逐日時數承接與零日來源保留 — `source_observed` — `domains/orders/actual_start.py`、`subsystems/orders/actual_start_workflow.py`、`infrastructure/mysql/scheduling_replacement_writer.py`；驗證由既有 `test_order_actual_start_workflow.py` 涵蓋。
 - Actual Start writer and cross-owner persistence — `source_observed` — `subsystems/orders/actual_start_workflow.py`.
 - Order Workbench V2 drawer eligibility gate — `source_observed` — `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`。
 - Historical tombstone date-only 與逐段精算／快照搬移 — `architecture_declared` — `.arch-map/requirements/01_Orders_Domain.md` §3.4。

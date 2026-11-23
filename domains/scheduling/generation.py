@@ -30,12 +30,17 @@ class EffectiveAssignmentSegment:
     assigned_start_date: date
     assigned_end_date: date
     official_service_dates: tuple[date, ...] = ()
+    service_hours_overrides: tuple[tuple[date, int], ...] = ()
+    date_adjusted: bool = False
 
     def __post_init__(self) -> None:
         require_positive_integer(self.assignment_id, "assignment id")
         require_positive_integer(self.staff_id, "staff id")
         require_positive_integer(self.sequence, "assignment sequence")
-        require_positive_integer(self.service_day_count, "segment service days")
+        if self.date_adjusted:
+            require_nonnegative_integer(self.service_day_count, "segment service days")
+        else:
+            require_positive_integer(self.service_day_count, "segment service days")
         if not isinstance(self.assigned_start_date, date):
             raise TypeError("assigned start date must be date")
         if not isinstance(self.assigned_end_date, date):
@@ -107,6 +112,7 @@ class AssignmentCandidate:
     actual_hours: float | int
     lineage_source_assignment_ids: tuple[int, ...] = ()
     double_pay_dates: tuple[date, ...] = ()
+    service_hours_overrides: tuple[tuple[date, int], ...] = ()
 
     def __post_init__(self) -> None:
         source_ids = self.lineage_source_assignment_ids
@@ -115,6 +121,9 @@ class AssignmentCandidate:
             object.__setattr__(self, "lineage_source_assignment_ids", source_ids)
         _validate_lineage_sources(self.source_assignment_id, source_ids)
         _validate_double_pay_dates(self.service_dates, self.double_pay_dates)
+        if (len(dict(self.service_hours_overrides)) != len(self.service_hours_overrides)
+                or any(day not in self.service_dates or hours not in (4, 8) for day, hours in self.service_hours_overrides)):
+            raise ValueError("invalid assignment daily service hours")
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +196,7 @@ def build_generation_candidate(
     preserve_assignment_dates: bool = False,
 ) -> SchedulingGenerationCandidate:
     _validate_generation_inputs(facts, terms, planned_service_dates)
+    preserve_assignment_dates = preserve_assignment_dates or any(segment.service_hours_overrides for segment in facts.segments)
     assignments = (
         tuple(_build_assignment(facts, terms, segment, segment.official_service_dates)
               for segment in _ordered_segments(facts))
@@ -271,10 +281,16 @@ def _validate_generation_inputs(
 ) -> None:
     if not facts.segments:
         raise ValueError("scheduling_segments_required")
-    if sum(segment.service_day_count for segment in facts.segments) != terms.service_days:
-        raise ValueError("scheduling_reallocation_required")
-    if len(planned_service_dates) != terms.service_days:
-        raise ValueError("service_days_mismatch")
+    overrides = dict(item for segment in facts.segments for item in segment.service_hours_overrides)
+    if overrides:
+        total = sum(overrides.get(day, terms.service_hours_per_day) for day in planned_service_dates)
+        if total != terms.service_days * terms.service_hours_per_day:
+            raise ValueError("scheduling_reallocation_required")
+    else:
+        if sum(segment.service_day_count for segment in facts.segments) != terms.service_days:
+            raise ValueError("scheduling_reallocation_required")
+        if len(planned_service_dates) != terms.service_days:
+            raise ValueError("service_days_mismatch")
     if planned_service_dates != tuple(sorted(set(planned_service_dates))):
         raise ValueError("service dates must be sorted and unique")
 
@@ -351,7 +367,8 @@ def _build_assignment(
         assigned_start_date=segment.assigned_start_date,
         assigned_end_date=segment.assigned_end_date,
         service_dates=service_dates,
-        actual_hours=len(service_dates) * terms.service_hours_per_day,
+        actual_hours=sum(dict(segment.service_hours_overrides).get(day, terms.service_hours_per_day) for day in service_dates),
+        service_hours_overrides=segment.service_hours_overrides,
     )
 
 

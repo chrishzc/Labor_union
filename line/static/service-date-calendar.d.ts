@@ -26,6 +26,7 @@ export type CalendarOccupancyDetail = {
   caseNo: string | null;
   period: CalendarServicePeriod | null;
   continues: boolean;
+  serviceHoursOverride?: number;
 };
 
 export function calendarOccupancyDetailsByDate(
@@ -36,6 +37,7 @@ export function calendarOccupancyDetailsByDate(
     actualStartDate?: string | null;
     serviceStartAt?: string | null;
     serviceEndAt?: string | null;
+    serviceHoursOverride?: number | null;
   }>,
   view: { caseNo: string; actualStartDate?: string | null; firstDate: string; lastDate: string },
 ): Map<string, CalendarOccupancyDetail[]>;

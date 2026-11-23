@@ -483,11 +483,12 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const canChangeActualStart = !terminalStatus && currentBranch !== 'cancelled'
     && (currentBranch === 'historical' || (assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0));
   const serviceDateWorkspace = <>
-    <h3 className="order-case-service-title">{historicalArrangementPending ? '設定班表'
+    <h3 className="order-case-service-title" hidden={editingOfficialSchedule}>{historicalArrangementPending ? '設定班表'
       : completedService || hasOfficialSchedule ? '現行服務日期' : '設定服務日期'}</h3>
     <OrderServiceDatesPanel
       caseNo={caseNo}
       completedCorrection={completedService}
+      adjustmentOnly={editingOfficialSchedule}
       coordinatedStart={currentBranch === 'normal' && !historicalBinding}
       officeScheduleStaff={officeScheduleStaff}
       onArrangementPendingChange={setHistoricalArrangementPending}
@@ -569,7 +570,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             {branchType === 'historical' && currentBranch !== 'cancelled' && intakeOrderStatus !== null && <OrderIntakeRepairPanel caseNo={caseNo} orderStatus={intakeOrderStatus} onChanged={refreshFacts} summaryHref={`#clients?case=${encodeURIComponent(caseNo)}&field=intake&from=workbench`} />}
           </>}
         {currentBranch === 'normal' && workbenchScope === 'in_progress' && !terminalStatus && (
-          <section hidden={editingOfficialSchedule && currentGroupNotices.length === 0} className={`order-v2-drawer-current-task${activeGroup === 'contracts' ? ' contract-workspace' : ''}`} aria-label="案件工作內容">
+          <section className={`order-v2-drawer-current-task${activeGroup === 'contracts' ? ' contract-workspace' : ''}`} aria-label="案件工作內容">
             {currentGroupNotices.map((notice) => <p className="order-case-review-note" key={notice.key} role="status">{notice.key !== 'intake_validation:orders_terms_missing' && <><strong>{notice.stage}</strong>：</>}{notice.message}</p>)}
             <fieldset disabled={operationBusy || factsRefreshing}>
               {(activeGroup === 'intake' || visitedGroups.includes('intake')) && <div hidden={activeGroup !== 'intake'}>
@@ -637,11 +638,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               {(activeGroup === 'contracts' || visitedGroups.includes('contracts')) && <div hidden={activeGroup !== 'contracts'}>
                 <ContractExternalSigningActions caseNo={caseNo} revision={refreshRevision} onCommitted={() => { setSelectedGroup('contracts'); refreshFacts(); }} onOpenServiceDates={() => openGroup('service')} onOpenRecommendation={() => { setReplacementRequest(value => value + 1); openGroup('recommendation'); }} />
               </div>}
-              {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service' || editingOfficialSchedule}>
+              {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
                 {serviceDateWorkspace}
                 {!historicalArrangementPending && <>
                   {datesPending && <p role="status">請先完成上方服務日期的儲存或回讀。</p>}
-                  <fieldset disabled={datesPending}>
+                  <fieldset hidden={editingOfficialSchedule} disabled={datesPending}>
                     <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalBinding={historicalBinding}
                       showScheduleActions={false} onObserved={refreshFacts} onEditStateChange={setServiceConfirmationState} />
                   </fieldset>

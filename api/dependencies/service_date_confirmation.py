@@ -8,6 +8,7 @@ from infrastructure.mysql.matching_schedule_confirmation_repository import (
     MySqlMatchingScheduleConfirmationRepository,
 )
 from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
+from infrastructure.mysql.service_date_adjustment_repository import MySqlServiceDateAdjustmentRepository
 from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import SystemBusinessClock
@@ -18,6 +19,21 @@ from subsystems.orders.service_date_confirmation_workflow import ServiceDateConf
 from subsystems.orders.historical_restart_arrangement import (
     HistoricalRestartArrangementWorkflow,
 )
+from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentWorkflow
+
+
+def _date_adjustment_workflow(connection):
+    return ServiceDateAdjustmentWorkflow(
+        MySqlServiceDateAdjustmentRepository(connection), lambda: MySqlUnitOfWork(connection),
+    )
+
+
+def get_service_date_adjustment_workflow():
+    connection = get_connection()
+    try:
+        yield _date_adjustment_workflow(connection)
+    finally:
+        connection.close()
 
 
 def get_service_date_confirmation_workflow():
@@ -27,6 +43,7 @@ def get_service_date_confirmation_workflow():
             MySqlServiceDateConfirmationRepository(connection),
             lambda: MySqlUnitOfWork(connection),
             MySqlMatchingScheduleConfirmationRepository(connection),
+            _date_adjustment_workflow(connection),
         )
     finally:
         connection.close()

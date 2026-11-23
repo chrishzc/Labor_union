@@ -7,7 +7,10 @@ import {
   type OfficialDateQuery,
   type OfficialDateSelection,
 } from '../api/orders/official_service_date_correction_client';
-import { OrderServiceDateCalendar } from './OrderServiceDateCalendar';
+import { ordersMutationClient } from '../api/orders/order_mutation_client';
+import type { ServiceDateConfirmationQueryView } from '../api/orders/order_mutation_schemas';
+import { assertServiceDateAdjustmentObserved, OrderServiceDateAdjustment } from './OrderServiceDateAdjustment';
+import { coordinatedServiceTime, OrderServiceDateCalendar } from './OrderServiceDateCalendar';
 
 interface Props {
   caseNo: string;
@@ -32,9 +35,24 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
   const [activeAssignmentId, setActiveAssignmentId] = useState<number | null>(null);
   const [month, setMonth] = useState('');
   const [localView, setLocalView] = useState<'dates' | 'arrangement'>('dates');
+  const [adjustmentView, setAdjustmentView] = useState<ServiceDateConfirmationQueryView | null>(null);
+  const [adjustmentCase, setAdjustmentCase] = useState<string | null>(null);
+  const [adjustmentBusy, setAdjustmentBusy] = useState(false);
+  const [adjustmentStatus, setAdjustmentStatus] = useState<{ caseNo: string; message: string } | null>(null);
   const observedSave = useRef<{ caseNo: string; revision: number | undefined } | null>(null);
+  const currentCase = useRef(caseNo);
+  currentCase.current = caseNo;
   const datesView = (view ?? localView) === 'dates';
-  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
+  useEffect(() => { onBusyChange?.(busy || adjustmentBusy); }, [busy, adjustmentBusy, onBusyChange]);
+
+  useEffect(() => {
+    if (!datesView) return;
+    const controller = new AbortController();
+    void ordersMutationClient.getServiceDates(caseNo, { signal: controller.signal }).then(result => {
+      if (!controller.signal.aborted && result.case_no === caseNo) setAdjustmentView(result);
+    }).catch(() => { /* The adjustment button can explicitly fetch missing data. */ });
+    return () => controller.abort();
+  }, [caseNo, datesView, revision, reload]);
 
   useEffect(() => {
     let active = true;
@@ -60,10 +78,34 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
   }, [caseNo, revision, reload]);
 
   const activeAssignment = facts?.assignments.find(item => item.assignment_id === activeAssignmentId);
+  const adjustment = adjustmentView?.case_no === caseNo ? adjustmentView.date_adjustment : null;
+  const adjustmentEditing = adjustmentCase === caseNo;
+  const adjustmentDays = adjustment?.days ?? [];
   const activeDates = selections.find(item => item.assignment_id === activeAssignmentId)?.service_dates ?? [];
   const countsValid = Boolean(facts?.assignments.length) && facts!.assignments.every(original =>
     selections.find(item => item.assignment_id === original.assignment_id)?.service_dates.length === original.service_dates.length);
   const blocked = !facts || facts.order_status !== '訂單完成' || facts.monetary_change_blocker;
+  const openAdjustment = async () => {
+    setAdjustmentStatus(null);
+    if (adjustmentDays.length > 0) {
+      setAdjustmentCase(caseNo);
+      return;
+    }
+    setAdjustmentBusy(true);
+    try {
+      const result = await ordersMutationClient.getServiceDates(caseNo);
+      if (currentCase.current !== caseNo) return;
+      if (result.case_no !== caseNo || !result.date_adjustment?.days.length) {
+        throw new Error('目前無法取得本案可調整的服務日期。');
+      }
+      setAdjustmentView(result);
+      setAdjustmentCase(caseNo);
+    } catch (error) {
+      if (currentCase.current === caseNo) setAdjustmentStatus({ caseNo, message: error instanceof Error ? error.message : '無法讀取可調整的服務日期。' });
+    } finally {
+      setAdjustmentBusy(false);
+    }
+  };
   const changeDate = (date: string) => {
     setSelections(current => current.map(item => item.assignment_id === activeAssignmentId
       ? { ...item, service_dates: item.service_dates.includes(date) ? item.service_dates.filter(day => day !== date) : [...item.service_dates, date].sort() }
@@ -127,6 +169,28 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
 
   return <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 排班日期更正`}>
     <div className="service-date-heading"><p className="service-date-instruction">請在原有月曆調整已完成的服務日期。更正會保留原完工紀錄，並更新有效排班與週報。</p></div>
+    {datesView && (adjustmentDays.length > 0 || facts?.assignments.some(item => item.service_dates.length > 0)) &&
+      <button type="button" disabled={busy || adjustmentBusy || adjustmentEditing} onClick={() => void openAdjustment()}>合併或分裂日期</button>}
+    {datesView && adjustment && adjustmentDays.length > 0 && <>
+      {adjustmentEditing && <OrderServiceDateAdjustment key={caseNo} caseNo={caseNo} query={adjustment}
+        onBusyChange={setAdjustmentBusy} onCancel={() => setAdjustmentCase(null)} onSaved={async observation => {
+          const fresh = await ordersMutationClient.getServiceDates(caseNo);
+          if (currentCase.current !== caseNo) throw new Error('目前顯示案件與本次服務日期調整不同。');
+          assertServiceDateAdjustmentObserved(caseNo, fresh, observation);
+          setAdjustmentView(fresh);
+          setAdjustmentCase(null);
+          setAdjustmentStatus({ caseNo, message: '服務日期調整已儲存' });
+          setReload(value => value + 1);
+          onObserved?.();
+        }} />}
+      <dl className="service-date-summary-strip" aria-label="目前實際排班摘要">
+        <div><dt>服務開始</dt><dd>{adjustmentDays[0]?.service_date}</dd></div>
+        <div><dt>最後服務日</dt><dd>{adjustmentDays.at(-1)?.service_date}</dd></div>
+        <div><dt>原訂服務天數</dt><dd>{adjustmentView?.contracted_service_days} / {adjustmentView?.contracted_service_days} 天</dd></div>
+        <div><dt>實際服務量</dt><dd>{adjustmentDays.length} 日・{adjustment.total_hours} 小時</dd></div>
+      </dl>
+    </>}
+    {datesView && adjustmentStatus?.caseNo === caseNo && <p role="status">{adjustmentStatus.message}</p>}
     {!facts && !message && <p role="status">正在讀取完工服務日期…</p>}
     {facts?.order_status !== '訂單完成' && facts && <p role="status">目前案件尚未完成，不能使用完工後日期更正。</p>}
     {facts?.monetary_change_blocker && <p role="status">{facts.monetary_blockers.map(blocker => <span key={blocker.code}>
@@ -136,7 +200,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
         {blocker.repair_target === 'case_profile' ? '核對案件服務與費用資料 →' : blocker.repair_target === 'subsidy' ? '核對本案補助明細 →' : '核對本案月嫂應付款 →'}
       </a><br />
     </span>)}<button type="button" disabled={busy} onClick={() => setReload(value => value + 1)}>重新讀取排班日期</button></p>}
-    {facts && datesView && <>
+    {facts && datesView && !adjustmentEditing && <>
       {facts.assignments.length > 1 && <label>服務月嫂與分段<select aria-label="服務月嫂與分段" disabled={busy} value={activeAssignmentId ?? ''} onChange={event => {
         const assignmentId = Number(event.target.value);
         setActiveAssignmentId(assignmentId);
@@ -150,6 +214,11 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       </dl>
       {month && <OrderServiceDateCalendar month={month} onMonthChange={setMonth} selectedDates={activeDates}
         isDateDisabled={() => busy || blocked} onToggle={changeDate}
+        dayDetails={date => {
+          const day = adjustmentDays.find(item => item.service_date === date && item.hours_override !== null);
+          const staff = adjustment?.staff.find(item => item.staff_id === day?.staff_id);
+          return { annotation: day && staff ? `${staff.staff_name}・${day.service_hours} 小時・${coordinatedServiceTime}` : undefined };
+        }}
         hint={`${activeAssignment ? staffIdentity.label(activeAssignment.staff_id, activeAssignment.staff_name) : ''}：點選日期可取消或補選，需保留原本 ${activeAssignment?.service_dates.length ?? 0} 天。`} />}
       <label>更正原因（選填）<input value={reason} maxLength={500} disabled={busy} onChange={event => setReason(event.target.value)} /></label>
       <div className="service-date-footer"><small>{countsValid ? '原紀錄會保留，儲存後自動重新讀取排班。' : '每段服務天數必須與原紀錄相同，請在月曆取消或補選日期。'}</small>

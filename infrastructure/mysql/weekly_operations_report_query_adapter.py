@@ -111,6 +111,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 service_end_date=_optional_date(row.get("service_end_date")),
                 service_hours_per_day=_optional_half_hour(row.get("service_hours_per_day")),
                 weekly_work_days=int(row["weekly_work_days"]),
+                weekly_hours=_optional_half_hour(row.get("weekly_hours")),
                 week_start_date=_date(row["week_start_date"]),
                 week_end_date=_date(row["week_end_date"]),
                 order_status=str(row["order_status"]),
@@ -295,13 +296,16 @@ ORDER BY c.created_at,c.id
 
 
 _SERVICE_FACTS_SQL = """
-SELECT a.id AS assignment_id,a.case_no,c.name AS client_name,s.name AS staff_name,s.union_no AS staff_union_no,
-       a.assigned_start_date AS service_start_date,
-       a.assigned_end_date AS service_end_date,o.service_hours_per_day,
+SELECT MIN(a.id) AS assignment_id,a.case_no,c.name AS client_name,s.name AS staff_name,s.union_no AS staff_union_no,
+       MIN(ss.work_date) AS service_start_date,MAX(ss.work_date) AS service_end_date,
+       CASE WHEN COUNT(DISTINCT COALESCE(ss.service_hours_override,o.service_hours_per_day)) = 1
+            THEN MIN(COALESCE(ss.service_hours_override,o.service_hours_per_day)) END AS service_hours_per_day,
        COUNT(DISTINCT ss.work_date) AS weekly_work_days,
+       CASE WHEN COUNT(COALESCE(ss.service_hours_override,o.service_hours_per_day)) = COUNT(*)
+            THEN SUM(COALESCE(ss.service_hours_override,o.service_hours_per_day)) END AS weekly_hours,
        DATE_SUB(ss.work_date, INTERVAL WEEKDAY(ss.work_date) DAY) AS week_start_date,
        DATE_ADD(DATE_SUB(ss.work_date, INTERVAL WEEKDAY(ss.work_date) DAY), INTERVAL 6 DAY) AS week_end_date,
-       o.status AS order_status,a.status AS assignment_status,
+       o.status AS order_status,MAX(a.status) AS assignment_status,
        s.weekly_rest_days
 FROM case_staff_assignments a
 JOIN scheduling_generations g ON g.id=a.generation_id AND g.effective_marker=1
@@ -312,10 +316,9 @@ JOIN clients c ON c.id=o.client_id
 JOIN staff s ON s.id=a.staff_id
 WHERE a.status NOT IN ('cancelled','replaced')
   AND ss.work_date >= %s AND ss.work_date <= %s
-GROUP BY a.id,a.case_no,c.name,s.name,a.assigned_start_date,a.assigned_end_date,
-         o.service_hours_per_day,o.status,a.status,s.weekly_rest_days,
+GROUP BY a.case_no,c.name,s.id,s.name,s.union_no,o.status,s.weekly_rest_days,
          week_start_date,week_end_date
-ORDER BY week_start_date,a.id
+ORDER BY week_start_date,assignment_id
 """
 
 

@@ -74,6 +74,8 @@ class EffectiveAssignmentCurrentFact:
     service_hours_per_day: float | int
     service_time_terms: ServiceTimeTerms
     actual_start_date: date | None = None
+    daily_projection: bool = False
+    hours_overrides: tuple[tuple[date, int], ...] = ()
 
     def __post_init__(self) -> None:
         _validate_assignment_identities(self)
@@ -167,8 +169,8 @@ class AssignmentCurrentProjection:
     status: AssignmentLifecycleStatus
     assigned_start_date: date
     assigned_end_date: date
-    first_service_at: datetime
-    completion_at: datetime
+    first_service_at: datetime | None
+    completion_at: datetime | None
     official_service_day_count: int
     actual_hours: float | int
 
@@ -187,6 +189,7 @@ class SchedulingDayEntry:
     actual_start_date: date | None = None
     service_start_at: datetime | None = None
     service_end_at: datetime | None = None
+    service_hours_override: int | None = None
 
     def __post_init__(self) -> None:
         if self.occupancy_kind is not SchedulingOccupancyKind.STAFF_UNAVAILABILITY:
@@ -365,10 +368,11 @@ def _project_assignment(assignment, evaluated_at):
         project_assignment_status(assignment, evaluated_at),
         assignment.assigned_start_date,
         assignment.assigned_end_date,
-        _first_service_at(assignment),
-        _completion_at(assignment),
+        None if assignment.official_service_dates[0] in dict(assignment.hours_overrides) else _first_service_at(assignment),
+        None if assignment.official_service_dates[-1] in dict(assignment.hours_overrides) else _completion_at(assignment),
         service_day_count,
-        service_day_count * assignment.service_hours_per_day,
+        sum(dict(assignment.hours_overrides).get(day, assignment.service_hours_per_day)
+            for day in assignment.official_service_dates),
     )
 
 
@@ -443,10 +447,7 @@ def _append_assignment_interval_entries(
     assignment_status,
 ):
     official_dates = set(assignment.official_service_dates)
-    for occupied_date in _inclusive_dates(
-        assignment.assigned_start_date,
-        assignment.assigned_end_date,
-    ):
+    for occupied_date in _projected_dates(assignment):
         _append_assignment_interval_entry(
             entries,
             occupied_dates,
@@ -489,16 +490,22 @@ def _append_assignment_interval_entry(
         if occupied_date in official_dates
         else SchedulingOccupancyKind.ASSIGNMENT_REST
     )
+    hours = dict(assignment.hours_overrides).get(occupied_date)
+    interval = assignment.service_time_terms.service_interval(occupied_date) if hours is None else None
     entry = SchedulingDayEntry(
         kind,
         assignment.case_no,
         assignment_id=assignment.assignment_id,
         assignment_status=assignment_status,
         actual_start_date=assignment.actual_start_date,
-        service_start_at=assignment.service_time_terms.service_interval(occupied_date)[0],
-        service_end_at=assignment.service_time_terms.service_interval(occupied_date)[1],
+        service_start_at=interval[0] if interval else None,
+        service_end_at=interval[1] if interval else None,
+        service_hours_override=hours,
     )
-    _claim_entry(entries, occupied_dates, occupied_date, entry, assignment.service_time_terms, assignment.staff_id)
+    if hours is not None:
+        entries.setdefault(occupied_date, []).append(entry)
+    else:
+        _claim_entry(entries, occupied_dates, occupied_date, entry, assignment.service_time_terms, assignment.staff_id)
 
 
 def _append_assignment_buffer_entry(
@@ -643,11 +650,14 @@ def _assignment_interval_occupancy(assignment):
             assignment.assignment_id,
             "assignment_interval",
         )
-        for value in _inclusive_dates(
-            assignment.assigned_start_date,
-            assignment.assigned_end_date,
-        )
+        for value in _projected_dates(assignment)
     )
+
+
+def _projected_dates(assignment):
+    if assignment.daily_projection:
+        return assignment.official_service_dates
+    return _inclusive_dates(assignment.assigned_start_date, assignment.assigned_end_date)
 
 
 def _projection_token(facts, assignments, days, case_versions):
@@ -677,8 +687,8 @@ def _assignment_payload(item):
         "status": item.status.value,
         "assigned_start_date": item.assigned_start_date.isoformat(),
         "assigned_end_date": item.assigned_end_date.isoformat(),
-        "first_service_at": item.first_service_at.isoformat(),
-        "completion_at": item.completion_at.isoformat(),
+        "first_service_at": item.first_service_at.isoformat() if item.first_service_at else None,
+        "completion_at": item.completion_at.isoformat() if item.completion_at else None,
         "official_service_day_count": item.official_service_day_count,
         "actual_hours": item.actual_hours,
     }
@@ -706,6 +716,7 @@ def _day_payload(item):
                 "actual_start_date": entry.actual_start_date.isoformat() if entry.actual_start_date else None,
                 "service_start_at": entry.service_start_at.isoformat() if entry.service_start_at else None,
                 "service_end_at": entry.service_end_at.isoformat() if entry.service_end_at else None,
+                "service_hours_override": entry.service_hours_override,
             }
             for entry in item.entries
         ),
@@ -788,7 +799,7 @@ def _validate_assignment_service_facts(assignment):
     if not assignment.service_time_terms.complete:
         raise ValueError("service_time_terms_incomplete")
     buffers = assignment.active_buffer_dates
-    if buffers and buffers != _expected_buffer_dates(
+    if not assignment.daily_projection and buffers and buffers != _expected_buffer_dates(
         assignment.assigned_end_date
     ):
         raise ValueError("active assignment buffer must contain exactly seven days")

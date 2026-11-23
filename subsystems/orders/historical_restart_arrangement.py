@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Callable, Protocol
 
@@ -155,8 +155,12 @@ class HistoricalRestartArrangementWorkflow:
                 )
                 facts = self._repository.load(case_no, lock=True)
             service_dates = tuple(day for segment in segments for day in segment.service_dates)
-            if (facts.current_version is None or facts.current_dates != service_dates
-                or facts.current_confirmed_order_version != facts.order_version):
+            if facts.first_schedule_basis_dates:
+                if facts.first_schedule_basis_dates != service_dates:
+                    raise ValueError("service_date_adjustment_first_schedule_ownership_conflict")
+                facts = replace(facts, current_confirmed_order_version=facts.order_version)
+            elif (facts.current_version is None or facts.current_dates != service_dates
+                  or facts.current_confirmed_order_version != facts.order_version):
                 dates_preview = date_workflow.preview_from_facts(facts, service_dates)
                 date_workflow.apply_in_current_unit_of_work(
                     case_no, service_dates, expected_order_version=facts.order_version,
@@ -292,12 +296,13 @@ def _arrangement_candidate(
         and facts.current_confirmed_order_version != facts.order_version
     ):
         raise ValueError("historical_arrangement_confirmed_dates_stale")
+    basis_dates = facts.first_schedule_basis_dates or facts.current_dates
     if (
-        not facts.current_dates
-        or len(facts.current_dates) != facts.contracted_service_days
-        or facts.current_dates != tuple(sorted(set(facts.current_dates)))
+        not basis_dates
+        or len(basis_dates) != facts.contracted_service_days
+        or basis_dates != tuple(sorted(set(basis_dates)))
         or not facts.selectable_dates
-        or any(day not in facts.selectable_dates for day in facts.current_dates)
+        or any(day not in facts.selectable_dates for day in basis_dates)
     ):
         raise ValueError("historical_arrangement_confirmed_dates_required_blocked")
     if not segments or len(segments) != len(facts.restart_assignments):
@@ -309,7 +314,7 @@ def _arrangement_candidate(
         raise ValueError("historical_arrangement_bound_staff_mismatch_blocked")
     if facts.service_hours_per_day <= 0:
         raise ValueError("historical_arrangement_service_hours_missing_blocked")
-    if tuple(day for segment in segments for day in segment.service_dates) != facts.current_dates:
+    if tuple(day for segment in segments for day in segment.service_dates) != basis_dates:
         raise ValueError("historical_arrangement_date_ownership_mismatch_blocked")
     interval_start = facts.selectable_dates[0]
     assignments = []

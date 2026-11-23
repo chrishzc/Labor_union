@@ -51,6 +51,7 @@ class OfficialScheduleFact:
     staff_id: int
     work_date: date
     is_double_pay: bool = False
+    service_hours_override: int | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.schedule_id, "schedule id")
@@ -149,6 +150,7 @@ class _ServiceOwner:
     source_assignment_id: int
     source_schedule_id: int
     is_double_pay: bool
+    service_hours_override: int | None
 
 
 # The invariant order is visible here so validation cannot drift between callers.
@@ -263,7 +265,8 @@ def _validate_schedule_facts(facts: LeaveSubstitutionFacts) -> None:
     if len({item.work_date for item in schedules}) != len(schedules):
         _raise_ownership("one service date has multiple official owners")
     expected_days = facts.assignment_plan.contracted_service_days
-    if len(schedules) != expected_days:
+    daily_hours = facts.assignment_plan.service_hours_per_day
+    if sum(item.service_hours_override or daily_hours for item in schedules) != expected_days * daily_hours:
         _raise_coverage("official service days do not conserve the contract")
     _validate_schedule_assignment_ownership(facts)
 
@@ -348,6 +351,7 @@ def _transform_service_ownership(
                 row.assignment_id,
                 row.schedule_id,
                 False,
+                row.service_hours_override,
             )
         )
         if recalculate_existing_dates and (
@@ -400,6 +404,7 @@ def _transform_service_row(
             row.assignment_id,
             row.schedule_id,
             row.is_double_pay,
+            row.service_hours_override,
         )
     return _ServiceOwner(
         resulting_date,
@@ -407,6 +412,7 @@ def _transform_service_row(
         row.assignment_id,
         row.schedule_id,
         item.is_double_pay,
+        row.service_hours_override,
     )
 
 
@@ -419,7 +425,9 @@ def _validate_transformed_service_rows(
     dates = tuple(item.service_date for item in transformed)
     if dates != tuple(sorted(set(dates))):
         _raise_ownership("leave transition creates duplicate service ownership")
-    if len(transformed) != facts.assignment_plan.contracted_service_days:
+    daily_hours = facts.assignment_plan.service_hours_per_day
+    if (sum(item.service_hours_override or daily_hours for item in transformed)
+            != facts.assignment_plan.contracted_service_days * daily_hours):
         _raise_coverage("leave transition changes contracted service quantity")
 
 
@@ -482,11 +490,12 @@ def _build_source_assignment(
         assigned_start_date=min(row.service_date for row in rows),
         assigned_end_date=max(row.service_date for row in rows),
         service_dates=tuple(row.service_date for row in rows),
-        actual_hours=len(rows) * facts.assignment_plan.service_hours_per_day,
+        actual_hours=sum(row.service_hours_override or facts.assignment_plan.service_hours_per_day for row in rows),
         lineage_source_assignment_ids=(assignment.assignment_id,),
         double_pay_dates=tuple(
             row.service_date for row in rows if row.is_double_pay
         ),
+        service_hours_overrides=_service_hour_overrides(rows),
     )
 
 
@@ -507,9 +516,10 @@ def _substitute_assignment_candidates(
             assigned_start_date=selected[0].service_date,
             assigned_end_date=selected[-1].service_date,
             service_dates=tuple(row.service_date for row in selected),
-            actual_hours=len(selected) * facts.assignment_plan.service_hours_per_day,
+            actual_hours=sum(row.service_hours_override or facts.assignment_plan.service_hours_per_day for row in selected),
             lineage_source_assignment_ids=(intent.original_assignment_id,),
             double_pay_dates=tuple(row.service_date for row in selected if row.is_double_pay),
+            service_hours_overrides=_service_hour_overrides(selected),
         ),)
     selected_ids={item.original_schedule_id for item in intent.items
                   if item.resolution_type is LeaveResolutionType.SUBSTITUTE}
@@ -531,10 +541,15 @@ def _substitute_assignment_candidates(
         assigned_start_date=run[0].service_date,
         assigned_end_date=run[-1].service_date,
         service_dates=tuple(row.service_date for row in run),
-        actual_hours=len(run)*facts.assignment_plan.service_hours_per_day,
+        actual_hours=sum(row.service_hours_override or facts.assignment_plan.service_hours_per_day for row in run),
         lineage_source_assignment_ids=(run[0].source_assignment_id,),
         double_pay_dates=tuple(row.service_date for row in run if row.is_double_pay),
+        service_hours_overrides=_service_hour_overrides(run),
     ) for run in runs)
+
+
+def _service_hour_overrides(rows):
+    return tuple((row.service_date, row.service_hours_override) for row in rows if row.service_hours_override is not None)
 
 
 def _assignment_sort_key(assignment: AssignmentCandidate):
@@ -562,6 +577,7 @@ def _resequence_assignment(
         actual_hours=assignment.actual_hours,
         lineage_source_assignment_ids=assignment.lineage_source_assignment_ids,
         double_pay_dates=assignment.double_pay_dates,
+        service_hours_overrides=assignment.service_hours_overrides,
     )
 
 
@@ -757,6 +773,8 @@ def _generation_payload(candidate: SchedulingGenerationCandidate):
                 "double_pay_dates": tuple(
                     value.isoformat() for value in item.double_pay_dates
                 ),
+                **({"daily_hours": tuple((day.isoformat(), hours) for day, hours in item.service_hours_overrides)}
+                   if item.service_hours_overrides else {}),
             }
             for item in candidate.assignments
         ),

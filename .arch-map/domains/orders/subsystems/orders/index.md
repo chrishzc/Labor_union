@@ -43,6 +43,7 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/orders/subsystems/orders/`
 - integration_root: `tests/domains/orders/subsystems/orders/integration/`
+- integration_root: `tests/domains/orders/subsystems/orders/modules/historical-adoption/integration/test_wp80_disposable_mysql_e2e.py`（核對歷史採納、零服務更正、服務天數歸屬與完工後的帳務結果，以及週報 JSON／XLSX 和看板回讀。）
 - integration_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/order_workbench_v2_service_dates.test.tsx`
 - integration_root: `ui_react/src/tests/write_readback_regression.cjs`
 - integration_root: `ui_react/src/tests/orders_mutation_client.test.ts` — shared service-date／controlled-reopen typed API contract。

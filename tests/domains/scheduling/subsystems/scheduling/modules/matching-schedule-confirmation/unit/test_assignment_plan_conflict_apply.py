@@ -3,7 +3,9 @@ from datetime import date, time
 from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.commitment_execution import CommitmentExecutionMismatch
 import pytest
-from domains.scheduling.assignment_plan import StaffOccupancyFact
+from domains.scheduling.assignment_plan import (
+    AssignmentPlanIntent, AssignmentPlanSegmentIntent, EffectiveAssignmentFact, StaffOccupancyFact,
+)
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanWorkflow, AssignmentPlanPreviewRequest, AssignmentPlanApplyRequest,
@@ -75,3 +77,28 @@ def test_assignment_plan_checks_the_actual_same_day_shift(start_hour, blocked):
         assert error.value.error.code == "staff_occupancy_conflict"
     else:
         assert workflow.preview(request).candidate.scheduling.assignments
+
+
+@pytest.mark.parametrize("move_override", [False, True])
+def test_assignment_plan_preserves_daily_hours_and_actual_day_count_after_merge(move_override):
+    first, second, moved = date(2026, 8, 3), date(2026, 8, 4), date(2026, 8, 5)
+    target = moved if move_override else first
+    dates = tuple(sorted((target, second)))
+    facts = _facts()
+    facts = replace(facts, assignment_plan=replace(
+        facts.assignment_plan, contracted_service_days=3, service_hours_per_day=4,
+        effective_assignments=(EffectiveAssignmentFact(
+            1, 1, 1, first, second, (first, second), service_hours_overrides=((first, 8),),
+        ),),
+    ))
+    client, payroll, orders = _ports()
+    workflow = AssignmentPlanWorkflow(_ReplayRepository(facts, None), client, payroll, orders, _UnitOfWork)
+    intent = AssignmentPlanIntent((AssignmentPlanSegmentIntent(2, dates[0], dates[-1], dates),))
+
+    result = workflow.preview(AssignmentPlanPreviewRequest("CASE-1", intent, CorrelationId("adjusted-plan")))
+    assignment, = result.candidate.scheduling.assignments
+
+    assert assignment.staff_id == 2
+    assert assignment.service_dates == dates
+    assert assignment.service_hours_overrides == ((target, 8),)
+    assert assignment.actual_hours == 12

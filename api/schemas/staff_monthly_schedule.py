@@ -33,6 +33,7 @@ class MonthlyScheduleDayView(_ClosedModel):
     service_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     starts_at: str | None = None
     ends_at: str | None = None
+    service_hours_override: Literal[4, 8] | None = None
     lock_id: int | None = Field(default=None, gt=0)
     plan_id: int | None = Field(default=None, gt=0)
     unavailability_block_id: int | None = Field(default=None, gt=0)

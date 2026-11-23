@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 from domains.orders.service_date_confirmation import (
     ConfirmedServiceDateCandidate,
     group_service_dates_by_calendar_week,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
+
+if TYPE_CHECKING:
+    from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentWorkflow, ServiceDateAdjustmentFacts
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +40,8 @@ class ServiceDateConfirmationFacts:
     service_hours_per_day: float = 0
     current_confirmed_order_version: int | None = None
     effective_service_dates: tuple[date, ...] = ()
+    date_adjustment: ServiceDateAdjustmentFacts | None = None
+    first_schedule_basis_dates: tuple[date, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,13 +89,16 @@ class ServiceDateConfirmationWorkflow:
         repository: ServiceDateConfirmationRepository,
         unit_of_work_factory: Callable[[], UnitOfWork],
         scheduling_snapshot_invalidation: SchedulingSnapshotInvalidationPort,
+        date_adjustment: ServiceDateAdjustmentWorkflow | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._scheduling_snapshot_invalidation = scheduling_snapshot_invalidation
+        self._date_adjustment = date_adjustment
 
     def query(self, case_no: str) -> ServiceDateConfirmationFacts:
-        return self._repository.load(case_no)
+        facts = self._repository.load(case_no)
+        return replace(facts, date_adjustment=self._date_adjustment.query(case_no)) if self._date_adjustment else facts
 
     def preview(self, case_no: str, service_dates: tuple[date, ...]) -> ServiceDateConfirmationPreview:
         return self.preview_from_facts(self._repository.load(case_no), service_dates)

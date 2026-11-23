@@ -19,6 +19,7 @@ import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_cl
 import type { SchedulingCurrentAssignment } from '../api/scheduling/scheduling_current_schemas';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
+import { coordinatedServiceTime } from '../components/OrderServiceDateCalendar';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import {
@@ -1132,7 +1133,9 @@ function monthlyShiftSpans(
     const lane = lanes.get(day) ?? 0;
     lanes.set(day, lane + 1);
 
-    const time = shift.starts_at && shift.ends_at
+    const time = shift.service_hours_override
+      ? `${shift.service_hours_override} 小時・${coordinatedServiceTime}`
+      : shift.starts_at && shift.ends_at
       ? `${continuation ? '00:00' : shift.starts_at.slice(11, 16)}–${shift.ends_at.slice(0, 10) > shift.work_date ? '翌日' : ''}${shift.ends_at.slice(11, 16)}${continuation ? ' 續班' : ''}`
       : ['working', 'historical_assignment', 'waiting_deposit_lock'].includes(shift.status) ? '時段未確認' : '';
 

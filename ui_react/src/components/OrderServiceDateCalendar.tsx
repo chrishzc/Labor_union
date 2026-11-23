@@ -4,6 +4,8 @@ import '../../../line/static/service-date-calendar.css';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { schedulingCurrentClient, type SchedulingCurrentQuery } from '../api/scheduling/scheduling_current_client';
 
+export const coordinatedServiceTime = '月嫂跟客戶自行協調';
+
 interface Props {
   month: string;
   onMonthChange: (month: string) => void;
@@ -15,7 +17,7 @@ interface Props {
   showHolidays?: boolean;
   monthRange?: readonly [string, string];
   dayLabel?: (date: string) => string;
-  dayDetails?: (date: string) => { holidayName?: string | null; rest?: boolean; laterSegment?: boolean };
+  dayDetails?: (date: string) => { holidayName?: string | null; rest?: boolean; laterSegment?: boolean; annotation?: string };
   staffSchedule?: { staffId: number; caseNo: string; actualStartDate?: string | null };
 }
 
@@ -52,6 +54,7 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
       const days = calendarOccupancyDetailsByDate(projection.days.flatMap(day => day.entries.map(entry => ({
         date: day.calendar_date, caseNo: entry.case_no, kind: entry.occupancy_kind,
         actualStartDate: entry.actual_start_date, serviceStartAt: entry.service_start_at, serviceEndAt: entry.service_end_at,
+        serviceHoursOverride: entry.service_hours_override,
       }))), { caseNo, actualStartDate, firstDate, lastDate: query.rangeEnd });
       setScheduleResult({ request: scheduleRequest, days });
     }).catch(() => {
@@ -111,6 +114,7 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
             <time dateTime={date} title={date}>{Number(date.slice(8))}</time>
             {holidayName && <small className="service-date-holiday" aria-label={holidayName} title={holidayName}>{holidayName}</small>}
             {!holidayName && details?.rest && !selected && <small>休</small>}
+            {details?.annotation && <small>{details.annotation}</small>}
           </button>;
           if (!occupancy || !scheduleRequest) return dateButton;
           return <div className={`${cellClass} service-date-occupied-day`} key={date}>
@@ -123,6 +127,7 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
                 <strong>{item.caseNo ?? item.label}</strong>
                 {item.caseNo && <small>{item.label}{item.continues && '・跨日續班'}</small>}
                 {item.period && <small>{item.period.summary}</small>}
+                {item.serviceHoursOverride && <small>{item.serviceHoursOverride} 小時・{coordinatedServiceTime}</small>}
               </span>)}
               {occupancy.length > 2 && <small className="service-date-occupancy-overflow">另有 {occupancy.length - 2} 筆</small>}
             </button>
@@ -136,7 +141,8 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
           <ul>{detailItems.map(item => <li key={`${item.label}-${item.caseNo}-${item.period?.full}`}>
             <strong>{item.caseNo ? `案件 ${item.caseNo}` : item.label}</strong>
             {item.caseNo && <span>{item.label}{item.continues && '・跨日續班'}</span>}
-            {item.period ? <span>{item.period.full}</span> : item.caseNo && <span>服務時段待確認</span>}
+            {item.serviceHoursOverride ? <span>{item.serviceHoursOverride} 小時・{coordinatedServiceTime}</span>
+              : item.period ? <span>{item.period.full}</span> : item.caseNo && <span>服務時段待確認</span>}
           </li>)}</ul>
         </>}
       </div>}

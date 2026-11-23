@@ -46,14 +46,17 @@ const LifecycleStatusSchema = z.enum([
   '歷史訂單－帳務完成',
 ]);
 
+const DailyServiceHoursOverridesSchema = z.array(z.tuple([IsoDateSchema, z.union([z.literal(4), z.literal(8)])]));
+
 const ActualStartAssignmentSchema = z.strictObject({
   source_assignment_id: PositiveIntegerSchema,
   staff_id: PositiveIntegerSchema,
   sequence: PositiveIntegerSchema,
   assigned_start_date: IsoDateSchema,
   assigned_end_date: IsoDateSchema,
-  service_dates: z.array(IsoDateSchema).min(1),
-  actual_hours: PositiveIntegerSchema,
+  service_dates: z.array(IsoDateSchema),
+  actual_hours: z.number().nonnegative().multipleOf(0.5),
+  service_hours_overrides: DailyServiceHoursOverridesSchema.optional(),
 });
 
 const ActualStartCandidateSchema = z.strictObject({
@@ -79,10 +82,11 @@ const SchedulingAssignmentSchema = z.strictObject({
   sequence: PositiveIntegerSchema,
   assigned_start_date: IsoDateSchema,
   assigned_end_date: IsoDateSchema,
-  service_dates: z.array(IsoDateSchema).min(1),
-  actual_hours: PositiveIntegerSchema,
+  service_dates: z.array(IsoDateSchema),
+  actual_hours: z.number().nonnegative().multipleOf(0.5),
   lineage_source_assignment_ids: z.array(PositiveIntegerSchema),
   double_pay_dates: z.array(IsoDateSchema),
+  service_hours_overrides: DailyServiceHoursOverridesSchema.optional(),
 });
 
 const SchedulingGenerationSchema = z.strictObject({

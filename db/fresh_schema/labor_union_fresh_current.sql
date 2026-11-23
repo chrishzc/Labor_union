@@ -1918,9 +1918,14 @@ CREATE TABLE `confirmed_service_date_days` (
   `confirmed_version_id` bigint unsigned NOT NULL,
   `ordinal` int unsigned NOT NULL,
   `service_date` date NOT NULL,
+  `staff_id` int DEFAULT NULL,
+  `service_hours_override` tinyint unsigned DEFAULT NULL,
   PRIMARY KEY (`confirmed_version_id`,`ordinal`),
   UNIQUE KEY `uq_confirmed_service_date_day` (`confirmed_version_id`,`service_date`),
-  CONSTRAINT `fk_confirmed_service_date_day_version` FOREIGN KEY (`confirmed_version_id`) REFERENCES `confirmed_service_date_versions` (`id`)
+  KEY `fk_confirmed_service_day_staff` (`staff_id`),
+  CONSTRAINT `fk_confirmed_service_date_day_version` FOREIGN KEY (`confirmed_version_id`) REFERENCES `confirmed_service_date_versions` (`id`),
+  CONSTRAINT `fk_confirmed_service_day_staff` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`),
+  CONSTRAINT `chk_confirmed_service_day_hours` CHECK (((`service_hours_override` is null) or ((`service_hours_override` in (4,8)) and (`staff_id` is not null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `confirmed_service_date_receipts` (
@@ -5884,7 +5889,7 @@ CREATE TABLE `order_cancellation_apply_receipts` (
   `scheduling_generation` int unsigned DEFAULT NULL,
   `client_finance_version` bigint unsigned DEFAULT NULL,
   `payroll_version` bigint unsigned DEFAULT NULL,
-  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','成立後未服務') COLLATE utf8mb4_unicode_ci NOT NULL,
   `actual_end_date` date DEFAULT NULL,
   `official_service_day_count` int unsigned NOT NULL,
   `official_service_hours` int unsigned NOT NULL,
@@ -6064,8 +6069,8 @@ CREATE TABLE `order_lifecycle_state_events` (
   UNIQUE KEY `uq_order_lifecycle_state_event_case_identity` (`id`,`case_no`),
   KEY `idx_order_lifecycle_state_event_case_time` (`case_no`,`created_at`),
   CONSTRAINT `fk_order_lifecycle_state_event_case_no` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_order_lifecycle_state_event_after_status` CHECK ((`after_status` in (_utf8mb4'待補件',_utf8mb4'洽談中',_utf8mb4'訂單成立',_utf8mb4'服務中',_utf8mb4'訂單完成',_utf8mb4'訂單取消',_utf8mb4'歷史訂單－未服務',_utf8mb4'歷史訂單－服務中',_utf8mb4'歷史訂單－服務完成',_utf8mb4'歷史訂單－帳務完成'))),
-  CONSTRAINT `chk_order_lifecycle_state_event_before_status` CHECK ((`before_status` in (_utf8mb4'待補件',_utf8mb4'洽談中',_utf8mb4'訂單成立',_utf8mb4'服務中',_utf8mb4'訂單完成',_utf8mb4'訂單取消',_utf8mb4'歷史訂單－未服務',_utf8mb4'歷史訂單－服務中',_utf8mb4'歷史訂單－服務完成',_utf8mb4'歷史訂單－帳務完成'))),
+  CONSTRAINT `chk_order_lifecycle_state_event_after_status` CHECK ((`after_status` in (_utf8mb4'待補件',_utf8mb4'洽談中',_utf8mb4'訂單成立',_utf8mb4'服務中',_utf8mb4'訂單完成',_utf8mb4'訂單取消',_utf8mb4'歷史訂單－未服務',_utf8mb4'歷史訂單－服務中',_utf8mb4'歷史訂單－服務完成',_utf8mb4'歷史訂單－帳務完成',_utf8mb4'成立後未服務'))),
+  CONSTRAINT `chk_order_lifecycle_state_event_before_status` CHECK ((`before_status` in (_utf8mb4'待補件',_utf8mb4'洽談中',_utf8mb4'訂單成立',_utf8mb4'服務中',_utf8mb4'訂單完成',_utf8mb4'訂單取消',_utf8mb4'歷史訂單－未服務',_utf8mb4'歷史訂單－服務中',_utf8mb4'歷史訂單－服務完成',_utf8mb4'歷史訂單－帳務完成',_utf8mb4'成立後未服務'))),
   CONSTRAINT `chk_order_lifecycle_state_event_facts_snapshot` CHECK ((json_type(`facts_snapshot`) = _utf8mb4'OBJECT')),
   CONSTRAINT `chk_order_lifecycle_state_event_required_text` CHECK (((char_length(trim(`trigger_event`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`idempotency_key`)) > 0)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -6157,7 +6162,7 @@ CREATE TABLE `order_terms_apply_receipts` (
   `scheduling_generation` int unsigned NOT NULL,
   `client_finance_version` bigint unsigned DEFAULT NULL,
   `payroll_version` bigint unsigned DEFAULT NULL,
-  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件','歷史訂單－未服務','歷史訂單－服務中') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件','歷史訂單－未服務','歷史訂單－服務中','成立後未服務') COLLATE utf8mb4_unicode_ci NOT NULL,
   `service_data_lock_formed` tinyint(1) NOT NULL,
   `correlation_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `result_snapshot` json NOT NULL,
@@ -6202,7 +6207,7 @@ CREATE TABLE `orders` (
   `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '案件唯一識別碼；對應 clients.case_no',
   `client_id` int NOT NULL COMMENT '對應 clients.id',
   `staff_id` int DEFAULT NULL COMMENT '對應 staff.id (可為 NULL，代表尚未配對成功)',
-  `status` enum('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－未服務','歷史訂單－服務中','歷史訂單－服務完成','歷史訂單－帳務完成') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '洽談中',
+  `status` enum('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－未服務','歷史訂單－服務中','歷史訂單－服務完成','歷史訂單－帳務完成','成立後未服務') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '洽談中',
   `lifecycle_version` bigint unsigned NOT NULL DEFAULT '0' COMMENT 'ORD-01 aggregate revision；每個非 replay command 恰遞增一次',
   `cancel_reason` text COLLATE utf8mb4_unicode_ci COMMENT '當狀態變更為 訂單取消 時的取消原因說明',
   `line_group_id` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '三方服務 LINE 群組 ID',
@@ -7378,6 +7383,24 @@ CREATE TABLE `scheduling_staff_unavailability_blocks` (
   CONSTRAINT `chk_scheduling_staff_unavailability_reason` CHECK ((char_length(trim(`created_by`)) > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `service_date_adjustment_receipts` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `command_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reverse_receipt_id` bigint unsigned DEFAULT NULL,
+  `result_snapshot` json NOT NULL,
+  `created_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_service_date_adjustment_receipt_key` (`idempotency_key`),
+  KEY `idx_service_date_adjustment_case` (`case_no`,`id`),
+  KEY `fk_service_date_adjustment_reverse` (`reverse_receipt_id`),
+  CONSTRAINT `fk_service_date_adjustment_case` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`),
+  CONSTRAINT `fk_service_date_adjustment_reverse` FOREIGN KEY (`reverse_receipt_id`) REFERENCES `service_date_adjustment_receipts` (`id`),
+  CONSTRAINT `chk_service_date_adjustment_snapshot` CHECK ((json_type(`result_snapshot`) = _utf8mb4'OBJECT'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `staff` (
   `id` int NOT NULL AUTO_INCREMENT,
   `registered_at` datetime DEFAULT NULL COMMENT '報名時間',
@@ -8182,15 +8205,17 @@ CREATE TABLE `staff_schedule` (
   `notes` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '行政人員調整備註',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `service_hours_override` tinyint unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_staff_schedule_generation_owner` (`generation_id`,`work_date`),
+  UNIQUE KEY `uq_staff_schedule_effective_generation_day` (`generation_id`,`work_date`,`effective_marker`),
   KEY `idx_schedule_case_no` (`case_no`),
   KEY `idx_staff_schedule_assignment` (`assignment_id`),
   KEY `uq_staff_schedule_effective_date` (`staff_id`,`work_date`,`effective_marker`),
   CONSTRAINT `fk_schedule_case_no` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_staff_schedule_assignment` FOREIGN KEY (`assignment_id`) REFERENCES `case_staff_assignments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_staff_schedule_generation` FOREIGN KEY (`generation_id`) REFERENCES `scheduling_generations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `staff_schedule_ibfk_1` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE CASCADE
+  CONSTRAINT `staff_schedule_ibfk_1` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_staff_schedule_service_day_hours` CHECK (((`service_hours_override` is null) or (`service_hours_override` in (4,8))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `staff_schedule_assignment_reviews` (

@@ -24,8 +24,8 @@ class SchedulingCurrentAssignmentView(BaseModel):
     status: AssignmentLifecycleStatus
     assigned_start_date: date
     assigned_end_date: date
-    first_service_at: datetime
-    completion_at: datetime
+    first_service_at: datetime | None
+    completion_at: datetime | None
     official_service_day_count: int = Field(gt=0)
     actual_hours: float = Field(gt=0, multiple_of=0.5)
 
@@ -45,6 +45,7 @@ class SchedulingCurrentDayEntryView(BaseModel):
     actual_start_date: date | None = None
     service_start_at: datetime | None = None
     service_end_at: datetime | None = None
+    service_hours_override: int | None = None
 
 
 class SchedulingCurrentDayView(BaseModel):

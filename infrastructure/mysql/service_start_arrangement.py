@@ -38,6 +38,7 @@ from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
 from infrastructure.mysql.matching_schedule_confirmation_repository import MySqlMatchingScheduleConfirmationRepository
 from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
+from infrastructure.mysql.service_date_adjustment_repository import load_first_schedule_dates
 from subsystems.orders.actual_start_workflow import ActualStartWorkflow
 from subsystems.orders.historical_restart_arrangement import HistoricalRestartArrangementReceipt
 from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
@@ -307,12 +308,18 @@ class MySqlServiceStartArrangement:
         self.actual_start.apply_date_only_in_current_unit_of_work(ActualStartDateOnlyApplyRequest(
             request['case_no'],start,ExpectedVersion(facts.order_version),preview.fingerprint,cid))
         all_dates=tuple(sorted(day for item in intents for day in item.official_service_dates))
-        preview=self.service_dates.preview(request['case_no'],all_dates)
-        dates=self.service_dates.apply_in_current_unit_of_work(request['case_no'],all_dates,
-            expected_order_version=preview.candidate.order_version,
-            expected_scheduling_version=preview.candidate.scheduling_version,
-            preview_fingerprint=preview.candidate.fingerprint.value,actor=actor.actor_id,reason='',idempotency_key='start-calendar:'+key,
-            reserve_waiting_deposit=False)
+        with self.connection.cursor() as c:
+            original, adjusted = load_first_schedule_dates(c, request['case_no'], lock=True)
+        if adjusted:
+            if tuple(day.service_date for day in original) != all_dates:
+                raise ValueError("service_date_adjustment_first_schedule_ownership_conflict")
+        else:
+            preview=self.service_dates.preview(request['case_no'],all_dates)
+            self.service_dates.apply_in_current_unit_of_work(request['case_no'],all_dates,
+                expected_order_version=preview.candidate.order_version,
+                expected_scheduling_version=preview.candidate.scheduling_version,
+                preview_fingerprint=preview.candidate.fingerprint.value,actor=actor.actor_id,reason='',idempotency_key='start-calendar:'+key,
+                reserve_waiting_deposit=False)
         with self.connection.cursor() as c:
             c.execute('SELECT id FROM confirmed_service_date_versions WHERE case_no=%s AND is_current=1',(request['case_no'],))
             version_id=c.fetchone()['id']
@@ -565,7 +572,12 @@ def save_office_schedule(
                 case_no, actual_start_date, ExpectedVersion(start.order_version), preview.fingerprint, cid,
             ))
             facts = date_repository.load(case_no, lock=True)
-        if facts.current_version is None or facts.current_dates != dates or facts.current_confirmed_order_version != facts.order_version:
+        with connection.cursor() as cursor:
+            baseline, adjusted = load_first_schedule_dates(cursor, case_no, lock=True)
+        if adjusted:
+            if tuple(day.service_date for day in baseline) != dates:
+                raise ValueError("service_date_adjustment_first_schedule_ownership_conflict")
+        elif facts.current_version is None or facts.current_dates != dates or facts.current_confirmed_order_version != facts.order_version:
             preview = date_workflow.preview_from_facts(facts, dates)
             date_workflow.apply_in_current_unit_of_work(
                 case_no, dates, expected_order_version=facts.order_version,
@@ -604,9 +616,12 @@ def save_office_schedule(
             preview.fingerprint, IdempotencyKey(f"office-schedule:{digest}"), who, reason, cid,
         ))
         observed = workflow.query(case_no).assignment_plan
-        if {a.staff_id: a.official_service_dates for a in observed.effective_assignments} != {
-            segment.staff_id: segment.service_dates for segment in segments
-        } or len(observed.effective_assignments) != len(segments):
+        intended = {day: segment.staff_id for segment in segments for day in segment.service_dates}
+        if adjusted:
+            intended = {day.service_date: day.staff_id or intended.get(day.service_date) for day in adjusted}
+        actual = {day: assignment.staff_id for assignment in observed.effective_assignments
+                  for day in assignment.official_service_dates}
+        if actual != intended or len(observed.effective_assignments) != len(segments):
             raise ValueError("office_schedule_result_conflict")
         unit.commit()
         return HistoricalRestartArrangementReceipt(

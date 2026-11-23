@@ -10,6 +10,7 @@ import type {
 import { ordersMutationClient, saveHistoricalSchedule } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
+import { assertServiceDateAdjustmentObserved, OrderServiceDateAdjustment, type ServiceDateAdjustmentObservation } from './OrderServiceDateAdjustment';
 import {
   schedulePrecisionClient,
   type SchedulePrecisionResult,
@@ -29,7 +30,7 @@ import { orderActualStartClient, type ActualStartPreview } from '../api/orders/o
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
 import { historicalScheduleSegments, HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
-import { OrderReadOnlyServiceDateCalendar, OrderServiceDateCalendar } from './OrderServiceDateCalendar';
+import { coordinatedServiceTime, OrderReadOnlyServiceDateCalendar, OrderServiceDateCalendar } from './OrderServiceDateCalendar';
 import { OrderCaregiverScheduleCalendars } from './OrderCaregiverScheduleCalendars';
 import { OrderOfficialDateCorrectionPanel } from './OrderOfficialDateCorrectionPanel';
 
@@ -47,6 +48,7 @@ interface OrderServiceDatesPanelProps {
   onArrangementPendingChange?: (pending: boolean) => void;
   onBoundStaffChange?: (staff: ServiceDateConfirmationQueryView['bound_staff']) => void;
   completedCorrection?: boolean;
+  adjustmentOnly?: boolean;
   coordinatedStart?: boolean;
   officeScheduleStaff?: ServiceDateConfirmationQueryView['bound_staff'];
 }
@@ -106,7 +108,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = (props) =
   ? <OrderOfficialDateCorrectionPanel caseNo={props.caseNo} revision={props.projectionRevision} view={props.view} onOpenArrangement={props.onOpenArrangement} onOpenDates={props.onOpenDates} onObserved={props.onObserved} onBusyChange={props.onBusyChange} />
   : <OrderPreCompletionServiceDatesPanel {...props} />;
 
-const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onArrangementPendingChange, onBoundStaffChange, coordinatedStart = false, officeScheduleStaff = [] }) => {
+const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onArrangementPendingChange, onBoundStaffChange, coordinatedStart = false, officeScheduleStaff = [], adjustmentOnly = false }) => {
   const staffIdentity = useStaffIdentityLabels();
   const staffDirectory = useStaffIdentityDirectory();
   const [officeStaff, setOfficeStaff] = useState<typeof officeScheduleStaff | null>(null);
@@ -125,11 +127,14 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   if (arrangementPending) historicalArrangementCase.current = caseNo;
   const [allocation, setAllocation] = useState<Record<string, number>>({});
   const [savedSchedule, setSavedSchedule] = useState<AssignmentPlan | null>(null);
+  const [adjustmentCase, setAdjustmentCase] = useState<string | null>(null);
+  const [adjustmentBusy, setAdjustmentBusy] = useState(false);
   const scheduleRequests = useRef(new Map<string, {
     key: string;
     office: boolean;
     payload: HistoricalScheduleSavePayload;
     receipt?: HistoricalArrangementReceiptView;
+    adjustedDates?: NonNullable<ServiceDateConfirmationQueryView['date_adjustment']>['days'];
   }>());
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
   const initialCalculation = useRef('');
@@ -182,10 +187,23 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const officeSchedule = scheduleRecovery?.office ?? (!arrangementPending && officeScheduleStaff.length > 0 && effectiveServiceDates === null);
   const schedulePending = arrangementPending || officeSchedule;
   const displayedDates = effectiveServiceDates ?? selectedDates;
+  const adjustment = queryView?.case_no === caseNo ? queryView.date_adjustment : null;
+  const adjustmentEditing = adjustmentCase === caseNo;
+  const hasAdjustedDays = adjustment?.days.some(day => day.hours_override !== null) ?? false;
+  const initialAdjustmentDates = adjustment && queryView?.current_version === null && !adjustment.days.length
+    && selectedDates.length === queryView.contracted_service_days
+    && selectedDates.every(day => queryView.selectable_dates.includes(day)) ? selectedDates : undefined;
+  const adjustmentDraft = adjustment && initialAdjustmentDates ? {
+    ...adjustment,
+    days: initialAdjustmentDates.map(service_date => ({
+      service_date, staff_id: adjustment.staff.length === 1 ? adjustment.staff[0].staff_id : allocation[service_date] ?? null,
+      hours_override: null, service_hours: adjustment.contracted_daily_hours,
+    })),
+  } : adjustment;
   const routineCalculationNotice = basisNotice === '已依此次輸入開始日試算服務日期，請核對後再確認。'
     || basisNotice === '已依正式實際開始日更新服務日期，請核對後再確認。';
 
-  useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [saving, onBusyChange]);
+  useEffect(() => { onBusyChange?.(saving || adjustmentBusy); return () => onBusyChange?.(false); }, [saving, adjustmentBusy, onBusyChange]);
   useEffect(() => { onArrangementPendingChange?.(arrangementPending); }, [arrangementPending, onArrangementPendingChange]);
   useEffect(() => { onBoundStaffChange?.(queryView?.bound_staff ?? []); }, [queryView, onBoundStaffChange]);
   useEffect(() => { setAllocation({}); }, [caseNo, queryView?.current_version, queryView?.order_version, queryView?.scheduling_version]);
@@ -243,7 +261,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     setRecoveryRevision((revision) => revision + 1);
   };
 
-  const loadServiceDates = async (mode: DateLoadMode, inputDate?: string, weekdayOverride = restWeekdays, replaceManualDates = false) => {
+  const loadServiceDates = async (mode: DateLoadMode, inputDate?: string, weekdayOverride = restWeekdays, replaceManualDates = false,
+    adjustmentObservation?: ServiceDateAdjustmentObservation) => {
     const pending = recoveryFromServiceDatesDraft(caseNo);
     if (actionInFlight.current.has(caseNo) || startUnresolved
       || (pending !== null && !(mode === 'resume' && pending.kind === 'superseded'))
@@ -279,6 +298,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         ordersQueryClient.getOrderCalendarDetail(caseNo, { signal: controller.signal }),
       ]);
       if (!current()) return;
+      if (adjustmentObservation) assertServiceDateAdjustmentObserved(caseNo, serviceDates, adjustmentObservation);
       if (calendarDetail.case_no !== caseNo) throw new Error('服務方式回讀案件編號不一致。');
       setOriginalServiceType(calendarDetail.original_service_type ?? calendarDetail.service_mode);
       if (serviceDates.case_no !== caseNo) throw new Error('服務日期回讀案件編號不一致。');
@@ -399,7 +419,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         setSuccess(`已載入目前正式日期版本 #${serviceDates.current_version}，請核對後再確認；未重送原操作。`);
         onObserved?.();
       }
+      return true;
     } catch (caught) {
+      if (adjustmentObservation) throw caught;
       if (!current()) return;
       setError(errorMessage(caught));
       setSuccess(null);
@@ -413,12 +435,12 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
   const previousProjection = useRef(projectionRevision);
   useEffect(() => {
-    if (previousProjection.current === projectionRevision || working !== null || isRecoveryActive || startUnresolved || needsBasisUpdate) return;
+    if (previousProjection.current === projectionRevision || working !== null || adjustmentEditing || isRecoveryActive || startUnresolved || needsBasisUpdate) return;
     previousProjection.current = projectionRevision;
     // External mutations refresh formal facts; a read never recalculates a saved arrangement.
     void loadServiceDates('read');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectionRevision, working, isRecoveryActive, startUnresolved, needsBasisUpdate]);
+  }, [projectionRevision, working, adjustmentEditing, isRecoveryActive, startUnresolved, needsBasisUpdate]);
 
   const changeStartDate = (value: string) => {
     readController.current?.abort();
@@ -642,20 +664,26 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const calendarStaffId = calendarStaff?.length === 1 ? calendarStaff[0].staff_id : undefined;
   const officeEditing = officeEditingOverride ?? (new Set(officeScheduleStaff.map(person => person.staff_id)).size > 1);
   const multiCaregiverEditing = officeSchedule && officeEditing;
+  const scheduleBasis = adjustment?.first_schedule_days.length ? adjustment.first_schedule_days : undefined;
+  const scheduleDates = scheduleBasis?.map(day => day.service_date) ?? selectedDates;
+  const scheduleAllocation = scheduleBasis ? {
+    ...allocation,
+    ...Object.fromEntries(scheduleBasis.flatMap(day => day.staff_id ? [[day.service_date, day.staff_id]] : [])),
+  } : allocation;
   const officeSegments = officeSchedule && selectedOfficeStaff.length > 1
     ? selectedOfficeStaff.map(person => ({
       staff_id: person.staff_id,
-      service_dates: selectedDates.filter(date => allocation[date] === person.staff_id).sort(),
+      service_dates: scheduleDates.filter(date => scheduleAllocation[date] === person.staff_id).sort(),
     })).sort((left, right) => (left.service_dates[0] ?? '').localeCompare(right.service_dates[0] ?? ''))
     : null;
   const scheduleSegments = schedulePending && queryView
     ? officeSegments
       ? officeSegments.every(segment => segment.service_dates.length > 0)
-        && officeSegments.reduce((count, segment) => count + segment.service_dates.length, 0) === selectedDates.length
+        && officeSegments.reduce((count, segment) => count + segment.service_dates.length, 0) === scheduleDates.length
         ? officeSegments : null
-      : historicalScheduleSegments(officeSchedule ? selectedOfficeStaff : queryView.bound_staff, selectedDates, allocation)
+      : historicalScheduleSegments(officeSchedule ? selectedOfficeStaff : queryView.bound_staff, scheduleDates, scheduleAllocation)
     : null;
-  const schedulePayload = queryView && scheduleSegments && selectedDates.length === queryView.contracted_service_days ? {
+  const schedulePayload = queryView && scheduleSegments && scheduleDates.length === queryView.contracted_service_days ? {
     actual_start_date: startDate,
     segments: scheduleSegments,
     expected_order_version: queryView.order_version,
@@ -683,6 +711,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         key: crypto.randomUUID(),
         office: officeSchedule,
         payload: schedulePayload,
+        adjustedDates: scheduleBasis ? adjustment?.days : undefined,
       };
       scheduleRequests.current.set(caseNo, request);
     }
@@ -701,17 +730,24 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         ordersQueryClient.getAssignmentPlan(caseNo),
       ]);
       const expected = request.payload.segments;
+      const expectedDates = request.adjustedDates?.map(day => day.service_date) ?? expected.flatMap(segment => segment.service_dates);
+      const assignmentDatesMatch = request.adjustedDates
+        ? sameServiceDates(plan.assignments.flatMap(segment => segment.official_service_dates), expectedDates)
+          && request.adjustedDates.every(day => observed.date_adjustment?.days.some(saved =>
+            saved.service_date === day.service_date && saved.hours_override === day.hours_override
+            && (day.staff_id === null || saved.staff_id === day.staff_id)))
+        : expected.every(segment => plan.assignments.some(assignment =>
+          assignment.staff_id === segment.staff_id && assignment.assignment_id !== null
+          && receipt.assignment_ids.includes(assignment.assignment_id)
+          && sameServiceDates(assignment.official_service_dates, segment.service_dates)));
       if (receipt.case_no !== caseNo || observed.case_no !== caseNo || plan.case_no !== caseNo
         || observed.historical_schedule_pending || observed.arrangement_pending
         || observed.scheduling_version !== receipt.scheduling_version
         || plan.scheduling_version !== receipt.scheduling_version
         || plan.scheduling_generation !== receipt.generation_number
-        || !sameServiceDates(observed.current_dates, expected.flatMap(segment => segment.service_dates))
+        || !sameServiceDates(observed.current_dates, expectedDates)
         || plan.assignments.length !== expected.length
-        || !expected.every(segment => plan.assignments.some(assignment =>
-          assignment.staff_id === segment.staff_id && assignment.assignment_id !== null
-          && receipt.assignment_ids.includes(assignment.assignment_id)
-          && sameServiceDates(assignment.official_service_dates, segment.service_dates)))) {
+        || !assignmentDatesMatch) {
         throw new Error('未能核對正式班表，請重新讀取結果。');
       }
       scheduleRequests.current.delete(caseNo);
@@ -756,19 +792,19 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
   const requiredDateCount = queryView?.contracted_service_days ?? 0;
   const canSave = queryView !== null
-    && selectedDates.every((date) => queryView.selectable_dates.includes(date))
+    && scheduleDates.every((date) => queryView.selectable_dates.includes(date))
     && working === null
     && !isRecoveryActive
     && !needsBasisUpdate && !inputInvalid && !manualNeedsReview && !startUnresolved && !actualStart?.service_data_locked;
   const canSaveSchedule = canSave && !!startDate && scheduleSegments !== null
-    && selectedDates.length === requiredDateCount;
+    && scheduleDates.length === requiredDateCount;
   const scheduleReasonRequired = officeSchedule && (officeStaff !== null || officeReasonRequired);
   const needsScheduleReason = scheduleReasonRequired && !reason.trim();
   const missingOfficeDates = multiCaregiverEditing && selectedOfficeStaff.length > 1
-    && selectedDates.some(date => !selectedOfficeStaff.some(person => person.staff_id === allocation[date]));
+    && scheduleDates.some(date => !selectedOfficeStaff.some(person => person.staff_id === scheduleAllocation[date]));
   const emptyOfficeBlock = multiCaregiverEditing && selectedOfficeStaff.length > 1
-    && selectedOfficeStaff.some(person => !selectedDates.some(date => allocation[date] === person.staff_id));
-  const officeScheduleIssue = selectedDates.length !== requiredDateCount
+    && selectedOfficeStaff.some(person => !scheduleDates.some(date => scheduleAllocation[date] === person.staff_id));
+  const officeScheduleIssue = scheduleDates.length !== requiredDateCount
     ? `請先回到服務日期月曆選滿 ${requiredDateCount} 個服務日，再進行月嫂分配。`
     : missingOfficeDates ? '請分配所有服務日。'
     : emptyOfficeBlock ? '請為每位月嫂分配服務日，或移除未排班的月嫂。'
@@ -785,9 +821,48 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   }, [caseNo, queryView, selectedDates.length, serviceMode, actualStart, working, isRecoveryActive, startUnresolved, needsBasisUpdate, startDate, officeSchedule]);
   useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates, '原因': reason, '月嫂分配': allocation, '首排月嫂': officeStaff }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive || !!scheduleRecovery });
 
+  const adjustmentButton = Boolean(adjustmentDraft?.staff.length) && <button type="button"
+    title={!adjustmentDraft?.days.length ? '請先選齊本案原訂服務日期' : undefined}
+    disabled={working !== null || adjustmentEditing || isRecoveryActive || startUnresolved}
+    onClick={() => {
+      if (!adjustmentDraft?.days.length) {
+        setError('請先選齊本案原訂服務日期，再合併或分裂日期。');
+        return;
+      }
+      setSuccess(null);
+      setAdjustmentCase(caseNo);
+    }}>合併或分裂日期</button>;
+  const adjustmentEditor = adjustmentEditing && adjustmentDraft && <OrderServiceDateAdjustment key={caseNo} caseNo={caseNo} query={adjustmentDraft}
+    initialDates={initialAdjustmentDates} onBusyChange={setAdjustmentBusy}
+    onCancel={() => setAdjustmentCase(null)}
+    onSaved={async observation => {
+      if (!await loadServiceDates('read', undefined, undefined, false, observation)) {
+        throw new Error('本次服務日期調整尚未讀回。');
+      }
+      setAdjustmentCase(null);
+      setSuccess('服務日期調整已儲存');
+      onObserved?.();
+    }} />;
+  const datesSummary = <dl className="service-date-summary-strip" aria-label="此次選定服務日期摘要" aria-live="polite">
+    <div><dt>服務開始</dt><dd>{displayedDates[0] ?? '尚未選取'}</dd></div>
+    <div><dt>最後服務日</dt><dd>{displayedDates.at(-1) ?? '尚未選取'}</dd></div>
+    <div><dt>原訂服務天數</dt><dd>{hasAdjustedDays ? requiredDateCount : displayedDates.length} / {requiredDateCount} 天</dd></div>
+    {adjustment && adjustment.days.length > 0 && <div><dt>實際服務量</dt><dd>{adjustment.days.length} 日・{adjustment.total_hours} 小時</dd></div>}
+    {!hasAdjustedDays && displayedDates.length !== requiredDateCount && <div><dt>待調整</dt><dd>{displayedDates.length < requiredDateCount ? `尚差 ${requiredDateCount - displayedDates.length}` : `超出 ${displayedDates.length - requiredDateCount}`} 天</dd></div>}
+  </dl>;
+
+  if (adjustmentOnly) return <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}>
+    <div className="service-date-heading">{adjustmentButton}</div>
+    {adjustmentEditor}
+    {queryView && datesSummary}
+    {!adjustmentEditing && adjustment?.days.filter(day => day.hours_override !== null).map(day =>
+      <p key={day.service_date}>{day.service_date}・{adjustment.staff.find(person => person.staff_id === day.staff_id)?.staff_name}・{day.service_hours} 小時・{coordinatedServiceTime}</p>)}
+    {error && <p role="alert">{error}</p>}
+    {success && <p role="status">{success}</p>}
+  </section>;
 
   if (coordinatedStart && queryView && queryView.bound_staff.length === 0
-    && !schedulePending && historicalArrangementCase.current !== caseNo) return (
+    && !schedulePending && !adjustment?.staff.length && historicalArrangementCase.current !== caseNo) return (
     <section className="order-service-dates-panel" aria-label="服務日期協調結果">
       <p>客戶與月嫂在原服務群組協調，由月嫂提交約定開始日；通過檢查即自動更新日期、排班及第一期款期限。</p>
       {effectiveServiceDates ? <OrderReadOnlyServiceDateCalendar dates={effectiveServiceDates} />
@@ -810,7 +885,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           onClick={officeEditing ? cancelOfficeEditing : () => setOfficeEditingOverride(true)}>
           {officeEditing ? '取消多月嫂編輯' : '多月嫂排班'}
         </button>}
+        {adjustmentButton}
       </div>
+      {adjustmentEditor}
       {effectiveServiceDates === null && <div className="service-date-settings">
         <div className="service-date-start-field">
           <label>實際開始日
@@ -914,14 +991,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
               <span>。此歷史綁定已保留，不需重新挑選候選或再次推薦。</span>
             </div>
           )}
-          <dl className="service-date-summary-strip" aria-label="此次選定服務日期摘要" aria-live="polite">
-            <div><dt>服務開始</dt><dd>{displayedDates[0] ?? '尚未選取'}</dd></div>
-            <div><dt>最後服務日</dt><dd>{displayedDates.at(-1) ?? '尚未選取'}</dd></div>
-            <div><dt>服務天數</dt><dd>{displayedDates.length} / {requiredDateCount} 天</dd></div>
-            {displayedDates.length !== requiredDateCount && <div><dt>待調整</dt><dd>{displayedDates.length < requiredDateCount ? `尚差 ${requiredDateCount - displayedDates.length}` : `超出 ${displayedDates.length - requiredDateCount}`} 天</dd></div>}
-          </dl>
+          {datesSummary}
 
-          {!multiCaregiverEditing && <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
+          {!multiCaregiverEditing && !adjustmentEditing && <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
           <OrderServiceDateCalendar
             month={calendarMonth || startDate.slice(0, 7)} onMonthChange={setCalendarMonth} selectedDates={displayedDates}
             staffSchedule={calendarStaffId ? { staffId: calendarStaffId, caseNo, actualStartDate: actualStart?.current_actual_start_date } : undefined}
@@ -938,7 +1010,10 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             dayDetails={date => {
               const day = precision?.day_by_day.find(value => value.date === date);
               const segmentIndex = assignmentPlan?.assignments.findIndex(segment => segment.official_service_dates.includes(date)) ?? -1;
-              return { holidayName: day?.holiday_name, rest: day?.is_rest_day, laterSegment: segmentIndex % 2 === 1 };
+              const adjusted = adjustment?.days.find(value => value.service_date === date && value.hours_override !== null);
+              const person = adjustment?.staff.find(value => value.staff_id === adjusted?.staff_id);
+              return { holidayName: day?.holiday_name, rest: day?.is_rest_day, laterSegment: segmentIndex % 2 === 1,
+                annotation: adjusted ? `${person?.staff_name ?? ''}・${adjusted.service_hours} 小時・${coordinatedServiceTime}` : undefined };
             }}
             showHolidaySelectionHint={effectiveServiceDates === null}
           />
@@ -950,9 +1025,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
               caseNo={caseNo}
               actualStartDate={actualStart?.current_actual_start_date}
               blocks={selectedOfficeStaff.map(person => ({ key: person.staff_id, staffId: person.staff_id, name: person.staff_name }))}
-              dates={selectedDates}
+              dates={scheduleDates}
               allocation={selectedOfficeStaff.length === 1
-                ? Object.fromEntries(selectedDates.map(date => [date, selectedOfficeStaff[0].staff_id])) : allocation}
+                ? Object.fromEntries(scheduleDates.map(date => [date, selectedOfficeStaff[0].staff_id])) : scheduleAllocation}
               onSelect={(date, id) => setAllocation(current => {
                 if (selectedOfficeStaff.length === 1) return current;
                 const next = { ...current };
@@ -975,7 +1050,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
                 } : undefined,
               }} />
           </fieldset> : schedulePending && <HistoricalRestartArrangementPanel key={caseNo}
-            staff={officeSchedule ? selectedOfficeStaff : queryView.bound_staff} dates={selectedDates} allocation={allocation}
+            staff={officeSchedule ? selectedOfficeStaff : queryView.bound_staff} dates={scheduleDates} allocation={scheduleAllocation}
             disabled={working !== null || !!scheduleRecovery}
             onSelect={(date, staffId) => setAllocation(current => {
               const next = { ...current };

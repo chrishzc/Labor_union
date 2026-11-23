@@ -505,6 +505,7 @@ def _official_schedules(cursor, case_no):
             int(row["staff_id"]),
             row["work_date"],
             bool(row["is_double_pay"]),
+            row.get("service_hours_override"),
         )
         for row in cursor.fetchall()
     )
@@ -977,7 +978,7 @@ def _canonical_json(value):
 
 
 _OFFICIAL_SCHEDULE_SQL = (
-    "SELECT s.id,s.assignment_id,s.staff_id,s.work_date,s.is_double_pay "
+    "SELECT s.id,s.assignment_id,s.staff_id,s.work_date,s.is_double_pay,s.service_hours_override "
     "FROM scheduling_aggregates a "
     "JOIN staff_schedule s ON s.generation_id=a.effective_generation_id "
     "WHERE a.case_no=%s AND s.effective_marker=1 AND s.is_work_day=1 "

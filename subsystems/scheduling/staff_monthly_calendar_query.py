@@ -50,6 +50,13 @@ def _priority_status(status: str) -> int:
 
 
 def _append_shift(grouped_rows, item, row, service_date, month_start, month_end):
+    if row.get("service_hours_override") is not None:
+        if month_start <= service_date <= month_end:
+            grouped_rows.setdefault(service_date.day, []).append({
+                **item, "service_date": service_date.isoformat(),
+                "service_hours_override": int(row["service_hours_override"]),
+            })
+        return
     if item["status"] in {"working", "waiting_deposit_lock", "historical_assignment"}:
         try:
             raw_start, raw_end = row.get("service_start_time"), row.get("service_end_time")
@@ -120,6 +127,7 @@ def get_staff_monthly_calendar_schedule(
                     ss.is_work_day,
                     ss.is_double_pay,
                     ss.notes,
+                    ss.service_hours_override,
                     ss.id AS schedule_id,
                     csa.case_no,
                     csa.staff_id,
@@ -135,6 +143,7 @@ def get_staff_monthly_calendar_schedule(
                 JOIN staff s ON csa.staff_id = s.id
                 WHERE csa.staff_id = %s
                   AND ss.assignment_id IS NOT NULL
+                  AND ss.effective_marker = 1
                   AND (csa.status IS NULL OR csa.status <> 'cancelled')
                   AND ss.work_date BETWEEN %s AND %s
                 ORDER BY ss.work_date, ss.id
@@ -206,6 +215,14 @@ def get_staff_monthly_calendar_schedule(
                 JOIN staff s ON s.id=csa.staff_id
                 WHERE csa.staff_id=%s AND csa.status='completed'
                   AND csa.assigned_start_date<=%s AND csa.assigned_end_date>=%s
+                  AND NOT EXISTS (
+                    SELECT 1 FROM staff_schedule daily
+                    WHERE daily.assignment_id=csa.id AND daily.is_work_day=1
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM staff_schedule daily
+                    WHERE daily.generation_id=csa.generation_id AND daily.is_work_day=1
+                  )
                   AND NOT EXISTS (
                     SELECT 1
                     FROM order_lifecycle_state_events restart

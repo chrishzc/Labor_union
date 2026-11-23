@@ -16,6 +16,11 @@ import {
   ServiceDateConfirmationReceiptViewSchema,
   ServiceDatePreviewPayloadSchema,
   ServiceDateApplyPayloadSchema,
+  ServiceDateAdjustmentPayloadSchema,
+  ServiceDateAdjustmentPreviewSchema,
+  ServiceDateAdjustmentReceiptSchema,
+  type ServiceDateAdjustmentPayload,
+  type ServiceDateAdjustmentPreview,
   HistoricalArrangementPreviewPayloadSchema,
   HistoricalArrangementApplyPayloadSchema,
   HistoricalArrangementPreviewViewSchema,
@@ -252,6 +257,33 @@ export async function previewHistoricalArrangement(
     return decodeOrderMutationEnvelope(HistoricalArrangementPreviewViewSchema, raw);
   } catch (error) {
     throw decodeMutationError(error, { caseNo, endpoint });
+  }
+}
+
+export async function previewServiceDateAdjustment(caseNo: string, payload: ServiceDateAdjustmentPayload) {
+  const endpoint = `/api/v1/orders/${encodeURIComponent(caseNo)}/service-dates/adjustment/preview`;
+  try {
+    return decodeOrderMutationEnvelope(ServiceDateAdjustmentPreviewSchema, await transport.post(
+      endpoint, ServiceDateAdjustmentPayloadSchema.parse(payload), resolveTransportOptions(),
+    ));
+  } catch (err) {
+    throw decodeMutationError(err, { caseNo, endpoint });
+  }
+}
+
+export async function applyServiceDateAdjustment(caseNo: string, payload: ServiceDateAdjustmentPayload,
+  preview: ServiceDateAdjustmentPreview, key: string) {
+  const endpoint = `/api/v1/orders/${encodeURIComponent(caseNo)}/service-dates/adjustment/apply`;
+  try {
+    return decodeOrderMutationEnvelope(ServiceDateAdjustmentReceiptSchema, await transport.post(endpoint, {
+      ...ServiceDateAdjustmentPayloadSchema.parse(payload),
+      expected_order_version: preview.order_version,
+      expected_scheduling_version: preview.scheduling_version,
+      expected_confirmed_version: preview.confirmed_version,
+      preview_fingerprint: preview.preview_fingerprint,
+    }, resolveTransportOptions(undefined, { 'Idempotency-Key': key, 'X-Correlation-ID': key })));
+  } catch (err) {
+    throw decodeMutationError(err, { caseNo, endpoint });
   }
 }
 

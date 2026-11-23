@@ -78,6 +78,7 @@ class WeeklyServiceFact:
     assignment_status: str
     weekly_rest_days: list[int] | None = None
     staff_union_no: str | None = None
+    weekly_hours: float | int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,7 +614,7 @@ class WeeklyOperationsReportQuery:
     ) -> WeeklyServiceRow:
         hours_per_day = _positive_or_none(fact.service_hours_per_day)
         quality_codes: list[str] = []
-        if hours_per_day is None:
+        if hours_per_day is None and fact.weekly_hours is None:
             quality_codes.append("service_hours_per_day_missing")
         if fact.service_start_date is None or fact.service_end_date is None:
             quality_codes.append("service_period_missing")
@@ -635,9 +636,8 @@ class WeeklyOperationsReportQuery:
             service_hours_per_day=hours_per_day,
             weekly_work_days=fact.weekly_work_days,
             weekly_hours=(
-                None
-                if hours_per_day is None
-                else fact.weekly_work_days * hours_per_day
+                fact.weekly_hours if fact.weekly_hours is not None
+                else fact.weekly_work_days * hours_per_day if hours_per_day is not None else None
             ),
             order_status=fact.order_status,
             completed=completed,

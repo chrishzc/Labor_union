@@ -70,6 +70,11 @@ class MySqlServiceDateConfirmationRepository:
             restart_generation, restart_assignments = self._restart_scheduling_source(
                 cursor, case_no, int(order["service_days"]), lock=lock
             )
+            first_schedule_basis_dates = ()
+            if current and not effective_dates and restart_generation is not None:
+                from infrastructure.mysql.service_date_adjustment_repository import load_first_schedule_dates
+                baseline, _ = load_first_schedule_dates(cursor, case_no, lock=lock)
+                first_schedule_basis_dates = tuple(day.service_date for day in baseline)
         return ServiceDateConfirmationFacts(
             str(order["case_no"]),
             int(order["lifecycle_version"] or 0),
@@ -84,6 +89,7 @@ class MySqlServiceDateConfirmationRepository:
             float(order["service_hours_per_day"]),
             int(current["order_version"]) if current else None,
             effective_service_dates=effective_dates,
+            first_schedule_basis_dates=first_schedule_basis_dates,
         )
 
     def load_service_dates(
@@ -312,14 +318,15 @@ class MySqlServiceDateConfirmationRepository:
     @staticmethod
     def _effective_service_dates(cursor, case_no, order, *, lock=False):
         cursor.execute(
-            "SELECT s.work_date FROM staff_schedule s JOIN scheduling_aggregates g "
+            "SELECT s.work_date,s.service_hours_override FROM staff_schedule s JOIN scheduling_aggregates g "
             "ON g.effective_generation_id=s.generation_id WHERE g.case_no=%s "
             "AND s.effective_marker=1 AND s.is_work_day=1 ORDER BY s.work_date"
             + (" FOR UPDATE" if lock else ""),
             (case_no,),
         )
-        dates = tuple(dict.fromkeys(row["work_date"] for row in cursor.fetchall()))
-        if len(dates) == int(order["service_days"]):
+        rows = cursor.fetchall()
+        dates = tuple(dict.fromkeys(row["work_date"] for row in rows))
+        if len(dates) == int(order["service_days"]) or any(row.get("service_hours_override") is not None for row in rows):
             return dates
         return ()
 

@@ -37,9 +37,10 @@ def load_occupancy_snapshot(cursor, staff_ids, case_no, *, lock, actual_start_da
     facts = tuple(
         StaffOccupancyFact(
             int(row["staff_id"]), row["occupancy_date"], str(row["case_no"]),
-            read_service_time_terms(row),
+            None if row.get("service_hours_override") is not None else read_service_time_terms(row),
             actual_start_date=row.get("actual_start_date"),
             reservation_only=bool(row.get("owner_case_no")) and not (current_actual and row.get("actual_start_date")),
+            coordinated=row.get("service_hours_override") is not None,
         )
         for row in schedules
     ) + tuple(
@@ -118,7 +119,7 @@ def historical_reservation_occupancy(row, current_actual=None):
 def _effective_occupancy_rows(cursor, staff_ids, lock):
     placeholders = ",".join("%s" for _ in staff_ids)
     cursor.execute(
-        "SELECT s.id AS source_id,s.staff_id,s.work_date AS occupancy_date,"
+        "SELECT s.id AS source_id,s.staff_id,s.work_date AS occupancy_date,s.service_hours_override,"
         "COALESCE(a.case_no,'legacy_schedule') AS case_no,"
         "o.case_no AS owner_case_no,o.actual_start_date,o.service_start_time,o.service_end_time,o.service_end_day_offset "
         "FROM staff_schedule s "

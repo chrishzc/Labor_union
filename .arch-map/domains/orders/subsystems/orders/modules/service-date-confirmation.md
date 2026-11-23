@@ -24,6 +24,7 @@
   - `ui_react/src/adapters/orders/order_mutation_adapter.ts`
   - `ui_react/src/adapters/orders/service_date_start_flow.ts` — 將未保存開始日的建議範圍投影到 UI；人工確認後串接既有 Actual Start 與服務日期 writer，保留第一步結果及第二步恢復狀態。
   - `ui_react/src/components/OrderServiceDatesPanel.tsx`
+  - `ui_react/src/components/OrderServiceDateAdjustment.tsx` — 純日期合併、分裂、精確復原與回執後讀回；不編輯帳務。
     - 顯示 Case Import 原始服務方式；人工休假星期僅作當次 server 精算參數，即時更新建議。歷史重啟在同一表單選日期、分配月嫂並儲存班表，成功後回讀正式排班。
   - `ui_react/src/components/OrderServiceDateCalendar.tsx` — 案件內既有月曆，事前日期確認與完工後日期更正共用呈現；不擁有日期寫入規則。
   - `ui_react/src/components/OrderCaregiverScheduleCalendars.tsx` — 首排與正式排班調整共用的逐人月曆區塊，分配結果委派各自的既有寫入流程。
@@ -44,6 +45,14 @@
 - inbound: `orders/historical-precision-restart` — 空 effective generation 與重啟事件中的媒合方案、分段及歷史來源。舊版重啟事件沿用原歷史配對證據。
 
 ## Contracts
+### 合併、分裂與精確復原 ^service-date-adjustment
+
+- `source_observed`：依 [Scheduling §3.4.2](../../../../../requirements/02_Assignments_Scheduling_Domain.md#service-date-merge-split) 與 [Admin UI §2.4](../../../../../requirements/31_MultiCaregiver_Admin_UI正式規格.md#service-date-merge-split-ui) 實作；執行結果另見本次功能驗證紀錄。
+- 規則型別與純轉換放在 `domains/scheduling/service_date_adjustment.py`；`subsystems/scheduling/service_date_adjustment.py` 協調 Query／Preview／Apply，`infrastructure/mysql/service_date_adjustment_repository.py` 實作保存埠。既有服務日期 route／dependency／schema 與 `OrderServiceDatesPanel.tsx` 接入同一命令，不經會更正金額的服務歸屬流程。
+- 事前日期仍由 Orders immutable confirmed version 保存。逐日記錄 nullable `staff_id` 及 `service_hours_override`，正式首排完整承接；沒有正式 generation 時也可合併、分裂及復原，不先製造正式指派。
+- `service_date_adjustment_receipts` 是本功能的不可變操作紀錄，保存精確 request identity、來源／結果日班及被復原操作，供事前與正式階段共同辨認配對。既有 Scheduling receipt 要求非空 rebuild／generation，不能用來假裝保存沒有世代重建的異動。復原只還原該次結果的來源原值，NULL 亦精確恢復，不回退整案後續變更。
+- 實作沿用下方 test roots；純轉換測試為 `tests/domains/scheduling/subsystems/scheduling/modules/schedule-generation/test_service_date_adjustment.py`，來源選取及復原互動為同一前端 test root 的 `service_date_adjustment_selection.test.tsx`。
+
 - `GET／POST /api/v1/orders/{case_no}/service-dates` — confirmed-date Query／Preview／Apply。
 - `POST /api/v1/orders/{case_no}/service-dates/schedule/apply` — 歷史重啟一次儲存班表。Query 的 `historical_schedule_pending` 投影有效空重啟世代。
 - `POST /api/v1/orders/{case_no}/service-dates/office-schedule/apply` — 一般案件從「多月嫂排班」直接儲存首份正式班表。允許交錯日期，委派 `scheduling/service-start` 共用正式排班 writer。既有 `office-schedule/preview` API 可獨立查閱，不是該畫面的儲存前置。

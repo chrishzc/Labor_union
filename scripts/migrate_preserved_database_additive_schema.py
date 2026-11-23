@@ -390,6 +390,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_15_line_order_group_history_delete_v1.json",
     "labor_union_2026_11_18_line_delivery_retention_v1.json",
     "labor_union_2026_11_20_registry_case_deletion_signing_v1.json",
+    "labor_union_2026_11_23_order_established_unserved_v1.json",
+    "labor_union_2026_11_23_service_date_adjustments_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2727,6 +2729,50 @@ def _registry_guard_snapshot(snapshot, artifact):
     return {**snapshot, "triggers": converted}, None
 
 
+def _established_unserved_schema_state(snapshot, descriptor):
+    """Accept only the published predecessor, successor, or a bounded partial schema."""
+    columns = {(row["table_name"], row["column_name"]): row for row in snapshot["columns"]}
+    constraints = {(row["table_name"], row["constraint_name"]): row for row in snapshot["constraints"]}
+    show_create_checks = {}
+    for create_sql in snapshot.get("show_create_tables", {}).values():
+        show_create_checks.update(_show_create_check_clauses(create_sql))
+    states = set()
+    for table, contracts in descriptor["parent_columns"].items():
+        for name, expected in contracts.items():
+            row = columns.get((table, name))
+            if row is None:
+                return "partial"
+            actual = _normalize_column_type_contract(row["column_type"])
+            successor = _normalize_column_type_contract(expected["column_type"])
+            predecessor = successor.replace(",'成立後未服務'", "")
+            if row["is_nullable"] != expected["is_nullable"] or row["column_default"] != expected["column_default"] or str(row["extra"] or "") != expected["extra"]:
+                return "drift"
+            if actual == successor:
+                states.add("successor")
+            elif actual == predecessor:
+                states.add("predecessor")
+            else:
+                return "drift"
+    for key, expected in descriptor["checks"].items():
+        row = constraints.get(key)
+        if row is None:
+            return "partial"
+        if row["constraint_type"] != "CHECK" or str(row.get("enforced") or "YES").upper() != "YES":
+            return "drift"
+        actual = _normalize_check_contract(
+            show_create_checks.get(key, row.get("check_clause") or "")
+        )
+        successor = _normalize_check_contract(expected)
+        predecessor = _normalize_check_contract(expected.replace(",'成立後未服務'", ""))
+        if actual == successor:
+            states.add("successor")
+        elif actual == predecessor:
+            states.add("predecessor")
+        else:
+            return "drift"
+    return "exact" if states == {"successor"} else "absent" if states == {"predecessor"} else "partial"
+
+
 def _metadata_state_for_artifact(
     snapshot: Mapping[str, Any],
     descriptor: dict[str, Any],
@@ -2734,6 +2780,8 @@ def _metadata_state_for_artifact(
     *,
     defer_missing_triggers: bool,
 ) -> str:
+    if artifact == "1081_order_established_unserved_status.sql":
+        return _established_unserved_schema_state(snapshot, descriptor)
     if artifact == "1073_client_beclass_query_case_uniqueness.sql":
         indexes = {
             row["index_name"]: (int(row["non_unique"]), row["columns"])
@@ -4168,6 +4216,12 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
+        unserved_part = ROOT / "db/schema_parts/1081_order_established_unserved_status.sql"
+        if normalized.rstrip(";") in {
+            re.sub(r"\s+", " ", sql.strip()).casefold().rstrip(";")
+            for sql in split_sql(unserved_part.read_text(encoding="utf-8"))
+        }:
+            return "alter_add_only"
         if normalized.startswith(("alter table controlled_file_staging_objects ", "alter table controlled_file_objects ")):
             for artifact in (
                 "1075_controlled_file_client_passbook_cover.sql",
@@ -4329,6 +4383,12 @@ def _local_classify_statement(statement: str) -> str:
         }
         if normalized in shift_index_alters:
             return "scheduling_shift_index_widen"
+        if normalized.startswith("alter table staff_schedule "):
+            adjustment_part = ROOT / "db/schema_parts/1082_service_date_adjustments.sql"
+            adjustment_alter = split_sql(adjustment_part.read_text(encoding="utf-8"))[1]
+            canonical = re.sub(r"\s+", " ", adjustment_alter.strip()).casefold()
+            if normalized.rstrip(";") == canonical.rstrip(";"):
+                return "scheduling_shift_index_widen"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -6194,6 +6254,24 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         path = ROOT / "db/schema_parts" / part_name
     if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
+    if part_name == "1081_order_established_unserved_status.sql":
+        document = json.loads((ROOT / "db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.descriptors.json").read_text(encoding="utf-8"))
+        descriptor = document["descriptors"][part_name]
+        descriptor["checks"] = {tuple(key.split(".", 1)): value for key, value in descriptor["checks"].items()}
+        descriptor["triggers"] = {}
+        return descriptor
+    if part_name == "1082_service_date_adjustments.sql":
+        source = ROOT / "db/migration_releases/labor_union_2026_11_23_service_date_adjustments_v1.descriptors.json"
+        descriptor = json.loads(source.read_text(encoding="utf-8"))["descriptors"][part_name]
+        for category in ("indexes", "foreign_keys", "checks"):
+            descriptor[category] = {tuple(key.split(".", 1)): value for key, value in descriptor[category].items()}
+        for index in descriptor["indexes"].values():
+            index["columns"] = tuple(index["columns"])
+        for foreign_key in descriptor["foreign_keys"].values():
+            for key in ("columns", "referenced_columns"):
+                foreign_key[key] = tuple(foreign_key[key])
+        descriptor["triggers"] = {}
+        return descriptor
     sql = path.read_text(encoding="utf-8")
     descriptor: dict[str, Any] = {
         "tables": {},
@@ -7364,6 +7442,8 @@ def _release_descriptor_metadata_state(
             canonical,
             defer_missing_triggers=defer_missing_triggers,
         )
+    if part_name == "1081_order_established_unserved_status.sql":
+        return _established_unserved_schema_state(snapshot, canonical)
     if part_name in {
         "1061_matching_manual_reason_optional.sql",
         "1062_order_reopen_reason_optional.sql",
@@ -7659,7 +7739,10 @@ def _order_lifecycle_pending_status_constraint_state(
         for row in snapshot.get("constraints", ())
     }
     row = constraints.get(key)
-    if row is None or row.get("constraint_type") != "CHECK":
+    if (
+        row is None or row.get("constraint_type") != "CHECK"
+        or str(row.get("enforced") or "YES").upper() != "YES"
+    ):
         return "drift"
     show_create_checks: dict[tuple[str, str], str] = {}
     for create_sql in snapshot.get("show_create_tables", {}).values():
@@ -7676,7 +7759,13 @@ def _order_lifecycle_pending_status_constraint_state(
     predecessor = _normalize_check_contract(_normalize_sql_contract(
         "before_status IN ('洽談中','訂單成立','服務中','訂單完成','訂單取消')"
     ))
-    if actual in {successor, historical_successor}:
+    later_successors = {
+        _normalize_check_contract(clause)
+        for clause in _allowed_later_artifact_checks(
+            "1013_order_lifecycle_pending_status_constraint.sql"
+        ).get(key, ())
+    }
+    if actual in {successor, historical_successor, *later_successors}:
         return "exact"
     if actual == predecessor:
         return "absent"
@@ -8147,6 +8236,27 @@ def _artifact_metadata_state(
         owned_presence.append(actual is not None)
         if actual is not None and actual != expected:
             return "drift"
+    if part_name == "1082_service_date_adjustments.sql":
+        # 109 created this parent index. 1082 replaces it so inactive dates can
+        # coexist with their effective successor.
+        old_key = ("staff_schedule", "uq_staff_schedule_generation_owner")
+        new_key = ("staff_schedule", "uq_staff_schedule_effective_generation_day")
+        old_index = indexes.get(old_key)
+        old_columns = ("generation_id", "work_date")
+        if any(
+            key[0] == "staff_schedule"
+            and key != old_key
+            and spec["non_unique"] == 0
+            and set(spec["columns"]) == set(old_columns)
+            for key, spec in indexes.items()
+        ):
+            return "drift"
+        if old_index is not None and (
+            old_index != {"non_unique": 0, "columns": old_columns} or new_key in indexes
+        ):
+            return "drift"
+        if not any(owned_presence):
+            return "absent" if old_index is not None else "drift"
     if not owned_presence or not any(owned_presence):
         return "absent"
     if not all(owned_presence):
@@ -8299,6 +8409,16 @@ def _allowed_successor_column_types(
     part_name: str, table: str, column: str,
 ) -> tuple[str, ...]:
     """Return exact types from declared successors of the owned column."""
+    unserved = "1081_order_established_unserved_status.sql"
+    status_columns = {("orders", "status"), ("order_terms_apply_receipts", "lifecycle_status"), ("order_cancellation_apply_receipts", "lifecycle_status")}
+    if part_name != unserved and (table, column) in status_columns and any(path.name == unserved for path in SCHEMA_PARTS):
+        successor_type = _canonical_artifact_descriptor(unserved)["parent_columns"][table][column]["column_type"]
+        if table != "order_terms_apply_receipts" or part_name not in {
+            "1070_historical_order_terms_receipt_status.sql", "1071_pending_order_terms_receipt_status.sql",
+        }:
+            return (successor_type,)
+    else:
+        successor_type = None
     if table == "order_terms_apply_receipts" and column == "lifecycle_status":
         pending = "1071_pending_order_terms_receipt_status.sql"
         historical_open = "1074_historical_open_order_terms_receipt_status.sql"
@@ -8309,7 +8429,7 @@ def _allowed_successor_column_types(
         return tuple(
             _canonical_artifact_descriptor(artifact)["parent_columns"][table][column]["column_type"]
             for artifact in successors.get(part_name, ())
-        )
+        ) + ((successor_type,) if successor_type else ())
     if part_name != "1003_matching_coordination_successor.sql" or table != "matching_coordination_outbox":
         return ()
     successor_types = {
@@ -8462,6 +8582,9 @@ def _allowed_later_artifact_checks(
     part_name: str,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
+    if part_name in {"104_order_lifecycle_state_history.sql", "1013_order_lifecycle_pending_status_constraint.sql", "215_historical_service_accounting.sql", "1028_historical_service_accounting.sql"} and any(path.name == "1081_order_established_unserved_status.sql" for path in SCHEMA_PARTS):
+        successor = _canonical_artifact_descriptor("1081_order_established_unserved_status.sql")
+        return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name == "124_case_architecture_bootstrap.sql" and any(
         path.name == "1072_case_architecture_bootstrap_reason_optional.sql" for path in SCHEMA_PARTS
     ):

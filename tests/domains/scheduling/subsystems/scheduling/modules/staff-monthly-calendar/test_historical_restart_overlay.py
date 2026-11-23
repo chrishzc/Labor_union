@@ -70,7 +70,8 @@ def test_historical_reservation_survives_restart_until_schedule_commit_or_cancel
     db.row_factory = sqlite3.Row
     try:
         db.executescript("""
-            CREATE TABLE orders (case_no, status, start_date, end_date, client_id);
+            CREATE TABLE orders (case_no, status, start_date, end_date, client_id,
+                actual_start_date, service_start_time, service_end_time, service_end_day_offset);
             CREATE TABLE historical_order_adoption_receipts (id, case_no, outcome);
             CREATE TABLE historical_order_pairing_evidence (receipt_id, staff_id, resolution, caregiver_ordinal);
             CREATE TABLE clients (id, name);
@@ -79,7 +80,8 @@ def test_historical_reservation_survives_restart_until_schedule_commit_or_cancel
             CREATE TABLE scheduling_generations (id, effective_marker);
             CREATE TABLE scheduling_command_receipts (case_no, resulting_generation_id, command_family, idempotency_key);
             CREATE TABLE order_lifecycle_state_events (case_no, idempotency_key, trigger_event, before_status);
-            INSERT INTO orders VALUES ('HIS-1','歷史訂單－未服務','2026-08-03','2026-08-20',1);
+            INSERT INTO orders (case_no, status, start_date, end_date, client_id)
+                VALUES ('HIS-1','歷史訂單－未服務','2026-08-03','2026-08-20',1);
             INSERT INTO historical_order_adoption_receipts VALUES (1,'HIS-1','adopted');
             INSERT INTO historical_order_pairing_evidence VALUES (1,7,'evidence_only',1);
             INSERT INTO clients VALUES (1,'客戶甲');

@@ -41,6 +41,7 @@ from domains.orders.actual_start import (
     build_actual_start_candidate,
     calculate_progressive_segment_service_dates,
     date_bound_manual_overrides,
+    to_scheduling_generation_candidate,
 )
 from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
 from domains.scheduling.assignment_plan import StaffOccupancyFact
@@ -531,6 +532,46 @@ def test_actual_start_can_replace_legacy_dates_with_recalculated_official_dates(
         date(2026, 8, 12),
     )
     assert candidate.actual_end_date == date(2026, 8, 12)
+
+
+def test_actual_start_recalculation_carries_daily_hours_by_segment_date_order() -> None:
+    source_dates = (date(2026, 8, 1), date(2026, 8, 4), date(2026, 8, 6))
+    target_dates = (date(2026, 8, 8), date(2026, 8, 11), date(2026, 8, 12))
+    order = ActualStartOrderFacts("CASE-1", 3, None, False, ServiceTimeTerms(None, None, None))
+    scheduling = ActualStartSchedulingFacts("CASE-1", 5, 1, source_dates[0], (
+        ActualStartAssignmentFacts(
+            11, 22, 1, source_dates[0], source_dates[-1], source_dates,
+            service_hours_overrides=((source_dates[1], 8), (source_dates[2], 4)),
+        ),
+    ))
+
+    candidate = build_actual_start_candidate(order, scheduling, target_dates[0], 4, target_dates)
+    assignment, = to_scheduling_generation_candidate(candidate).assignments
+
+    assert assignment.source_assignment_id == 11
+    assert assignment.service_dates == target_dates
+    assert assignment.service_hours_overrides == ((target_dates[1], 8), (target_dates[2], 4))
+    assert assignment.actual_hours == 16
+
+
+def test_actual_start_retains_source_identity_when_adjustment_left_no_days_for_segment() -> None:
+    root_date = date(2026, 8, 1)
+    source_date, target_date = date(2026, 8, 6), date(2026, 8, 11)
+    order = ActualStartOrderFacts("CASE-1", 3, root_date, False, ServiceTimeTerms(None, None, None))
+    scheduling = ActualStartSchedulingFacts("CASE-1", 5, 1, root_date, (
+        ActualStartAssignmentFacts(11, 22, 1, root_date, root_date, (), date_adjusted=True),
+        ActualStartAssignmentFacts(12, 23, 2, source_date, source_date, (source_date,),
+                                   service_hours_overrides=((source_date, 8),), date_adjusted=True),
+    ))
+
+    candidate = build_actual_start_candidate(order, scheduling, target_date, 4, (target_date,))
+    replacement = to_scheduling_generation_candidate(candidate)
+    empty, serving = replacement.assignments
+
+    assert (empty.source_assignment_id, empty.staff_id, empty.service_dates, empty.actual_hours) == (11, 22, (), 0)
+    assert (serving.source_assignment_id, serving.staff_id, serving.service_dates, serving.actual_hours) == (12, 23, (target_date,), 8)
+    assert serving.service_hours_overrides == ((target_date, 8),)
+    assert [buffer.staff_id for buffer in replacement.buffers] == [23]
 
 
 @pytest.mark.parametrize("conflict_during_apply", [False, True])

@@ -743,6 +743,8 @@ def _scheduling_candidate(facts, proposed_terms, *, preserve_assignment_dates=Fa
                 value + timedelta(days=day_shift)
                 for value in segment.official_service_dates
             ),
+            service_hours_overrides=tuple((day + timedelta(days=day_shift), hours)
+                                          for day, hours in segment.service_hours_overrides),
         )
         for segment in facts.scheduling.segments
     )

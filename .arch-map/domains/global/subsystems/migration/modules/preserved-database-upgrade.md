@@ -5,11 +5,14 @@
 - subsystem: `migration`
 
 ## Responsibility
+- 服務日期調整的 `1082_service_date_adjustments.sql` 由 `db/migration_releases/labor_union_2026_11_23_service_date_adjustments_v1.json` 與同名 descriptors 登錄。新增 nullable 逐日時數、事前指定人員與調整回執；保留舊列及原工時計算，不回填歷史班次。有效班次唯一索引納入 effective marker，停用來源可留存。fresh assembly、compact fresh 與 preserve 共用該 artifact。反向 contract 見 `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_service_date_adjustments_schema.py`。資格 `validation/receipts/PROV-service-date-adjustments-local-additive-qualification-20261123.json` 已綁定 synthetic MySQL fresh／備份／保留資料候選與原欄位逐表驗證，developer 唯讀預覽為 `ready / daily_additive`；不代表現用或正式資料庫已套用。
 對既有 development database 建立零寫入 ordered plan，並在既有正式 release／descriptor
 邊界內協調 preserve-data candidate、additive progression、replacement verification與resume；
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- Schema predecessor `db/schema_parts/1081_order_established_unserved_status.sql` is a shared fresh/preserve artifact. The release manifest `db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.json` and its descriptors register the artifact.
+- `db/schema_parts/1082_service_date_adjustments.sql` — 逐日時數、事前人員及復原回執的共用 fresh／preserve artifact。
 - LINE 六個月寄送明細清理 guard：`db/schema_parts/1079_line_delivery_retention_guards.sql`，`db/migration_releases/labor_union_2026_11_18_line_delivery_retention_v1.json` 及對應 descriptors。fresh／preserve 同 artifact；保留原 registry-delete 分支，追加精確 receipt、合法終態、無租約及 DB 臺灣六個月 cutoff 上限。完整 guard normalization、fresh assembly及 NAS compact 沿原生成入口。
 - `db/schema_parts/1076_staff_availability_optional_reason.sql` 由 `db/migration_releases/labor_union_2026_11_13_staff_availability_optional_reason_v1.json` 與同名 descriptors 登錄，供新庫初始化與保留資料升級共用。不可服務期間原因可留空，建立者仍必填。驗證回條為 `validation/receipts/PROV-STAFF-AVAILABILITY-OPTIONAL-REASON-local-additive-qualification-20261113.json`。
 - The client passbook cover release uses `db/migration_releases/labor_union_2026_11_13_controlled_file_client_passbook_cover_v1.json` and its descriptors. Shared fresh/preserve artifact `db/schema_parts/1075_controlled_file_client_passbook_cover.sql` brings both controlled-file tables into the existing client passbook contract and preserves their rows and version references. Qualification is recorded in `validation/receipts/PROV-CONTROLLED-FILE-CLIENT-PASSBOOK-local-additive-qualification-20261113.json`.

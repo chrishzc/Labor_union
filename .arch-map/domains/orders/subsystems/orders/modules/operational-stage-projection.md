@@ -42,6 +42,8 @@
   - `api/routes/orders_stage_projection.py`
   - `api/routes/orders_core_stage_projection.py`
   - `api/dependencies/orders_stage_projection.py`
+  - `api/schemas/orders_stage_projection.py`
+  - `api/schemas/orders_core_stage_projection.py`
   - `api/schemas/order_government_subsidy_projection.py`
 
 ## Dependencies

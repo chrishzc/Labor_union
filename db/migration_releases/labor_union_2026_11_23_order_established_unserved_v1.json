@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-order-established-unserved-2026-11-23-v1",
+  "release_metadata": {
+    "release_name": "Established order without service",
+    "application_version": "order-established-unserved-v1",
+    "published_at": "2026-11-23",
+    "description": "Append the verified zero-service terminal lifecycle status without rewriting business rows."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-registry-case-deletion-signing-2026-11-20-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1081_order_established_unserved_status.sql",
+      "relative_path": "db/schema_parts/1081_order_established_unserved_status.sql",
+      "sha256": "7fb0226bc3ed0563ce4ee3671969a9e69ad9248b1042f228514162dbebf80d2b",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-compatible-status-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "order-established-unserved-exact",
+      "phase": "post-schema",
+      "policy": "Verify exact appended enum values and lifecycle checks, preserved source rows, and no business-row backfill.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "order-established-unserved-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "order-established-unserved-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_23_order_established_unserved_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.descriptors.json",
+    "sha256": "e62806365b954bad1c507fd985c65a06fdc3a62ff5f7a4e420555911a93a5a22",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

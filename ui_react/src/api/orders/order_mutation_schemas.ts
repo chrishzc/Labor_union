@@ -72,6 +72,52 @@ export const BoundServiceStaffSchema = z
   })
   .strict();
 
+const AdjustableServiceDaySchema = z.object({
+  service_date: IsoDateSchema,
+  staff_id: z.number().int().positive().nullable(),
+  hours_override: z.union([z.literal(4), z.literal(8)]).nullable(),
+  service_hours: z.number(),
+}).strict();
+
+const ServiceDateAdjustmentQuerySchema = z.object({
+  days: z.array(AdjustableServiceDaySchema),
+  staff: z.array(BoundServiceStaffSchema),
+  pairs: z.array(z.object({
+    receipt_id: z.number().int().positive(),
+    removed: z.array(AdjustableServiceDaySchema),
+    inserted: z.array(AdjustableServiceDaySchema),
+  }).strict()),
+  total_hours: z.number(),
+  contracted_daily_hours: z.number(),
+  first_schedule_days: z.array(AdjustableServiceDaySchema),
+}).strict();
+
+export type ServiceDateAdjustmentQuery = z.infer<typeof ServiceDateAdjustmentQuerySchema>;
+export const ServiceDateAdjustmentPreviewSchema = z.object({
+  order_version: z.number().int().nonnegative(),
+  scheduling_version: z.number().int().nonnegative(),
+  confirmed_version: z.number().int().positive().nullable(),
+  preview_fingerprint: FingerprintSchema,
+  removed: z.array(AdjustableServiceDaySchema),
+  inserted: z.array(AdjustableServiceDaySchema),
+}).strict();
+
+export const ServiceDateAdjustmentReceiptSchema = z.object({
+  receipt_id: z.number().int().positive(),
+  scheduling_version: z.number().int().nonnegative(),
+  confirmed_version: z.number().int().positive().nullable(),
+}).strict();
+
+export const ServiceDateAdjustmentPayloadSchema = z.object({
+  source_dates: z.array(IsoDateSchema).min(1).max(2),
+  targets: z.array(z.object({ service_date: IsoDateSchema, staff_id: z.number().int().positive() })).max(2),
+  reverse_receipt_id: z.number().int().positive().nullable(),
+  initial_dates: z.array(IsoDateSchema).optional(),
+}).strict();
+
+export type ServiceDateAdjustmentPayload = z.infer<typeof ServiceDateAdjustmentPayloadSchema>;
+export type ServiceDateAdjustmentPreview = z.infer<typeof ServiceDateAdjustmentPreviewSchema>;
+
 export const ServiceDateConfirmationQueryViewSchema = z
   .object({
     case_no: z.string().min(1),
@@ -86,6 +132,7 @@ export const ServiceDateConfirmationQueryViewSchema = z
     bound_staff: z.array(BoundServiceStaffSchema),
     arrangement_pending: z.boolean(),
     historical_schedule_pending: z.boolean().optional(),
+    date_adjustment: ServiceDateAdjustmentQuerySchema.nullish(),
   })
   .strict();
 

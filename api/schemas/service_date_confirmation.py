@@ -1,6 +1,7 @@
 """Typed views for confirmed planned service dates."""
 
 from datetime import date
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -19,6 +20,43 @@ class BoundServiceStaffView(BaseModel):
     staff_name: str = Field(min_length=1)
 
 
+class AdjustableServiceDayView(BaseModel):
+    service_date: date
+    staff_id: int | None
+    hours_override: Literal[4, 8] | None
+    service_hours: float
+
+
+class ServiceDateAdjustmentPairView(BaseModel):
+    receipt_id: int = Field(gt=0)
+    removed: list[AdjustableServiceDayView]
+    inserted: list[AdjustableServiceDayView]
+
+
+class ServiceDateAdjustmentQueryView(BaseModel):
+    days: list[AdjustableServiceDayView]
+    staff: list[BoundServiceStaffView]
+    pairs: list[ServiceDateAdjustmentPairView]
+    total_hours: float
+    contracted_daily_hours: float
+    first_schedule_days: list[AdjustableServiceDayView]
+
+
+class ServiceDateAdjustmentPreviewView(BaseModel):
+    order_version: int
+    scheduling_version: int
+    confirmed_version: int | None
+    preview_fingerprint: str
+    removed: list[AdjustableServiceDayView]
+    inserted: list[AdjustableServiceDayView]
+
+
+class ServiceDateAdjustmentReceiptView(BaseModel):
+    receipt_id: int = Field(gt=0)
+    scheduling_version: int
+    confirmed_version: int | None
+
+
 class ServiceDateConfirmationQueryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     case_no: str
@@ -35,6 +73,7 @@ class ServiceDateConfirmationQueryView(BaseModel):
     bound_staff: list[BoundServiceStaffView]
     arrangement_pending: bool
     historical_schedule_pending: bool = False
+    date_adjustment: ServiceDateAdjustmentQueryView | None = None
 
 
 class HistoricalArrangementSegmentView(BaseModel):

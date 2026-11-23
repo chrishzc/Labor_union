@@ -172,6 +172,16 @@ describe('official date correction panel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('crypto', { randomUUID: () => 'issue346-key' });
+    vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue({
+      case_no: original.case_no, order_version: original.order_version, scheduling_version: original.scheduling_version,
+      contracted_service_days: 2, suggested_dates: [], selectable_dates: original.assignments[0].service_dates,
+      current_version: null, current_dates: [], effective_service_dates: original.assignments[0].service_dates,
+      bound_staff: [{ staff_id: 7, staff_name: '王月嫂' }], arrangement_pending: false,
+      date_adjustment: {
+        days: original.assignments[0].service_dates.map(service_date => ({ service_date, staff_id: 7, hours_override: null, service_hours: 8 })),
+        staff: [{ staff_id: 7, staff_name: '王月嫂' }], pairs: [], total_hours: 16, contracted_daily_hours: 8, first_schedule_days: [],
+      },
+    });
     mocks.query.mockResolvedValueOnce(original).mockResolvedValueOnce(changed);
     mocks.preview.mockImplementation(async (_caseNo, assignments) => ({
       ...original, proposed_assignments: assignments,
@@ -292,13 +302,15 @@ describe('official date correction panel', () => {
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
-  it('completed mode uses the existing calendar without querying or writing pre-service dates', async () => {
+  it('completed mode reads adjustment facts and corrects the existing calendar without pre-service writes', async () => {
     const correctedDates = ['2026-09-19', '2026-10-01'];
     mocks.query.mockReset().mockResolvedValueOnce(original).mockResolvedValue({ ...changed,
       actual_end_date: '2026-10-01', assignments: [{ ...changed.assignments[0], service_dates: correctedDates }] });
     mocks.apply.mockResolvedValue({ case_no: 'ISSUE-346', order_version: 2, scheduling_version: 2, generation_id: 12,
       effective_assignments: [{ assignment_id: 14, service_dates: correctedDates }], preview_fingerprint: 'a'.repeat(64) });
-    const queryDates = vi.spyOn(ordersMutationClient, 'getServiceDates');
+    const queryDates = vi.mocked(ordersMutationClient.getServiceDates);
+    const previewDates = vi.spyOn(ordersMutationClient, 'previewServiceDates');
+    const applyDates = vi.spyOn(ordersMutationClient, 'applyServiceDates');
     const actualStart = vi.spyOn(ordersQueryClient, 'getActualStart');
     render(<OrderServiceDatesPanel caseNo="ISSUE-346" completedCorrection />);
     await screen.findByRole('group', { name: '服務日期月曆' });
@@ -311,12 +323,14 @@ describe('official date correction panel', () => {
       { assignment_id: 13, service_dates: ['2026-09-19', '2026-10-01'] },
     ]));
     await screen.findByText(/排班日期已更正/);
-    expect(queryDates).not.toHaveBeenCalled();
+    expect(queryDates).toHaveBeenCalledExactlyOnceWith('ISSUE-346', { signal: expect.any(AbortSignal) });
+    expect(previewDates).not.toHaveBeenCalled();
+    expect(applyDates).not.toHaveBeenCalled();
     expect(actualStart).not.toHaveBeenCalled();
     expect(mocks.apply).toHaveBeenCalledWith('ISSUE-346', expect.objectContaining({
       proposed_assignments: [{ assignment_id: 13, service_dates: correctedDates }],
     }), '', 'issue346-key');
-    queryDates.mockRestore(); actualStart.mockRestore();
+    queryDates.mockRestore(); previewDates.mockRestore(); applyDates.mockRestore(); actualStart.mockRestore();
   });
 
   it('keeps the original monetary blocker on the calendar and never previews or applies', async () => {

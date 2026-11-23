@@ -28,6 +28,8 @@
 - inbound: `orders/service-date-confirmation`、`scheduling/leave-substitution` — 共用月曆呈現，各自透過既有查詢取得檔期資料。
 
 ## Contracts
+- `architecture_declared`：合併、分裂及復原的日班呈現依 [Admin UI §2.4](../../../../../requirements/31_MultiCaregiver_Admin_UI正式規格.md#service-date-merge-split-ui)。只讀目前生效的逐日班次；逐日時數有覆寫值時顯示當日時數及協調文字，不以 Orders 時段推造起訖。復原 NULL 後恢復正常呈現。施工完成後核對 inactive 來源日班不重複出現。
+
 - 名冊先讀完 bounded Staff summary cursor 全部頁面，再依 Staff-owned `union_no` 自然升冪排列，未設定排最後；日曆、排查與代班選單使用「公會編號 姓名」，搜尋比對公會編號，不以內部 STF 代碼代替。
 - 排班主頁的可選名單使用 `/staff/summaries?lifecycle_state=active`，初頁與後續 cursor 均保留篩選。歷史案件、completed assignment 與單人月份 Query 保持唯讀可查；全域歷史人員標籤仍從未篩選摘要解析，不刪除歷史 root。
 - `GET /api/v1/staff/{staff_id}/monthly-schedule` — `api/routes/staff_monthly_schedule.py` 與 `api/schemas/staff_monthly_schedule.py`。

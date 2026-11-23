@@ -53,3 +53,8 @@ db/cutover_releases/labor_union_validation_schema_v1.json -text whitespace=cr-at
 *.pdf  binary
 
 db/releases/labor_union_validation_schema_finance_case_arrangements_v1.sql -whitespace
+
+# Preserve the exact bytes of the qualified 1081 schema predecessor.
+db/schema_parts/1081_order_established_unserved_status.sql -text whitespace=cr-at-eol
+db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.json -text whitespace=cr-at-eol
+db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.descriptors.json -text whitespace=cr-at-eol

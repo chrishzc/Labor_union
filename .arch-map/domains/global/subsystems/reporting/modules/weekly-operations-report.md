@@ -37,6 +37,8 @@
 - storage: current `weekly_report_metrics` uses Monday `week_start_date` as its key and nullable promotion／inquiry counts; fresh `218` and preserve `1035` provide the table. Released `1031` batch objects are historical compatibility only and have no current runtime reader／writer.
 
 ## Contracts
+- `architecture_declared`：依 [逐日工時口徑](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-service-daily-hours) 擴充既有 Query／typed facts／JSON／XLSX，施工中。有效日班工時取逐日覆寫值，NULL 才沿用案件原訂時數；按實際日期與當日人員加總，不納入停用來源日班。報表只讀，不改原合約與帳務。
+
 - HCM 審核不符合優先於訂單狀況，六項資格欄位每筆至多一個；資格來源缺漏保留待確認。確認符合並歸一般市民的案件只計一般市民符合；原住民及其來源別名（`原民`、`原住民市民`）依審查結果計入原住民符合或原住民不符合；實為非市民誤報、原 HCM 作廢者依 `QUAL-STAT-03` 維持計入一般市民不符合且不轉換成 `A` 案。週報畫面、同候選 Excel 與待辦看板共用分類。
 - 2026-11-04 核准搬移：營運畫面只留案件／工時兩分頁，補助統計及季度／年度移至 Finance 唯一入口；原三 worksheet、typed API／owner formula／XLSX 不變。案件操作仍使用 Finance 原抽屜，原查詢條件與來源位置保留；不維護第二套 CSV。
 - 週報 React／XLSX 案件受理總表使用 A:Z 26 欄雙層表頭，取消原因讀取 Orders 生效的取消事件或歷史訂單資料。`補助案件統計表` 支援三軌獨立分區（`general`、`subsidized`、`indigenous`）與頂端六列兩年度統計。看板 summary 與 `WorkbenchCaseStatistics` 同步呈現在三大資格群組共六欄與模板四欄計數，非市民區塊獨立呈現。正式欄位裁決：`.arch-map/requirements/34_營運報表與統計口徑正式規格.md` §2–§5。

@@ -458,9 +458,10 @@ def _effective_assignment(segment, service_dates):
         assignment_id=segment.assignment_id,
         staff_id=segment.staff_id,
         sequence=segment.sequence,
-        assigned_start_date=segment.assigned_start_date,
-        assigned_end_date=segment.assigned_end_date,
+        assigned_start_date=None if segment.date_adjusted and not service_dates else segment.assigned_start_date,
+        assigned_end_date=None if segment.date_adjusted and not service_dates else segment.assigned_end_date,
         official_service_dates=service_dates,
+        service_hours_overrides=segment.service_hours_overrides,
     )
 
 

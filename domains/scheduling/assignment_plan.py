@@ -113,6 +113,7 @@ class EffectiveAssignmentFact:
     assigned_start_date: date | None = None
     assigned_end_date: date | None = None
     official_service_dates: tuple[date, ...] = ()
+    service_hours_overrides: tuple[tuple[date, int], ...] = ()
 
     def __post_init__(self) -> None:
         require_positive_integer(self.assignment_id, "assignment id")
@@ -132,6 +133,7 @@ class StaffOccupancyFact:
     possible_end: date | None = None
     actual_start_date: date | None = None
     reservation_only: bool = False
+    coordinated: bool = False
 
     def __post_init__(self) -> None:
         require_positive_integer(self.staff_id, "staff id")
@@ -227,8 +229,8 @@ def build_assignment_plan_candidate(
 ) -> AssignmentPlanCandidate:
     if intent.office_day_allocation and not facts.office_schedule:
         _raise_invalid("daily allocation requires office first scheduling")
-    _validate_service_conservation(facts, intent)
-    assignments = _build_assignments(facts, intent)
+    overrides = _validate_service_conservation(facts, intent)
+    assignments = _build_assignments(facts, intent, overrides)
     buffers = _build_buffers(assignments, active=not facts.service_started)
     _validate_internal_occupancy(assignments)
     _validate_external_occupancy(facts, assignments)
@@ -280,6 +282,9 @@ def _validate_effective_assignment_detail(
         for value in service_dates
     ):
         raise ValueError("effective assignment service date is outside interval")
+    if (len(dict(assignment.service_hours_overrides)) != len(assignment.service_hours_overrides)
+            or any(day not in service_dates or hours not in (4, 8) for day, hours in assignment.service_hours_overrides)):
+        raise ValueError("invalid effective assignment daily service hours")
 
 
 def _validate_official_service_dates(
@@ -311,7 +316,7 @@ def _validate_consecutive_intervals(
 def _validate_service_conservation(
     facts: AssignmentPlanFacts,
     intent: AssignmentPlanIntent,
-) -> None:
+) -> dict[date, int]:
     service_dates = tuple(
         service_date
         for segment in intent.segments
@@ -319,13 +324,24 @@ def _validate_service_conservation(
     )
     if len(service_dates) != len(set(service_dates)):
         _raise_ownership("one official service date has multiple owners")
-    if len(service_dates) != facts.contracted_service_days:
+    current_overrides = dict(item for assignment in facts.effective_assignments for item in assignment.service_hours_overrides)
+    if not current_overrides:
+        if len(service_dates) != facts.contracted_service_days:
+            _raise_coverage("official service days do not conserve the contract")
+        return {}
+    current_dates = {day for assignment in facts.effective_assignments for day in assignment.official_service_dates}
+    if len(service_dates) != len(current_dates):
         _raise_coverage("official service days do not conserve the contract")
+    proposed_dates = set(service_dates)
+    destinations = {day: day for day in current_dates & proposed_dates}
+    destinations.update(zip(sorted(current_dates - proposed_dates), sorted(proposed_dates - current_dates)))
+    return {destinations[day]: hours for day, hours in current_overrides.items()}
 
 
 def _build_assignments(
     facts: AssignmentPlanFacts,
     intent: AssignmentPlanIntent,
+    overrides: dict[date, int],
 ) -> tuple[AssignmentCandidate, ...]:
     return tuple(
         _build_assignment(
@@ -333,6 +349,7 @@ def _build_assignments(
             segment,
             sequence,
             _lineage_for_segment(facts, segment),
+            overrides,
         )
         for sequence, segment in enumerate(intent.segments, start=1)
     )
@@ -373,6 +390,7 @@ def _build_assignment(
     segment: AssignmentPlanSegmentIntent,
     sequence: int,
     lineage: tuple[int, ...],
+    overrides: dict[date, int],
 ) -> AssignmentCandidate:
     candidate_key = (
         f"{facts.case_no}:g{facts.scheduling_generation + 1}:a{sequence}"
@@ -385,10 +403,9 @@ def _build_assignment(
         assigned_start_date=segment.assigned_start_date,
         assigned_end_date=segment.assigned_end_date,
         service_dates=segment.official_service_dates,
-        actual_hours=(
-            len(segment.official_service_dates) * facts.service_hours_per_day
-        ),
+        actual_hours=sum(overrides.get(day, facts.service_hours_per_day) for day in segment.official_service_dates),
         lineage_source_assignment_ids=lineage,
+        service_hours_overrides=tuple((day, overrides[day]) for day in segment.official_service_dates if day in overrides),
     )
 
 
@@ -439,15 +456,22 @@ def first_shift_conflict(case_no, service_time, assignments, occupancy):
         if fact.source_case_no != case_no and not fact.reservation_only:
             by_staff.setdefault(fact.staff_id, []).append(fact)
     for assignment in assignments:
+        overrides = dict(assignment.service_hours_overrides)
         for day in assignment.service_dates:
             for fact in by_staff.get(assignment.staff_id, ()):
-                if service_shift_may_overlap(day, service_time, fact):
+                if day in overrides:
+                    overlaps = fact.all_day and fact.occupancy_date <= day <= (fact.block_end or date.max)
+                else:
+                    overlaps = service_shift_may_overlap(day, service_time, fact)
+                if overlaps:
                     return fact
     return None
 
 
 def service_shift_may_overlap(service_date, service_time, occupied: StaffOccupancyFact) -> bool:
     """Keep ambiguous occupancy closed; compare known windows as half-open."""
+    if occupied.coordinated:
+        return False
     if occupied.block_end is not None and not occupied.all_day and occupied.service_time:
         return any(
             service_shift_may_overlap(service_date, service_time, replace(occupied, occupancy_date=day, block_end=None))
@@ -578,6 +602,8 @@ def _assignment_payload(assignment: AssignmentCandidate) -> dict[str, object]:
         "staff_id": assignment.staff_id,
         "sequence": assignment.sequence,
         "actual_hours": assignment.actual_hours,
+        **({"service_hours_overrides": tuple((day.isoformat(), hours) for day, hours in assignment.service_hours_overrides)}
+           if assignment.service_hours_overrides else {}),
         "lineage": assignment.lineage_source_assignment_ids,
     }
 

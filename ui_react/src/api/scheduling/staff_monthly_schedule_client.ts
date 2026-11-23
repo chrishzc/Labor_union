@@ -18,6 +18,7 @@ const DaySchema = z.strictObject({
   notes: z.string().nullable().optional(),
   service_date: DateSchema.nullable().optional(),
   starts_at: z.string().nullable().optional(),
+  service_hours_override: z.number().nullish(),
   ends_at: z.string().nullable().optional(),
   lock_id: z.number().int().positive().nullable().optional(),
   plan_id: z.number().int().positive().nullable().optional(),
