@@ -448,6 +448,11 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, coo
   const savingLocked = status !== 'idle' || (receipt !== null && readback === null) || outcomeUnknown;
   const closedService = currentQuery.service_data_locked || currentQuery.floor_fee_correction_available === true;
   const locked = closedService || savingLocked;
+  const cookingOnlyChange = draft.requiresCooking !== ''
+    && draft.requiresCooking !== draftFromQuery(currentQuery).requiresCooking
+    && Object.entries(draft).every(([key, value]) => key === 'requiresCooking'
+      || value === draftFromQuery(currentQuery)[key as keyof OrderTermsDraft]);
+  const submitLocked = savingLocked || (closedService && !cookingOnlyChange);
   const lockReason = currentQuery.service_quantity_lock_reason;
   const quantityLocked = locked || (lockReason === 'service_started' && !startedServiceUnlocked);
   const replacementLocked = quantityLocked || lockReason === 'service_started_replacement_blocked';
@@ -507,7 +512,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, coo
 
   const previewTerms = async () => {
     if (!draftReady || !replacementReady || !startedChangeReady || (needsReplacement && replacementLocked)
-      || (floorCorrection ? savingLocked : locked)) return;
+      || (floorCorrection ? savingLocked : submitLocked)) return;
     const generation = ++previewGeneration.current;
     previewAbort.current?.abort();
     const controller = new AbortController();
@@ -551,7 +556,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, coo
 
   const applyTerms = async (calculatedPreview = preview, proposedPayload = proposedTermsPayload()) => {
     const preview = calculatedPreview;
-    if (!preview || (closedService && !proposedPayload.floor_fee_correction)) return;
+    if (!preview || (closedService && !proposedPayload.floor_fee_correction && !cookingOnlyChange)) return;
     setStatus('applying');
     setError(null);
     setReadback(null);
@@ -695,7 +700,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, coo
           />
         </label>
         <label>下廚料理需求
-          <select aria-label="下廚料理需求" aria-invalid={visibleCookingIssue ? true : undefined} aria-describedby={visibleCookingIssue ? cookingIssueId : undefined} value={draft.requiresCooking} disabled={locked || startedServiceUnlocked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
+          <select aria-label="下廚料理需求" aria-invalid={visibleCookingIssue ? true : undefined} aria-describedby={visibleCookingIssue ? cookingIssueId : undefined} value={draft.requiresCooking} disabled={savingLocked || startedServiceUnlocked || floorCorrection} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
             <option value="">尚未確認（可先保留）</option>
             <option value="yes">需要下廚</option>
             <option value="no">不需下廚</option>
@@ -837,7 +842,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, coo
             <textarea aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={floorCorrection?savingLocked:locked} onChange={(event) => setReason(event.target.value)} />
           </label></>
       <div className="order-v2-drawer-actions" style={{ marginTop: '12px' }}>
-        <button type="button" disabled={(floorCorrection?savingLocked:locked) || !draftReady || !replacementReady || !startedChangeReady || (needsReplacement && replacementLocked) || (floorCorrection&&Number(draft.floorFeeNtd)===currentQuery.terms.floor_fee_ntd)} onClick={() => void previewTerms()}>
+        <button type="button" disabled={(floorCorrection?savingLocked:submitLocked) || !draftReady || !replacementReady || !startedChangeReady || (needsReplacement && replacementLocked) || (floorCorrection&&Number(draft.floorFeeNtd)===currentQuery.terms.floor_fee_ntd)} onClick={() => void previewTerms()}>
           {status === 'previewing' ? '正在檢查服務條件…' : floorCorrection ? '儲存樓層費更正' : startedServiceUnlocked ? '預覽服務條件與排班' : '儲存服務條件'}
         </button>
       </div>

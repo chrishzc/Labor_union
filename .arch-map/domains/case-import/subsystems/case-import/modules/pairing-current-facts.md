@@ -48,7 +48,7 @@
 
 ## Correction boundary
 - `registration_details` 投影本案唯一綁定問卷的 `id_number`／`holiday_double_pay`，兩欄沿用 BeClass correction state／version／event／receipt。
-- HCM／Client BeClass 唯一配對後，未知下廚需求由 Orders-owned cooking correction command 在同一 caller UoW 補入；已有帳務或無逐日排班不阻擋此單欄補正，服務資料鎖、fresh version 與已知值異動規則仍由 Orders 擁有。
+- HCM／Client BeClass 唯一配對後，未知下廚需求由 Orders-owned cooking correction command 在同一 caller UoW 補入；已有帳務或無逐日排班不阻擋此單欄補正，服務資料鎖不阻擋下廚單欄補正，fresh version 與已知值異動規則仍由 Orders 擁有。
 - Effective corrections resolve the unique `bound_case_no`; `query_no` remains immutable source provenance and original imported BeClass fields remain unchanged.
 - Workbook Apply stores one source copy per selected case within the workbook row transaction. The unique source key is `(query_no, bound_case_no)` and each case resolves its own correction record.
 - Named care／bonus／floor-agreement fields share the existing BeClass correction state／version／event／receipt and effective projection. Corrected NULL clears an original value／field issue, unchanged bool／number scalars retain their type. Holiday bonus and floor-agreement text do not invoke financial sync; floor-fee amounts use Orders Terms and birth count retains its existing financial coordination.

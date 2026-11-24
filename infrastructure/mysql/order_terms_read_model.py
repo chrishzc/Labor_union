@@ -25,6 +25,7 @@ from domains.orders.terms import (
     OrderAggregateFacts,
     OrderTerms,
     ServiceTimeTerms,
+    is_unique_cooking_requirement_correction,
 )
 from domains.orders.lifecycle import (
     OrderLifecycleRootFacts,
@@ -363,6 +364,18 @@ def _assemble_facts(
     proposed_terms: OrderTerms | None = None,
     office_first_schedule: bool = False,
 ) -> TermsWorkflowFacts:
+    current_order = _order_facts(order_row) if proposed_terms is not None else None
+    if (current_order is not None and (current_order.service_data_locked or current_order.historical_service_completed)
+            and is_unique_cooking_requirement_correction(current_order.terms, proposed_terms)):
+        from subsystems.orders.terms_workflow import HistoricalFinancialVersions
+        generation = _select_generation(cursor, aggregate_row, lock)
+        versions = _registry_terms_facts(cursor, order_row, aggregate_row, generation)
+        finance = (HistoricalFinancialVersions(versions.client_finance_version, None)
+                   if versions.client_finance_version is not None else None)
+        payroll = (HistoricalFinancialVersions(0, versions.payroll_version)
+                   if versions.payroll_version is not None else None)
+        return _facts_from_rows(order_row, aggregate_row, generation, (), (), finance, payroll,
+            _load_lifecycle(cursor, order_row, lock), None, ())
     if omit_preassignment_downstream and str(order_row.get('status')) in ('歷史訂單－服務完成','歷史訂單－帳務完成'):
         cursor.execute("SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='order_terms_apply_receipts' AND column_name='lifecycle_status'")
         column = cursor.fetchone()

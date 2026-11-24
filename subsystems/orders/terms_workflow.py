@@ -413,6 +413,27 @@ class OrderTermsWorkflow:
                        replacement_allocations=(), floor_fee_correction=False,
                        allow_started_service_change=False, replacement_assignment_dates=()):
         validate_terms_change(facts.order, proposed_terms, floor_fee_correction=floor_fee_correction)
+        if ((facts.order.service_data_locked or facts.order.historical_service_completed) and not floor_fee_correction
+                and is_unique_cooking_requirement_correction(facts.order.terms, proposed_terms)
+                and replacement_service_dates is None and not replacement_allocations
+                and not replacement_assignment_dates and not allow_started_service_change):
+            scheduling = build_preassignment_cooking_correction_candidate(
+                replace(facts.scheduling, segments=()), facts.order.terms, proposed_terms,
+            )
+            lifecycle = build_financial_correction_lifecycle_impact(
+                facts.lifecycle, facts.actual_end_date, self._clock.now(),
+            )
+            return OrderTermsPreview(
+                facts.order.terms, proposed_terms, scheduling, facts.order.version,
+                facts.scheduling.aggregate_version, facts.scheduling.generation_number,
+                facts.client_finance.account_version if facts.client_finance else None,
+                facts.payroll.payroll_version if facts.payroll else None,
+                None, None, lifecycle, facts.planned_end_date, None,
+                facts.confirmed_service_date_version, False,
+                fingerprint_payload({'cooking': proposed_terms.canonical_payload(),
+                    'order_version': facts.order.version,
+                    'scheduling_version': facts.scheduling.aggregate_version}), False,
+            )
         _validate_started_service_change(
             facts, proposed_terms, replacement_service_dates, allow_started_service_change,
         )

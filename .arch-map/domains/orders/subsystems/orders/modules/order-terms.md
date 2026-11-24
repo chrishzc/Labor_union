@@ -20,7 +20,7 @@ Terms GET 使用獨立的 typed `OrderTermsQueryFacts`，沿用 registry 的條�
 
 已有客戶期款但未建立執行指派的既有案件，付款相關條件異動亦讀取 Finance facts、重算已存在期款及補正條款日期；以 current confirmed／此次替代日期計算，缺少期款依同一公式自動同步。缺漏 roots、Payroll 義務與 nonstage 限制仍拒絕；同一 Terms Apply 保存版本、事件與 receipt。
 
-Case Import 唯一來源的 unknown→known 下廚需求補正使用 `OrderCookingRequirementCorrectionRequest` 與最小 Orders cooking facts；沿用 caller-owned UoW，fresh lock／版本檢查後只更新 `requires_cooking` 與 Orders version，不要求逐日排班或讀寫既有帳務。服務資料鎖與既有已知料理條款仍阻擋此受限 command；已知條款的異動沿用一般 Terms Preview／Apply。
+Case Import 唯一來源的 unknown→known 下廚需求補正使用 `OrderCookingRequirementCorrectionRequest` 與最小 Orders cooking facts；沿用 caller-owned UoW，fresh lock／版本檢查後只更新 `requires_cooking` 與 Orders version，不要求逐日排班或讀寫既有帳務。服務資料鎖不阻擋此受限 command，已有已知料理條款仍不接受匯入覆寫；已知條款的異動沿用 Terms Preview／Apply。鎖定與歷史服務完成案件的下廚單欄更正僅更新 Orders 條件與版本，保留服務、排班、帳務及 lifecycle。
 
 Issue #326：同一 Terms command 可承接完整替代日期與明確既有指派分配；原有跨 owner transaction 與 immutable versions 保持不變。
 

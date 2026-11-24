@@ -803,7 +803,7 @@ def test_preassignment_service_started_allows_unique_cooking_correction():
     assert preview.scheduling.cancelled_assignment_ids == ()
 
 
-def test_service_data_lock_rejects_unique_cooking_correction():
+def test_service_data_lock_allows_unique_cooking_correction():
     facts = _facts()
     locked = replace(
         facts,
@@ -811,8 +811,9 @@ def test_service_data_lock_rejects_unique_cooking_correction():
     )
     workflow = terms_workflow.OrderTermsWorkflow(_Repository(locked), object(), _Clock())
 
-    with pytest.raises(ValueError, match="service_data_locked"):
-        workflow.preview("116990823", _terms(requires_cooking=True))
+    preview = workflow.preview("116990823", _terms(requires_cooking=True))
+    assert preview.after.requires_cooking is True
+    assert not preview.requires_formal_apply
 
 
 def test_preassignment_terms_apply_does_not_require_downstream_roots_or_versions():
@@ -1079,3 +1080,24 @@ def test_replacement_rejects_stale_confirmed_date_version_and_started_service():
         workflow.preview(facts.order.case_no, proposed,
                          replacement_service_dates=dates, replacement_allocations=((9, 3),))
     assert repository.writes == []
+
+
+@pytest.mark.parametrize("known", [None, False, True])
+@pytest.mark.parametrize("value", [False, True])
+def test_locked_cooking_only_preserves_completed_service(known, value):
+    facts = _assigned_facts()
+    facts = replace(facts, order=replace(facts.order, service_data_locked=True,
+        terms=replace(facts.order.terms, requires_cooking=known)),
+        lifecycle=replace(facts.lifecycle, current_status=OrderLifecycleStatus.COMPLETED,
+            service_data_locked=True), actual_end_date=date(2026, 9, 14))
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock())
+    proposed = replace(facts.order.terms, requires_cooking=value)
+    preview = workflow.preview(facts.order.case_no, proposed)
+    assert preview.after.requires_cooking is value
+    assert not preview.requires_formal_apply
+    assert not preview.scheduling_replacement_required
+    assert preview.lifecycle_impact.after_status is OrderLifecycleStatus.COMPLETED
+    assert preview.lifecycle_impact.actual_end_date == facts.actual_end_date
+    assert preview.planned_end_date == facts.planned_end_date
+    with pytest.raises(ValueError, match='service_data_locked'):
+        workflow.preview(facts.order.case_no, replace(proposed, service_days=99))

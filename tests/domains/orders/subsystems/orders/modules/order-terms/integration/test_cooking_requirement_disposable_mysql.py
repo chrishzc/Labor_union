@@ -111,21 +111,15 @@ def test_historical_cooking_correction_preserves_existing_accounting(case_connec
         MySqlOrderTermsRepository(connection).load_for_preview(case_no)
 
     adapter = MySqlHcmBeClassReconciliationAdapter(connection)
-    if locked:
-        with pytest.raises(TermsWorkflowError) as captured:
-            adapter.apply_cooking_terms(case_no, 1, requires_cooking)
-        assert captured.value.error.code == "service_data_locked"
-        assert _snapshot(connection, case_no) == before
-    else:
-        adapter.apply_cooking_terms(case_no, 1, requires_cooking)
-        after = _snapshot(connection, case_no)
-        order = after["orders"][0]
-        assert bool(order["requires_cooking"]) is requires_cooking
-        assert order["lifecycle_version"] == 4
-        for field in ("start_date", "end_date", "actual_start_date", "actual_end_date", "service_days",
-                      "service_hours_per_day", "floor_fee", "service_start_time", "service_end_time",
-                      "service_end_day_offset", "status"):
-            assert order[field] == before["orders"][0][field]
-        assert {k: v for k, v in after.items() if k != "orders"} == {k: v for k, v in before.items() if k != "orders"}
-        adapter.apply_cooking_terms(case_no, 1, requires_cooking)
-        assert _snapshot(connection, case_no) == after
+    adapter.apply_cooking_terms(case_no, 1, requires_cooking)
+    after = _snapshot(connection, case_no)
+    order = after["orders"][0]
+    assert bool(order["requires_cooking"]) is requires_cooking
+    assert order["lifecycle_version"] == 4
+    for field in ("start_date", "end_date", "actual_start_date", "actual_end_date", "service_days",
+                  "service_hours_per_day", "floor_fee", "service_start_time", "service_end_time",
+                  "service_end_day_offset", "status"):
+        assert order[field] == before["orders"][0][field]
+    assert {k: v for k, v in after.items() if k != "orders"} == {k: v for k, v in before.items() if k != "orders"}
+    adapter.apply_cooking_terms(case_no, 1, requires_cooking)
+    assert _snapshot(connection, case_no) == after

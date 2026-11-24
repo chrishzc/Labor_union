@@ -176,8 +176,6 @@ def validate_cooking_requirement_correction(
 ) -> None:
     if not isinstance(requires_cooking, bool):
         raise TypeError("requires cooking must be bool")
-    if current.service_data_locked:
-        raise ValueError("service_data_locked")
     if current.requires_cooking is not None:
         raise ValueError("cooking_requirement_already_known")
 
@@ -186,11 +184,10 @@ def is_unique_cooking_requirement_correction(
     current_terms: OrderTerms,
     proposed_terms: OrderTerms,
 ) -> bool:
-    """Allow only the Case Import-owned unknown-to-known cooking correction."""
+    """Identify a cooking-only correction that preserves service and financial terms."""
     return (
-        current_terms.requires_cooking is None
-        and proposed_terms.requires_cooking is not None
-        and replace(proposed_terms, requires_cooking=None) == current_terms
+        proposed_terms.requires_cooking is not None
+        and replace(proposed_terms, requires_cooking=current_terms.requires_cooking) == current_terms
     )
 
 
@@ -208,7 +205,8 @@ def validate_terms_change(
             raise ValueError("floor_fee_correction_requires_change")
         return
     if current.service_data_locked:
-        raise ValueError("service_data_locked")
+        if not is_unique_cooking_requirement_correction(current.terms, proposed_terms):
+            raise ValueError("service_data_locked")
     if (
         proposed_terms.service_time != current.terms.service_time
         and not proposed_terms.service_time.complete

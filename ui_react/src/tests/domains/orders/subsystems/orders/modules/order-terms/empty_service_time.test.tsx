@@ -341,3 +341,17 @@ describe('Issue #337 empty service time', () => {
     expect(previewButton()).toHaveProperty('disabled', false);
   });
 });
+
+
+it('allows cooking correction on locked service while keeping quantities locked', async () => {
+  const query = OrderTermsQuerySchema.parse({ ...queryFixture(), service_data_locked: true });
+  render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} />);
+  expect(screen.getByLabelText('下廚料理需求')).toBeEnabled();
+  expect(screen.getByLabelText('服務天數')).toBeDisabled();
+  expect(previewButton()).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('下廚料理需求'), { target: { value: 'yes' } });
+  expect(previewButton()).toBeEnabled();
+  fireEvent.click(previewButton());
+  expect(await submittedTerms()).toEqual({ ...query.terms, requires_cooking: true });
+  await waitFor(() => expect(orderTermsMutationClient.apply).toHaveBeenCalledTimes(1));
+});

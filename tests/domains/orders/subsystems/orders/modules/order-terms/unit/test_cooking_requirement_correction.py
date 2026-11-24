@@ -43,8 +43,9 @@ def _request(value=True):
 
 
 @pytest.mark.parametrize("value", [True, False])
-def test_unknown_cooking_correction_is_replay_safe_in_caller_uow(value):
-    repository = _Repository(OrderCookingRequirementFacts("COOKING-TEST", 4, None, False))
+@pytest.mark.parametrize("locked", [True, False])
+def test_unknown_cooking_correction_is_replay_safe_in_caller_uow(value, locked):
+    repository = _Repository(OrderCookingRequirementFacts("COOKING-TEST", 4, None, locked))
     workflow = OrderTermsWorkflow(repository, _forbidden_uow, None)
 
     assert workflow.correct_cooking_requirement_in_current_uow(_request(value)) == 5
@@ -54,7 +55,6 @@ def test_unknown_cooking_correction_is_replay_safe_in_caller_uow(value):
 
 @pytest.mark.parametrize("version,current,locked,code,category", [
     (5, None, False, "order_version_conflict", ErrorCategory.CONFLICT),
-    (4, None, True, "service_data_locked", ErrorCategory.DOMAIN_BLOCKED),
     (4, False, False, "cooking_requirement_already_known", ErrorCategory.DOMAIN_BLOCKED),
 ])
 def test_fresh_conflict_or_lock_prevents_cooking_write(version, current, locked, code, category):
