@@ -13,6 +13,7 @@ import { sessionClient } from '../api/auth/session_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { CANDIDATE_INFORMATION_LABELS, OrderPreviewPages, OrderPreviewSections } from './OrderCandidateInformationPanel';
+import { StaffWebProfilePreview } from './StaffWebProfilePreview';
 import { OrderRecommendationReplacementPanel } from './OrderRecommendationReplacementPanel';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import {
@@ -143,7 +144,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const [decisionReason, setDecisionReason] = useState('');
   const [resumeNote, setResumeNote] = useState('請查收正式推薦月嫂的完整確認資訊。');
   const [confirmationPreview, setConfirmationPreview] = useState<ReadState<CustomerConfirmationPreview>>({ status: 'idle' });
-  const [resumePreview, setResumePreview] = useState<ReadState<CustomerConfirmationPreview>>({ status: 'idle' });
   const [confirmationPreviewGeneration, setConfirmationPreviewGeneration] = useState(0);
   const confirmationActionIdentity = useRef<{ signature: string; key: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -285,20 +285,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     confirmationPlanId,
     confirmationVersion,
   ]);
-
-  useEffect(() => {
-    if (!informationOpen || confirmationPlanId === null || confirmationVersion === null) return;
-    const controller = new AbortController();
-    setResumePreview({ status: 'loading' });
-    void matchingPlanCommunicationClient.previewCustomerConfirmation(
-      caseNo, confirmationPlanId, confirmationVersion, { signal: controller.signal, includeResumeImages: true },
-    ).then(data => {
-      if (!controller.signal.aborted) setResumePreview({ status: 'ready', data });
-    }).catch(error => {
-      if (!controller.signal.aborted) setResumePreview({ status: 'error', message: errorMessage(error) });
-    });
-    return () => controller.abort();
-  }, [caseNo, confirmationPlanId, confirmationVersion, confirmationPreviewGeneration, informationOpen]);
 
   const perform = async (operation: () => Promise<void>, invalidateActiveOnError = true) => {
     if (busyRef.current || activeCase.current !== caseNo) return;
@@ -688,14 +674,14 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
         ? `待確認 ${pendingWillingnessCount} 位月嫂意願`
         : profileStatusLabel(confirmationDeliveryStatus);
 
-  const resumeImages = resumePreview.status === 'ready' ? resumePreview.data.resume_images ?? [] : [];
-  const resumePageCount = Math.max(1, resumeImages.length);
+  const webProfiles = confirmationPreview.status === 'ready' ? confirmationPreview.data.caregiver_web_profiles : [];
   const informationLabels = [
-    ...Array.from({ length: resumePageCount }, (_, index) => resumePageCount === 1 ? '月嫂履歷' : `月嫂履歷 ${index + 1}`),
+    ...webProfiles.map(profile => webProfiles.length === 1 ? '月嫂個人網頁' : `${profile.staff_name}個人網頁`),
     ...Object.values(CANDIDATE_INFORMATION_LABELS),
   ];
   const visibleInformationTab = Math.min(informationTab, informationLabels.length - 1);
-  const informationSection = visibleInformationTab - resumePageCount;
+  const informationSection = visibleInformationTab - webProfiles.length;
+  const visibleWebProfile = webProfiles[visibleInformationTab];
   const segmentName = (segmentId: number, staffId: number) => {
     const candidate = candidates.status === 'ready' ? candidates.data.candidates.find(value => value.staff_id === staffId) : undefined;
     const segment = current?.contact.segments.find(value => value.segment_id === segmentId);
@@ -769,7 +755,6 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                 setInformationOpen(!informationOpen);
                 if (!informationOpen) {
                   setInformationTab(0);
-                  setResumePreview({ status: 'loading' });
                 }
                 if (!informationOpen) requestAnimationFrame(() => informationPreviewHeading.current?.focus());
                 else event.currentTarget.focus();
@@ -777,14 +762,11 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             <section id={informationPreviewId} aria-label="客戶確認資訊預覽" hidden={!informationOpen || confirmationPreview.status !== 'ready'}>
               {informationOpen && confirmationPreview.status === 'ready' && <>
                 <h5 className="formal-confirmation-preview-heading" ref={informationPreviewHeading} tabIndex={-1}>客戶確認資訊預覽</h5>
-                {resumePreview.status === 'loading' ? <p role="status">正在讀取履歷圖片…</p> : <OrderPreviewPages
+                <OrderPreviewPages
                   labels={informationLabels} page={visibleInformationTab} onPageChange={setInformationTab}
                   title={informationLabels[visibleInformationTab]} navigationLabel="選擇客戶確認資訊" paginationLabel="客戶確認資訊翻頁">
-                  {informationSection < 0 ? (
-                    resumeImages[visibleInformationTab]
-                      ? <img className="formal-confirmation-resume-image" src={resumeImages[visibleInformationTab]} alt={informationLabels[visibleInformationTab]} />
-                      : <p role="status">{resumePreview.status === 'error' ? resumePreview.message : '履歷圖片尚未就緒。'}</p>
-                  ) : !informationReady[informationSection] ? <p role="status">{informationLabels[visibleInformationTab]}尚未就緒。</p>
+                  {visibleWebProfile ? <StaffWebProfilePreview path={visibleWebProfile.admin_preview_url} headingLevel="h4" />
+                    : !informationReady[informationSection] ? <p role="status">{informationLabels[visibleInformationTab]}尚未就緒。</p>
                     : informationSection === 2 ? <div className="formal-recommendation-weekly-preview" onTouchStart={event => event.stopPropagation()}>
                       <table>
                         <thead><tr><th>週次</th><th>月嫂</th><th>服務期間</th><th>每日時數</th><th>工作日數</th><th>每週工時</th></tr></thead>
@@ -801,7 +783,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                       <h4>{staffIdentity.label(item.staff_id, item.staff_name)}</h4>
                       <OrderPreviewSections sections={item.line_sections} />
                     </article>)}
-                </OrderPreviewPages>}
+                </OrderPreviewPages>
               </>}
             </section>
             {confirmationPreview.status === 'ready' && canCommunicate && confirmationPreview.data.blockers.length > 0 && <div className="formal-recommendation-blockers" role="alert"><strong>尚不能寄送</strong><ul>{confirmationPreview.data.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></div>}

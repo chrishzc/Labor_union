@@ -55,7 +55,7 @@ from subsystems.scheduling.matching_notification_contracts import (
     ApplyManualCustomerProfilesCommand,
     CustomerConfirmationPreview,
     CustomerConfirmationInformationPreview,
-    CustomerConfirmationResumePreview,
+    CustomerConfirmationWebProfilePreview,
     CustomerConfirmationWeeklyServicePreview,
     ManualCustomerProfilesPreview,
     ManualCustomerProfilesReceipt,
@@ -106,7 +106,7 @@ class MatchingNotificationApplication:
         interaction_lifetime: timedelta = timedelta(days=7),
         availability_validator: Callable[[MatchingContactState], None] | None = None,
         availability_facts_port: SegmentedAvailabilityFactsPort | None = None,
-        resume_page_renderer: Callable[[str, int], tuple[bytes, ...]] | None = None,
+        staff_web_profile_url: Callable[[int, str], str] | None = None,
     ) -> None:
         if availability_validator is None and availability_facts_port is None:
             raise RuntimeError("matching availability facts port is not configured")
@@ -114,7 +114,7 @@ class MatchingNotificationApplication:
         self._now = now
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(24))
         self._interaction_lifetime = interaction_lifetime
-        self._resume_page_renderer = resume_page_renderer
+        self._staff_web_profile_url = staff_web_profile_url
         self._availability_validator = availability_validator or (
             lambda state: _validate_availability(state, availability_facts_port)
         )
@@ -136,8 +136,6 @@ class MatchingNotificationApplication:
         self,
         actor: ActorContext,
         plan: MatchingPlanReference,
-        *,
-        include_resume_images: bool = False,
     ) -> CustomerConfirmationPreview:
         """Return the complete, read-only Stage 5 readiness projection."""
         require_line_capability(actor, LineCapability.MATCHING_READ)
@@ -170,27 +168,10 @@ class MatchingNotificationApplication:
                 plan.case_no, plan.plan_id
             )
             blockers.extend(str(item) for item in raw["blockers"])
-            resumes = tuple(
-                CustomerConfirmationResumePreview(
-                    staff_id=int(item["staff_id"]),
-                    staff_name=str(item["staff_name"]),
-                    ready=bool(item["ready"]),
-                    filename=(str(item["filename"]) if item["filename"] is not None else None),
-                    version=(int(item["version"]) if item["version"] is not None else None),
-                    blocker=(str(item["blocker"]) if item["blocker"] is not None else None),
-                )
-                for item in raw["caregiver_resumes"]
+            profiles = tuple(
+                CustomerConfirmationWebProfilePreview(int(item["id"]), str(item["name"]))
+                for item in raw["caregiver_web_profiles"]
             )
-            blockers.extend(item.blocker for item in resumes if not item.ready and item.blocker)
-        resume_images = ()
-        if include_resume_images and all(item.ready for item in resumes):
-            from subsystems.line.table_image_contracts import TableImageUnavailable
-            try:
-                resume_images = self._render_resume_images(raw["resume_files"])
-            except ValueError as error:
-                blockers.append(str(error))
-            except TableImageUnavailable:
-                blockers.append("履歷圖片服務暫時無法使用，請稍後再試。")
         return CustomerConfirmationPreview(
             plan=state.plan,
             order_information_1_ready=bool(raw["order_information_1_ready"]),
@@ -212,11 +193,10 @@ class MatchingNotificationApplication:
                 )
                 for item in raw["weekly_service_rows"]
             ),
-            caregiver_resumes=resumes,
+            caregiver_web_profiles=profiles,
             blockers=tuple(dict.fromkeys(blockers)),
             service_period_start=raw.get("service_period_start"),
             service_period_end=raw.get("service_period_end"),
-            resume_images=resume_images,
         )
 
     def request_caregiver_information(
@@ -269,6 +249,29 @@ class MatchingNotificationApplication:
             result = self._create_customer_confirmation(unit_of_work, command)
             unit_of_work.commit()
         return result
+
+    def require_customer_web_profile(self, token: str, recipient: LineUserId, staff_id: int) -> None:
+        reference = _token_hash(token)
+        with self._unit_of_work_factory() as unit_of_work:
+            repository = unit_of_work.matching_notifications
+            interaction = repository.interaction(reference, lock=False)
+            if (
+                interaction is None or interaction["action_scope"] != "customer_decision"
+                or interaction["interaction_status"] not in {"active", "consumed"}
+                or str(interaction["recipient_line_user_id"]) != recipient.value
+                or aware_datetime(interaction["expires_at_utc"]) <= self._now()
+            ):
+                raise LookupError("customer_staff_web_profile_not_found")
+            plan_id = int(interaction["plan_id"])
+            state = repository.get_contact_state(str(interaction["case_no"]), plan_id)
+            if (
+                state is None or not state.plan_is_active or state.customer_line_user_id != recipient
+                or all(segment.staff_id != staff_id for segment in state.segments)
+            ):
+                raise LookupError("customer_staff_web_profile_not_found")
+            snapshot = repository.customer_confirmation_snapshot(plan_id, reference, recipient)
+            if not snapshot or staff_id not in snapshot.get("staff_web_profile_ids", ()):
+                raise LookupError("customer_staff_web_profile_not_found")
 
     def preview_manual_customer_profiles(
         self,
@@ -461,6 +464,7 @@ class MatchingNotificationApplication:
         if not 1 <= len(profiles) <= 4:
             raise MatchingDecisionNotReadyError("customer profile count must be between 1 and 4")
         token = self._token_factory()
+        profiles = self._web_profiles(profiles, token)
         payload_json = customer_profiles_card(
             command.plan.case_no,
             profiles,
@@ -471,6 +475,8 @@ class MatchingNotificationApplication:
             "case_no": command.plan.case_no,
             "profile_count": len(profiles),
             "note": command.note,
+            "staff_web_profile_ids": [profile["id"] for profile in profiles],
+            "staff_web_reference": _token_hash(token),
         }
         return self._append_notification(
             unit_of_work,
@@ -509,10 +515,7 @@ class MatchingNotificationApplication:
         if not 1 <= len(profiles) <= 4:
             raise MatchingDecisionNotReadyError("customer profile count must be between 1 and 4")
         token = self._token_factory()
-        resumes = package["caregiver_resumes"]
-        if {int(resume["staff_id"]) for resume in resumes} != {int(profile["id"]) for profile in profiles}:
-            raise MatchingDecisionNotReadyError("推薦月嫂皆須上傳履歷 PDF 才能寄送。")
-        resume_pages = self._render_resume_images(resumes)
+        profiles = self._web_profiles(profiles, token)
         payload_json = customer_confirmation_card(
             command.plan.case_no, profiles, package["order_information_1"],
             package["order_information_2"], package["weekly_service_rows"],
@@ -524,42 +527,45 @@ class MatchingNotificationApplication:
             "order_information_1": package["order_information_1"],
             "order_information_2": package["order_information_2"],
             "weekly_service_rows": package["weekly_service_rows"],
-            "caregiver_resumes": package["caregiver_resumes"],
+            "staff_web_profile_ids": [profile["id"] for profile in profiles],
             "confirmation_reference": _token_hash(token),
         }
         unit_of_work.matching_notifications.revoke_customer_interactions(command.plan.plan_id)
         return self._append_notification(
             unit_of_work, command, state.customer_line_user_id, None,
             MatchingNotificationKind.CUSTOMER_PROFILES, snapshot, payload_json,
-            token, "customer_decision", resume_pages=resume_pages,
+            token, "customer_decision",
         )
 
-    def _render_resume_images(self, resumes) -> tuple[bytes, ...]:
-        from subsystems.line.table_image_contracts import TableImageUnavailable
-        if self._resume_page_renderer is None:
-            raise TableImageUnavailable("履歷圖片轉換服務尚未設定。")
-        pages = []
-        for resume in resumes:
-            pages.extend(self._resume_page_renderer(resume["file_id"], 4 - len(pages)))
-        return tuple(pages)
+    def _web_profiles(self, profiles, token):
+        if self._staff_web_profile_url is None:
+            raise MatchingDecisionNotReadyError("月嫂個人網頁連結尚未設定。")
+        return tuple(
+            {"id": int(item["id"]), "name": item["name"],
+             "staff_web_url": self._staff_web_profile_url(int(item["id"]), token)}
+            for item in {int(profile["id"]): profile for profile in profiles}.values()
+        )
 
     # Intent, one-time action, delivery task, and projection are one transaction.
     def _append_notification(self, unit_of_work, command, recipient, segment_id,
-                             kind, snapshot, payload_json, token, action_scope, *, resume_pages=()):
+                             kind, snapshot, payload_json, token, action_scope):
         repository = unit_of_work.matching_notifications
         import json
         key = ("card-customer-confirmation" if snapshot.get("package_type") == "customer_confirmation" else "card-customer-profiles") if kind is MatchingNotificationKind.CUSTOMER_PROFILES else "card-caregiver-information" + ("-2" if kind is MatchingNotificationKind.CAREGIVER_INFO_2 else "")
         payload_json = canonical_line_payload_json(configured_payload(unit_of_work, key, json.loads(payload_json), {"case_no": command.plan.case_no}))
         if snapshot.get('package_type') == 'customer_confirmation':
             from subsystems.line.table_image_contracts import information_document, weekly_document
-            from subsystems.line.table_image_messages import with_resume_images, with_table_images
+            from subsystems.line.table_image_messages import with_table_images
             documents = (information_document('訂單資訊－1｜客戶費用', command.plan.case_no, snapshot['order_information_1'], info_type=1),
                          information_document('訂單資訊－2', command.plan.case_no, snapshot['order_information_2'], info_type=2),
                          weekly_document(command.plan.case_no, snapshot['weekly_service_rows']))
             delivery_key = f'matching-delivery:{command.idempotency_key.value}'
             now = self._now()
-            pictured = with_table_images(json.loads(payload_json), documents, delivery_key, now)
-            payload_json = canonical_line_payload_json(with_resume_images(pictured, resume_pages, delivery_key, now))
+            pictured = with_table_images(
+                json.loads(payload_json), documents, delivery_key, now,
+                customer_profile_count=len(snapshot["staff_web_profile_ids"]),
+            )
+            payload_json = canonical_line_payload_json(pictured)
         intent_id = repository.append_notification_intent(
             plan=command.plan,
             segment_id=segment_id,
@@ -618,7 +624,7 @@ class MatchingNotificationApplication:
                     raise MatchingDecisionNotReadyError(_availability_blocker(error)) from error
                 if check_snapshot:
                     snapshot = repository.customer_confirmation_snapshot(state.plan.plan_id, token_hash, line_user_id)
-                    if snapshot is not None:
+                    if snapshot is not None and "order_information_1" in snapshot:
                         current = repository.customer_confirmation_package(state.plan.case_no, state.plan.plan_id)
                         content_keys = ("order_information_1", "order_information_2", "weekly_service_rows")
                         # JSON normalization preserves the comparison across tuple/list serialization.

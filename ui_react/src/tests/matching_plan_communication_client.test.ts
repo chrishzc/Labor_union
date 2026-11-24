@@ -82,7 +82,7 @@ describe('matchingPlanCommunicationClient', () => {
     );
   });
 
-  it('accepts a sendable confirmation preview when the resume will be sent manually', async () => {
+  it('accepts a sendable confirmation preview with the published web profile endpoint', async () => {
     vi.spyOn(transport, 'get').mockResolvedValue({
       success: true,
       message: 'ok',
@@ -99,13 +99,10 @@ describe('matchingPlanCommunicationClient', () => {
         order_information_2: [{ segment_id: 31, staff_id: 21, staff_name: '王小美', text: '訂單資訊－2',
           line_sections: [{ title: '飲食與照護需求', rows: [['飲食習慣', '清淡']] }] }],
         weekly_service_rows: [{ serial_number: 1, staff_name: '王小美', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
-        caregiver_resumes: [{
+        caregiver_web_profiles: [{
           staff_id: 21,
-          staff_name: '月嫂甲',
-          ready: false,
-          filename: null,
-          version: null,
-          blocker: '月嫂 月嫂甲 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。',
+          staff_name: '王小美',
+          admin_preview_url: '/api/v1/admin/staff-web-profile/21/preview',
         }],
         blockers: [],
         send_allowed: true,
@@ -115,7 +112,10 @@ describe('matchingPlanCommunicationClient', () => {
 
     await expect(
       matchingPlanCommunicationClient.previewCustomerConfirmation('CASE-1', 12, 3),
-    ).resolves.toMatchObject({ send_allowed: true });
+    ).resolves.toMatchObject({
+      send_allowed: true,
+      caregiver_web_profiles: [{ staff_id: 21, admin_preview_url: '/api/v1/admin/staff-web-profile/21/preview' }],
+    });
   });
 
   it('uses Preview then Apply without claiming LINE delivery for manual profile evidence', async () => {

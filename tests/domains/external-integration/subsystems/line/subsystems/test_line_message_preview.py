@@ -747,7 +747,7 @@ def test_service_menu_legacy_copy_keeps_faq_label_and_drops_retired_handoff():
     action = body["contents"][-1]["action"]
     assert action["type"] == "uri" and action["uri"].endswith("?target=ai_assistant")
     assert action["label"] == "更多常見問答"
-    assert footer["contents"][0]["text"] == "如需人員協助，請直接在此聊天室留言。"
+    assert footer["contents"][0]["text"] == "點選問題分類可展開常見題目；點選「問 AI 客服」可直接跳出智慧問答視窗。"
     assert json.loads(definition["templates"][0]["content"]) == old_saved_copy
 
 

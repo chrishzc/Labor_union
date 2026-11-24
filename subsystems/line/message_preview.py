@@ -166,6 +166,7 @@ _CURRENT_FLOW_PREVIEWS = (
     ("registration-approved-citizen", "市民需求申請核准通知", "text"),
     ("registration-approved-non-citizen", "非市民需求申請核准通知", "text"),
     ("staff-leave-completed", "月嫂請假完成正式排班通知", "text"),
+    ("staff-web-expiry-reminder", "月嫂個人網頁項目到期提醒", "text"),
     ("payment-overdue-deposit", "訂金逾期提醒卡", "flex"),
     ("payment-overdue-first", "第一期款逾期提醒卡", "flex"),
     ("payment-overdue-second", "第二期款逾期提醒卡", "flex"),
@@ -402,7 +403,8 @@ class LineMessagePreviewApplication:
         elif descriptor.id == "card-customer-profiles":
             from subsystems.scheduling.matching_line_cards import customer_profiles_card
             note = rendered_payload["text"] if rendered_payload else ""
-            profiles = (asdict(staff),)
+            from subsystems.line.message_preview_samples import STAFF_WEB_PREVIEW_URL
+            profiles = ({"id": staff.id, "name": staff.name, "staff_web_url": STAFF_WEB_PREVIEW_URL},)
             payload = json.loads(customer_profiles_card(case.case_no, profiles, "preview-only", note))
         elif descriptor.id in {"card-caregiver-information", "card-caregiver-information-2"}:
             from domains.scheduling.matching_communication import MatchingNotificationKind
@@ -460,7 +462,11 @@ class LineMessagePreviewApplication:
             from subsystems.line.table_image_contracts import TableDocument
             from subsystems.line.table_image_messages import with_table_images, DOCUMENTS_KEY
             models = tuple(TableDocument.from_mapping(item) for item in json.loads(card_source.table_documents_json))
-            payload = with_table_images(payload, models, candidate=key.startswith('card-candidate-information-'))
+            profile_count = len(payload["contents"]["contents"]) - 4 if key == "card-customer-confirmation" else 0
+            payload = with_table_images(
+                payload, models, candidate=key.startswith('card-candidate-information-'),
+                customer_profile_count=profile_count,
+            )
             documents = {item['url']: TableDocument.from_mapping(item['document']) for item in payload[DOCUMENTS_KEY]}
         container = payload["contents"]
         bubbles = container["contents"] if container["type"] == "carousel" else [container]

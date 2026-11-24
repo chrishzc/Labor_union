@@ -308,7 +308,8 @@ class MySqlMatchingNotificationRepository:
                 "WHERE i.plan_id=%s AND i.notification_kind='customer_profiles' "
                 "AND i.recipient_line_user_id=%s "
                 "AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.confirmation_reference')), "
-                "JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.resume_reference')))=%s",
+                "JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.resume_reference')), "
+                "JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.staff_web_reference')))=%s",
                 (plan_id, recipient.value, reference),
             )
             row = cursor.fetchone()
@@ -434,11 +435,8 @@ class MySqlMatchingNotificationRepository:
             segments = tuple(dict(row) for row in (cursor.fetchall() or ()))
             cursor.execute(_CUSTOMER_PROFILE_FACTS_SQL, (plan_id,))
             profiles = tuple(_profile_row(row) for row in (cursor.fetchall() or ()))
-            cursor.execute(_CURRENT_RESUMES_SQL, (plan_id,))
-            resume_rows = tuple(dict(row) for row in (cursor.fetchall() or ()))
         if not segments:
             raise LookupError("matching plan segments not found")
-        resumes = _current_resumes(segments, resume_rows)
         information = MySqlOrderInformationRepository(self._connection)
         info_1 = information.preview_matching_plan_information(case_no, plan_id, 1, for_update=True)
         info_2 = information.preview_matching_plan_information(case_no, plan_id, 2, for_update=True)
@@ -448,7 +446,6 @@ class MySqlMatchingNotificationRepository:
             "order_information_1": info_1,
             "order_information_2": info_2,
             "weekly_service_rows": weekly,
-            "caregiver_resumes": resumes,
         }
 
     def case_weekly_service_preview(self, case_no: str, service_dates: tuple[date, ...] | None = None) -> dict[str, object]:
@@ -517,8 +514,6 @@ class MySqlMatchingNotificationRepository:
             segments = tuple(dict(row) for row in (cursor.fetchall() or ()))
             cursor.execute(_CUSTOMER_PROFILE_FACTS_SQL, (plan_id,))
             profiles = tuple(_profile_row(row) for row in (cursor.fetchall() or ()))
-            cursor.execute(_CURRENT_RESUMES_SQL, (plan_id,))
-            resume_rows = tuple(dict(row) for row in (cursor.fetchall() or ()))
         if not segments:
             raise LookupError("matching plan segments not found")
 
@@ -526,7 +521,6 @@ class MySqlMatchingNotificationRepository:
         if not 1 <= len(profiles) <= 4 or len(profiles) != len(segments):
             blockers.append("正式推薦月嫂資料不完整，請重新讀取目前方案。")
 
-        resumes, _resume_notices = _resume_previews(segments, resume_rows)
 
         information = MySqlOrderInformationRepository(self._connection)
         info_1_ready = True
@@ -575,8 +569,7 @@ class MySqlMatchingNotificationRepository:
             "order_information_1": info_1,
             "order_information_2": info_2,
             "weekly_service_rows": weekly,
-            "caregiver_resumes": resumes,
-            "resume_files": _current_resumes(segments, resume_rows),
+            "caregiver_web_profiles": profiles,
             "blockers": tuple(dict.fromkeys(blockers)),
         }
 

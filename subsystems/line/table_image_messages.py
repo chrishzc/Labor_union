@@ -24,7 +24,7 @@ def candidate_action_bubble(container):
     return action
 
 
-def with_table_images(payload, documents, key=None, now=None, *, candidate=False):
+def with_table_images(payload, documents, key=None, now=None, *, candidate=False, customer_profile_count=0):
     result = deepcopy(payload)
     links = [image_url(key, index, now) if key is not None else f'https://preview.invalid/table/{index}'
              for index in range(len(documents))]
@@ -40,7 +40,7 @@ def with_table_images(payload, documents, key=None, now=None, *, candidate=False
         pictures[-1]['body']['contents'].extend(decision['body']['contents'][1:])
         if decision.get('footer'):
             pictures[-1]['footer'] = decision['footer']
-        result['contents']['contents'] = pictures
+        result['contents']['contents'] = cards[:customer_profile_count] + pictures
     result[DOCUMENTS_KEY] = [{'url': url, 'document': asdict(document)} for document, url in zip(documents, links)]
     return result
 

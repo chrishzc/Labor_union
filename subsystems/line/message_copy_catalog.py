@@ -59,6 +59,7 @@ def _text_defaults():
     from subsystems.line.webhook_identity_handlers import _identity_link_message
     from subsystems.scheduling.matching_notification_application import matching_response_text
     from subsystems.line.cancellation_notifications import DEFAULT_COPY as CANCELLATION_NOTICE_COPY
+    from subsystems.line.staff_web_expiry_reminders import COPY_KEY as STAFF_WEB_EXPIRY, DEFAULT_COPY as STAFF_WEB_EXPIRY_COPY
     from subsystems.line.service_start_messages import HELPER_TEXT_DEFAULTS
     from subsystems.case_import.provisional_registration_application import registration_confirmation_text
     result = {
@@ -73,6 +74,7 @@ def _text_defaults():
         "payment-first-greeting": GREETING_COPY,
         "payment-second-reminder": "案件 {case_no} 第二期款尚待確認入帳 {amount_ntd} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
         "service-day-log-reminder": log_reminder("{staff_name}"),
+        STAFF_WEB_EXPIRY: STAFF_WEB_EXPIRY_COPY,
         "service-start-result": "服務日期安排\n案件：{case_no}\n{assignments}",
         "service-progress": "最新案件：{case_no}\n目前狀態：{status}\n服務期間：{start_date} 至 {end_date}",
         "service-progress-unbound": help._unbound_progress_reply("{identity_url}"),

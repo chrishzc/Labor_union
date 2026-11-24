@@ -149,6 +149,11 @@ def _caregiver_fact_rows(kind, facts):
 
 def _profile_bubble(profile):
     name = str(profile.get("name") or "月嫂")
+    if profile.get("staff_web_url"):
+        return _bubble([_title(name)], [{
+            "type": "button", "style": "link",
+            "action": {"type": "uri", "label": "查看月嫂個人網頁", "uri": profile["staff_web_url"]},
+        }])
     rows = (
         ("居住地", profile.get("city") or "未提供"),
         ("照護寶寶數", profile.get("care_babies") or 1),
