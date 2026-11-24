@@ -38,6 +38,8 @@ Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。�
   - `ui_react/src/api/staff/staff_web_profile_client.ts` — 模板、照片審核、資料夾 metadata、代傳發布與授權圖片的型別化傳輸。
   - `ui_react/src/components/StaffWebFileManagement.tsx`、`ui_react/src/components/StaffWebFileManagement.css` — 個人抽屜的「履歷網頁與照片」分組、資料夾、代傳與刪除確認。
   - `db/schema_parts/1085_staff_web_file_management.sql` — 目前內容關聯的移除時間與操作者。升級僅新增欄位，保留發布版本與受控檔案。
+  - `db/schema_parts/1086_staff_web_feedback.sql` — 只在 `staff_web_template_items.category` 加入 `feedback`，保留既有類別與業務資料；不新增資料表，也不改圖片或到期欄位。
+  - `db/schema_assembly/labor_union_fresh_schema_v1.json` — 新建資料庫納入 1086。既有資料庫保留資料升級走 `db/migration_releases/labor_union_2026_11_24_staff_web_feedback_v1.json`；升級後先核對 ENUM 精確值及既有業務資料是否保留。這項檢查不代表客戶頁面已驗收。
   - `ui_react/src/components/StaffWebProfileManagement.tsx`、`ui_react/src/components/StaffWebPhotoReview.tsx`、`ui_react/src/components/StaffWebProfilePreview.tsx` — 名冊「履歷網頁」、待審裁切及已發布預覽。
   - `infrastructure/mysql/staff_profile_mutation_repository.py`
   - `domains/staff/bank_account.py`
