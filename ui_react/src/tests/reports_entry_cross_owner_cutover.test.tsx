@@ -249,6 +249,8 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     act(()=>{window.history.replaceState(null,'','#finance?tab=government-list');window.dispatchEvent(new HashChangeEvent('hashchange'));});
     await screen.findByRole('table',{name:'一般市民補助案件統計明細'});
     expect(window.location.hash).toBe('#finance?tab=government-list');
+    // The subsidy workspace opens its own weekly report after navigation.
+    expect(countPath(requests, WEEKLY_ENDPOINT)).toBe(2);
     expect(screen.getAllByText(/NT\$ 12,000/).length).toBeGreaterThan(0);
     expect(screen.getByRole('table', { name: '一般市民補助案件統計明細' })).toBeInTheDocument();
     expect(screen.getByText('(114)一般市民')).toBeInTheDocument();
@@ -267,7 +269,8 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     expect(document.querySelector('[data-control-id="reports.export.annual-xlsx"]')).toBeEnabled();
     expect(screen.queryByText(/未開放|後端尚未提供/)).not.toBeInTheDocument();
 
-    expect(countPath(requests, WEEKLY_ENDPOINT)).toBe(1);
+    // Neither the quarterly nor the annual view should fetch another weekly report.
+    expect(countPath(requests, WEEKLY_ENDPOINT)).toBe(2);
     expect(countPath(requests, QUARTERLY_ENDPOINT)).toBe(1);
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
     // The authenticated shell reads its badge catalog independently of the current page.
