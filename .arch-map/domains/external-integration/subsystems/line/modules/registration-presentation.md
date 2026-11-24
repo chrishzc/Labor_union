@@ -25,8 +25,8 @@
 - outbound: `external LINE LIFF runtime` — 已驗證身分的瀏覽器 transport；不得以 query string user ID 作身分證明。
 
 ## Contracts
-- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §2、§4 — LIFF 身分與需求調查的 transport boundary。
-- `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` §4 — registration Preview 零正式寫入，Apply 交由 current owner contract。
+- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §5.2 — LIFF 設定與非市民登記入口。
+- `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` §2 — Gateway 與非市民登記入口；Preview 不建立正式資料，Apply 送待審申請，由需求 #17B §§3.1–3.2 定義正式核准與復原。
 - Apply 成功呈現待工會核准及申請編號；未核准時 client／beclass IDs 為 null，不宣稱完成綁定或已建立正式客戶。
 
 ## Verification

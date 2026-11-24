@@ -86,7 +86,7 @@
   - 待審申請自伺服器提交時起算固定 **14 × 24 小時（14 天）**，設定不可延長之絕對 `expires_at` 與 Redis TTL（重開／查詢不延長；到期立即清除問卷並釋放主體占用，保留最小「已到期」狀態供查「申請已到期，請重新申請」；轉入核准處理中立即解除 TTL 改受恢復索引保護以防 MySQL 交易中途遺失）。
   - 明確拒絕立終態並立即清除問卷原文（僅留申請號、拒絕時間與操作人供授權回讀）；拒絕或到期後可重新提出新申請（原號重送僅回原終態）。
 - **`REG-REDIS-06～08`（兩儲存故障恢復、維護與 AOF 實體整理）**：
-  - 核准中斷後先分清 MySQL 是否已提交。若未提交，恢復作業讀取處理中索引，以原操作識別續走冪等 MySQL writer；若已提交但 Redis 未清除，核對已 commit 回執後只補做 Redis 終態與刪除，絕不重建案號或 Client。
+  - 核准中斷後先分清 MySQL 是否已提交。若未提交，恢復作業讀取處理中索引，以原操作識別續走冪等 MySQL writer；若已提交但 Redis 未清除，沿用同一申請／操作的 MySQL 回執；有存摺封面時先補做或確認受控歸檔已完成，再完成 Redis 終態與清除，不重新配號或重建 Client、BeClass 或 Orders。
   - 內部維運排程除設定原生 AOF rewrite 外，每小時偵測自上次整理後如有問卷清除則執行一次 `BGREWRITEAOF`，實體抹除舊 AOF 內容（禁止腳本手動刪 AOF）；獨立容器拓樸統一編排於根目錄 `docker-compose.yml`（`registration` profile，搭配 `REGISTRATION_REDIS_ADMIN_PASSWORD_FILE` 與 `REGISTRATION_REDIS_INTAKE_PASSWORD_FILE`，`registration-intake` 僅綁定 `127.0.0.1`、保持 `internal` 容器網路且不掛 `.env` 或 MySQL 憑證），首次全新空實例以 `scripts.registration_maintenance --initialize-new-instance --once` 初始化並於一般啟動／還原核對既有 SQL 最大編號。
 
 ## 4. HCM 進件規範、欄位警示與 `BECLASS-001／IMPORT-003`
