@@ -16,7 +16,7 @@
 3. Preview 零 durable 副作用；Apply 才可建立正式檔案／版本或執行明確允許的 cleanup／reconciliation command。
 4. 同一正式檔案 identity 不可覆寫既有 frozen revision；更正使用 additive revision 並保留 lineage。
 5. 外送、列印、下載供正式用途或提交政府／合作方前，必須引用 immutable frozen artifact，不得讀取仍可變動的 live workspace 檔案。個人網頁的照片讀取依[發布版本契約](35_月嫂個人網頁與照片審核發布正式規格.md#22-送審內容與發布版本staff-web-02)取得對應不可變檔案版本。
-6. NAS 只是 storage backend；「NAS 上有檔案」本身不是 business Authority、publication receipt、簽署成功或 owner state。
+6. 受控檔案的正式儲存位於單一 Windows 主機的受控根目錄，不依賴獨立 NAS。儲存已有檔案不代表取得 business Authority、publication receipt、簽署成功或 owner state。
 
 ## 3. FILE_PURPOSE_REGISTRY 與排除範圍
 
@@ -28,11 +28,11 @@
 - `staff_profile_photo`：月嫂個人網頁照片，由 Staff 個人網頁 owner 關聯模板項目及發布版本；bytes、格式驗證與存取仍經本受控檔案邊界。
 - `staff_certificate`：月嫂專業證照（PDF / JPG）
 - `staff_health_exam`：月嫂體檢合格證明與良民證（PDF / JPG）
-- `client_passbook_cover`：客戶存摺封面照片（JPG / PNG / WebP；由客戶需求 LIFF `register.html` 市民／非市民申請時必填上傳，供工會人員核對銀行帳號與分行代碼，並於人員審核／建檔時歸檔至 NAS）
+- `client_passbook_cover`：客戶存摺封面照片（JPG / PNG / WebP；由客戶需求 LIFF `register.html` 市民／非市民申請時必填上傳，供工會人員核對銀行帳號與分行代碼，並於人員審核／建檔時歸檔至受控檔案儲存）
 - `rich_menu_background`：LINE 圖文選單底圖（PNG）
-- `database_backup`：資料庫 SQL 快照備份（`SQL.GZ + SHA256`，正式 Windows 每日預設 18:00 觸發並寫至 NAS，時間可於 `database-backup` 修改，復原契約由 [NAS Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md) 擁有）
+- `database_backup`：資料庫 SQL 快照備份（`SQL.GZ + SHA256`，排程、目的目錄與復原依 [單機 Docker MySQL 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md#windows-nas-maintenance) §5，本節不另定時間或硬體）
 
-**非永久儲存排除項目**：`unsigned_contract`（待簽約草案動態產製不落地永久儲存）、紙本簽到工作單、服務日期確認書、排班行事曆圖卡與 LINE 客服對話截圖及附件，均不列入 NAS 永久儲存清單。
+**非永久儲存排除項目**：`unsigned_contract`（待簽約草案動態產製不落地永久儲存）、紙本簽到工作單、服務日期確認書、排班行事曆圖卡與 LINE 客服對話截圖及附件，均不列入受控檔案的永久儲存清單。
 
 每個 purpose 至少定義 `owner_domain`、`file_format`、`source_of_truth`、`generation_cadence`、`db_reference`、`consumers`、`overwrite_policy`、`retention_policy`、`backup_required`、`restore_owner`；新增 purpose 須先有唯一 owner 與 typed consumer。
 
