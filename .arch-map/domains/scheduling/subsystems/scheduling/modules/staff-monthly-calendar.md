@@ -38,6 +38,12 @@
 - `historical_reservation` — 工會月曆以共用檔期資料呈現歷史未服務案的唯讀預定區段，涵蓋重啟後待排班期間。
 - `SchedulingPage` 對日曆、案件選項及資格投影分別最多同時查詢 3 位人員；日曆每列完成即顯示，兩個 projection 同時接收成功／失敗，避免無上限 fan-out 及未處理的 rejected Promise，不自動重送失敗列。
 
+### 年度時間軸的唯讀邊界
+- 載入由可視月份驅動，快取鍵為人員、年、月。每次只呼叫既有逐月 endpoint，沿用最多三列並行；未查、查詢中、空結果、失敗及部分失敗分開保存，失敗由使用者重試。回到仍有效月份不重查，跨年與中斷請求不得寫回其他月份。
+- 合併逐筆比較來源類型、指派／鎖／不可服務識別、服務日及時段。同來源同班去重，不同案件及唯讀歷史可同日並列。跨午夜的續班不增加正式服務事實。歷史整案起訖與重啟抑制仍由原查詢與 Orders 日期投影負責，不形成出勤或計薪來源。
+- 成功異動依既有通知失效受影響人員的已快取月份；只有人員識別而沒有日期的通知，以該人員所有已快取月份為保守失效範圍，不清其他人。返回畫面的重新查詢讀回有效來源；不得依訂單狀態一律隱藏歷史。
+- 正式日班及正式緩衝讀取須核對有效 generation 與 aggregate current pointer；取消／替換來源退出目前投影。completed 歷史指派沿既有獨立分支及重啟規則，後端逐月契約維持不變。
+
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/staff-monthly-calendar/`
 - layout_status: `custom_current`

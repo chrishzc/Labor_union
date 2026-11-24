@@ -138,13 +138,17 @@ def get_staff_monthly_calendar_schedule(
                     s.name AS staff_name
                 FROM staff_schedule ss
                 JOIN case_staff_assignments csa ON ss.assignment_id = csa.id
+                JOIN scheduling_generations g ON g.id = csa.generation_id
+                    AND g.status = 'effective' AND g.effective_marker = 1
+                JOIN scheduling_aggregates sa ON sa.case_no = csa.case_no
+                    AND sa.effective_generation_id = g.id
                 JOIN orders o ON csa.case_no = o.case_no
                 JOIN clients c ON o.client_id = c.id
                 JOIN staff s ON csa.staff_id = s.id
                 WHERE csa.staff_id = %s
                   AND ss.assignment_id IS NOT NULL
                   AND ss.effective_marker = 1
-                  AND (csa.status IS NULL OR csa.status <> 'cancelled')
+                  AND csa.status NOT IN ('cancelled', 'replaced')
                   AND ss.work_date BETWEEN %s AND %s
                 ORDER BY ss.work_date, ss.id
             """, (staff_id, service_window_start, month_end))
@@ -357,12 +361,16 @@ def get_staff_monthly_calendar_schedule(
                     o.status AS order_status,
                     s.name AS staff_name
                 FROM case_staff_assignments csa
+                JOIN scheduling_generations g ON g.id = csa.generation_id
+                    AND g.status = 'effective' AND g.effective_marker = 1
+                JOIN scheduling_aggregates sa ON sa.case_no = csa.case_no
+                    AND sa.effective_generation_id = g.id
                 JOIN orders o ON csa.case_no = o.case_no
                 JOIN clients c ON o.client_id = c.id
                 JOIN staff s ON csa.staff_id = s.id
                 WHERE csa.staff_id = %s
                   AND o.status = '訂單成立'
-                  AND (csa.status IS NULL OR csa.status <> 'cancelled')
+                  AND csa.status NOT IN ('cancelled', 'replaced')
                   AND COALESCE(o.actual_end_date, csa.assigned_end_date) IS NOT NULL
                 """,
                 (staff_id,)

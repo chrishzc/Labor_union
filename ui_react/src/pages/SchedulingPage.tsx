@@ -7,7 +7,7 @@ import { serviceStartClient, type ServiceStartView } from '../api/scheduling/ser
 import { sessionClient } from '../api/auth/session_client';
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import './SchedulingPage.css';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
@@ -16,7 +16,7 @@ import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_tim
 import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
-import type { SchedulingCurrentAssignment } from '../api/scheduling/scheduling_current_schemas';
+import type { SchedulingCurrentAssignment, SchedulingCurrentProjection } from '../api/scheduling/scheduling_current_schemas';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
 import { coordinatedServiceTime } from '../components/OrderServiceDateCalendar';
@@ -33,7 +33,7 @@ import {
   matchesSchedulingFilter,
   type SchedulingCalendarRowViewModel,
 } from '../adapters/scheduling/scheduling_current_adapter';
-import { adaptHistoricalAssignmentOverlays, type HistoricalAssignmentOverlay } from '../adapters/scheduling/historical_assignment_overlay_adapter';
+import { adaptHistoricalAssignmentOverlays, mergeStaffCalendarDays, type HistoricalAssignmentOverlay } from '../adapters/scheduling/historical_assignment_overlay_adapter';
 import {
   adaptSchedulingEligibilityCollision,
   type SchedulingEligibilityCollisionViewModel,
@@ -783,7 +783,6 @@ const NO_OCCUPANCY_DIAGNOSTIC: SchedulingDiagnosticBadge = {
   tone: 'unavailable',
   text: '⚪ 本月無排班占用',
 };
-const NO_OCCUPANCY_SLOT_TEXT = '本月無排班占用';
 
 // 只將 server occupancy／typed error 映射為標籤，或在 Ghost 模式下計算預留區間撞期診斷
 function getStaffDiagnosticBadge(
@@ -943,6 +942,36 @@ interface HistoricalCaseRanges {
   service: OrderServiceRange | null;
 }
 
+interface CalendarMonthTarget extends MonthSelection {
+  staff: StaffDirectoryCardViewModel;
+}
+
+interface CalendarMonthResult {
+  kind: 'settled';
+  row: CalendarRowState;
+  canonical?: SchedulingCurrentProjection;
+  monthly?: StaffMonthlySchedule;
+  overlays: readonly HistoricalAssignmentOverlay[];
+  ranges: ReadonlyMap<string, HistoricalCaseRanges | null>;
+  historicalError: string | null;
+}
+
+type CalendarMonthState = { kind: 'unloaded' } | { kind: 'loading' } | CalendarMonthResult;
+
+interface CalendarMonthCacheEntry {
+  target: CalendarMonthTarget;
+  result: CalendarMonthResult;
+  retry?: true;
+}
+
+function calendarMonthKey(staffId: number, year: number, month: number): string {
+  return `${staffId}:${year}:${month}`;
+}
+
+function calendarMonthFailed(result: CalendarMonthResult): boolean {
+  return !result.canonical || result.historicalError !== null;
+}
+
 function orderServiceRange(start: string | null, end: string | null): OrderServiceRange | null {
   return start && end && start <= end ? { start, end } : null;
 }
@@ -957,6 +986,61 @@ async function loadHistoricalCaseRanges(caseNo: string, signal: AbortSignal): Pr
   } catch {
     return null;
   }
+}
+
+async function loadCalendarMonth(
+  target: CalendarMonthTarget,
+  signal: AbortSignal,
+  previous?: CalendarMonthResult,
+): Promise<CalendarMonthResult> {
+  const { staff, year, month } = target;
+  const { rangeStart, rangeEnd } = monthRange(target);
+  const readCanonical = async (): Promise<Pick<CalendarMonthResult, 'row' | 'canonical'>> => {
+    if (previous?.canonical) return { row: previous.row, canonical: previous.canonical };
+    try {
+      const canonical = await schedulingCurrentClient.queryCurrentCalendar(
+        { staffId: staff.id, rangeStart, rangeEnd }, { signal },
+      );
+      const row: CalendarRowState = canonical.days.length === 0
+        ? { kind: 'empty' }
+        : { kind: 'loaded', row: adaptSchedulingProjection(staff, canonical), assignments: canonical.assignments };
+      return { row, canonical };
+    } catch (caught) {
+      const row: CalendarRowState = caught instanceof SchedulingCurrentError
+        && caught.publicCode === 'service_time_terms_incomplete'
+        ? { kind: 'terms_incomplete' }
+        : { kind: 'error', message: renderError(caught instanceof Error ? caught : new Error('排班日曆查詢失敗')) };
+      return { row };
+    }
+  };
+
+  const readHistorical = async (): Promise<Pick<CalendarMonthResult, 'monthly' | 'overlays' | 'ranges' | 'historicalError'>> => {
+    if (previous && previous.historicalError === null) {
+      const { monthly, overlays, ranges } = previous;
+      return { monthly, overlays, ranges, historicalError: null };
+    }
+    const ranges = new Map<string, HistoricalCaseRanges | null>();
+    try {
+      const monthly = await staffMonthlyScheduleClient.query(staff.id, year, month, { signal });
+      const overlays = adaptHistoricalAssignmentOverlays(monthly);
+      const caseNos = new Set(monthly.days.flatMap(day => (
+        (day.status === 'historical_assignment' || day.status === 'historical_reservation') && day.case_no ? [day.case_no] : []
+      )));
+      for (const caseNo of caseNos) {
+        if (signal.aborted) break;
+        ranges.set(caseNo, await loadHistoricalCaseRanges(caseNo, signal));
+      }
+      return { monthly, overlays, ranges, historicalError: [...ranges.values()].some(value => value === null) ? '整案日期載入失敗，可重試。' : null };
+    } catch (caught) {
+      return {
+        overlays: [], ranges,
+        historicalError: caught instanceof Error ? caught.message : '歷史指派月曆載入失敗。',
+      };
+    }
+  };
+
+  const [canonical, historical] = await Promise.all([readCanonical(), readHistorical()]);
+  return { kind: 'settled', ...canonical, ...historical };
 }
 
 function resolveOrderSpanEnrichment(
@@ -1119,12 +1203,11 @@ function monthlyShiftSpans(
       const existing = activeOrderSpans.get(orderKey);
       if (existing && (existing.endDay >= day - 1)) {
         existing.endDay = Math.max(existing.endDay, day);
-        if (shift.work_date > existing.visualEndDate
-          && (shift.assignment_id != null || !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate)) {
+        if (continuation && !existing.dailyTimeText?.includes('續班')) {
+          existing.dailyTimeText = `${existing.dailyTimeText ?? ''} 續班`.trim();
+        }
+        if (shift.work_date > existing.visualEndDate) {
           existing.visualEndDate = shift.work_date;
-          existing.dateRangeText = existing.visualStartDate === existing.visualEndDate
-            ? existing.visualStartDate
-            : `${existing.visualStartDate} ～ ${existing.visualEndDate}`;
         }
         continue;
       }
@@ -1143,10 +1226,9 @@ function monthlyShiftSpans(
     const prior = previous.get(key);
     if (prior?.endDay === day - 1) {
       prior.endDay = day;
-      if (shift.work_date > prior.visualEndDate
-        && (isHistorical || shift.assignment_id != null || !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate)) {
+      if (shift.work_date > prior.visualEndDate) {
         prior.visualEndDate = shift.work_date;
-        prior.dateRangeText = prior.visualStartDate === prior.visualEndDate
+        if (isHistorical) prior.dateRangeText = prior.visualStartDate === prior.visualEndDate
           ? prior.visualStartDate
           : `${prior.visualStartDate} ～ ${prior.visualEndDate}`;
       }
@@ -1160,7 +1242,6 @@ function monthlyShiftSpans(
       shift.work_date,
       context,
     );
-    const useFullRange = shift.case_no && (shift.status === 'working' || shift.status === 'resting' || shift.status === 'waiting_deposit_lock');
     const icon = shift.status === 'working' || shift.status === 'resting'
       ? '🟢'
       : shift.status === 'waiting_deposit_lock'
@@ -1175,8 +1256,8 @@ function monthlyShiftSpans(
       id: `${key}:${day}`,
       startDay: day,
       endDay: day,
-      visualStartDate: useFullRange ? enrichment.fullStartDate : shift.work_date,
-      visualEndDate: useFullRange ? enrichment.fullEndDate : shift.work_date,
+      visualStartDate: shift.work_date,
+      visualEndDate: shift.work_date,
       lane,
       icon,
       tone: tones[shift.status],
@@ -1184,7 +1265,8 @@ function monthlyShiftSpans(
       caseText: shift.case_no || labels[shift.status],
       dateRangeText: isHistorical ? shift.work_date : enrichment.dateRangeText,
       dailyTimeText: time || enrichment.dailyTimeText,
-      statusLabel: labels[shift.status],
+      statusLabel: shift.status === 'historical_assignment' && !shift.starts_at
+        ? '歷史指派區間（不計入工時）' : labels[shift.status],
       shift,
     };
     spans.push(span);
@@ -1289,186 +1371,6 @@ function ghostCaseSpan(
   };
 }
 
-function buildGanttSpans(
-  state: CalendarRowState | undefined,
-  totalDays: number,
-  ghostConfig?: GhostProjectionConfig | null,
-  historicalOverlays: readonly HistoricalAssignmentOverlay[] = [],
-  context?: SpanEnrichmentContext,
-): GanttSpan[] {
-  const ymFallback = context
-    ? `${String(context.year).padStart(4, '0')}-${String(context.month).padStart(2, '0')}`
-    : `${taipeiCalendarDate(new Date()).year}-${String(taipeiCalendarDate(new Date()).month).padStart(2, '0')}`;
-  const mapHistoricalOverlay = (overlay: HistoricalAssignmentOverlay, startDay: number, endDay: number): GanttSpan => ({
-    id: `historical-${overlay.assignmentId}-${startDay}`,
-    startDay,
-    endDay,
-    visualStartDate: startDay === Number(overlay.startDate.slice(8, 10)) && endDay === Number(overlay.endDate.slice(8, 10))
-      ? overlay.startDate
-      : `${ymFallback}-${String(startDay).padStart(2, '0')}`,
-    visualEndDate: startDay === Number(overlay.startDate.slice(8, 10)) && endDay === Number(overlay.endDate.slice(8, 10))
-      ? overlay.endDate
-      : `${ymFallback}-${String(endDay).padStart(2, '0')}`,
-    tone: 'historical',
-    icon: '🕘',
-    clientName: overlay.clientName,
-    caseText: overlay.caseNo,
-    dateRangeText: overlay.startDate === overlay.endDate ? overlay.startDate : `${overlay.startDate} ～ ${overlay.endDate}`,
-    statusLabel: '歷史指派區間（不計入工時）',
-  });
-
-  if (state?.kind === 'empty') {
-    if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
-      const start = Math.max(1, ghostConfig.startDay);
-      const end = Math.min(totalDays, ghostConfig.endDay);
-      return [ghostCaseSpan(ghostConfig, start, end)];
-    }
-    return assignNonOverlappingLanes(historicalOverlays.map((overlay) =>
-      mapHistoricalOverlay(overlay, Number(overlay.startDate.slice(8, 10)), Number(overlay.endDate.slice(8, 10))),
-    ));
-  }
-
-  if (!state || state.kind === 'terms_incomplete' || state.kind === 'error') {
-    return assignNonOverlappingLanes(historicalOverlays.map((overlay) =>
-      mapHistoricalOverlay(overlay, Number(overlay.startDate.slice(8, 10)), Number(overlay.endDate.slice(8, 10))),
-    ));
-  }
-
-  const row = state.row;
-  const spans: GanttSpan[] = [];
-  let current: GanttSpan | null = null;
-  let currentCaseNo: string | null = null;
-
-  const finalizeCurrentSpan = (span: GanttSpan, caseNo: string | null) => {
-    const enrichment = resolveOrderSpanEnrichment(
-      caseNo,
-      null,
-      span.visualStartDate,
-      span.visualEndDate,
-      context,
-    );
-    const shouldExpandCrossMonth = caseNo !== null && (span.tone === 'active' || span.tone === 'waiting');
-    spans.push({
-      ...span,
-      clientName: enrichment.clientName,
-      dateRangeText: enrichment.dateRangeText,
-      dailyTimeText: enrichment.dailyTimeText,
-      visualStartDate: shouldExpandCrossMonth ? enrichment.fullStartDate : span.visualStartDate,
-      visualEndDate: shouldExpandCrossMonth ? enrichment.fullEndDate : span.visualEndDate,
-    });
-  };
-
-  row.days.forEach((day, index) => {
-    const dayNum = index + 1;
-    const isOccupied = day.occupancyKinds.length > 0;
-    const primaryCaseNo = day.caseLabels.length === 1 ? day.caseLabels[0] : null;
-    const isRestMergedIntoOrder = day.tone === 'rest'
-      && day.caseLabels.length > 0
-      && !day.occupancyKinds.includes('staff_unavailability')
-      && !day.occupancyKinds.includes('assignment_buffer');
-
-    const tone: GanttSpan['tone'] = isRestMergedIntoOrder
-      ? 'active'
-      : day.tone === 'rest'
-        ? (day.assignmentStatuses.includes('active') ? 'rest' : 'active')
-        : day.tone;
-    const caseText = day.caseLabels.join('、') || (isOccupied ? day.statusLabel : NO_OCCUPANCY_SLOT_TEXT);
-    const mergedOrderLabel = day.assignmentStatuses.includes('completed')
-      ? '服務已結束'
-      : day.assignmentStatuses.includes('active')
-        ? '服務中'
-        : day.assignmentStatuses.includes('planned')
-          ? '已排定服務'
-          : day.statusLabel;
-    const statusLabel = day.caseLabels.length > 0
-      ? (isRestMergedIntoOrder ? mergedOrderLabel : day.statusLabel)
-      : undefined;
-    const icon: string | undefined = tone === 'active'
-      ? '🟢'
-      : tone === 'rest'
-        ? '🔴'
-        : tone === 'buffer'
-          ? '🔒'
-          : tone === 'leave'
-            ? '🚑'
-            : tone === 'waiting'
-              ? '🔵'
-              : undefined;
-
-    if (!current) {
-      if (isOccupied) {
-        current = {
-          id: `span-${dayNum}`,
-          startDay: dayNum,
-          endDay: dayNum,
-          visualStartDate: day.date,
-          visualEndDate: day.date,
-          tone,
-          icon,
-          caseText,
-          statusLabel,
-        };
-        currentCaseNo = primaryCaseNo;
-      }
-    } else if (
-      current.tone === tone
-      && current.caseText === caseText
-      && current.statusLabel === statusLabel
-    ) {
-      current.endDay = dayNum;
-      current.visualEndDate = day.date;
-    } else {
-      finalizeCurrentSpan(current, currentCaseNo);
-      if (isOccupied) {
-        current = {
-          id: `span-${dayNum}`,
-          startDay: dayNum,
-          endDay: dayNum,
-          visualStartDate: day.date,
-          visualEndDate: day.date,
-          tone,
-          icon,
-          caseText,
-          statusLabel,
-        };
-        currentCaseNo = primaryCaseNo;
-      } else {
-        current = null;
-        currentCaseNo = null;
-      }
-    }
-  });
-
-  if (current) {
-    finalizeCurrentSpan(current, currentCaseNo);
-  }
-
-  if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
-    spans.push(ghostCaseSpan(ghostConfig, ghostConfig.startDay, ghostConfig.endDay));
-  }
-
-  const canonicalDays = new Set<number>();
-  spans.filter((span) => span.tone !== 'historical').forEach((span) => {
-    for (let day = span.startDay; day <= span.endDay; day += 1) canonicalDays.add(day);
-  });
-  historicalOverlays.forEach((overlay) => {
-    const startDay = Number(overlay.startDate.slice(8, 10));
-    const endDay = Number(overlay.endDate.slice(8, 10));
-    let segmentStart: number | null = null;
-    for (let day = startDay; day <= endDay + 1; day += 1) {
-      const canRender = day <= endDay && !canonicalDays.has(day);
-      if (canRender && segmentStart == null) segmentStart = day;
-      if (!canRender && segmentStart != null) {
-        const segmentEnd = day - 1;
-        spans.push(mapHistoricalOverlay(overlay, segmentStart, segmentEnd));
-        segmentStart = null;
-      }
-    }
-  });
-
-  return assignNonOverlappingLanes(spans);
-}
-
 const SchedulingWorkbench: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
   const [activeTab, setActiveTab] = useState<SchedulingTab>('calendar');
@@ -1488,16 +1390,9 @@ const SchedulingWorkbench: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
-  const [calendarRows, setCalendarRows] = useState<Record<number, CalendarRowState>>({});
-  const [historicalOverlaysByStaff, setHistoricalOverlaysByStaff] = useState<Record<number, HistoricalAssignmentOverlay[]>>({});
-  const [monthlyRowsByStaff, setMonthlyRowsByStaff] = useState<Record<number, StaffMonthlySchedule | undefined>>({});
-  const [historicalRangesByStaff, setHistoricalRangesByStaff] = useState<Record<number, ReadonlyMap<string, HistoricalCaseRanges | null>>>({});
+  const [calendarCache, setCalendarCache] = useState<ReadonlyMap<string, CalendarMonthCacheEntry>>(() => new Map());
   const [orderSummariesByCaseNo, setOrderSummariesByCaseNo] = useState<Record<string, OrderSummaryInfo>>({});
   const [selectedShift, setSelectedShift] = useState<GanttSpan | null>(null);
-  const [historicalOverlayErrors, setHistoricalOverlayErrors] = useState<Record<number, string>>({});
-  const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
-  const [calendarError, setCalendarError] = useState<Error | null>(null);
-  const [retryGeneration, setRetryGeneration] = useState<number>(0);
   const [availabilityRevision, setAvailabilityRevision] = useState(0);
   const [eligibilityCaseNo, setEligibilityCaseNo] = useState('');
   const [eligibilityState, setEligibilityState] = useState<EligibilityCollisionState>({ kind: 'idle' });
@@ -1518,33 +1413,43 @@ const SchedulingWorkbench: React.FC = () => {
   const directorySentinelRef = useRef<HTMLDivElement | null>(null);
   const calendarHeaderScrollRef = useRef<HTMLDivElement | null>(null);
   const calendarBodyScrollRef = useRef<HTMLDivElement | null>(null);
-  const [pendingTodayScroll, setPendingTodayScroll] = useState(false);
+  const pendingTodayScrollRef = useRef(false);
   const [scrollLeftValue, setScrollLeftValue] = useState(0);
-  const [scrollMetrics, setScrollMetrics] = useState<{ max: number; thumbWidth: number; clientTimelineWidth: number; measuredZeroOverflow: boolean }>({
+  const [scrollMetrics, setScrollMetrics] = useState({
     max: GANTT_TOTAL_THIRDS * GANTT_THIRD_COL_WIDTH,
     thumbWidth: 160,
-    clientTimelineWidth: 1200,
+    clientTimelineWidth: 0,
+    thirdWidth: GANTT_THIRD_COL_WIDTH,
     measuredZeroOverflow: false,
   });
-  const calendarControllerRef = useRef<AbortController | null>(null);
+  const calendarRequestsRef = useRef(new Map<string, { target: CalendarMonthTarget; controller: AbortController }>());
   const caseOptionsControllerRef = useRef<AbortController | null>(null);
   const assignmentOptionsByStaffRef = useRef(new Map<number, readonly StaffAssignmentOption[]>());
-  const calendarLoadedKeyRef = useRef<Map<number, string>>(new Map());
-  const calendarRetryStaffIdsRef = useRef<Set<number>>(new Set());
   const eligibilityControllerRef = useRef<AbortController | null>(null);
   const caseEligibilityControllerRef = useRef<AbortController | null>(null);
 
+  const invalidateCalendarMonths = useCallback((matches: (target: CalendarMonthTarget) => boolean) => {
+    for (const [key, request] of calendarRequestsRef.current) {
+      if (!matches(request.target)) continue;
+      calendarRequestsRef.current.delete(key);
+      request.controller.abort();
+    }
+    setCalendarCache(current => new Map([...current].filter(([, entry]) => !matches(entry.target))));
+  }, []);
+
   useEffect(() => subscribeStaffAvailabilityChanges(staffId => {
     if (!staffList.some(staff => staff.id === staffId)) return;
-    calendarControllerRef.current?.abort();
-    calendarLoadedKeyRef.current.delete(staffId);
-    setCalendarRows(current => {
-      const next = { ...current };
-      delete next[staffId];
-      return next;
-    });
+    invalidateCalendarMonths(target => target.staff.id === staffId);
     setAvailabilityRevision(revision => revision + 1);
-  }), [staffList]);
+  }), [invalidateCalendarMonths, staffList]);
+
+  useLayoutEffect(() => {
+    const requests = calendarRequestsRef.current;
+    return () => {
+      requests.forEach(request => request.controller.abort());
+      requests.clear();
+    };
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1552,7 +1457,6 @@ const SchedulingWorkbench: React.FC = () => {
       mountedRef.current = false;
       directoryControllerRef.current?.abort();
       directoryPendingCursorRef.current = null;
-      calendarControllerRef.current?.abort();
       caseOptionsControllerRef.current?.abort();
       eligibilityControllerRef.current?.abort();
       caseEligibilityControllerRef.current?.abort();
@@ -1793,145 +1697,6 @@ const SchedulingWorkbench: React.FC = () => {
     return () => controller.abort();
   }, [activeTab, range, holidayReload]);
 
-  const prevMonthRef = useRef<MonthSelection | null>(null);
-
-  // 切換月份時重置排班快取
-  useEffect(() => {
-    if (prevMonthRef.current === null) {
-      prevMonthRef.current = month;
-      return;
-    }
-    if (prevMonthRef.current.year !== month.year || prevMonthRef.current.month !== month.month) {
-      prevMonthRef.current = month;
-      setCalendarRows({});
-      calendarLoadedKeyRef.current.clear();
-    }
-  }, [month]);
-
-  // 甘特矩陣中的每一列都必須有自己的 server projection，不能只查目前選取的人員。
-  useEffect(() => {
-    if (staffList.length === 0) return undefined;
-    const rangeKey = `${range.rangeStart}:${range.rangeEnd}`;
-    const staffToLoad = staffList.filter(
-      (staff) => calendarLoadedKeyRef.current.get(staff.id) !== rangeKey
-        || calendarRetryStaffIdsRef.current.has(staff.id),
-    );
-    if (staffToLoad.length === 0) return undefined;
-
-    staffToLoad.forEach((staff) => calendarLoadedKeyRef.current.set(staff.id, rangeKey));
-    const pendingStaffIds = new Set(staffToLoad.map(staff => staff.id));
-
-    let cancelled = false;
-    const controller = new AbortController();
-    calendarControllerRef.current?.abort();
-    calendarControllerRef.current = controller;
-    setCalendarLoading(true);
-    setCalendarError(null);
-
-    const loadRows = async () => {
-      const caseRequests = new Map<string, Promise<HistoricalCaseRanges | null>>();
-      const loadStaffRow = async (staff: (typeof staffToLoad)[number]) => {
-        // Each row needs two independent projections. Limit active rows so queued
-        // browser requests do not consume their timeout before reaching the API.
-        const [historical, canonical] = await Promise.allSettled([staffMonthlyScheduleClient.query(
-          staff.id, month.year, month.month, { signal: controller.signal },
-        ), schedulingCurrentClient.queryCurrentCalendar(
-          {
-            staffId: staff.id,
-            rangeStart: range.rangeStart,
-            rangeEnd: range.rangeEnd,
-          },
-          { signal: controller.signal },
-        )]);
-        let overlays: HistoricalAssignmentOverlay[] = [];
-        let historicalError: string | null = null;
-        try {
-          if (historical.status === 'rejected') throw historical.reason;
-          overlays = adaptHistoricalAssignmentOverlays(historical.value);
-        } catch (caught) {
-          historicalError = caught instanceof Error ? caught.message : '歷史指派月曆載入失敗。';
-        }
-        try {
-          if (canonical.status === 'rejected') throw canonical.reason;
-          const projection = canonical.value;
-          const state: CalendarRowState = projection.days.length === 0
-            ? { kind: 'empty' }
-            : {
-                kind: 'loaded',
-                row: adaptSchedulingProjection(staff, projection),
-                assignments: projection.assignments,
-              };
-          return { staffId: staff.id, state, overlays, historicalError, monthly: historical.status === 'fulfilled' ? historical.value : undefined, error: null };
-        } catch (caught) {
-          const error = caught instanceof Error ? caught : new Error('排班日曆查詢失敗');
-          const state: CalendarRowState = caught instanceof SchedulingCurrentError
-            && caught.publicCode === 'service_time_terms_incomplete'
-            ? { kind: 'terms_incomplete' }
-            : { kind: 'error', message: renderError(error) };
-          return { staffId: staff.id, state, overlays, historicalError, monthly: historical.status === 'fulfilled' ? historical.value : undefined, error: state.kind === 'error' ? error : null };
-        }
-      };
-      const results = await loadStaffQueries(staffToLoad, controller.signal, async staff => {
-        const result = await loadStaffRow(staff);
-        const caseNos = new Set(result.monthly?.days.flatMap(day =>
-          (day.status === 'historical_assignment' || day.status === 'historical_reservation') && day.case_no ? [day.case_no] : [],
-        ));
-        const ranges = new Map<string, HistoricalCaseRanges | null>();
-        for (const caseNo of caseNos) {
-          if (controller.signal.aborted) break;
-          let request = caseRequests.get(caseNo);
-          if (!request) {
-            request = loadHistoricalCaseRanges(caseNo, controller.signal);
-            caseRequests.set(caseNo, request);
-          }
-          ranges.set(caseNo, await request);
-        }
-        if (mountedRef.current && !controller.signal.aborted && !cancelled) {
-          pendingStaffIds.delete(result.staffId);
-          calendarLoadedKeyRef.current.set(result.staffId, rangeKey);
-          calendarRetryStaffIdsRef.current.delete(result.staffId);
-          setCalendarRows(current => ({ ...current, [result.staffId]: result.state }));
-          setHistoricalOverlaysByStaff(current => ({ ...current, [result.staffId]: result.overlays }));
-          setMonthlyRowsByStaff(current => ({ ...current, [result.staffId]: result.monthly }));
-          setHistoricalRangesByStaff(current => ({ ...current, [result.staffId]: ranges }));
-          setHistoricalOverlayErrors(current => {
-            const next = { ...current };
-            if (result.historicalError) next[result.staffId] = result.historicalError;
-            else delete next[result.staffId];
-            return next;
-          });
-        }
-        return result;
-      });
-      if (!mountedRef.current || controller.signal.aborted || cancelled) return;
-      const failed = results.filter((result) => result.error !== null);
-      if (failed.length > 0) {
-        setCalendarError(new Error(
-          `${failed.length} 位服務人員的排班資料載入失敗；請查看各列狀態後重試。`,
-        ));
-      }
-    };
-
-    queueMicrotask(() => {
-      if (!cancelled) {
-        void loadRows().finally(() => {
-          if (mountedRef.current && !controller.signal.aborted && !cancelled) {
-            setCalendarLoading(false);
-          }
-        });
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      // A change may interrupt other rows in this batch; they still need a fresh read.
-      for (const staffId of pendingStaffIds) {
-        if (calendarLoadedKeyRef.current.get(staffId) === rangeKey) calendarLoadedKeyRef.current.delete(staffId);
-      }
-    };
-  }, [range, retryGeneration, staffList, month.year, month.month, availabilityRevision]);
-
   const queryEligibility = useCallback(async (overrideCaseNo?: string, overrideStaffId?: number | null) => {
     const caseNo = (overrideCaseNo ?? eligibilityCaseNo ?? selectedCaseNo).trim();
     const staffId = overrideStaffId !== undefined ? overrideStaffId : selectedStaffId;
@@ -1961,25 +1726,6 @@ const SchedulingWorkbench: React.FC = () => {
     }
   }, [collisionDrawerOpen, selectedStaffId, eligibilityCaseNo, selectedCaseNo, queryEligibility, availabilityRevision]);
 
-  // 篩選與搜尋過濾
-  const filteredStaff = useMemo(() => {
-    return staffList.filter((staff) => {
-      const matchKeyword =
-        !searchKeyword ||
-        staff.displayName.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-        (staff.unionNo ?? '').toLowerCase().includes(searchKeyword.toLowerCase());
-
-      if (!matchKeyword) return false;
-
-      const state = calendarRows[staff.id];
-      if (state?.kind === 'loaded' && !matchesSchedulingFilter(state.row, statusFilter)) return false;
-      if (state?.kind !== 'loaded' && statusFilter !== 'all') return false;
-
-      return true;
-    });
-  }, [staffList, searchKeyword, statusFilter, calendarRows]);
-
-  const selectedStaffRow = selectedStaffId ? calendarRows[selectedStaffId] : null;
   const taipeiToday = todayIsoDate();
   const [taipeiYear, taipeiMonth, taipeiDay] = taipeiToday.split('-');
 
@@ -1995,61 +1741,83 @@ const SchedulingWorkbench: React.FC = () => {
 
   const syncScrollMetrics = useCallback(() => {
     const body = calendarBodyScrollRef.current;
-    if (!body || body.scrollWidth <= 0 || body.clientWidth <= 0) return;
+    const header = calendarHeaderScrollRef.current;
+    if (!body || !header || body.scrollWidth <= 0 || body.clientWidth <= 0) return;
+    const staffWidth = header.querySelector('.gantt-staff-header-cell')?.getBoundingClientRect().width || 260;
+    const thirdWidth = header.querySelector('.gantt-third-header-col')?.getBoundingClientRect().width || GANTT_THIRD_COL_WIDTH;
     const max = Math.max(0, body.scrollWidth - body.clientWidth);
     const ratio = Math.min(1, body.clientWidth / body.scrollWidth);
     setScrollMetrics({
       max,
-      thumbWidth: Math.max(64, Math.round(ratio * Math.max(300, body.clientWidth - 360))),
-      clientTimelineWidth: Math.max(300, body.clientWidth - 260),
+      thumbWidth: Math.max(64, Math.round(ratio * Math.max(300, body.clientWidth - staffWidth - 100))),
+      clientTimelineWidth: Math.max(0, body.clientWidth - staffWidth),
+      thirdWidth,
       measuredZeroOverflow: max === 0,
     });
+    setScrollLeftValue(body.scrollLeft);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const body = calendarBodyScrollRef.current;
+    if (!body || activeTab !== 'calendar') return;
     syncScrollMetrics();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(syncScrollMetrics) : null;
+    observer?.observe(body);
     window.addEventListener('resize', syncScrollMetrics);
-    return () => window.removeEventListener('resize', syncScrollMetrics);
-  }, [syncScrollMetrics, activeTab, filteredStaff.length]);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', syncScrollMetrics);
+    };
+  }, [syncScrollMetrics, activeTab, staffList.length]);
 
   const applyHorizontalScroll = useCallback((nextLeft: number) => {
     const body = calendarBodyScrollRef.current;
     const header = calendarHeaderScrollRef.current;
-    const max = body && body.scrollWidth > body.clientWidth
+    const max = body && body.scrollWidth > 0 && body.clientWidth > 0
       ? Math.max(0, body.scrollWidth - body.clientWidth)
-      : scrollMetrics.max;
+      : GANTT_TOTAL_THIRDS * GANTT_THIRD_COL_WIDTH;
     const clamped = Math.max(0, Math.min(max, nextLeft));
     if (body) body.scrollLeft = clamped;
     if (header) header.scrollLeft = clamped;
     setScrollLeftValue(clamped);
-  }, [scrollMetrics.max]);
+  }, []);
 
   const scrollToMonthColumn = useCallback((targetMonth: number) => {
     const body = calendarBodyScrollRef.current;
     if (!body || body.scrollWidth <= body.clientWidth) return;
-    const monthOffset = Math.max(0, (targetMonth - 1) * 3 * GANTT_THIRD_COL_WIDTH - 20);
+    const thirdWidth = calendarHeaderScrollRef.current?.querySelector('.gantt-third-header-col')?.getBoundingClientRect().width || GANTT_THIRD_COL_WIDTH;
+    const monthOffset = Math.max(0, (targetMonth - 1) * 3 * thirdWidth - 20);
     applyHorizontalScroll(monthOffset);
   }, [applyHorizontalScroll]);
 
   const stepScrollByThird = useCallback((deltaThirds: number) => {
     const current = calendarBodyScrollRef.current?.scrollLeft ?? scrollLeftValue;
-    applyHorizontalScroll(current + deltaThirds * GANTT_THIRD_COL_WIDTH);
-  }, [applyHorizontalScroll, scrollLeftValue]);
+    applyHorizontalScroll(current + deltaThirds * scrollMetrics.thirdWidth);
+  }, [applyHorizontalScroll, scrollLeftValue, scrollMetrics.thirdWidth]);
 
   const visibleMonthRange = useMemo(() => {
-    const timelineWidth = GANTT_TOTAL_THIRDS * GANTT_THIRD_COL_WIDTH;
-    const viewW = scrollMetrics.clientTimelineWidth;
-    const startMonth = Math.max(1, Math.min(12, Math.floor((scrollLeftValue / timelineWidth) * 12) + 1));
-    const endMonth = Math.max(startMonth, Math.min(12, Math.floor(((scrollLeftValue + viewW - 1) / timelineWidth) * 12) + 1));
+    const { clientTimelineWidth, thirdWidth } = scrollMetrics;
+    const monthWidth = thirdWidth * 3;
+    const startMonth = clientTimelineWidth > 0
+      ? Math.max(1, Math.min(12, Math.floor(scrollLeftValue / monthWidth) + 1))
+      : month.month;
+    const endMonth = clientTimelineWidth > 0
+      ? Math.max(startMonth, Math.min(12, Math.ceil((scrollLeftValue + clientTimelineWidth) / monthWidth)))
+      : startMonth;
     return {
       startMonth,
       endMonth,
       label: startMonth === endMonth ? `目前可視：${startMonth}月` : `目前可視：${startMonth}月 ～ ${endMonth}月`,
     };
-  }, [scrollLeftValue, scrollMetrics.clientTimelineWidth]);
+  }, [month.month, scrollLeftValue, scrollMetrics]);
 
-  useEffect(() => {
-    if (!pendingTodayScroll) return;
+  useLayoutEffect(() => {
+    if (activeTab !== 'calendar') return;
+    if (!pendingTodayScrollRef.current) {
+      scrollToMonthColumn(month.month);
+      return;
+    }
+    pendingTodayScrollRef.current = false;
     const header = calendarHeaderScrollRef.current;
     const body = calendarBodyScrollRef.current;
     const today = header?.querySelector<HTMLElement>(`[data-date="${taipeiToday}"]`);
@@ -2059,16 +1827,104 @@ const SchedulingWorkbench: React.FC = () => {
     const todayRect = today.getBoundingClientRect();
     const left = Math.max(0, todayRect.left - header.getBoundingClientRect().left
       + header.scrollLeft - staffWidth - (body.clientWidth - staffWidth - todayRect.width) / 2);
-    body.scrollLeft = left;
-    header.scrollLeft = body.scrollLeft;
-    setScrollLeftValue(body.scrollLeft);
-    setPendingTodayScroll(false);
-  }, [pendingTodayScroll, month, taipeiToday, filteredStaff.length, activeTab]);
+    applyHorizontalScroll(left);
+  }, [activeTab, applyHorizontalScroll, month, scrollToMonthColumn, taipeiToday]);
+
+  const { startMonth, endMonth } = visibleMonthRange;
+  const diagnosticMonth = month.month >= startMonth && month.month <= endMonth ? month.month : startMonth;
+  const calendarTargets = useMemo(() => {
+    const targets = new Map<string, CalendarMonthTarget>();
+    if (activeTab !== 'calendar') return targets;
+    const viewportMonths = Array.from({ length: endMonth - startMonth + 1 }, (_, offset) => startMonth + offset);
+    const prioritizedMonths = [diagnosticMonth, ...viewportMonths.filter(value => value !== diagnosticMonth)];
+    for (const targetMonth of prioritizedMonths) {
+      for (const staff of staffList) {
+        targets.set(calendarMonthKey(staff.id, month.year, targetMonth), { staff, year: month.year, month: targetMonth });
+      }
+    }
+    return targets;
+  }, [activeTab, diagnosticMonth, startMonth, endMonth, month.year, staffList]);
 
   useEffect(() => {
-    if (pendingTodayScroll || activeTab !== 'calendar') return;
-    scrollToMonthColumn(month.month);
-  }, [month.month, month.year, activeTab, pendingTodayScroll, scrollToMonthColumn]);
+    if (activeTab !== 'calendar') return;
+    const refreshVisibleMonths = () => {
+      if (document.visibilityState !== 'visible') return;
+      invalidateCalendarMonths(target => calendarTargets.has(calendarMonthKey(target.staff.id, target.year, target.month)));
+    };
+    document.addEventListener('visibilitychange', refreshVisibleMonths);
+    return () => document.removeEventListener('visibilitychange', refreshVisibleMonths);
+  }, [activeTab, calendarTargets, invalidateCalendarMonths]);
+
+  useLayoutEffect(() => {
+    const requests = calendarRequestsRef.current;
+    for (const [key, request] of requests) {
+      if (calendarTargets.has(key)) continue;
+      requests.delete(key);
+      request.controller.abort();
+    }
+
+    for (const [key, target] of calendarTargets) {
+      if (requests.size >= 3) break;
+      const cached = calendarCache.get(key);
+      if (requests.has(key) || (cached && !cached.retry)) continue;
+      const request = { target, controller: new AbortController() };
+      requests.set(key, request);
+      queueMicrotask(() => {
+        const { signal } = request.controller;
+        if (signal.aborted) return;
+        void loadCalendarMonth(target, signal, cached?.result).then(result => {
+          if (signal.aborted || requests.get(key) !== request) return;
+          requests.delete(key);
+          setCalendarCache(current => new Map(current).set(key, { target, result }));
+        });
+      });
+    }
+  }, [calendarCache, calendarTargets]);
+
+  const calendarMonthsByStaff = useMemo(() => {
+    const entries = new Map<number, Map<number, CalendarMonthResult>>();
+    for (const { target, result } of calendarCache.values()) {
+      if (target.year !== month.year) continue;
+      let staffMonths = entries.get(target.staff.id);
+      if (!staffMonths) {
+        staffMonths = new Map();
+        entries.set(target.staff.id, staffMonths);
+      }
+      staffMonths.set(target.month, result);
+    }
+    return entries;
+  }, [calendarCache, month.year]);
+
+  const getCalendarMonth = useCallback((staffId: number, targetMonth: number): CalendarMonthState => {
+    const key = calendarMonthKey(staffId, month.year, targetMonth);
+    return calendarCache.get(key)?.result ?? { kind: calendarTargets.has(key) ? 'loading' : 'unloaded' };
+  }, [calendarCache, calendarTargets, month.year]);
+
+  const filteredStaff = useMemo(() => {
+    const keyword = searchKeyword.toLowerCase();
+    return staffList.filter(staff => {
+      if (keyword && !staff.displayName.toLowerCase().includes(keyword)
+        && !(staff.unionNo ?? '').toLowerCase().includes(keyword)) return false;
+      if (statusFilter === 'all') return true;
+      const state = getCalendarMonth(staff.id, diagnosticMonth);
+      return state.kind === 'settled' && state.row.kind === 'loaded' && matchesSchedulingFilter(state.row.row, statusFilter);
+    });
+  }, [staffList, searchKeyword, statusFilter, getCalendarMonth, diagnosticMonth]);
+
+  const selectedStaffMonth = selectedStaffId === null ? null : getCalendarMonth(selectedStaffId, diagnosticMonth);
+  const selectedStaffRow = selectedStaffMonth?.kind === 'settled' ? selectedStaffMonth.row : null;
+  const selectedMonths = selectedStaffId === null
+    ? [] : Array.from({ length: endMonth - startMonth + 1 }, (_, offset) => getCalendarMonth(selectedStaffId, startMonth + offset));
+  const selectedRangeEmpty = selectedMonths.length > 0 && selectedMonths.every(entry => entry.kind === 'settled'
+    && entry.row.kind === 'empty' && entry.historicalError === null && entry.overlays.length === 0
+    && !entry.monthly?.days.some(day => day.status !== 'available'));
+  const failedCalendarStaff = new Set<number>();
+  let calendarLoading = false;
+  for (const [key, target] of calendarTargets) {
+    const cached = calendarCache.get(key);
+    if (!cached || cached.retry) calendarLoading = true;
+    else if (calendarMonthFailed(cached.result)) failedCalendarStaff.add(target.staff.id);
+  }
   const eligibilityResult = eligibilityState.kind === 'ready'
     ? eligibilityDisplay(eligibilityState.data)
     : null;
@@ -2131,12 +1987,14 @@ const SchedulingWorkbench: React.FC = () => {
   const nextMonthName = `${month.month === 12 ? 1 : month.month + 1}月`;
 
   const retryFailedCalendarRows = () => {
-    const failedStaffIds = staffList
-      .filter((staff) => calendarRows[staff.id]?.kind === 'error')
-      .map((staff) => staff.id);
-    if (failedStaffIds.length === 0) return;
-    calendarRetryStaffIdsRef.current = new Set(failedStaffIds);
-    setRetryGeneration((current) => current + 1);
+    setCalendarCache(current => {
+      const next = new Map(current);
+      for (const key of calendarTargets.keys()) {
+        const failed = current.get(key);
+        if (failed && calendarMonthFailed(failed.result)) next.set(key, { ...failed, retry: true });
+      }
+      return next;
+    });
   };
 
   return (
@@ -2221,8 +2079,8 @@ const SchedulingWorkbench: React.FC = () => {
                 className="gantt-today-btn"
                 data-control-id="scheduling.calendar.today"
                 onClick={() => {
+                  pendingTodayScrollRef.current = true;
                   setMonth(currentMonth());
-                  setPendingTodayScroll(true);
                 }}
               >
                 🗓 今天 ({Number(taipeiMonth)}/{Number(taipeiDay)})
@@ -2290,10 +2148,7 @@ const SchedulingWorkbench: React.FC = () => {
                   key={targetMonth}
                   type="button"
                   className={`month-jump-pill ${isSelected ? 'active' : ''} ${isInView ? 'is-in-view' : ''} ${isCurrentRealMonth ? 'is-current-month' : ''}`}
-                  onClick={() => {
-                    setMonth((value) => ({ year: value.year, month: targetMonth }));
-                    scrollToMonthColumn(targetMonth);
-                  }}
+                  onClick={() => setMonth(value => ({ year: value.year, month: targetMonth }))}
                 >
                   {targetMonth}月
                 </button>
@@ -2443,10 +2298,10 @@ const SchedulingWorkbench: React.FC = () => {
           {calendarLoading && (
             <div className="scheduling-status" role="status">正在載入排班月曆…</div>
           )}
-          {selectedStaffId && selectedStaffRow?.kind === 'empty' && !calendarLoading && !calendarError && (
+          {selectedRangeEmpty && !calendarLoading && failedCalendarStaff.size === 0 && (
             <div className="scheduling-status">目前範圍沒有排班資料。</div>
           )}
-          {selectedStaffId && selectedStaffRow?.kind === 'terms_incomplete' && !calendarLoading && !calendarError && (
+          {selectedStaffRow?.kind === 'terms_incomplete' && (
             <div className="scheduling-status error" role="alert" style={{ background: '#fffbeb', borderColor: '#f59e0b', color: '#b45309' }}>
               ⚠️ 該服務人員所屬訂單的每日服務時段尚未完整，請至本案客戶與訂單資料補齊。
             </div>
@@ -2454,10 +2309,11 @@ const SchedulingWorkbench: React.FC = () => {
           {holidayLoading && <p role="status">正在讀取當月國定假日…</p>}
           {holidayError && <p role="alert">國定假日標示載入失敗：{holidayError} <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button></p>}
           {!holidayLoading && !holidayError && monthHolidays.length === 0 && <p className="scheduling-status">本月沒有已匯入的國定假日資料。</p>}
-          {calendarError && (
+          {failedCalendarStaff.size > 0 && (
             <div className="scheduling-status error" role="alert">
-              {renderError(calendarError)}
+              {`${failedCalendarStaff.size} 位服務人員的排班資料載入失敗，請查看各列狀態後重試。`}
               <button
+                type="button"
                 data-control-id="scheduling.calendar.retry"
                 onClick={retryFailedCalendarRows}
               >
@@ -2540,7 +2396,7 @@ const SchedulingWorkbench: React.FC = () => {
                     calendarHeaderScrollRef.current.scrollLeft = nextLeft;
                   }
                   setScrollLeftValue(nextLeft);
-                  syncScrollMetrics();
+                  if (scrollMetrics.clientTimelineWidth === 0) syncScrollMetrics();
                 }}
               >
                 <div className="gantt-matrix-table">
@@ -2551,7 +2407,8 @@ const SchedulingWorkbench: React.FC = () => {
                 )}
                 {/* Staff Rows */}
                 {filteredStaff.map((staff) => {
-                  const row = calendarRows[staff.id];
+                  const monthState = getCalendarMonth(staff.id, diagnosticMonth);
+                  const row = monthState.kind === 'settled' ? monthState.row : undefined;
                   const ghostConfig: GhostProjectionConfig | null = visibleInterval
                     ? {
                         active: true,
@@ -2560,21 +2417,34 @@ const SchedulingWorkbench: React.FC = () => {
                         outcome: fullIntervalOutcome(caseEligibilityRows[staff.id]),
                       }
                     : null;
-                  const diagnostic = getStaffDiagnosticBadge(row ?? undefined, ghostConfig);
-                  const monthly = monthlyRowsByStaff[staff.id];
-                  const enrichmentContext: SpanEnrichmentContext = {
-                    year: month.year,
-                    month: month.month,
-                    orderSummariesByCaseNo,
-                    staffAssignments: assignmentOptionsByStaffRef.current.get(staff.id) ?? [],
-                    projectionAssignments: row?.kind === 'loaded' ? (row.assignments ?? []) : [],
-                  };
-                  const hasShiftRows = monthly?.days.some(day => day.starts_at || (day.status !== 'available' && day.status !== 'historical_assignment'));
-                  const monthMatches = monthly?.year === month.year && monthly.month === month.month;
-                  const monthlySpans = hasShiftRows && monthMatches
-                    ? assignNonOverlappingLanes(monthlyShiftSpans(monthly, enrichmentContext))
-                    : buildGanttSpans(row ?? undefined, range.totalDays, null, monthMatches ? historicalOverlaysByStaff[staff.id] : [], enrichmentContext);
-                  const spans = showHistoricalCaseRanges(monthlySpans, historicalRangesByStaff[staff.id]);
+                  const diagnostic = monthState.kind === 'unloaded'
+                    ? { tone: 'unavailable', text: '尚未載入' }
+                    : monthState.kind === 'loading'
+                      ? LOADING_DIAGNOSTIC
+                      : getStaffDiagnosticBadge(row, ghostConfig);
+                  const monthSpans: GanttSpan[] = [];
+                  const allRanges = new Map<string, HistoricalCaseRanges | null>();
+                  for (const [targetMonth, entry] of calendarMonthsByStaff.get(staff.id) ?? []) {
+                    if (entry.kind !== 'settled') continue;
+                    const enrichmentContext: SpanEnrichmentContext = {
+                      year: month.year, month: targetMonth, orderSummariesByCaseNo,
+                      staffAssignments: assignmentOptionsByStaffRef.current.get(staff.id) ?? [],
+                      projectionAssignments: entry.canonical?.assignments ?? [],
+                    };
+                    const merged = mergeStaffCalendarDays(entry.monthly, entry.canonical, staff.id, month.year, targetMonth);
+                    monthSpans.push(...monthlyShiftSpans(merged, enrichmentContext));
+                    for (const [caseNo, ranges] of entry.ranges) {
+                      if (ranges || !allRanges.has(caseNo)) allRanges.set(caseNo, ranges);
+                    }
+                  }
+                  const uniqueSpans = new Map<string, GanttSpan>();
+                  for (const span of monthSpans) {
+                    const key = [span.shift?.status, span.caseText, span.shift?.assignment_id,
+                      span.shift?.lock_id, span.shift?.unavailability_block_id,
+                      span.visualStartDate, span.visualEndDate, span.dailyTimeText].join('|');
+                    if (!uniqueSpans.has(key)) uniqueSpans.set(key, { ...span, id: key, lane: undefined });
+                  }
+                  const spans = showHistoricalCaseRanges([...uniqueSpans.values()], allRanges);
                   if (ghostConfig) {
                     spans.push(...caseShiftSpans(
                       ghostConfig,
@@ -2584,7 +2454,7 @@ const SchedulingWorkbench: React.FC = () => {
                     ));
                   }
                   const spanHeight = Math.max(60, ...spans.map(span => ((span.lane ?? 0) + 1) * 52 + 8));
-                  const historicalOverlayError = historicalOverlayErrors[staff.id];
+                  const historicalOverlayError = monthState.kind === 'settled' ? monthState.historicalError : null;
 
                   return (
                     <div
@@ -2608,6 +2478,19 @@ const SchedulingWorkbench: React.FC = () => {
                         <div className="staff-name-line">
                           <span className="staff-avatar">👤</span>
                           <strong>{staffDisplayLabel(staff.unionNo, staff.displayName)}</strong>
+                        </div>
+                        <div aria-label="可見月份載入狀態">
+                          {Array.from({ length: endMonth - startMonth + 1 }, (_, offset) => {
+                            const targetMonth = startMonth + offset;
+                            const state = getCalendarMonth(staff.id, targetMonth);
+                            const text = state.kind === 'unloaded' ? '尚未載入'
+                              : state.kind === 'loading' ? '載入中'
+                              : calendarMonthFailed(state) ? '載入失敗，可重試'
+                              : (state.canonical?.days.some(day => day.entries.length > 0)
+                                || state.monthly?.days.some(day => day.status !== 'available'))
+                                ? '已載入' : '已查無班';
+                            return <small key={targetMonth}>{targetMonth}月：{text} </small>;
+                          })}
                         </div>
                         {historicalOverlayError && <small className="historical-overlay-error" role="status">歷史指派區間未載入：{historicalOverlayError}</small>}
                         <div

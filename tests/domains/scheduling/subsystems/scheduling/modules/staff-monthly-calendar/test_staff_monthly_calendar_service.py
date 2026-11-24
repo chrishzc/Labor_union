@@ -3,7 +3,9 @@ File: test_staff_monthly_calendar_service.py
 Description: 驗證月嫂月份排班、等待鎖與服務前防撞緩衝的唯讀投影。
 """
 
+from contextlib import closing
 from datetime import date, datetime, timedelta
+import sqlite3
 
 from subsystems.scheduling import staff_monthly_calendar_query as staff_monthly_calendar_schedule_service
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
@@ -179,7 +181,6 @@ def test_same_day_shifts_and_overnight_continuation_are_distinct(monkeypatch):
     assert "JOIN case_staff_assignments" in query
     assert "o.status AS order_status" in query
     assert "o.order_status" not in query
-    assert "csa.status <> 'cancelled'" in query
     assert params == (7, date(2026, 6, 30), date(2026, 7, 31))
     query, params = connection.cursor_obj.executed[3]
     assert "JOIN caregiver_availability_locks" in query
@@ -191,6 +192,49 @@ def test_same_day_shifts_and_overnight_continuation_are_distinct(monkeypatch):
     assert "assignment_id" in query
     assert params == (7,)
     assert connection.closed is True
+
+
+@pytest.mark.parametrize("early_end", [False, True])
+def test_formal_calendar_queries_only_read_current_generation_assignments(monkeypatch: pytest.MonkeyPatch, early_end: bool) -> None:
+    connection = FakeConnection([{"id": 7}, [], [], [], [], []])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+    staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(7, 2026, 12, clock=BUSINESS_CLOCK)
+
+    # Every assignment has an effective daily row. Only assignment 1 is current.
+    fixtures = """
+        WITH case_staff_assignments(id, case_no, generation_id, staff_id, status,
+                                    assigned_start_date, assigned_end_date) AS (
+            VALUES (1, 'CURRENT', 101, 7, 'planned', '2026-12-01', '2026-12-01'),
+                   (2, 'SUPERSEDED', 102, 7, 'planned', '2026-12-01', '2026-12-01'),
+                   (3, 'NO_POINTER', 103, 7, 'planned', '2026-12-01', '2026-12-01'),
+                   (4, 'REPLACED', 104, 7, 'replaced', '2026-12-01', '2026-12-01'),
+                   (5, 'CANCELLED', 105, 7, 'cancelled', '2026-12-01', '2026-12-01')
+        ), scheduling_generations(id, status, effective_marker) AS (
+            VALUES (101, 'effective', 1), (102, 'cancelled', NULL), (103, 'effective', 1),
+                   (104, 'effective', 1), (105, 'effective', 1), (106, 'effective', 1)
+        ), scheduling_aggregates(case_no, effective_generation_id) AS (
+            VALUES ('CURRENT', 101), ('SUPERSEDED', 106), ('NO_POINTER', NULL),
+                   ('REPLACED', 104), ('CANCELLED', 105)
+        ), staff_schedule(id, assignment_id, work_date, effective_marker, is_work_day,
+                          is_double_pay, notes, service_hours_override) AS (
+            SELECT id, id, '2026-12-01', 1, 1, 0, NULL, NULL FROM case_staff_assignments
+            UNION ALL SELECT 99, 1, '2026-12-02', NULL, 1, 0, NULL, NULL
+        ), orders(case_no, client_id, status, actual_start_date, actual_end_date,
+                  service_start_time, service_end_time, service_end_day_offset) AS (
+            SELECT case_no, 10, '訂單成立', NULL, NULL, NULL, NULL, NULL FROM case_staff_assignments
+        ), clients(id, name) AS (VALUES (10, '客戶甲')),
+           staff(id, name) AS (VALUES (7, '月嫂甲'))
+    """
+    if early_end:
+        fixtures = fixtures.replace("10, '訂單成立'", "10, '訂單完成'")
+    executed = connection.cursor_obj.executed
+    with closing(sqlite3.connect(":memory:")) as db:
+        db.row_factory = sqlite3.Row
+        for query, params in (executed[1], executed[4]):
+            values = tuple(value.isoformat() if isinstance(value, date) else value for value in params)
+            rows = db.execute(fixtures + query.replace("%s", "?"), values).fetchall()
+            expected = [] if early_end and query == executed[4][0] else [1]
+            assert [row["assignment_id"] for row in rows] == expected
 
 
 def test_historical_overnight_assignment_preserves_each_service_date(monkeypatch):

@@ -9,6 +9,7 @@ import { staffDirectoryClient } from '../api/staff_directory/staff_directory_cli
 import { serviceStartClient } from '../api/scheduling/service_start_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
+import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
@@ -32,9 +33,11 @@ vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
 
 describe('SchedulingPage query-only presentation', () => {
   let observeNextPage: ReturnType<typeof vi.fn>;
-  afterEach(() => { sessionClient.clearSession(); vi.unstubAllGlobals(); });
+  afterEach(() => { sessionClient.clearSession(); vi.unstubAllGlobals(); vi.useRealTimers(); });
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-23T04:00:00Z'));
     vi.spyOn(serviceStartClient, 'todos').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
     vi.spyOn(serviceStartClient, 'options').mockResolvedValue({ items: [] });
     vi.spyOn(holidayClient, 'query').mockImplementation(async query => ({ planning_horizon: 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate }, source_identity: 'test-holidays', calendar_version: 'a'.repeat(64), holidays: [] }));
@@ -408,6 +411,89 @@ describe('SchedulingPage query-only presentation', () => {
     expect((dateHeader as HTMLElement).scrollLeft).toBe(320);
   });
 
+  it('loads only viewport months and reuses each staff month after scrolling away and back', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('gantt-matrix-scroll-wrapper') ? 620 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('gantt-matrix-scroll-wrapper') ? 260 + 36 * 136 : 0;
+    });
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockImplementation(async query => ({
+      ...SCHEDULING_PROJECTION_EMPTY,
+      staff_id: query.staffId, range_start: query.rangeStart, range_end: query.rangeEnd,
+    }));
+    const canonical = vi.mocked(schedulingCurrentClient.queryCurrentCalendar);
+    const monthly = vi.mocked(staffMonthlyScheduleClient.query);
+    render(<SchedulingPage />);
+    await waitFor(() => expect(canonical).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(screen.queryByText('正在載入排班月曆…')).not.toBeInTheDocument());
+    expect(new Set(canonical.mock.calls.map(([query]) => `${query.rangeStart}/${query.rangeEnd}`))).toEqual(new Set([
+      '2026-07-01/2026-07-31', '2026-08-01/2026-08-31',
+    ]));
+    expect(new Set(monthly.mock.calls.map(([staffId, year, month]) => `${staffId}/${year}/${month}`))).toEqual(new Set([
+      '11/2026/7', '12/2026/7', '11/2026/8', '12/2026/8',
+    ]));
+
+    const body = document.querySelector<HTMLElement>('.gantt-matrix-scroll-wrapper')!;
+    body.scrollLeft = 400;
+    fireEvent.scroll(body);
+    await waitFor(() => expect(canonical).toHaveBeenCalledTimes(8));
+    await waitFor(() => expect(screen.queryByText('正在載入排班月曆…')).not.toBeInTheDocument());
+    expect(new Set(canonical.mock.calls.slice(4).map(([query]) => `${query.rangeStart}/${query.rangeEnd}`))).toEqual(new Set([
+      '2026-01-01/2026-01-31', '2026-02-01/2026-02-28',
+    ]));
+
+    body.scrollLeft = 7 * 408 - 20;
+    fireEvent.scroll(body);
+    expect(screen.getByText(/目前可視：7月 ～ 8月/)).toBeInTheDocument();
+    await act(async () => {});
+    expect(canonical).toHaveBeenCalledTimes(8);
+    expect(monthly).toHaveBeenCalledTimes(8);
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    fireEvent(document, new Event('visibilitychange'));
+    expect(canonical).toHaveBeenCalledTimes(8);
+    visibility.mockReturnValue('visible');
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(canonical).toHaveBeenCalledTimes(12));
+    await waitFor(() => expect(screen.queryByText('正在載入排班月曆…')).not.toBeInTheDocument());
+    expect(new Set(canonical.mock.calls.slice(8).map(([query]) => query.rangeStart))).toEqual(new Set([
+      '2026-07-01', '2026-08-01',
+    ]));
+    body.scrollLeft = 400;
+    fireEvent.scroll(body);
+    await act(async () => {});
+    expect(canonical).toHaveBeenCalledTimes(12);
+  });
+
+  it('discards late work from the old year and refetches that unfinished month on return', async () => {
+    const canonical = vi.mocked(schedulingCurrentClient.queryCurrentCalendar);
+    const pending: Array<(result: typeof SCHEDULING_PROJECTION_READY) => void> = [];
+    canonical.mockImplementation(async query => ({
+      ...SCHEDULING_PROJECTION_EMPTY,
+      staff_id: query.staffId, range_start: query.rangeStart, range_end: query.rangeEnd,
+    })).mockImplementationOnce(() => new Promise(resolve => pending.push(resolve)));
+    render(<SchedulingPage />);
+    await waitFor(() => expect(canonical).toHaveBeenCalledTimes(2));
+    const [unfinished, options] = canonical.mock.calls[0];
+    expect(screen.getByText('正在載入排班月曆…')).toBeInTheDocument();
+    const healthyRow = document.querySelector<HTMLElement>('[data-staff-id="12"]')!;
+    await waitFor(() => expect(within(healthyRow).getByText(/本月無排班占用/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '查看下一年' }));
+    await waitFor(() => expect(canonical).toHaveBeenCalledTimes(4));
+    expect(options?.signal?.aborted).toBe(true);
+    expect(canonical.mock.calls.slice(2).map(([query]) => query.rangeStart)).toEqual(['2027-08-01', '2027-08-01']);
+    await act(async () => { pending[0](SCHEDULING_PROJECTION_READY); });
+    expect(document.querySelectorAll('.gantt-span-bar')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: '查看上一年' }));
+    await waitFor(() => expect(canonical).toHaveBeenCalledTimes(5));
+    expect(canonical.mock.calls[4][0]).toEqual(unfinished);
+    await waitFor(() => expect(screen.queryByText('正在載入排班月曆…')).not.toBeInTheDocument());
+    expect(document.querySelectorAll('.gantt-span-bar')).toHaveLength(0);
+  });
+
   it.each(['待補件', '洽談中'])('未排班的%s案件只在訂金前供排查', async (orderStatus) => {
     const summary = (caseNo: string, clientName: string) => ({
       case_no: caseNo,
@@ -697,15 +783,36 @@ describe('SchedulingPage query-only presentation', () => {
     expect(document.querySelectorAll('.gantt-span-bar:not(.span-historical)')).not.toHaveLength(0);
   });
 
-  it('keeps a healthy canonical calendar visible when the historical read model rejects its response', async () => {
-    vi.mocked(staffMonthlyScheduleClient.query).mockRejectedValue(new Error('歷史指派月曆回應結構異常。'));
+  it('keeps canonical data visible and retries only the failed historical month for the affected row', async () => {
+    const monthly = vi.mocked(staffMonthlyScheduleClient.query);
+    monthly.mockRejectedValueOnce(new Error('歷史指派月曆回應結構異常。'));
 
     render(<SchedulingPage />);
 
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
-    expect(screen.getAllByRole('status', { name: '' })).toHaveLength(2);
-    expect(screen.getAllByText(/歷史指派區間未載入：歷史指派月曆回應結構異常/)).toHaveLength(2);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText(/歷史指派區間未載入：歷史指派月曆回應結構異常/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重試月曆查詢' }));
+    expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.queryByText(/歷史指派區間未載入/)).not.toBeInTheDocument());
+    expect(monthly).toHaveBeenCalledTimes(3);
+    expect(monthly.mock.calls[2].slice(0, 3)).toEqual(monthly.mock.calls[0].slice(0, 3));
+    expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries canonical terms-incomplete for the affected row without refetching its historical month', async () => {
+    const canonical = vi.mocked(schedulingCurrentClient.queryCurrentCalendar);
+    canonical.mockRejectedValueOnce(new SchedulingCurrentError('SCHEDULING_CONFLICT', '時段未確認。', {
+      publicCode: 'service_time_terms_incomplete',
+    }));
+    render(<SchedulingPage />);
+
+    const retry = await screen.findByRole('button', { name: '重試月曆查詢' });
+    expect(screen.getByText(/訂單的每日服務時段尚未完整/)).toBeInTheDocument();
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.queryByText(/訂單的每日服務時段尚未完整/)).not.toBeInTheDocument());
+    expect(canonical).toHaveBeenCalledTimes(3);
+    expect(canonical.mock.calls[2][0]).toEqual(canonical.mock.calls[0][0]);
+    expect(staffMonthlyScheduleClient.query).toHaveBeenCalledTimes(2);
   });
 
   it('still renders historical intervals when the canonical calendar query fails', async () => {
@@ -1020,16 +1127,21 @@ describe('SchedulingPage query-only presentation', () => {
     expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(beforeCalendar + 1);
   });
 
-  it('does not leave unfinished calendar rows cached when a change interrupts the batch', async () => {
-    const pending: Array<(value: typeof SCHEDULING_PROJECTION_READY) => void> = [];
-    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockImplementationOnce(() => new Promise(resolve => pending.push(resolve)))
+  it('invalidates the changed staff month without interrupting another pending row', async () => {
+    const pending: Array<(value: typeof SCHEDULING_PROJECTION_EMPTY) => void> = [];
+    const canonical = vi.mocked(schedulingCurrentClient.queryCurrentCalendar);
+    canonical.mockImplementationOnce(() => new Promise(resolve => pending.push(resolve)))
       .mockImplementationOnce(() => new Promise(resolve => pending.push(resolve)))
       .mockImplementation(async query => ({ ...SCHEDULING_PROJECTION_EMPTY, staff_id: query.staffId, range_start: query.rangeStart, range_end: query.rangeEnd }));
     render(<SchedulingPage />);
     await waitFor(() => expect(pending).toHaveLength(2));
     act(() => publishStaffAvailabilityChange(11));
-    await waitFor(() => expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(4));
-    await act(async () => { pending.forEach(resolve => resolve(SCHEDULING_PROJECTION_READY)); });
+    await waitFor(() => expect(canonical).toHaveBeenCalledTimes(3));
+    for (const [query, options] of canonical.mock.calls.slice(0, 2)) {
+      expect(options?.signal?.aborted).toBe(query.staffId === 11);
+    }
+    expect(canonical.mock.calls[2][0].staffId).toBe(11);
+    await act(async () => { pending.forEach(resolve => resolve(SCHEDULING_PROJECTION_EMPTY)); });
     await waitFor(() => expect(screen.getAllByText(/本月無排班占用/)).toHaveLength(2));
   });
 
@@ -1075,6 +1187,15 @@ describe('SchedulingPage query-only presentation', () => {
   });
 
   it('將同案服務與排休日合併為單一連續訂單條，並完整顯示客戶姓名、案件編號、起訖日期與每日時段', async () => {
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockImplementation(async query => ({
+      ...SCHEDULING_PROJECTION_READY, staff_id: query.staffId,
+      range_start: query.rangeStart, range_end: query.rangeEnd,
+      days: SCHEDULING_PROJECTION_READY.days.map(day => ({ ...day, entries: day.entries.map(entry => ({
+        ...entry,
+        service_start_at: `${day.calendar_date}T09:00:00+08:00`,
+        service_end_at: `${day.calendar_date}T18:00:00+08:00`,
+      })) })),
+    }));
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getAllByText('排班客戶甲').length).toBeGreaterThan(0));

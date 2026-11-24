@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import ctypes
+from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -1111,14 +1113,60 @@ def _restore_require_stopped(settings):
                     raise MaintenanceBlocked("工會系統的服務連接埠仍在使用，請先停止服務。") from None
 
 
+def _restore_manager_is_ancestor(kernel: ctypes.WinDLL, manager_pid: str | None) -> bool:
+    if manager_pid is None:
+        return False
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [
+            ("size", wintypes.DWORD),
+            ("usage", wintypes.DWORD),
+            ("pid", wintypes.DWORD),
+            ("default_heap_id", ctypes.c_size_t),
+            ("module_id", wintypes.DWORD),
+            ("threads", wintypes.DWORD),
+            ("parent_pid", wintypes.DWORD),
+            ("priority_class_base", wintypes.LONG),
+            ("flags", wintypes.DWORD),
+            ("executable", wintypes.WCHAR * 260),
+        ]
+
+    snapshot_processes = kernel.CreateToolhelp32Snapshot
+    snapshot_processes.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    snapshot_processes.restype = wintypes.HANDLE
+    first_process = kernel.Process32FirstW
+    next_process = kernel.Process32NextW
+    for read_process in (first_process, next_process):
+        read_process.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+        read_process.restype = wintypes.BOOL
+
+    snapshot = snapshot_processes(0x00000002, 0)  # TH32CS_SNAPPROCESS
+    if snapshot == ctypes.c_void_p(-1).value:
+        return False
+    try:
+        entry = ProcessEntry(size=ctypes.sizeof(ProcessEntry))
+        parents: dict[int, int] = {}
+        has_entry = first_process(snapshot, ctypes.byref(entry))
+        while has_entry:
+            parents[entry.pid] = entry.parent_pid
+            has_entry = next_process(snapshot, ctypes.byref(entry))
+    finally:
+        kernel.CloseHandle(snapshot)
+
+    # Windows venv Python can run through a redirector between the manager and worker.
+    pid = os.getppid()
+    while pid and pid in parents:
+        if str(pid) == manager_pid:
+            return True
+        pid = parents.pop(pid)
+    return False
+
+
 @contextmanager
 def _restore_installation_lock(settings):
     if os.name != "nt":
         yield
         return
-    import ctypes
-    from ctypes import wintypes
-
     path = _restore_path(Path(settings["environment_file"]).parent / "scratch" / "windows-remote" / "manager.lock")
     path.parent.mkdir(parents=True, exist_ok=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -1129,9 +1177,10 @@ def _restore_installation_lock(settings):
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     handle = open_file(str(path), 0xC0000000, 0, None, 4, 0x80, None)
     if handle == ctypes.c_void_p(-1).value:
-        parent_holds_lock = (ctypes.get_last_error() == 32
-                             and os.getenv("LABOR_UNION_RESTORE_MANAGER_PID") == str(os.getppid()))
-        require(parent_holds_lock, "另一項管理操作正在執行，請待該操作完成再復原。")
+        manager_holds_lock = ctypes.get_last_error() == 32 and _restore_manager_is_ancestor(
+            kernel, os.getenv("LABOR_UNION_RESTORE_MANAGER_PID")
+        )
+        require(manager_holds_lock, "另一項管理操作正在執行，請待該操作完成再復原。")
         yield
         return
     try:
