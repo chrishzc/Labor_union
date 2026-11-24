@@ -49,3 +49,17 @@ def test_historical_payroll_accepts_half_hour_daily_terms_with_whole_ntd_salary(
 def test_payroll_terms_reject_binary_floating_point_hours():
     with pytest.raises(TypeError, match="must use Decimal or int"):
         PayrollTerms(30, 8.5, MoneyNTD(3000))
+
+
+def test_historical_floor_fee_tie_uses_numeric_assignment_id():
+    facts = (HistoricalAssignmentServiceFacts("assignment:10", 3, 1),
+             HistoricalAssignmentServiceFacts("assignment:2", 7, 1))
+    candidate = build_historical_case_payroll_candidate(
+        facts,
+        tuple(rate_snapshot(item.assignment_identity, "policy-v1", PayrollPolicyKind.CITIZEN) for item in facts),
+        PayrollTerms(2, 8, MoneyNTD(1)),
+    )
+    assert {item.assignment_identity: item.floor_fee_allocated.amount for item in candidate.assignments} == {
+        "assignment:2": 1, "assignment:10": 0,
+    }
+    assert candidate.earned_floor_fee == MoneyNTD(1)

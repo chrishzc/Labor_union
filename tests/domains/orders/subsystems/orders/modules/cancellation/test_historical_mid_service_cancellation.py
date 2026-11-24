@@ -77,3 +77,25 @@ def test_historical_cancelled_case_without_confirmed_days_remains_closed():
             (),
             CorrelationId("historical-recovery-without-days"),
         )
+
+
+@pytest.mark.parametrize("lock", [False, True])
+def test_cancellation_reader_carries_financial_identity_from_payroll_baseline(monkeypatch, lock):
+    from infrastructure.mysql.order_cancellation_read_model import _with_financial_assignment_identities
+    from infrastructure.mysql import service_date_adjustment_repository as baseline
+    from subsystems.payroll.terms_impact import SourceAssignmentPayrollTerms
+    from domains.payroll.calculation import PayrollPolicyKind
+
+    def load(cursor, generation, assignments, service_days, *, lock):
+        assert (cursor, generation, assignments, service_days) == ("cursor", 3, ({"id": 30},), 2)
+        assert lock is expected_lock
+        return ({"assignment_id": 30, "financial_assignment_identity": "assignment:2"},)
+
+    expected_lock = lock
+    monkeypatch.setattr(baseline, "load_payroll_service_dates", load)
+    source = SimpleNamespace(source_terms=(SourceAssignmentPayrollTerms(30, 2, "v1", PayrollPolicyKind.CITIZEN),))
+    from subsystems.payroll.terms_impact import PayrollTermsSourceFacts
+    payroll = PayrollTermsSourceFacts("CASE-1", 1, source.source_terms, (), None)
+    result = _with_financial_assignment_identities("cursor", payroll, 3, ({"id": 30},), 2, lock=lock)
+    assert result.source_terms[0].source_assignment_id == 30
+    assert result.source_terms[0].financial_assignment_identity == "assignment:2"

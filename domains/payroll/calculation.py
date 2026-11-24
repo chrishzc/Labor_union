@@ -223,10 +223,17 @@ def _earned_floor_fee(terms, facts) -> MoneyNTD:
     )
 
 
+def assignment_floor_fee_order(identity: str) -> tuple[int, int, str]:
+    prefix, separator, value = identity.partition(":")
+    if prefix == "assignment" and separator and value.isdecimal():
+        return (0, int(value), identity)
+    return (1, 0, identity)
+
+
 def _allocate_floor_fee(earned_floor_fee, facts):
     ordered = sorted(facts, key=lambda item: (
-        item.financial_assignment_identity or item.assignment_identity,
-        item.assignment_identity,
+        assignment_floor_fee_order(item.financial_assignment_identity or item.assignment_identity),
+        assignment_floor_fee_order(item.assignment_identity),
     ))
     width = len(str(len(ordered)))
     indexed = tuple((str(index).zfill(width), item) for index, item in enumerate(ordered))

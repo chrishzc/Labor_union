@@ -63,6 +63,7 @@ class SourceAssignmentPayrollTerms:
     ancestor_assignment_ids: tuple[int, ...] = ()
     hourly_rate: MoneyNTD | None = None
     tiered: TieredPayrollRate | None = None
+    financial_assignment_identity: str | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.source_assignment_id, "source assignment id")
@@ -482,8 +483,17 @@ def _source_terms_by_assignment(facts):
 
 
 def _service_facts(facts):
+    sources = {item.source_assignment_id: item for item in facts.source_terms}
     return tuple(
-        OfficialAssignmentServiceFacts(item.candidate_key, item.staff_id, item.service_dates)
+        OfficialAssignmentServiceFacts(
+            item.candidate_key, item.staff_id, item.service_dates,
+            financial_assignment_identity=(
+                sources[item.source_assignment_id].financial_assignment_identity
+                if item.source_assignment_id in sources
+                and sources[item.source_assignment_id].financial_assignment_identity is not None
+                else f"assignment:{item.source_assignment_id}" if item.source_assignment_id is not None else None
+            ),
+        )
         for item in facts.scheduling.assignments
     )
 
