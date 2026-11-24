@@ -3,7 +3,6 @@ from datetime import date
 from decimal import Decimal
 
 from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
-from subsystems.client_finance.pricing_configuration import case_total_amount
 from subsystems.reporting.staff_performance_query import (
     PerformanceCaseOpening, PerformanceHistoricalAssignment, PerformanceServiceDay, PerformanceStaff,
 )
@@ -205,7 +204,7 @@ class MySqlStaffPerformanceQueryRepository:
         result = {}
         for case_no in case_nos:
             try:
-                result[case_no] = case_total_amount(repository.case(case_no))
+                result[case_no] = repository.reporting_case_total_amount(case_no)
             except ValueError as exc:
                 if str(exc) not in {
                     "case_pricing_service_facts_required",

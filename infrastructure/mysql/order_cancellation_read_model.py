@@ -193,6 +193,10 @@ def _assemble_cancellation_facts(
         cursor, order_row, assignment_rows, lock,
         allow_missing_payroll_rates=allow_missing_payroll_rates,
     ) if payroll_present else None
+    if payroll is not None and generation is not None and payroll.source_terms:
+        payroll = _with_financial_assignment_identities(
+            cursor, payroll, generation["id"], assignment_rows, int(order_row["service_days"]), lock=lock,
+        )
     lifecycle = replace(
         _load_lifecycle(cursor, order_row, lock),
         establishment_evidence=load_order_establishment_evidence(
@@ -419,3 +423,15 @@ __all__ = [
     "load_cancellation_locked_facts",
     "load_cancellation_preview_facts",
 ]
+
+
+def _with_financial_assignment_identities(cursor, payroll, generation_id, assignments, service_days, *, lock):
+    from infrastructure.mysql.service_date_adjustment_repository import load_payroll_service_dates
+
+    rows = load_payroll_service_dates(cursor, generation_id, assignments, service_days, lock=lock)
+    identities = {int(row["assignment_id"]): row["financial_assignment_identity"]
+                  for row in rows if row.get("financial_assignment_identity") is not None}
+    return replace(payroll, source_terms=tuple(
+        replace(item, financial_assignment_identity=identities.get(item.source_assignment_id))
+        for item in payroll.source_terms
+    ))

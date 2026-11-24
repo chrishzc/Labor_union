@@ -12,7 +12,7 @@
 - `subsystems/case_import/passbook_image_validation.py` — 待審申請接收存摺封面時共用的圖片格式與內容驗證。
 - `infrastructure/redis/registration_staging_repository.py`、`infrastructure/redis/registration_connection.py`、`infrastructure/redis/registration_maintenance.py` — 正式環境要求專用 Redis 與分角色憑證；明確的本機開發與測試可用共用 Redis。提供命名空間隔離、原子狀態及 AOF 維護。
 - `api/registration_intake.py`、`api/registration_contracts.py`、`api/registration_token_verification.py`、`infrastructure/line/registration_token_verifier.py` — 無 SQL 公開接收與固定 LINE 驗證 transport。
-- `api/dependencies/registration_applications.py`、`api/dependencies/registration_runtime.py`、`subsystems/case_import/registration_maintenance.py`、`scripts/registration_maintenance.py`、`docker-compose.registration.yml`、`deploy/registration/` — 內部核准 composition、每分鐘 recovery／expiry 與每小時 AOF maintenance；部署仍需環境驗收。
+- `api/dependencies/registration_applications.py`、`api/dependencies/registration_runtime.py`、`subsystems/case_import/registration_maintenance.py`、`scripts/registration_maintenance.py`、`docker-compose.yml`（`registration` profile）、`deploy/registration/` — 內部核准 composition、每分鐘 recovery／expiry 與每小時 AOF maintenance；部署仍需環境驗收。
 - primary:
   - `domains/case_import/non_citizen_registration.py` — 非市民 HCM＋BeClass 合併欄位與必填驗證；原補助規則保持。
   - `infrastructure/mysql/non_citizen_case_number_repository.py` — 唯讀預估配號，並在手動新案與 LINE 核准各自的 outer UoW 中共用年度列鎖與正式配號。

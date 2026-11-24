@@ -13,6 +13,7 @@ from domains.payroll.calculation import (
     AssignmentRateSnapshot,
     PayrollAdjustment,
     PayrollTerms,
+    assignment_floor_fee_order,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -79,10 +80,13 @@ def build_historical_case_payroll_candidate(
         terms.contracted_service_days,
         total_days,
     )
-    floor_allocations = allocate_largest_remainder(
-        floor_fee,
-        {item.assignment_identity: item.actual_service_days for item in service_facts},
+    ordered = sorted(service_facts, key=lambda item: assignment_floor_fee_order(item.assignment_identity))
+    width = len(str(len(ordered)))
+    indexed = tuple((str(index).zfill(width), item) for index, item in enumerate(ordered))
+    allocated = allocate_largest_remainder(
+        floor_fee, {key: item.actual_service_days for key, item in indexed},
     )
+    floor_allocations = {item.assignment_identity: allocated[key] for key, item in indexed}
     assignments = tuple(
         _assignment_candidate(
             item,

@@ -1,8 +1,40 @@
 services:
+  db:
+    image: ${MYSQL_IMAGE:-mysql:8.0.46}
+    container_name: ${MYSQL_CONTAINER:-mysql_db}
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    ports:
+      - "127.0.0.1:${DB_PORT:-3306}:3306"
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      MYSQL_DATABASE: ${DB_DATABASE:-union_db}
+      MYSQL_USER: ${MYSQL_APP_USER:-}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:-}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--default-time-zone=+00:00"
+      - "--mysqlx=OFF"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin --host=127.0.0.1 ping --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - union-network
+
   redis:
     image: redis:7-alpine
     container_name: union_redis
     restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
     ports:
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
@@ -13,9 +45,93 @@ services:
     networks:
       - union-network
 
-# MySQL 由外部主機（例如 NAS）管理；應用程式依 .env 的 DB_* 直接連線。
-# 既有 mysql_db 容器與 mysql-data volume 不由此檔案移除。
+  registration-redis:
+    profiles: ["registration"]
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    container_name: ${REGISTRATION_REDIS_CONTAINER:-union_registration_redis}
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    entrypoint: ["/bin/sh", "/usr/local/bin/registration-redis-entrypoint"]
+    ports:
+      - "127.0.0.1:${REGISTRATION_REDIS_PORT:-6380}:6379"
+    volumes:
+      - registration-data:/data
+      - ./deploy/registration/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./deploy/registration/redis-entrypoint.sh:/usr/local/bin/registration-redis-entrypoint:ro
+    tmpfs:
+      - /run/registration:mode=0700
+    secrets:
+      - registration_intake_password
+      - registration_admin_password
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -h 127.0.0.1 --user registration-intake --pass \"$(cat /run/secrets/registration_intake_password)\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - registration-private
+
+  registration-intake:
+    profiles: ["registration"]
+    build:
+      context: .
+      dockerfile: deploy/registration/Dockerfile
+      args:
+        PYTHON_IMAGE: ${REGISTRATION_INTAKE_PYTHON_IMAGE:-python:3.14-slim@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "127.0.0.1:${REGISTRATION_INTAKE_PORT:-8080}:8080"
+    environment:
+      APP_ENV: production
+      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:-}
+      REGISTRATION_REDIS_HOST: registration-redis
+      REGISTRATION_REDIS_INTAKE_PASSWORD_FILE: /run/secrets/registration_intake_password
+    secrets: [registration_intake_password]
+    depends_on:
+      registration-redis:
+        condition: service_healthy
+      registration-token-verifier:
+        condition: service_started
+    networks: [registration-private, registration-verification, registration-ingress]
+
+  registration-token-verifier:
+    profiles: ["registration"]
+    build:
+      context: .
+      dockerfile: deploy/registration/Dockerfile
+      args:
+        PYTHON_IMAGE: ${REGISTRATION_INTAKE_PYTHON_IMAGE:-python:3.14-slim@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966}
+    command: [uvicorn, api.registration_token_verification:app, --host, 0.0.0.0, --port, "8081", --no-access-log]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:-}
+    networks: [registration-verification, registration-egress]
+
+volumes:
+  mysql-data:
+  registration-data:
 
 networks:
   union-network:
     driver: bridge
+  registration-private:
+    internal: true
+  registration-verification:
+    internal: true
+  registration-ingress:
+    internal: true
+  registration-egress:
+    driver: bridge
+
+secrets:
+  registration_intake_password:
+    file: ${REGISTRATION_REDIS_INTAKE_PASSWORD_FILE:-${REGISTRATION_INTAKE_PASSWORD_FILE:-./scratch/registration-secrets/intake-password}}
+  registration_admin_password:
+    file: ${REGISTRATION_REDIS_ADMIN_PASSWORD_FILE:-${REGISTRATION_ADMIN_PASSWORD_FILE:-./scratch/registration-secrets/admin-password}}

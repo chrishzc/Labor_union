@@ -10,10 +10,21 @@ ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "
 def test_local_stateful_services_bind_only_to_loopback() -> None:
     source = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
+    assert '"127.0.0.1:${DB_PORT:-3306}:3306"' in source
     assert '"127.0.0.1:${REDIS_PORT:-6379}:6379"' in source
-    services = yaml.safe_load(source)["services"]
-    assert "mysql" not in services
+    assert '"127.0.0.1:${REGISTRATION_REDIS_PORT:-6380}:6379"' in source
+    assert '"127.0.0.1:${REGISTRATION_INTAKE_PORT:-8080}:8080"' in source
+    compose = yaml.safe_load(source)
+    services = compose["services"]
+    assert set(services) == {
+        "db",
+        "redis",
+        "registration-redis",
+        "registration-intake",
+        "registration-token-verifier",
+    }
+    assert "no-new-privileges:true" in services["db"]["security_opt"]
+    assert "mysql-data:/var/lib/mysql" in services["db"]["volumes"]
     for service in services.values():
         for binding in service.get("ports", ()):
             assert binding.startswith("127.0.0.1:")
-            assert not binding.endswith(":3306")

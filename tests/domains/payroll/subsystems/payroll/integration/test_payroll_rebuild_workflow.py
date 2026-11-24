@@ -211,7 +211,7 @@ def test_cross_caregiver_merge_keeps_both_original_payees_and_floor_allocations(
     raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
     raw.execute("INSERT INTO staff_schedule VALUES (9,1,'2026-10-03',1,1,8)")
     assert _schedule_payroll(cursor, 1, assignments) == baseline
-    assert {item.staff_id: item.total_payable.amount for item in baseline[1].assignments} == {17: 1700, 18: 1701}
+    assert {item.staff_id: item.total_payable.amount for item in baseline[1].assignments} == {17: 1701, 18: 1700}
     raw.execute("UPDATE staff_schedule SET effective_marker=CASE WHEN service_hours_override IS NULL THEN 1 END")
     assert _schedule_payroll(cursor, 1, assignments) == baseline
 
@@ -680,3 +680,78 @@ def test_monthly_query_retains_genuine_receivables_and_staff_scope(monthly_sql_c
     assert summary.receivable_total == MoneyNTD(1500)
     assert summary.net_payable == MoneyNTD(4300)
     assert summary.obligation_count == 2
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("lineage", [False, True])
+def test_floor_fee_numeric_assignment_ties_survive_order_and_rebuild(reverse, lineage):
+    from domains.payroll.calculation import _allocate_floor_fee
+
+    facts = tuple(OfficialAssignmentServiceFacts(
+        identity, staff, (date(2026, 10, staff),),
+        financial_assignment_identity=source if lineage else None,
+    ) for identity, source, staff in (
+        ("assignment:10" if not lineage else "assignment:20", "assignment:10", 1),
+        ("assignment:2" if not lineage else "assignment:30", "assignment:2", 2),
+    ))
+    if reverse:
+        facts = tuple(reversed(facts))
+    amounts = _allocate_floor_fee(MoneyNTD(1), facts)
+    assert amounts[facts[0].assignment_identity].amount + amounts[facts[1].assignment_identity].amount == 1
+    assert amounts["assignment:30" if lineage else "assignment:2"] == MoneyNTD(1)
+
+
+def test_floor_fee_remainder_precedes_numeric_assignment_id():
+    from domains.payroll.calculation import _allocate_floor_fee
+
+    facts = (
+        OfficialAssignmentServiceFacts("assignment:2", 1, (date(2026, 10, 1),)),
+        OfficialAssignmentServiceFacts("assignment:10", 2, (date(2026, 10, 2), date(2026, 10, 3))),
+    )
+    assert _allocate_floor_fee(MoneyNTD(1), facts) == {
+        "assignment:2": MoneyNTD(0), "assignment:10": MoneyNTD(1),
+    }
+
+
+@pytest.mark.parametrize("contracted_days", [2, 3])
+def test_cancelled_generation_rebuild_retains_preview_floor_recipient(payroll_schedule_sql, contracted_days):
+    from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
+    from infrastructure.mysql.scheduling_replacement_writer import _lineage_rows
+    from domains.payroll.calculation import build_case_payroll_candidate
+    from subsystems.payroll.terms_impact import (
+        PayrollTermsSourceFacts, SourceAssignmentPayrollTerms, build_payroll_cancellation_impact,
+    )
+    from domains.orders.terms import OrderTerms, ServiceTimeTerms
+
+    raw, cursor = payroll_schedule_sql
+    raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(10, 17), (2, 18)])
+    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,1,NULL)", [(10, "2026-10-01"), (2, "2026-10-02")])
+    assignments = tuple(AssignmentCandidate(
+        f"CASE-1:g2:a{sequence}", source, staff, sequence, day, day, (day,), 4,
+    ) for sequence, source, staff, day in (
+        (1, 10, 17, date(2026, 10, 1)), (2, 2, 18, date(2026, 10, 2)),
+    ))
+    scheduling = SchedulingGenerationCandidate("CASE-1", 2, 1, 2, (2, 10), assignments, ())
+    source = PayrollTermsSourceFacts("CASE-1", 1, tuple(
+        SourceAssignmentPayrollTerms(source, staff, "v1", PayrollPolicyKind.CITIZEN)
+        for source, staff in ((10, 17), (2, 18))
+    ), (), None)
+    preview = build_payroll_cancellation_impact(source, scheduling, OrderTerms(
+        date(2026, 10, 1), contracted_days, 4, MoneyNTD(1), ServiceTimeTerms(None, None, None),
+    ), "cancel-floor").payroll
+    resolved = {assignments[0].candidate_key: 20, assignments[1].candidate_key: 30}
+    raw.executemany("INSERT INTO case_staff_assignments VALUES (?,2,'CASE-1',?)", [(20, 17), (30, 18)])
+    raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
+    raw.executemany("INSERT INTO staff_schedule VALUES (?,2,?,1,1,NULL)", [(20, "2026-10-01"), (30, "2026-10-02")])
+    raw.execute("INSERT INTO scheduling_command_receipts VALUES (2,'orders_cancellation')")
+    raw.executemany("INSERT INTO scheduling_rebuild_lineage VALUES (?,?,?,?)", tuple(
+        (event, new, old, ordinal) for event, old, new, _generation, ordinal
+        in _lineage_rows(SimpleNamespace(candidate=scheduling), 2, 2, resolved)
+    ))
+    facts, _ = _schedule_payroll(cursor, 2, ({"id": 20, "staff_id": 17}, {"id": 30, "staff_id": 18}), days=contracted_days)
+    formal = build_case_payroll_candidate(facts, tuple(
+        rate_snapshot(item.assignment_identity, "v1", PayrollPolicyKind.CITIZEN) for item in facts
+    ), PayrollTerms(contracted_days, 4, MoneyNTD(1)))
+    assert {item.staff_id: item.floor_fee_allocated.amount for item in preview.assignments} == {17: 0, 18: 1}
+    assert {item.staff_id: item.floor_fee_allocated.amount for item in formal.assignments} == {17: 0, 18: 1}
+    assert formal.total_payable == preview.total_payable

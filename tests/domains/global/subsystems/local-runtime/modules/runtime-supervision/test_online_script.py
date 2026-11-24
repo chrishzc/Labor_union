@@ -41,13 +41,13 @@ def test_online_script_resolves_its_own_working_directory_and_venv():
 def test_online_script_waits_for_database_before_launching_services():
     script = _script()
 
-    docker_start = script.index("docker compose up -d redis")
+    docker_start = script.index("docker compose up -d --wait db redis")
     database_check = script.index('"%PY%" -m scripts.check_runtime_database\n')
     supervisor_start = script.index(
         'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0supervise_local_runtime.ps1"'
     )
 
-    assert database_check < docker_start < supervisor_start
+    assert docker_start < database_check < supervisor_start
     assert "MySQL readiness failed." in script
     assert 'exit /b !READINESS_EXIT!' in script
 
@@ -86,9 +86,9 @@ def test_online_shell_script_uses_macos_venv_and_expected_entrypoints():
     assert 'cd "$SCRIPT_DIR/../.."' in script
     assert "[[ ! -x .venv/bin/python ]]" in script
     assert 'PY="$PWD/.venv/bin/python"' in script
-    assert 'docker compose up -d redis' in script
+    assert 'docker compose up -d --wait db redis' in script
     assert '"$PY" -m scripts.check_runtime_database' in script
-    assert script.index('"$PY" -m scripts.check_runtime_database\n') < script.index('docker compose up -d redis')
+    assert script.index('docker compose up -d --wait db redis') < script.index('"$PY" -m scripts.check_runtime_database\n')
     assert 'LOCAL_BIND_HOST="127.0.0.1"' in script
     api_start = script.index('start_owned "FastAPI"')
     api_ready = script.index('wait_for_http "http://127.0.0.1:8000/health"')

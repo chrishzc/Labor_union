@@ -72,3 +72,23 @@ def test_unknown_historical_time_never_claims_proven_overlap(current_actual, oth
     assert conflict.severity is (CollisionSeverity.REQUIRES_REVIEW if pending else CollisionSeverity.ADVISORY)
     assert conflict.service_start_at is None and conflict.service_end_at is None
     assert "時段待確認" in conflict.detail
+
+
+@pytest.mark.parametrize("other_start,collides", [(time(15), True), (time(16), False)])
+def test_calendar_read_changes_preserve_overlap_warning_and_touching_endpoint(other_start, collides):
+    """S: two started cases; A: overlap or touch; R: only overlap blocks."""
+    started = date(2026, 8, 21)
+    facts = SchedulingEligibilityCollisionFacts(
+        case=_case(service_time=ServiceTimeTerms(time(8), time(16), 0), actual_start_date=started),
+        staff=(_staff(),),
+        schedules=(SchedulingScheduleFact(
+            92, "OTHER", 92, 11, started, True, True,
+            service_time=ServiceTimeTerms(other_start, time(20), 0),
+            actual_start_date=started, owner_known=True,
+        ),),
+    )
+    result = _workflow(facts).query(SchedulingEligibilityCollisionQuery("CASE-ELIG-001", started, 11)).staff[0]
+    assert result.availability is (AvailabilityState.BLOCKED if collides else AvailabilityState.AVAILABLE)
+    assert bool(result.collisions) is collides
+    if collides:
+        assert result.collisions[0].severity is CollisionSeverity.HARD_BLOCK

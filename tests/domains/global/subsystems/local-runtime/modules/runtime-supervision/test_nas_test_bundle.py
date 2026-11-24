@@ -69,13 +69,21 @@ def test_build_context_does_not_admit_local_credentials_or_data(name):
     assert not package_windows_runtime.include_source(name)
 
 
-def test_nas_compose_is_database_only():
-    compose = yaml.safe_load((ROOT / "deployment/nas/compose.yaml").read_text(encoding="utf-8"))
-    assert set(compose["services"]) == {"db"}
-    db_service = compose["services"]["db"]
+def test_single_host_compose_binds_mysql_and_redis_locally():
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    services = compose["services"]
+    assert set(services) == {
+        "db",
+        "redis",
+        "registration-redis",
+        "registration-intake",
+        "registration-token-verifier",
+    }
+    db_service = services["db"]
     assert "mysql:" in db_service["image"]
     assert "no-new-privileges:true" in db_service["security_opt"]
     assert any("mysql-data:/var/lib/mysql" in str(v) for v in db_service["volumes"])
-    assert "default-character-set=utf8mb4" in (
-        ROOT / "deployment/nas/mysql-client.cnf"
-    ).read_text(encoding="utf-8")
+    assert "--character-set-server=utf8mb4" in db_service["command"]
+    for service in services.values():
+        for binding in service.get("ports", ()):
+            assert str(binding).startswith("127.0.0.1:")

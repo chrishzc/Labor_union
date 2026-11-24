@@ -106,14 +106,16 @@ def test_old_public_registration_routes_cannot_reach_sql():
 
 def test_public_container_has_no_mysql_settings_or_network_egress():
     import yaml
-    config = yaml.safe_load(Path("docker-compose.registration.yml").read_text(encoding="utf-8"))
+    config = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
     intake = config["services"]["registration-intake"]
     assert intake["environment"]["APP_ENV"] == "production"
     assert intake["environment"]["REGISTRATION_REDIS_HOST"] == "registration-redis"
     assert intake["secrets"] == ["registration_intake_password"]
     assert not any(key.startswith(("DB_", "MYSQL")) for key in intake["environment"])
     assert all(config["networks"][key].get("internal") is True for key in intake["networks"])
-    assert "ports" not in config["services"]["registration-redis"]
+    for service_name in ("registration-redis", "registration-intake", "registration-token-verifier"):
+        for binding in config["services"][service_name].get("ports", ()):
+            assert str(binding).startswith("127.0.0.1:")
     image_source = Path("deploy/registration/Dockerfile").read_text(encoding="utf-8")
     assert "COPY infrastructure/mysql" not in image_source
     assert "COPY api/main.py" not in image_source
