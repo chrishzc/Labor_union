@@ -87,6 +87,9 @@ def build_orders_assignment_impact(
     scheduling: SchedulingGenerationCandidate,
     client_finance: VersionedImpactCandidate,
     evaluation_at: datetime,
+    *,
+    effective_service_end: date | None = None,
+    coordinated_final_day: bool = False,
 ) -> AssignmentPlanDomainImpact:
     settlement = client_finance.payload.settlement
     override_active = deposit_gate_override_survives_terms_impact(
@@ -105,6 +108,8 @@ def build_orders_assignment_impact(
         settlement,
         evaluation_at,
         blockers,
+        effective_service_end=effective_service_end,
+        coordinated_final_day=coordinated_final_day,
     )
     fingerprint = fingerprint_payload(
         {
@@ -150,6 +155,9 @@ def _build_lifecycle_candidate(
     settlement: Any,
     evaluation_at: datetime,
     blockers: tuple[str, ...],
+    *,
+    effective_service_end: date | None = None,
+    coordinated_final_day: bool = False,
 ) -> Any:
     if "waiting_lock_conversion.service_time_required" in blockers:
         return None
@@ -159,6 +167,8 @@ def _build_lifecycle_candidate(
         scheduling,
         settlement,
         evaluation_at,
+        effective_service_end=effective_service_end,
+        coordinated_final_day=coordinated_final_day,
     )
 
 

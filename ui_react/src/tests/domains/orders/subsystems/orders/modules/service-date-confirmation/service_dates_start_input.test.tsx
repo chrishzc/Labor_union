@@ -157,6 +157,7 @@ it('等到讀回同一回執的日期、月嫂和時數才顯示日期調整完�
   expect(adjust.getByRole('alert')).toHaveTextContent('42');
   expect(screen.queryByText('服務日期調整已儲存')).not.toBeInTheDocument();
   expect(adjust.queryByRole('button', { name: '儲存日期調整' })).not.toBeInTheDocument();
+  orderVersion = 2;
   scheduleVersion = 6;
   actualDays = [{ ...merged, staff_id: 7 }];
   fireEvent.click(readAgain);
@@ -184,11 +185,13 @@ it('完工且有帳務更正擋關時仍可透過純日期操作分裂', async (
     effective_service_dates: actualDays.map(day => day.service_date), bound_staff: staff,
     date_adjustment: { days: actualDays, staff, pairs: [], total_hours: 8, contracted_daily_hours: 8, first_schedule_days: [] },
   }));
+  mocks.getStart.mockImplementation(async () => ({ ...startQuery(), scheduling_version: scheduleVersion, has_formal_assignments: true }));
   mocks.previewAdjustment.mockResolvedValue({
     order_version: 1, scheduling_version: 5, confirmed_version: null, preview_fingerprint: fp,
     removed: [source], inserted: [first, second],
   });
   mocks.applyAdjustment.mockImplementation(async () => {
+    orderVersion = 2;
     scheduleVersion = 6;
     actualDays = [first, second];
     return { receipt_id: 43, scheduling_version: 6, confirmed_version: null };
@@ -414,9 +417,11 @@ describe('#335 direct start input and existing writer integration', () => {
   });
 
   it('精算超出既有範圍時明示原因，不能靜默裁掉日期或寫入', async () => {
-    mocks.calculate.mockResolvedValue({ ...result('2026-09-28'), day_by_day: result('2026-12-20').day_by_day });
+    mocks.calculate.mockImplementation(async ({ actual_start_date }) => actual_start_date === '2026-09-28'
+      ? { ...result(actual_start_date), day_by_day: result('2026-12-20').day_by_day }
+      : result(actual_start_date));
     render(<OrderServiceDatesPanel caseNo={CASE} />);
-    await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+    await waitForSelectedDates(days('2026-10-01', 3));
     fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '2026-09-28' } });
     await screen.findByText(/精算結果超出目前允許/); expect(mocks.applyStart).not.toHaveBeenCalled();
   });

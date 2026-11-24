@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
@@ -71,7 +72,7 @@ def _taipei_instant(value: object) -> datetime:
 
 
 def _reload_locked_order(cursor: Any, envelope: object, case_no: str) -> Mapping[str, Any]:
-    cursor.execute("SELECT case_no, status, lifecycle_version, service_days, cancel_reason, actual_start_date, actual_end_date, service_start_time, service_end_time, service_end_day_offset FROM orders WHERE case_no = %s FOR UPDATE", (case_no,))
+    cursor.execute("SELECT case_no, status, lifecycle_version, service_days, service_hours_per_day, cancel_reason, actual_start_date, actual_end_date, service_start_time, service_end_time, service_end_day_offset FROM orders WHERE case_no = %s FOR UPDATE", (case_no,))
     row = cursor.fetchone()
     if row is None:
         raise ValueError("locked order no longer exists")
@@ -138,19 +139,29 @@ def _load_effective_completion_facts(
     cursor: Any,
     case_no: str,
     service_day_count: int,
+    daily_hours: Decimal | None,
     actual_end_date: date | None,
-) -> tuple[int | None, tuple[date, ...], list[str]]:
+) -> tuple[int | None, tuple[date, ...], bool, list[str]]:
     generation_id = _lock_effective_generation_id(cursor, case_no)
     if generation_id is None:
-        return None, (), ["auto_complete.effective_generation_missing"]
+        return None, (), False, ["auto_complete.effective_generation_missing"]
     assignments = _lock_effective_assignments(cursor, generation_id)
     schedules = _lock_effective_service_schedules(cursor, case_no, generation_id)
-    return generation_id, _official_dates(schedules), _completion_root_blockers(
+    dates = _official_dates(schedules)
+    final_day = max(dates, default=None)
+    final_day_is_coordinated = final_day is not None and any(
+        row.get("service_hours_override") is not None
+        and _optional_date(row.get("work_date"), "official service date") == final_day
+        for row in schedules
+    )
+    blockers = _completion_root_blockers(
         assignments,
         schedules,
         service_day_count,
+        daily_hours,
         actual_end_date,
     )
+    return generation_id, dates, final_day_is_coordinated, blockers
 
 
 def _lock_effective_generation_id(cursor: Any, case_no: str) -> int | None:
@@ -199,7 +210,7 @@ def _lock_effective_service_schedules(
     generation_id: int,
 ) -> tuple[Mapping[str, Any], ...]:
     cursor.execute(
-        "SELECT id,assignment_id,work_date FROM staff_schedule "
+        "SELECT id,assignment_id,work_date,service_hours_override FROM staff_schedule "
         "WHERE case_no=%s AND generation_id=%s AND effective_marker=1 "
         "AND is_work_day=1 ORDER BY work_date,id FOR UPDATE",
         (case_no, generation_id),
@@ -218,6 +229,7 @@ def _completion_root_blockers(
     assignments: tuple[Mapping[str, Any], ...],
     schedules: tuple[Mapping[str, Any], ...],
     service_day_count: int,
+    daily_hours: Decimal | None,
     actual_end_date: date | None,
 ) -> list[str]:
     assignment_ids = {row.get("id") for row in assignments}
@@ -231,16 +243,35 @@ def _completion_root_blockers(
         blockers.append("auto_complete.official_service_owner_inconsistent")
     if len(dates) != len(set(dates)):
         blockers.append("auto_complete.official_service_days_duplicated")
-    if len(dates) != service_day_count:
+    overrides = tuple(row.get("service_hours_override") for row in schedules)
+    if any(hours is not None for hours in overrides):
+        if (
+            daily_hours is None or daily_hours <= 0
+            or any(hours is not None and hours not in (4, 8) for hours in overrides)
+            or sum(daily_hours if hours is None else hours for hours in overrides)
+            != service_day_count * daily_hours
+        ):
+            blockers.append("auto_complete.official_service_hours_mismatch")
+    elif len(dates) != service_day_count:
         blockers.append("auto_complete.official_service_day_count_mismatch")
     if dates and actual_end_date != max(dates):
         blockers.append("auto_complete.actual_end_date_drift")
     return blockers
 
 
-def _completion_instant(actual_end_date: date | None, start: time | None, end: time | None, offset: object) -> tuple[datetime | None, list[str]]:
+def _completion_instant(
+    actual_end_date: date | None,
+    order: Mapping[str, Any],
+    *,
+    final_day_is_coordinated: bool,
+) -> tuple[datetime | None, list[str]]:
     if actual_end_date is None:
         return None, ["auto_complete.actual_end_date_missing"]
+    if final_day_is_coordinated:
+        return datetime.combine(actual_end_date, time.max, _TAIPEI), []
+    start = _optional_time(order.get("service_start_time"), "service_start_time")
+    end = _optional_time(order.get("service_end_time"), "service_end_time")
+    offset = order.get("service_end_day_offset")
     if start is None and end is None and offset is None:
         return datetime.combine(actual_end_date, time.max, _TAIPEI), []
     if start is None or end is None or offset not in {0, 1}:
@@ -269,13 +300,17 @@ def load_order_lifecycle_authoritative_facts(cursor: Any, command_envelope: obje
     service_days = _nonnegative_int(order.get("service_days"), "service_days")
     if service_days < 1:
         raise ValueError("service_days must be positive")
-    generation_id, official_dates, completion_blockers = _load_effective_completion_facts(
+    daily_hours = order.get("service_hours_per_day")
+    generation_id, official_dates, final_day_is_coordinated, completion_blockers = _load_effective_completion_facts(
         cursor,
         case_no,
         service_days,
+        Decimal(str(daily_hours)) if daily_hours is not None else None,
         actual_end,
     )
-    completion, time_blockers = _completion_instant(actual_end, _optional_time(order.get("service_start_time"), "service_start_time"), _optional_time(order.get("service_end_time"), "service_end_time"), order.get("service_end_day_offset"))
+    completion, time_blockers = _completion_instant(
+        actual_end, order, final_day_is_coordinated=final_day_is_coordinated
+    )
     cancellation, reason, reconfirmed, blockers = _control_facts(controls, current_status=status, actual_start_date=actual_start, deposit_reconciled=deposit.reconciled, settlement_identity=deposit.settlement_identity, settlement_date=deposit.settlement_date)
     blockers["enter_service"].extend(deposit.blockers); blockers["auto_complete"].extend(completion_blockers + time_blockers)
     facts = {"cancellation":cancellation,"cancellation_reason":reason,"deposit_reconciled":deposit.reconciled,"deposit_settlement_identity":deposit.settlement_identity,"actual_start_date":actual_start.isoformat() if actual_start else None,"actual_end_date":actual_end.isoformat() if actual_end else None,"evaluation_at":evaluation.isoformat(),"completion_instant":completion.isoformat() if completion else None,"completion_facts_consistent":not completion_blockers and not time_blockers,"actual_start_reconfirmed":reconfirmed,"effective_scheduling_generation_id":generation_id,"official_service_dates":tuple(value.isoformat() for value in official_dates),"transition_blockers":{key:tuple(sorted(set(value))) for key,value in blockers.items()},"manual_correction_target":manual_correction_target}

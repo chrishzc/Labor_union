@@ -31,6 +31,7 @@ def _order(*, service_days=1, actual_end_date=date(2026, 8, 4)):
         "status": "服務中",
         "lifecycle_version": 3,
         "service_days": service_days,
+        "service_hours_per_day": 8,
         "cancel_reason": None,
         "actual_start_date": date(2026, 8, 4),
         "actual_end_date": actual_end_date,
@@ -115,3 +116,70 @@ def test_effective_schedule_root_drift_blocks_auto_completion(rows, expected_blo
     facts = _facts(_Cursor(rows))
     assert facts["completion_facts_consistent"] is False
     assert expected_blockers.issubset(set(facts["transition_blockers"]["auto_complete"]))
+
+
+@pytest.mark.parametrize(
+    "contracted_days,daily_hours,days,overrides,expected_completion",
+    [
+        (2, 4, (4,), (8,), "2026-08-04T23:59:59.999999+08:00"),
+        (1, 8, (4, 5), (4, 4), "2026-08-05T23:59:59.999999+08:00"),
+        (3, 8, (1, 2, 4, 5), (4, 4, None, None), "2026-08-05T17:00:00+08:00"),
+        (2, 4, (4, 5), (None, None), "2026-08-05T17:00:00+08:00"),
+    ],
+)
+def test_completion_uses_conserved_daily_hours_and_only_the_final_days_time(
+    contracted_days, daily_hours, days, overrides, expected_completion,
+):
+    order = _order(service_days=contracted_days, actual_end_date=date(2026, 8, max(days)))
+    order["service_hours_per_day"] = daily_hours
+    schedules = tuple(
+        {"id": index + 21, "assignment_id": 11, "work_date": date(2026, 8, day),
+         "service_hours_override": hours}
+        for index, (day, hours) in enumerate(zip(days, overrides, strict=True))
+    )
+
+    facts = _facts(_Cursor(_rows(order=order, schedules=schedules)))
+
+    assert facts["completion_facts_consistent"] is True
+    assert facts["transition_blockers"]["auto_complete"] == ()
+    assert facts["completion_instant"] == expected_completion
+
+
+@pytest.mark.parametrize("overrides", [(4,), (8, 4), (3, 5)])
+def test_adjusted_schedule_with_inconsistent_hours_still_blocks_completion(overrides):
+    order = _order(actual_end_date=date(2026, 8, len(overrides) + 3))
+    schedules = tuple(
+        {"id": index + 21, "assignment_id": 11, "work_date": date(2026, 8, index + 4),
+         "service_hours_override": hours}
+        for index, hours in enumerate(overrides)
+    )
+
+    facts = _facts(_Cursor(_rows(order=order, schedules=schedules)))
+
+    assert facts["completion_facts_consistent"] is False
+    assert "auto_complete.official_service_hours_mismatch" in facts["transition_blockers"]["auto_complete"]
+
+
+def test_adjusted_schedule_does_not_hide_an_unsynchronized_order_end():
+    order = _order(actual_end_date=date(2026, 8, 4))
+    schedules = ({"id": 21, "assignment_id": 11, "work_date": date(2026, 8, 5),
+                  "service_hours_override": 8},)
+
+    facts = _facts(_Cursor(_rows(order=order, schedules=schedules)))
+
+    assert facts["completion_facts_consistent"] is False
+    assert facts["transition_blockers"]["auto_complete"] == ("auto_complete.actual_end_date_drift",)
+
+
+def test_coordinated_final_day_ignores_inapplicable_original_partial_times():
+    order = _order()
+    order["service_start_time"] = None
+    schedules = ({"id": 21, "assignment_id": 11, "work_date": date(2026, 8, 4),
+                  "service_hours_override": 8},)
+    facts = _facts(_Cursor(_rows(order=order, schedules=schedules)))
+    assert facts["completion_facts_consistent"] is True
+    assert facts["completion_instant"] == "2026-08-04T23:59:59.999999+08:00"
+
+    facts = _facts(_Cursor(_rows(order=order)))
+    assert facts["completion_instant"] is None
+    assert "auto_complete.service_time_terms_incomplete" in facts["transition_blockers"]["auto_complete"]

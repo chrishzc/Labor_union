@@ -47,9 +47,12 @@ class OfficialAssignmentServiceFacts:
     service_dates: tuple[date, ...]
     double_pay_dates: tuple[date, ...] = ()
     effective: bool = True
+    financial_assignment_identity: str | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.assignment_identity, "assignment identity")
+        if self.financial_assignment_identity is not None:
+            _validate_identity(self.financial_assignment_identity, "financial assignment identity")
         require_positive_integer(self.staff_id, "staff id")
         _validate_dates(self.service_dates, "service dates")
         if self.effective and not self.service_dates:
@@ -221,10 +224,17 @@ def _earned_floor_fee(terms, facts) -> MoneyNTD:
 
 
 def _allocate_floor_fee(earned_floor_fee, facts):
+    ordered = sorted(facts, key=lambda item: (
+        item.financial_assignment_identity or item.assignment_identity,
+        item.assignment_identity,
+    ))
+    width = len(str(len(ordered)))
+    indexed = tuple((str(index).zfill(width), item) for index, item in enumerate(ordered))
     service_days = {
-        item.assignment_identity: len(item.service_dates) for item in facts
+        key: len(item.service_dates) for key, item in indexed
     }
-    return allocate_largest_remainder(earned_floor_fee, service_days)
+    allocations = allocate_largest_remainder(earned_floor_fee, service_days)
+    return {item.assignment_identity: allocations[key] for key, item in indexed}
 
 
 def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments, consumed_by_date=None):

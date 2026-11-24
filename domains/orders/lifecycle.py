@@ -6,7 +6,7 @@ Description: 定義訂單生命週期與查詢範圍，待補件案件不得自�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import StrEnum
 
 from domains.client_finance.obligation_planning import (
@@ -14,6 +14,7 @@ from domains.client_finance.obligation_planning import (
 )
 from domains.orders.terms import OrderTerms
 from domains.scheduling.generation import SchedulingGenerationCandidate
+from shared_kernel.clock import TAIPEI_TIME_ZONE
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import require_canonical_text
 
@@ -166,11 +167,16 @@ def build_terms_lifecycle_impact(
     scheduling: SchedulingGenerationCandidate,
     client_settlement: ClientSettlementProjection,
     evaluation_at: datetime,
+    *,
+    effective_service_end: date | None = None,
+    coordinated_final_day: bool = False,
 ) -> LifecycleImpactCandidate:
     _validate_inputs(root_facts, scheduling, evaluation_at)
-    actual_end_date = _actual_end_date(scheduling)
+    actual_end_date = effective_service_end or _actual_end_date(scheduling)
     completion_instant = (
-        order_terms.service_time.completion_instant(actual_end_date)
+        datetime.combine(actual_end_date, time.max, TAIPEI_TIME_ZONE)
+        if coordinated_final_day and actual_end_date is not None
+        else order_terms.service_time.completion_instant(actual_end_date)
         if actual_end_date is not None
         else None
     )
@@ -237,6 +243,9 @@ def build_historical_restart_arrangement_lifecycle_impact(
     order_terms: OrderTerms,
     scheduling: SchedulingGenerationCandidate,
     evaluation_at: datetime,
+    *,
+    effective_service_end: date | None = None,
+    coordinated_final_day: bool = False,
 ) -> LifecycleImpactCandidate:
     """Resume restarted service only when its formal arrangement is created."""
     _validate_inputs(root_facts, scheduling, evaluation_at)
@@ -249,9 +258,11 @@ def build_historical_restart_arrangement_lifecycle_impact(
         or root_facts.service_data_locked
     ):
         raise ValueError("historical_arrangement_lifecycle_blocked")
-    actual_end_date = _actual_end_date(scheduling)
+    actual_end_date = effective_service_end or _actual_end_date(scheduling)
     completion_instant = (
-        order_terms.service_time.completion_instant(actual_end_date)
+        datetime.combine(actual_end_date, time.max, TAIPEI_TIME_ZONE)
+        if coordinated_final_day and actual_end_date is not None
+        else order_terms.service_time.completion_instant(actual_end_date)
         if actual_end_date is not None else None
     )
     # Restart provenance exempts the deposit/contract gate.  No settlement fact

@@ -121,6 +121,18 @@ class MySqlServiceDateAdjustmentRepository:
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("service_date_adjustment_stale_version")
+                from infrastructure.mysql.order_lifecycle_impact_writer import persist_order_scheduled_end_projection
+
+                try:
+                    persist_order_scheduled_end_projection(
+                        cursor, case_no=facts.case_no,
+                        actual_end_date=max(day.service_date for day in change.days),
+                        expected_order_version=facts.order_version,
+                    )
+                except RuntimeError as error:
+                    if str(error) == "order_version_conflict":
+                        raise ValueError("service_date_adjustment_stale_version") from error
+                    raise
             snapshot = {
                 "removed": [service_day_payload(day) for day in change.removed],
                 "inserted": [service_day_payload(day) for day in change.inserted],
@@ -147,6 +159,53 @@ def _formal_days(cursor, generation_id, suffix):
         (generation_id,),
     )
     return tuple(_service_day(row) for row in cursor.fetchall())
+
+
+def load_payroll_service_dates(cursor, generation_id, assignments, service_days, *, lock):
+    """Keep date-only adjustments separate from the assignment's financial basis."""
+    suffix = " FOR UPDATE" if lock else ""
+    current_generation = generation_id
+    identities = {int(row["id"]): int(row["id"]) for row in assignments}
+    visited = set()
+    while current_generation not in visited:
+        visited.add(current_generation)
+        cursor.execute(
+            "SELECT assignment_id,work_date FROM staff_schedule "
+            "WHERE generation_id=%s AND is_work_day=1 AND service_hours_override IS NULL "
+            "ORDER BY assignment_id,work_date" + suffix, (current_generation,),
+        )
+        original = tuple(cursor.fetchall())
+        if len(original) == service_days:
+            current_by_source = {source: current for current, source in identities.items()}
+            if all(int(row["assignment_id"]) in current_by_source for row in original):
+                return tuple({"assignment_id": current_by_source[int(row["assignment_id"])],
+                              "financial_assignment_identity": f"assignment:{int(row['assignment_id'])}",
+                              "work_date": row["work_date"]} for row in original)
+        cursor.execute(
+            "SELECT lineage.new_assignment_id,old.id AS source_assignment_id,old.generation_id AS source_generation_id "
+            "FROM scheduling_rebuild_lineage lineage "
+            "JOIN scheduling_command_receipts receipt ON receipt.rebuild_event_id=lineage.rebuild_event_id "
+            "JOIN case_staff_assignments current_assignment ON current_assignment.id=lineage.new_assignment_id "
+            "JOIN case_staff_assignments old ON lineage.old_assignment_identity=CONCAT('assignment:',old.id) "
+            "WHERE current_assignment.generation_id=%s AND old.case_no=current_assignment.case_no "
+            "AND old.staff_id=current_assignment.staff_id AND receipt.command_family='orders_actual_start_rebuild' "
+            "ORDER BY lineage.new_assignment_id,lineage.lineage_ordinal" + suffix, (current_generation,),
+        )
+        sources = tuple(cursor.fetchall())
+        by_assignment = {int(row["new_assignment_id"]): int(row["source_assignment_id"]) for row in sources}
+        source_generations = {int(row["source_generation_id"]) for row in sources}
+        if (len(by_assignment) != len(sources) or len(source_generations) != 1
+                or set(by_assignment) != set(identities.values())):
+            break
+        identities = {current: by_assignment[source] for current, source in identities.items()}
+        current_generation = next(iter(source_generations))
+    # Financial corrections own a new basis. Do not freeze it across non-neutral rebuilds.
+    cursor.execute(
+        "SELECT assignment_id,work_date FROM staff_schedule "
+        "WHERE generation_id=%s AND effective_marker=1 AND is_work_day=1 "
+        "ORDER BY assignment_id,work_date" + suffix, (generation_id,),
+    )
+    return tuple(cursor.fetchall())
 
 
 def _validate_formal_targets(cursor, case_no, days, *, lock):

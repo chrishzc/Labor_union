@@ -126,6 +126,154 @@ def test_mysql_service_facts_crossing_decimal_id_boundary_can_be_calculated():
     assert {item.staff_id: item.total_payable.amount for item in result.assignments} == {17: 2400, 18: 2400}
 
 
+@pytest.fixture
+def payroll_schedule_sql():
+    import sqlite3
+
+    raw = sqlite3.connect(":memory:")
+    raw.row_factory = sqlite3.Row
+    raw.create_function("CONCAT", 2, lambda left, right: str(left) + str(right))
+    raw.executescript("""
+        CREATE TABLE staff_schedule(assignment_id INTEGER,generation_id INTEGER,work_date TEXT,
+            is_work_day INTEGER,effective_marker INTEGER,service_hours_override INTEGER);
+        CREATE TABLE case_staff_assignments(id INTEGER PRIMARY KEY,generation_id INTEGER,
+            case_no TEXT,staff_id INTEGER);
+        CREATE TABLE scheduling_rebuild_lineage(rebuild_event_id INTEGER,new_assignment_id INTEGER,
+            old_assignment_identity TEXT,lineage_ordinal INTEGER);
+        CREATE TABLE scheduling_command_receipts(rebuild_event_id INTEGER,command_family TEXT);
+    """)
+
+    class Cursor:
+        def execute(self, statement, parameters):
+            assert statement.startswith("SELECT ")
+            self.result = raw.execute(statement.replace("%s", "?").replace(" FOR UPDATE", ""), parameters)
+
+        def fetchall(self):
+            return tuple({key: date.fromisoformat(row[key]) if key == "work_date" else row[key]
+                          for key in row.keys()} for row in self.result.fetchall())
+
+    try:
+        yield raw, Cursor()
+    finally:
+        raw.close()
+
+
+def _schedule_payroll(cursor, generation, assignments, *, days=2, hours=4, tiered=False):
+    from decimal import Decimal
+    from domains.payroll.calculation import AssignmentRateSnapshot, build_case_payroll_candidate
+    from domains.payroll.tiered_rates import TieredPayrollRate
+
+    schedules = mysql_rebuild._load_schedules(
+        cursor, {"effective_generation_id": generation, "service_days": days}, assignments, True,
+    )
+    facts = mysql_rebuild._service_facts(assignments, mysql_rebuild._schedule_index(assignments, schedules))
+    rates = tuple(AssignmentRateSnapshot(
+        item.assignment_identity, "frozen-policy", PayrollPolicyKind.CITIZEN, MoneyNTD(300),
+        TieredPayrollRate(300, 500, Decimal(4), False) if tiered else None,
+    ) for item in facts)
+    result = build_case_payroll_candidate(facts, rates, PayrollTerms(days, hours, MoneyNTD(1001)), ())
+    return facts, result
+
+
+@pytest.mark.parametrize(("operation", "days", "hours"), [
+    ("normal", 2, 4), ("merge", 2, 4), ("split", 1, 8), ("restore", 2, 4),
+])
+@pytest.mark.parametrize("tiered", [False, True])
+def test_date_only_adjustments_preserve_original_payroll_hours_floor_fee_and_tiers(
+    payroll_schedule_sql, operation, days, hours, tiered,
+):
+    raw, cursor = payroll_schedule_sql
+    assignments = ({"id": 9, "staff_id": 17},)
+    raw.execute("INSERT INTO case_staff_assignments VALUES (9,1,'CASE-1',17)")
+    raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,1,NULL)",
+                    [(f"2026-10-0{ordinal}",) for ordinal in range(1, days + 1)])
+    baseline = _schedule_payroll(cursor, 1, assignments, days=days, hours=hours, tiered=tiered)
+    if operation != "normal":
+        raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
+        actual = [("2026-10-03", 4), ("2026-10-04", 4)] if operation == "split" else [("2026-10-03", 8)]
+        raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,1,?)", actual)
+        if operation == "restore":
+            raw.execute("UPDATE staff_schedule SET effective_marker=CASE WHEN service_hours_override IS NULL THEN 1 END")
+    changes = raw.total_changes
+    assert _schedule_payroll(cursor, 1, assignments, days=days, hours=hours, tiered=tiered) == baseline
+    assert baseline[1].assignments[0].actual_hours == 8
+    assert baseline[1].earned_floor_fee == MoneyNTD(1001)
+    assert baseline[1].total_payable == MoneyNTD(4201 if tiered else 3401)
+    assert raw.total_changes == changes
+
+
+def test_cross_caregiver_merge_keeps_both_original_payees_and_floor_allocations(payroll_schedule_sql):
+    raw, cursor = payroll_schedule_sql
+    assignments = ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18})
+    raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(9, 17), (10, 18)])
+    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,1,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
+    baseline = _schedule_payroll(cursor, 1, assignments)
+    raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
+    raw.execute("INSERT INTO staff_schedule VALUES (9,1,'2026-10-03',1,1,8)")
+    assert _schedule_payroll(cursor, 1, assignments) == baseline
+    assert {item.staff_id: item.total_payable.amount for item in baseline[1].assignments} == {17: 1700, 18: 1701}
+    raw.execute("UPDATE staff_schedule SET effective_marker=CASE WHEN service_hours_override IS NULL THEN 1 END")
+    assert _schedule_payroll(cursor, 1, assignments) == baseline
+
+
+@pytest.mark.parametrize("neutral_hops", [1, 2])
+def test_neutral_actual_start_lineage_preserves_payee_with_zero_actual_dates(payroll_schedule_sql, neutral_hops):
+    raw, cursor = payroll_schedule_sql
+    raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(9, 17), (10, 18)])
+    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,NULL,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
+    baseline = _schedule_payroll(cursor, 1, ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18}))
+    for generation in range(2, neutral_hops + 2):
+        owner, other = generation * 10 - 1, generation * 10
+        raw.executemany("INSERT INTO case_staff_assignments VALUES (?,?,'CASE-1',?)",
+                        [(owner, generation, 17), (other, generation, 18)])
+        raw.execute("INSERT INTO staff_schedule VALUES (?,?,'2026-10-05',1,1,8)", (owner, generation))
+        raw.execute("INSERT INTO scheduling_command_receipts VALUES (?,'orders_actual_start_rebuild')", (generation,))
+        raw.executemany("INSERT INTO scheduling_rebuild_lineage VALUES (?,?,?,?)", [
+            (generation, owner, f"assignment:{owner - 10}", 1),
+            (generation, other, f"assignment:{other - 10}", 2),
+        ])
+    facts, result = _schedule_payroll(cursor, generation, ({"id": owner, "staff_id": 17}, {"id": other, "staff_id": 18}))
+    assert {item.staff_id: item.service_dates for item in facts} == {
+        item.staff_id: item.service_dates for item in baseline[0]}
+    assert {item.staff_id: (item.actual_hours, item.service_salary, item.floor_fee_allocated)
+            for item in result.assignments} == {
+        item.staff_id: (item.actual_hours, item.service_salary, item.floor_fee_allocated)
+        for item in baseline[1].assignments}
+    assert {item.assignment_identity for item in facts} == {f"assignment:{owner}", f"assignment:{other}"}
+
+
+@pytest.mark.parametrize(("family", "override"), [("orders_terms_rebuild", 4), ("orders_actual_start_rebuild", None)])
+def test_financial_rebuild_and_complete_current_basis_do_not_inherit_older_dates(payroll_schedule_sql, family, override):
+    raw, cursor = payroll_schedule_sql
+    raw.executemany("INSERT INTO case_staff_assignments VALUES (?,?,'CASE-1',17)", [(9, 1), (19, 2)])
+    raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,NULL,NULL)", [("2026-10-01",), ("2026-10-02",)])
+    raw.executemany("INSERT INTO staff_schedule VALUES (19,2,?,1,1,?)", [("2026-10-03", override), ("2026-10-04", override)])
+    raw.execute("INSERT INTO scheduling_command_receipts VALUES (2,?)", (family,))
+    raw.execute("INSERT INTO scheduling_rebuild_lineage VALUES (2,19,'assignment:9',1)")
+    facts, result = _schedule_payroll(cursor, 2, ({"id": 19, "staff_id": 17},))
+    assert facts[0].service_dates == (date(2026, 10, 3), date(2026, 10, 4))
+    assert result.total_payable == MoneyNTD(3401)
+
+
+@pytest.mark.parametrize("financial_identity", [None, "assignment:source"])
+def test_floor_fee_allocation_preserves_prefix_order_and_conserves_shared_basis(financial_identity):
+    from domains.payroll.calculation import build_case_payroll_candidate
+
+    facts = tuple(OfficialAssignmentServiceFacts(
+        identity, staff_id, (date(2026, 10, staff_id - 16),),
+        financial_assignment_identity=financial_identity,
+    ) for identity, staff_id in (("assignment:1", 17), ("assignment:10", 18)))
+    rates = tuple(rate_snapshot(item.assignment_identity, "policy-1", PayrollPolicyKind.CITIZEN)
+                  for item in facts)
+
+    result = build_case_payroll_candidate(facts, rates, PayrollTerms(2, 4, MoneyNTD(1001)), ())
+
+    assert {item.assignment_identity: item.floor_fee_allocated for item in result.assignments} == {
+        "assignment:1": MoneyNTD(501), "assignment:10": MoneyNTD(500),
+    }
+    assert sum(item.floor_fee_allocated.amount for item in result.assignments) == 1001
+
+
 @pytest.mark.parametrize("effective_amount,allowed", [(3400, True), (3500, False)])
 def test_automatic_completion_accepts_only_unchanged_handover_entitlement(effective_amount, allowed):
     existing = ExistingStaffObligation("assignment:8", "original", MoneyNTD(effective_amount), True,

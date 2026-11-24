@@ -38,6 +38,7 @@ from infrastructure.mysql.staff_payable_correction_sql import (
     effective_staff_obligation_amount,
     selectable_staff_obligation,
 )
+from infrastructure.mysql.service_date_adjustment_repository import load_payroll_service_dates
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -86,7 +87,7 @@ class MySqlPayrollRebuildRepository:
         with _cursor(self._connection) as cursor:
             root = _load_root(cursor, case_no, for_update)
             assignments = _load_assignments(cursor, root, for_update)
-            schedules = _load_schedules(cursor, root, for_update)
+            schedules = _load_schedules(cursor, root, assignments, for_update)
             rates = _load_rates(cursor, assignments, for_update)
             rates = _apply_explicit_case_rate(
                 cursor,
@@ -216,15 +217,13 @@ def _load_assignments(cursor, root, lock):
     return tuple(cursor.fetchall())
 
 
-def _load_schedules(cursor, root, lock):
+def _load_schedules(cursor, root, assignments, lock):
     generation_id = root["effective_generation_id"]
     if generation_id is None:
         return ()
-    cursor.execute(
-        _SCHEDULE_SELECT_SQL + _lock_clause(lock),
-        (generation_id,),
+    return load_payroll_service_dates(
+        cursor, generation_id, assignments, int(root["service_days"]), lock=lock,
     )
-    return tuple(cursor.fetchall())
 
 
 def _load_rates(cursor, assignments, lock):
@@ -380,6 +379,11 @@ def _service_facts(assignments, schedules):
             service_dates=tuple(
                 item["work_date"] for item in schedules[int(row["id"])]
             ),
+            financial_assignment_identity=next((
+                item["financial_assignment_identity"]
+                for item in schedules[int(row["id"])]
+                if item.get("financial_assignment_identity") is not None
+            ), None),
         )
         for row in sorted(assignments, key=lambda item: _assignment_identity(item["id"]))
     )
@@ -902,11 +906,6 @@ _ROOT_SELECT_SQL = (
 _ASSIGNMENT_SELECT_SQL = (
     "SELECT id,staff_id FROM case_staff_assignments "
     "WHERE generation_id=%s AND status NOT IN ('cancelled','replaced') ORDER BY id"
-)
-_SCHEDULE_SELECT_SQL = (
-    "SELECT assignment_id,work_date FROM staff_schedule "
-    "WHERE generation_id=%s AND effective_marker=1 AND is_work_day=1 "
-    "ORDER BY assignment_id,work_date"
 )
 _RATE_SELECT_SQL = (
     "SELECT assignment_id,policy_version,policy_kind,hourly_rate_ntd "

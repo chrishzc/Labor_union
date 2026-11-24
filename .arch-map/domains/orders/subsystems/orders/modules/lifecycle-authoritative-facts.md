@@ -5,6 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
+合併／分裂的服務量讀有效逐日覆寫並核對合約總時數。最後日為協調時段時，查詢與背景到期發現均採臺北日終；其他正常最後班次仍沿用原訂結束時間及跨日設定。正式調整／復原及首排承接透過 `infrastructure/mysql/order_lifecycle_impact_writer.py` 的 Orders CAS 投影同步結束日與版本，保留真正的日期漂移及控制 blocker。
 鎖定並組成 Orders lifecycle／自動完成的 authoritative facts，包含有效正式服務日、actual end 與 completion instant；服務時間三欄皆未設定、且實際迄日與最後正式服務日一致時，依 Orders contract 採台北日終；若只缺其中一部分，則阻擋自動完工。
 
 <a id="completion-catchup-design"></a>
@@ -55,6 +56,8 @@
 - Lock-held facts and auto-completion workflow — `source_observed` — `subsystems/orders/lifecycle_authoritative_facts_loader.py`.
 
 ## Verification
+- `tests/domains/orders/subsystems/orders/integration/test_order_lifecycle_authoritative_facts_loader.py` — 合併、分裂、正常末日、服務量不足及真實日期漂移。
+- `tests/domains/orders/subsystems/orders/integration/test_order_auto_completion_persistent_mysql_e2e.py` — 隔離 MySQL 的合併／分裂日終 discovery、正式完工與回執重播。
 - higher_boundary: [Orders order-terms 的帳務更正整合測試](../../../../../../tests/domains/orders/subsystems/orders/integration/test_accounting_change_reconciliation_mysql.py) — 引用該 owner 的解鎖 Terms 縮短班表、昨日到期補抓、正式完工與雙邊結算投影。
 
 ## Change triggers

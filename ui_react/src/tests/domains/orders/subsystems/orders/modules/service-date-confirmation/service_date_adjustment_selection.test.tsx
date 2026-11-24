@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { OrderServiceDateAdjustment } from '../../../../../../../components/OrderServiceDateAdjustment';
-import type { ServiceDateAdjustmentQuery } from '../../../../../../../api/orders/order_mutation_schemas';
+import { assertServiceDateAdjustmentObserved, OrderServiceDateAdjustment } from '../../../../../../../components/OrderServiceDateAdjustment';
+import type { ServiceDateAdjustmentObservation } from '../../../../../../../components/OrderServiceDateAdjustment';
+import type { ServiceDateAdjustmentQuery, ServiceDateConfirmationQueryView } from '../../../../../../../api/orders/order_mutation_schemas';
 
 const mutations = vi.hoisted(() => ({ preview: vi.fn(), apply: vi.fn() }));
 vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({
@@ -28,6 +29,48 @@ const preview = {
   order_version: 1, scheduling_version: 5, confirmed_version: null, preview_fingerprint: 'a'.repeat(64),
   removed: [independent, other], inserted: [merged],
 };
+
+function adjustmentReadback(confirmedVersion: number | null, schedulingVersion: number) {
+  const currentVersion = confirmedVersion === null ? null : confirmedVersion + 1;
+  const observation: ServiceDateAdjustmentObservation = {
+    preview: { ...preview, confirmed_version: confirmedVersion },
+    receipt: { receipt_id: 42, scheduling_version: schedulingVersion, confirmed_version: currentVersion },
+  };
+  const readback: ServiceDateConfirmationQueryView = {
+    case_no: 'ADJUST-SELECTION',
+    order_version: preview.order_version,
+    scheduling_version: schedulingVersion,
+    contracted_service_days: 2,
+    suggested_dates: [],
+    selectable_dates: [],
+    current_version: currentVersion,
+    current_dates: [merged.service_date],
+    bound_staff: [],
+    arrangement_pending: false,
+    date_adjustment: { ...query, days: [first, second, merged] },
+  };
+  return { observation, readback };
+}
+
+it.each([
+  { name: '正式排班', confirmedVersion: null, schedulingVersion: 6, orderVersion: 2 },
+  { name: '預定服務日期', confirmedVersion: 3, schedulingVersion: 5, orderVersion: 1 },
+])('$name調整後接受預期的訂單版本', ({ confirmedVersion, schedulingVersion, orderVersion }) => {
+  const { observation, readback } = adjustmentReadback(confirmedVersion, schedulingVersion);
+  expect(() => assertServiceDateAdjustmentObserved('ADJUST-SELECTION', {
+    ...readback, order_version: orderVersion,
+  }, observation)).not.toThrow();
+});
+
+it.each([
+  { name: '正式排班', confirmedVersion: null, schedulingVersion: 6, orderVersion: 1 },
+  { name: '預定服務日期', confirmedVersion: 3, schedulingVersion: 5, orderVersion: 2 },
+])('$name調整後拒絕不符的訂單版本', ({ confirmedVersion, schedulingVersion, orderVersion }) => {
+  const { observation, readback } = adjustmentReadback(confirmedVersion, schedulingVersion);
+  expect(() => assertServiceDateAdjustmentObserved('ADJUST-SELECTION', {
+    ...readback, order_version: orderVersion,
+  }, observation)).toThrow('正式讀回的版本或服務日期與本次調整不一致。');
+});
 
 beforeEach(() => {
   mutations.preview.mockReset().mockResolvedValue(preview);
@@ -109,7 +152,7 @@ it.each([
   const adjust = editor({ ...query, days: [nineHours, ...additionalDays], pairs: [], total_hours: 9 + additionalDays.length * 4 });
   expect(adjust.getByText('目前沒有可合併的 4 小時日期或可分裂的 8 小時日期。')).toBeInTheDocument();
   expect(adjust.getAllByRole('button')).toHaveLength(1);
-  expect(adjust.getByRole('button', { name: '取消日期調整' })).toBeEnabled();
+  expect(adjust.getByRole('button', { name: '取消調整' })).toBeEnabled();
 });
 
 it('查詢更新後切換成可用操作，並清除舊操作的草稿', () => {

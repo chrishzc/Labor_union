@@ -263,9 +263,16 @@ class HistoricalRestartArrangementWorkflow:
         )
         if lifecycle_facts.order.version != facts.order_version:
             raise ValueError("historical_arrangement_stale_version")
+        adjusted_days = facts.date_adjustment.days if facts.date_adjustment else ()
+        effective_end = max((day.service_date for day in adjusted_days), default=None)
         lifecycle = build_historical_restart_arrangement_lifecycle_impact(
             lifecycle_facts.lifecycle, lifecycle_facts.order.terms,
             candidate, self._clock.now(),
+            effective_service_end=effective_end,
+            coordinated_final_day=any(
+                day.service_date == effective_end and day.hours_override is not None
+                for day in adjusted_days
+            ),
         )
         self._repository.validate_arrangement_availability(candidate, lock=lock)
         rate_fingerprint = self._repository.arrangement_rate_fingerprint(

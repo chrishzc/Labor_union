@@ -46,6 +46,8 @@
 ### 3.2 `AutoCompleteOrderService` 與完工後日期更正
 
 - **完工時刻與鎖定**：以最後正式服務日（`actual_end_date`）為基準，依訂單記錄的跨日偏移和服務結束時間，算出台北時間的完工時刻。
+  - 最後正式服務日若為 [合併、分裂後的協調時段](02_Assignments_Scheduling_Domain.md#service-date-merge-split)，以該日臺北日終 `23:59:59.999999` 為完工時刻，日終前不得自動完工；畫面顯示該日日終。不能套用原訂時間或由時數猜測實際上下班時間。只有較早日期採協調時段、最後日為正常班次時，仍依最後日的原訂時段與跨日設定。
+  - 完工服務量依 Scheduling 逐日有效時數核對合約總時數；合法合併、分裂不要求實際日期筆數等於原訂天數。日期唯一、有效人員歸屬、Orders 結束日與最後正式服務日一致及既有控制仍須成立，查詢與背景到期發現採相同條件。
   ```text
   completion_instant = actual_end_date + service_end_day_offset + service_end_time  # Asia/Taipei
   ```
