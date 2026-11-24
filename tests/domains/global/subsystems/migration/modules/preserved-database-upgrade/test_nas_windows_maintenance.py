@@ -21,6 +21,61 @@ from scripts import nas_database_maintenance as nas
 IS_NAS_DESTINATION = nas.is_nas_destination
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows manager file sharing and venv redirector")
+def test_restore_installation_lock_accepts_manager_ancestry_and_blocks_other_launches(tmp_path: Path) -> None:
+    lock_path = tmp_path / "scratch" / "windows-remote" / "manager.lock"
+    lock_path.parent.mkdir(parents=True)
+    probe = tmp_path / "restore_lock_probe.py"
+    probe.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "from scripts import nas_database_maintenance as nas\n"
+        "print(os.getppid(), flush=True)\n"
+        "try:\n"
+        "    with nas._restore_installation_lock({'environment_file': Path(os.environ['LU_TEST_LOCK_ROOT']) / '.env'}):\n"
+        "        print('entered restore lock')\n"
+        "except nas.MaintenanceBlocked as exc:\n"
+        "    print(exc)\n"
+        "    raise SystemExit(8)\n",
+        encoding="utf-8",
+    )
+    manager = tmp_path / "manager_lock_probe.ps1"
+    manager.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n"
+        "$env:LABOR_UNION_RESTORE_MANAGER_PID = [string]$PID\n"
+        "Write-Output $PID\n"
+        "$stream = [IO.File]::Open($env:LU_TEST_LOCK_PATH, 'OpenOrCreate', 'ReadWrite', 'None')\n"
+        "try {\n"
+        "    & $env:LU_TEST_PYTHON $env:LU_TEST_PROBE\n"
+        "    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+        "    Remove-Item Env:LABOR_UNION_RESTORE_MANAGER_PID\n"
+        "    & $env:LU_TEST_PYTHON $env:LU_TEST_PROBE\n"
+        "    if ($LASTEXITCODE -ne 8) { throw 'Expected competing lock to block' }\n"
+        "    $env:LABOR_UNION_RESTORE_MANAGER_PID = '4294967295'\n"
+        "    & $env:LU_TEST_PYTHON $env:LU_TEST_PROBE\n"
+        "    exit $LASTEXITCODE\n"
+        "} finally { $stream.Dispose() }\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(manager)],
+        cwd=nas.ROOT,
+        env={**os.environ, "LU_TEST_LOCK_PATH": str(lock_path), "LU_TEST_LOCK_ROOT": str(tmp_path),
+             "LU_TEST_PROBE": str(probe), "LU_TEST_PYTHON": sys.executable,
+             "PYTHONPATH": str(nas.ROOT), "PYTHONIOENCODING": "utf-8"},
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 8, (result.stdout, result.stderr)
+    manager_pid, restore_parent, entered, _, blocked, _, invalid_owner_blocked = result.stdout.decode("utf-8").splitlines()
+    if sys.prefix != sys.base_prefix:
+        assert restore_parent != manager_pid
+    assert entered == "entered restore lock"
+    assert blocked == "另一項管理操作正在執行，請待該操作完成再復原。"
+    assert invalid_owner_blocked == blocked
+
+
 def test_nas_does_not_execute_the_retired_subsidy_relabeling(monkeypatch, tmp_path):
     candidate = 'lu_nas_upgrade_synthetic'
     connection = nas.ConnectionConfig({'host': 'nas.invalid', 'port': 3306, 'ssl_mode': 'VERIFY_IDENTITY',
