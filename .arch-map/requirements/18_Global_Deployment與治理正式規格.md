@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：Global Deployment / Runtime Governance
-- 單一負責範圍：正式部署拓樸（工會 Windows 主機應用端＋區網 NAS MySQL 端）、React 靜態產物與本機 runtime 邊界、Windows 遠端入口與獨立換版、Release orchestration、Runtime supervision 與 30 天營運技術資料保留治理。
+- 單一負責範圍：正式部署拓樸與邊界、React 靜態產物與本機 runtime 邊界、Windows 遠端入口與獨立換版、Release orchestration、Runtime supervision 與 30 天營運技術資料保留治理。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Migration 與 Cutover](10_Global_保留資料Migration與Cutover_Subsystem.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)
 
 本文件定義部署、發布與維運契約，不構成任何特定 production target、credential、schema mutation、provider publication 或外部寫入的執行授權。
@@ -21,18 +21,15 @@
 8. Schema 變更必須使用 preserve-data release manifest、backup、candidate、validation、switch 與 recovery receipt。
 9. Release 未通過 post-start readback 不得標示完成。
 10. 部署位置變更不得改變 Domain ownership、typed API contract、transaction 或資料語意。
-11. NAS production Private Operations caller 使用各 Worker 獨立機器憑證與私人 HTTPS；local shared key 不得 fallback 到 production。
+11. Production Private Operations caller 使用各 Worker 獨立機器憑證與私人 HTTPS；local shared key 不得 fallback 到 production。
 12. 外部副作用只由已提交的 outbox、inbox 或 durable job 執行。
 13. 技術 log 與營運觀測資料以正向 allowlist 管理，最長保留 30 天；所有業務根事實、事件與稽核證據不受本政策刪除。
 
 ## 3. 正式部署拓樸
 
-系統採「工會電腦應用端＋區網 NAS 資料庫端」分離架構：
+NAS 已退出部署範圍，不再是資料庫端，也不安排 DSM 備份或升級。以下保留 Windows 應用端及其服務邊界；替代的正式資料庫位置與維運方式不在本次決策定義。
 
 - **工會電腦（Windows 應用端）**：以根目錄 `Windows管理.bat`（`scripts/launchers/manage_windows.ps1` → `supervise_local_runtime.ps1`）與根目錄 `docker-compose.yml`（本機 Redis）啟動並監督 FastAPI、React 靜態產物、背景 Workers、LINE Webhook 與 Cloudflare Tunnel（詳見 `scripts/launchers/WINDOWS-REMOTE.md`）。主機間程式交付使用 `scripts/package_windows_runtime.py` 產生排除秘密與 runtime 資料的來源雜湊部署包。
-- **NAS（Synology 資料庫端）**：僅透過 `deployment/nas/compose.yaml`、同目錄 `.env` 與 `mysql-client.cnf` 部署區網隔離的 MySQL 8.0 資料庫（`db` 服務與 `mysql-data` 資料卷，密碼以 `/run/mysql-secrets/root-password` 與 `app-password` 唯讀檔案掛載）。日常維護由 `deployment/nas/README.md` 承接。
-- **NAS 每日線上 SQL 備份**：DSM 每日 03:00 以獨立 root 腳本 `deployment/nas/backup-database.sh` 將 `db` 容器內的非空 InnoDB 資料庫匯出至未掛入容器的 NAS 管理者專用資料夾，永久保存、不自動清理；不停止服務或變更 Compose／`.env`／DB GRANT。檢查來源歸屬、權限／路徑、串流／壓縮／檢查碼與完成標記，失敗非零通知 DSM 並保留備份；詳細操作見 `deployment/nas/SQL-BACKUPS.md`。
-- **NAS 保留資料升級**：Schema 升級使用 `deployment/nas/upgrade-database.sh` 與 `scripts/update_nas_database.py` 針對冷備份副本驗證後切換，詳見 `deployment/nas/DATABASE-UPGRADE.md`。
 - **API 隔離組成與機器憑證邊界**：`api/main.py`（含 `api/routes/admin_setup.py` 首次 root 建帳）、`api/nas_apps.py` 與 `api/routes/nas_line_operations.py` 維持管理與公開 LINE 分離組成及私人入口 `/internal/v1/line-operations`（限 `line-operations-proxy` 獨立機器憑證呼叫）。
 
 ### 3.1 Public edge、Application zone 與 Data zone

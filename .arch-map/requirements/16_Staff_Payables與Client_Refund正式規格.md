@@ -37,7 +37,7 @@
 - **方案一分來源核銷**：永豐 `P永` 核銷自備款分期，台新 `P台` 核銷補助款分期，金額依各自來源餘額。兩筆分期均清償後才結清整筆應付。`P台` 自動配對使用原補助分期月份或原預檢擬建的補助分期月份；六碼已確認歸屬的跨月交易由人員依[單筆人工核對規則](22_銀行流水匯入與帳務異常處理正式規格.md#taishin-staff-case-match)確認，正式預檢與套用重驗原始備註、月嫂、案件及款項資格。
 - **少付超過 100 元部分付款（`ApplyStaffPayoutDifference(mode=underpayment)`）**：
   - 銀行對帳「核對交易」可選「足額核銷本次款項（含 100 元內手續費）」、「付款不足，先核銷實付」、「付款超額，另列追收」及上述永豐方案一選項。
-  - 在單一 UoW 內依義務 ID 順序寫入 payout event 與 allocation，計算 `remaining = obligation_amount - net_valid_payout`（> 0 轉 `partially_paid`），下期清冊僅列 `remaining`，不改變 Payroll 原始應付或重複建單；後續新補款繼續對同一義務結清。退匯／沖正僅重開指定來源付款額。
+  - 在單一 UoW 內依義務 ID 順序寫入 payout event 與 allocation，計算 `remaining = obligation_amount - net_valid_payout`（> 0 轉 `partially_paid`），不改變 Payroll 原始應付或重複建單。清冊是否列入及列示金額依[應付清冊 §3.2](16A_Accounts_Payable_Export與現金需求清冊規格.md#historical-payables-review-entry)：沿用原付款日，符合條件才列正數未付餘額；後續新補款繼續對同一義務結清。退匯／沖正僅重開指定來源付款額。
 
   - **少付邊界例**：已確認原應付為 NT$10,000。若實付 NT$9,900，符合正式配對條件時，以 NT$100 手續費結清。若實付 NT$9,899，不能以手續費結清；經辦選「付款不足，先核銷實付」後，原義務只核銷 NT$9,899，保留 NT$101 待付，無須另建應付單。
 

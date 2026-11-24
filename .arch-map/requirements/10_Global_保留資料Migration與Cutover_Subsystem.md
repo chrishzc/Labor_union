@@ -35,7 +35,7 @@
 7. Plan 至 switch 期間須持有 maintenance／write-freeze token（source 異動即判定 stale）。
 8. `.env` switch 僅原子修改唯一 `DB_DATABASE`，其餘 bytes 與註解不變；切換前重驗 fingerprint 與 config digest；切換後重啟 API、管理端前端、Watcher／worker 並完成 read smoke 方標記完成；Rollback 僅切回原庫而不刪 candidate。
 9. `db/schema.sql` 與 `scripts/init_db.py` 屬 fresh bootstrap 工具，preserve-data workflow 嚴禁呼叫；所有 receipt 不得包含 credential、完整 `.env`、PII 或銀行 raw payload。
-10. **本機受控清空重建（`scripts/launchers/reset_DB.bat`）**：僅於開發者明確捨棄 localhost `union_db` 資料時執行，強制輸入 exact `RESET` 與通過靜態 hash-locked compact schema（見 [NAS 精簡結構規格](10A_NAS_Fresh初始化與維護復原規格.md#3-nas-新庫結構精簡與退役清單)）驗證，不載入業務 fixture；DROP 前必須使用 TOTP encryption keyring 建立加密之 root-only backup（完整保留 root 帳號、designation、encrypted MFA factor／key version／counter、recovery-code consumed facts、enrollment challenges 與必要 LINE identity parent FK，缺 key／factor 即 fail closed），重建後依 FK 還原驗證後方回 committed receipt；DDL 失敗保留加密備份並回報路徑。
+10. **本機受控清空重建（`scripts/launchers/reset_DB.bat`）**：僅於開發者明確捨棄 localhost `union_db` 資料時執行，強制輸入 exact `RESET` 與通過靜態 hash-locked compact schema（見 [共用精簡新庫結構規格](10A_NAS_Fresh初始化與維護復原規格.md#3-nas-新庫結構精簡與退役清單)）驗證，不載入業務 fixture；DROP 前必須使用 TOTP encryption keyring 建立加密之 root-only backup（完整保留 root 帳號、designation、encrypted MFA factor／key version／counter、recovery-code consumed facts、enrollment challenges 與必要 LINE identity parent FK，缺 key／factor 即 fail closed），重建後依 FK 還原驗證後方回 committed receipt；DDL 失敗保留加密備份並回報路徑。
 
 ## 4. Subsystems 與核心模組
 
@@ -49,6 +49,8 @@
 - Qualification receipt 必須綁定 runner 實際選中的單一 `release_id` 與該 release canonical fingerprint，禁止以整條 chain aggregate fingerprint 冒充單一選定版本通過。
 
 ### 4.2 Preflight、Backup、Schema State 與 Runner
+
+本機開發庫日常升級走 `scripts.update_local_database`。依 ordered release plan 判定已是現行版、可在本機原庫套用的純結構升級，或需另選隔離副本的保留資料升級。原庫直連須符合該版本資格、原庫身分、備份及續跑驗證；不以 NAS 候選、DSM 備份或部署切換為前置。既有 NAS 入口與中斷恢復規則屬相容邊界，不列入現行部署。
 
 - **Preflight／Backup**：`DatabaseIdentityReader`、`SourceReadOnlyGuard`、`CandidateAbsenceGuard`、`CutoverPlanFingerprint`、`MySqlDumpCommandBuilder`、`AtomicBackupPublisher`、`RestoreEvidenceValidator` 產生 zero-write plan 與驗證備份還原。
 - **Schema State Classification**：Descriptor 須同時列明新表及 `altered_tables` 新增／修改欄位與完整 metadata（type、nullability、default、generated expr、index、FK、check）。Parent-table ALTER 不擁有 parent 既有物件；較早 artifact 遇到後續 canonical release 加入的物件僅依「successor artifact identity ＋ 完整契約」allowlist 視為相容，契約不符仍判 `drift`。1060 條件式 trigger 採 hash-bound predecessor／successor 定義（`db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json`），共用 SQL loader 採 quote／comment-aware `DELIMITER`。
