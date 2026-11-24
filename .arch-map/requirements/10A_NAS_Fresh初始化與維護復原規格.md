@@ -3,6 +3,7 @@
 ## 1. 文件邊界與所有權
 
 - 狀態：`current-spec`
+- 適用範圍：本機開發仍使用的共用精簡結構，以及既有維護入口的相容契約。此文件不授權 NAS 部署或執行。部署範圍以 [Global Deployment §3](18_Global_Deployment與治理正式規格.md#3-正式部署拓樸) 為準。
 - Owner：Global Migration Infrastructure Subsystem（`scripts/initialize_nas_schema.py`、`scripts/compact_fresh_schema.py`、`scripts/nas_database_maintenance.py`、`scripts/update_nas_database.py`、`scripts/retire_client_payment_destination.py`）
 - 單一負責範圍：NAS 空白資料庫安全初始化與互動確認契約、精簡新庫 schema（371 retained tables）與全域退役表清單（`labor_union_fresh_table_retirements_v1.json`）、舊全域收款帳戶資料表退役（`retire_client_payment_destination.py`）、DSM 冷備份副本升級入口（`deployment/nas/upgrade-database.sh`），以及 Windows 工會端三大維護入口、每日 18:00 NAS SQL 備份、復原與排程設定 UI。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Migration 與 Cutover Subsystem](10_Global_保留資料Migration與Cutover_Subsystem.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)。
@@ -31,20 +32,22 @@
 - **舊全域收款帳戶三表移除（`scripts/retire_client_payment_destination.py`）**：
   - `client_payment_destination_configuration_{current,events,receipts}` 加入 fresh retirement register；針對已有開發庫提供獨立受控清理工具，依 `receipts → current → events` 順序連帶 table-owned trigger 移除三表（限 `localhost` development，Apply 前強制驗證 plan fingerprint、metadata、無外部 FK 與完整備份，不得混充 additive schema）。
 
-## 4. DSM 冷備份副本受控升級（`upgrade-database.sh` / `update_nas_database.py`）
+<a id="4-dsm-冷備份副本受控升級upgrade-databasesh--update_nas_databasepy"></a>
 
-- 專供 NAS 容器離線維護手動執行（禁止排程自動切換）。`--update` 於鎖內串接「冷備份卷身分核對 → 還原副本卷 → network-none 啟動同版 MySQL 並委派 `scripts.update_local_database` 完成 preserve-data 升級與驗證 → 通過後方更新 Compose physical volume 與 `NAS_IMAGE` 並啟動服務」。
+## 4. 舊 DSM 冷備份副本升級（不再列入部署）（`upgrade-database.sh` / `update_nas_database.py`）
+
+- 此節是舊 NAS 入口仍留在原始碼時的相容契約，不是現行部署或本機日常升級步驟。禁止排程自動切換。`--update` 於鎖內串接「冷備份卷身分核對 → 還原副本卷 → network-none 啟動同版 MySQL 並委派 `scripts.update_local_database` 完成 preserve-data 升級與驗證 → 通過後方更新 Compose physical volume 與 `NAS_IMAGE` 並啟動服務」。
 - 原營運來源庫保持停機且 SQL 零連線；需要連線驗證的是隔離環境還原的新副本，不是原營運來源庫。Switch 前寫入 config before／after hash（保留 `.env` 其他設定、憑證與 MFA keys）；失敗時保留原卷與備份卷，不自動刪除或覆寫。
 
 <a id="windows-nas-maintenance"></a>
 
 ## 5. Windows 三大維護入口與每日 NAS SQL 備份（`nas_database_maintenance.py`）
 
-- **系統架構定位**：Windows 工會電腦執行應用與管理腳本，NAS 執行 Docker MySQL 與共用檔案儲存。維護入口沿用設定中的 MySQL TLS 模式，不啟用 SSH 或遠端修改容器設定，保留 `.env` 的存取權限與切換一致性檢查。備份、升級及復原的備份位置均可使用本機磁碟、映射磁碟或網路共用。
+- **維護相容範圍**：此節保留既有 Windows 維護入口及備份復原行為，不指定正式資料庫或共用檔案主機。日常本機開發庫升級依 [Global Migration](10_Global_保留資料Migration與Cutover_Subsystem.md)。維護入口沿用設定中的 MySQL TLS 模式，不啟用 SSH 或遠端修改容器設定，保留 `.env` 的存取權限與切換一致性檢查。備份、升級及復原的備份位置均可使用本機磁碟、映射磁碟或網路共用。
 - **入口收斂**：獨立批處理 `backup_nas_database.bat`、`initialize_nas_schema.bat`（安全升級，不提供清空重建）、`restore_nas_database.bat` 與根目錄 `Windows管理.bat`（選項 `6 備份`、`7 安全升級`、`8 復原備份`）統一委派 `scripts/nas_database_maintenance.py`；選項 7 的操作與受管服務檢查見[安全升級契約](#windows-管理器的安全升級契約)；選項 8 偵測同一安裝仍有受管服務時，立即停止並要求先停止服務。
 - `Windows管理.bat` 選項 `11 管理 root 帳號` 見 [Access Control 的 Windows 主機離線管理](17_External_Integration_LINE_Access正式規格.md#34-windows-主機離線管理-root-帳號)。
 - **設定邊界**：選項 6、7、8 為內部維護入口，以指定 `.env` 的實際主機、連接埠及資料庫為準，不限制維護啟用旗標、部署名稱、固定目標或庫名前綴，也不因程序環境變數與檔案不同而阻擋。程序中的連線覆寫不取代指定檔案。未另填維護帳密時沿用 `.env` 的原帳密；明確提供的維護帳密仍可使用。備份目的目錄優先使用 `.env` 的 `NAS_BACKUP_DIR`，其次使用選填維護設定檔的同名值；未指定時使用 `CONTROLLED_FILE_STORAGE_ROOT/05_資料庫冷備份 (db_backups)`，根目錄未設定則使用專案 `backups/05_資料庫冷備份 (db_backups)`。允許本機、映射磁碟或 UNC 路徑，寫入時可建立所需目錄，不要求預建 NAS 根目錄。升級及復原顯示停機提醒，不再要求額外輸入確認。`--dry-run` 零連線零寫入；路徑不得越界或經 symlink／junction，寫入前仍須通過可讀寫檢查。遠端升級持續使用備份與新副本流程，不使用原庫直連快速升級。
-- **Windows 本機 NAS 測試部署**：`.env` 指向 loopback 的 `lu_nas_*` 測試庫時，選項 7 與正式遠端 NAS 共用保留資料的副本預檢。預檢列出待套用的遷移檔案，再備份、建立副本並升級；直連升級回條僅用於直連升級。若來源已通過正常啟動使用的現行版本檢查，結束而不建立備份或副本。副本通過相同的啟動版本檢查後才可切換。此部署沿用該安裝的測試備份位置。
+- **Windows 本機 NAS 測試部署**：`.env` 指向 loopback 的 `lu_nas_*` 測試庫時，選項 7 與既有遠端相容路徑共用保留資料的副本預檢。預檢列出待套用的遷移檔案，再備份、建立副本並升級；直連升級回條僅用於直連升級。若來源已通過正常啟動使用的現行版本檢查，結束而不建立備份或副本。副本通過相同的啟動版本檢查後才可切換。此部署沿用該安裝的測試備份位置。
 - **安全升級資源受限時的讀取成本**：維持原庫唯讀、完整備份、新副本升級及切換前完整驗證。只有 trigger 的逐步結構核對不查詢投影必為空的欄位、索引、約束、外鍵及 view；trigger 查詢在資料庫端限定該步需要的名稱與資料表，保留 metadata 原順序與完整定義。逐表資料驗證在每次呼叫中一次取得各表主鍵定義，逐表筆數、checksum 及主鍵內容雜湊仍逐一重新核對，不跨階段快取。不得以效能優化取消備份或完整驗證，也不自動刪除原庫。
 - **雙胞胎政策回填範圍**：來源 `1037_twins_payroll_policy.sql` 已為 `exact` 時，安全升級保留既有薪資資料，不重新掃描歷史問卷或重跑雙胞胎薪資回填，無關的胎數答案不得阻擋後續結構升級。來源尚未具備該政策結構時，首次導入仍由副本上的標準回填檢查胎數、費率衝突及多筆綁定。Case Import 對已確認的舊答案 `雙胞胎(+150時薪)` 正規化為 `雙胞胎`，不改寫原始問卷或由標籤加價文字推算費率。備份、結構與來源資料保留驗證維持不變。
 - **1080 直連中斷的副本恢復**：既有原庫若因直連 DDL 逾時停在 1080 的已驗證前綴，選項 7 只讀核對原 `fast_additive` journal、升級前備份及目前完整結構。歷史備份仍須通過檔案完整性、主機／庫別／版本／基線結構身分、資料證據範圍及 journal 所記指紋核對，但不要求目前資料列仍等於中斷前的歷史備份，允許維護期間修正來源資料。規劃及套用仍重新讀取目前來源資料，另建完整備份並核對新副本；一般原庫直連升級與接續仍要求歷史備份資料列一致。原始 trigger 定義取自已驗證備份，依原 MySQL metadata 排序規則重建並核對原基線完整 SHA，包含已被 DROP 的名稱，不改用 Python 排序。已套用 trigger 先比較 canonical SQL 契約，再以現況原始定義及快照原順序核對前綴完整 SHA，不因 SQL 匯入格式或排序差異而誤擋。僅 hash-bound 的 canonical 前綴可進入副本恢復；修復 DDL 由原 runner 在新副本執行，原庫與原紀錄不改寫。缺少備份、紀錄或結構不符，以及 DDL 結果未明時，停止且保留現況，不在原庫盲目續跑。

@@ -70,10 +70,14 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 
 - **請假送件與代班待辦入口**。排班頁移除「代班待辦」分頁及其中的歷史請假畫面，桌面與行動通知不提供開工、延期衝突或局部代班待辦續辦入口。`staff_leave_apply` 連結顯示雙方合意延期指引。月嫂直送 `POST /api/v1/line/staff-self-service/leave-results/submit` 及雙邊確認 `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 回 `410 Gone`。工會端原服務開始 `dates` 動作的局部代班分支拒絕新提交並回 `410 Gone`。歷史記錄及成功操作收據保留唯讀與原鍵讀回，不恢復請假或代班續辦流程。正常開工、合意延期與服務中換人依 [Scheduling](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 各自契約處理，管理員排班由 [案件人力配置](31_MultiCaregiver_Admin_UI正式規格.md#case-staffing) 承接。
 
-### 3.3 Windows NAS 維護入口
+### 3.3 資料庫備份 API 與舊 NAS 相容入口
+
+以下批次檔保留為舊 Windows NAS 部署的相容入口，不是現行部署或標準本機升級入口。
 
 - `initialize_nas_schema.bat`：僅執行備份後的 candidate 安全升級，不委派 fresh／reset（低階 Python／Unix `.sh` 仍保留供 disposable 環境測試）。
 - `backup_nas_database.bat` 與 `restore_nas_database.bat`：提供明確備份／還原操作。
+管理端備份 API 與上述舊批次入口分開：
+
 - `GET /api/v1/system/database-backup` 與 `PUT /api/v1/system/database-backup/schedule`：限已認證管理員查閱狀態與設定每日備份時間，不提供 reset、SQL 執行、備份下載或網頁復原。
 
 ## 4. Standard local runtime
