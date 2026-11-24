@@ -34,7 +34,7 @@ export function FinanceCaseList({
   revision = 0,
   initialSubTab = 'ongoing',
 }: {
-  onCase: (caseNo: string) => void;
+  onCase: (caseNo: string, noticeStage?: 'deposit' | 'first' | 'second') => void;
   revision?: number;
   initialSubTab?: 'ongoing' | 'all';
 }) {
@@ -290,6 +290,7 @@ export function FinanceCaseList({
                         <button className="finance-btn-secondary" onClick={() => onCase(order.case_no)}>
                           查看案件
                         </button>
+                        {current&&current!=='scheme'&&progress?.sources_complete&&(progress.remaining_ntd??0)>0&&notice?.can_send&&(notice.payment?.remaining_amount_ntd??0)>0&&!notice.history.some(task=>['pending','processing','retryable_failed'].includes(task.status))&&<button className="finance-btn-primary" onClick={()=>onCase(order.case_no,current)}>發出提醒</button>}
                       </div>
                     </td>
                   </tr>

@@ -25,6 +25,8 @@ class StaffRecoveryDispositionItem:
     version: int
     status: str
     related_cases: tuple[str,...]
+    source_obligation_identities: tuple[str, ...] = ()
+    has_source_cash_evidence: bool = False
 
 
 @dataclass(frozen=True)

@@ -543,6 +543,45 @@ def test_full_subsidy_case_does_not_require_customer_receipts_or_three_zero_stag
     assert result.customer_amount_ntd == 0 and result.customer_fully_received is True
     assert result.staff_receivable_ntd == result.subsidy_ntd == 12000
     assert not result.scheme_conflict
+    assert result.full_subsidy is True
+    assert result.staff_items == () and result.client_items == ()
+    # A read-only full-subsidy fact must survive the strict HTTP boundary even
+    # before Payroll has established an obligation.
+    from api.routes.finance_statement_workspace import _case_view
+    projected = _case_view(result).model_dump(mode='json')
+    assert projected['full_subsidy'] is True
+    assert projected['staff_items'] == [] and projected['client_items'] == []
+
+
+def test_full_subsidy_effective_scheme_outweighs_old_advance_confirmation():
+    from datetime import date
+    from decimal import Decimal
+    from domains.finance_import.statement_archive import CaseSubsidyPlan, SubsidyPlanEvent
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding, ClientCasePaymentTerms
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    from api.routes.finance_statement_workspace import _case_view
+
+    class State:
+        def case_client(self, _): return 'Synthetic'
+        def dismissed(self, _, **kwargs): return {}
+
+    plan = CaseSubsidyPlan('CASE-FULL', 1, (
+        SubsidyPlanEvent(1, 'advance', 'synthetic', '2026-11-05T00:00:00+00:00'),
+    ))
+    terms = ClientCasePaymentTerms(
+        ClientCaseFunding('CASE-FULL', '原住民', Decimal(80), Decimal(80), 12000),
+        service_end_date=date(2026, 11, 12),
+    )
+    result = AccountingWorkspace(
+        State(), lambda *a, **kw: ((), ()), lambda *a, **kw: ((), ()),
+        payment_terms=lambda _: terms, plan=lambda _: plan,
+    ).query('CASE-FULL')
+    projected = _case_view(result).model_dump(mode='json')
+    assert projected['full_subsidy'] is True and projected['scheme'] == 'split'
+    assert projected['ongoing_completed'] is False
+    assert projected['client_items'] == [] and projected['staff_items'] == []
+    assert all(payment['recipient'] == 'staff' for payment in projected['subsidy_payments'])
+    assert projected['subsidy_plan']['events'][0]['scheme'] == 'advance'
 
 
 def test_full_subsidy_conflicting_existing_customer_charge_is_preserved_for_review():
@@ -558,6 +597,7 @@ def test_full_subsidy_conflicting_existing_customer_charge_is_preserved_for_revi
         payment_terms=lambda _:ClientCasePaymentTerms(terms)).query('CASE-FULL')
     assert result.scheme == 'unknown' and result.scheme_conflict
     assert result.client_items[0].expected_ntd == result.client_items[0].actual_ntd == 500
+    assert result.full_subsidy is False and result.zero_stages == ()
 
 
 def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_distinct():
@@ -601,10 +641,25 @@ def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_
     assert (confirmed.customer_amount_ntd, confirmed.customer_paid_ntd, confirmed.customer_fully_received) == (18000, 18000, True)
     assert confirmed.collection_progress.stage == 'scheme'
     assert confirmed.client_items == (stages[1],)
+    assert set(confirmed.zero_stages) == {'deposit', 'second'}
+    from api.routes.finance_statement_workspace import _case_view
+    projected = _case_view(confirmed).model_dump(mode='json')
+    assert set(projected['zero_stages']) == {'deposit', 'second'}
+    assert projected['full_subsidy'] is False
+    assert [item['identity'] for item in projected['client_items']] == ['first']
+    # Existing formal items are preserved and never also advertised as absent
+    # zero-stage evidence, even if old terms include that stage.
+    query.client=lambda *_,**__: (stages,())
+    assert query.query('CASE').zero_stages == ()
     query.client=lambda *_,**__: ((),())
     unknown=query.query('CASE')
     assert unknown.customer_amount_ntd is None and unknown.customer_paid_ntd is None
     assert unknown.collection_progress.stage == 'first' and not unknown.collection_progress.sources_complete
+    query.payment_terms=lambda _: ClientCasePaymentTerms(historical_stages=True)
+    historical=query.query('CASE')
+    assert historical.zero_stages == () and historical.full_subsidy is False
+    assert historical.client_items == () and historical.staff_receivable_ntd == 30000
+    assert historical.customer_amount_ntd is None and historical.customer_fully_received is None
     query.client=lambda *_,**__: ((stages[1],),())
     query.bank=lambda _: (replace(banks[1],cases=('CASE','OTHER')),)
     shared=query.query('CASE')

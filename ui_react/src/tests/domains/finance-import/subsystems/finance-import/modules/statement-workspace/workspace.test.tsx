@@ -262,3 +262,50 @@ it('switches between ongoing cases and all cases tabs in case accounting workspa
  expect(screen.queryByRole('button', { name: '115000702' })).not.toBeInTheDocument();
  expect(screen.getByText(/已顯示全部進行中案件/)).toBeInTheDocument();
 });
+
+describe('案件免繳唯讀 API 解碼契約', () => {
+  it('decodes authoritative exemption facts and preserves unknown and conflicting values', async () => {
+    const { financeAccountingClient: actualClient } = await vi.importActual<typeof import('../../../../../../../api/finance_import/finance_accounting_client')>('../../../../../../../api/finance_import/finance_accounting_client');
+    const { transport } = await import('../../../../../../../api/shared/transport');
+    const { sessionClient } = await import('../../../../../../../api/auth/session_client');
+    const token = vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-test-session');
+    const get = vi.spyOn(transport, 'get');
+    try {
+      const full: CaseAccounting = {
+        ...detail(), zero_stages: ['deposit'], full_subsidy: true,
+        scheme: 'split', scheme_conflict: false,
+        client_items: [], staff_items: [], transactions: [], warnings: [],
+        pending_warning_count: 0, customer_amount_ntd: 0, subsidy_ntd: 12000,
+        payable_ntd: null, paid_ntd: null, receivable_ntd: null, received_ntd: null,
+      };
+      get.mockResolvedValue({ success: true, message: '', data: full });
+      const decoded = await actualClient.query(full.case_no);
+      expect(decoded.zero_stages).toEqual(['deposit']);
+      expect(decoded.full_subsidy).toBe(true);
+      const unknown: CaseAccounting = {
+        ...detail(), zero_stages: [], full_subsidy: false,
+        subsidy_ntd: null, customer_amount_ntd: null,
+        scheme: 'unknown', scheme_conflict: true,
+      };
+      get.mockResolvedValue({ success: true, message: '', data: unknown });
+      const unresolved = await actualClient.query(unknown.case_no);
+      expect(unresolved.subsidy_ntd).toBeNull();
+      expect(unresolved.customer_amount_ntd).toBeNull();
+      expect(unresolved.zero_stages).toEqual([]);
+      expect(unresolved.full_subsidy).toBe(false);
+      expect(unresolved.scheme_conflict).toBe(true);
+      get.mockResolvedValue({ success: true, message: '', data: { ...unknown, zero_stages: ['unknown'] } });
+      await expect(actualClient.query(unknown.case_no)).rejects.toThrow();
+    } finally {
+      get.mockRestore();
+      token.mockRestore();
+    }
+  });
+});
+
+it('列表提醒開啟正確期別預覽，不在列表發送',async()=>{
+ vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(orderPage(['115000701']));
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({...detail(),collection_progress:{stage:'first',sources_complete:true,expected_ntd:1000,received_ntd:0,remaining_ntd:1000,due_date:'2026-11-01'}});
+ vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue([{case_no:'115000701',payment_stage:'first',payment:{case_no:'115000701',payment_stage:'first',obligation_identity:'first',projection_version:1,obligation_event_id:1,due_date:'2026-11-01',remaining_amount_ntd:1000},recipient_label:'合成客戶',can_send:true,unavailable_reason:null,message:'繳款提醒',history:[]}]);
+ const open=vi.fn();render(<FinanceCaseList onCase={open}/>);fireEvent.click(await screen.findByRole('button',{name:'發出提醒'}));expect(open).toHaveBeenCalledWith('115000701','first');expect(paymentOverdueReminderClient.sendCase).not.toHaveBeenCalled();
+});

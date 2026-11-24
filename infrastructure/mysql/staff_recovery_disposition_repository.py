@@ -34,7 +34,38 @@ class MySqlStaffRecoveryDispositionRepository:
                 cursor.execute('SELECT * FROM staff_recovery_noncash_events WHERE recovery_identity=%s ORDER BY id',(r['recovery_identity'],))
                 history=cursor.fetchall()
                 status='待追償' if int(r['remaining_amount_ntd']) else '已作損失處理' if history and history[-1]['action']=='loss' else '工會已承擔超付款' if history else '已追回'
-                items.append(StaffRecoveryDispositionItem(r['recovery_identity'],int(r['staff_id']),r['party'],int(r['original_amount_ntd']),int(r['remaining_amount_ntd']),int(r['noncash']),int(r['aggregate_version']),status,cases))
+                cursor.execute('SELECT o.obligation_identity FROM staff_obligations o WHERE o.case_no=%s AND o.staff_id=%s AND JSON_CONTAINS(%s,JSON_QUOTE(o.obligation_identity)) ORDER BY o.obligation_identity',
+                    (case_no, int(r['staff_id']), r['source_obligation_identities']))
+                source_obligations = tuple(row['obligation_identity'] for row in cursor.fetchall())
+                bank_references = r.get('source_bank_fact_identities') or '[]'
+                payout_references = r.get('source_payout_event_ids') or '[]'
+                try:
+                    banks = json.loads(bank_references) if isinstance(bank_references, str) else bank_references
+                    payouts = json.loads(payout_references) if isinstance(payout_references, str) else payout_references
+                except (ValueError, TypeError):
+                    banks, payouts = [], []
+                has_sources = False
+                if (source_obligations and isinstance(banks, list) and banks and all(isinstance(value, str) for value in banks)
+                        and isinstance(payouts, list) and payouts and all(type(value) is int and value > 0 for value in payouts)):
+                    cursor.execute(
+                        "SELECT o.obligation_identity,e.id AS payout_event_id,e.finance_import_row_id "
+                        "FROM staff_payout_events e JOIN staff_payout_obligation_links l ON l.payout_event_id=e.id "
+                        "JOIN staff_obligations o ON o.obligation_identity=l.obligation_identity "
+                        "JOIN finance_import_rows b ON b.id=e.finance_import_row_id "
+                        "WHERE o.case_no=%s AND o.staff_id=%s AND e.staff_id=%s AND e.event_type='payout' "
+                        "AND JSON_CONTAINS(%s,CAST(e.id AS JSON)) "
+                        "AND JSON_CONTAINS(%s,JSON_QUOTE(CONCAT('finance-import-row:',b.id))) "
+                        "AND JSON_CONTAINS(%s,JSON_QUOTE(o.obligation_identity)) "
+                        "AND NOT EXISTS(SELECT 1 FROM staff_payout_events reversed WHERE reversed.reversal_of_event_id=e.id)",
+                        (case_no, int(r['staff_id']), int(r['staff_id']), json.dumps(payouts), json.dumps(banks), r['source_obligation_identities']),
+                    )
+                    source_rows = cursor.fetchall()
+                    has_sources = (bool(source_rows)
+                        and {row['payout_event_id'] for row in source_rows} == set(payouts)
+                        and {f"finance-import-row:{row['finance_import_row_id']}" for row in source_rows} == set(banks)
+                        and len(payouts) == len(set(payouts)) and len(banks) == len(set(banks)))
+                items.append(StaffRecoveryDispositionItem(r['recovery_identity'],int(r['staff_id']),r['party'],int(r['original_amount_ntd']),int(r['remaining_amount_ntd']),int(r['noncash']),int(r['aggregate_version']),status,cases,
+                    source_obligation_identities=source_obligations, has_source_cash_evidence=has_sources))
                 events.extend(StaffRecoveryDispositionEvent(f'staff-noncash:{x["id"]}',x['recovery_identity'],x['action'],int(x['amount_ntd']),x['reason'],x['actor'],str(x['confirmed_on'])) for x in history)
         return StaffRecoveryDispositionView(case_no,tuple(items),tuple(events))
 

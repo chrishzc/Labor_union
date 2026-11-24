@@ -162,6 +162,8 @@ class CaseAccounting:
     bank_memos: tuple[CaseBankMemo, ...] = ()
     subsidy_payments: tuple[SubsidyPayment, ...] = ()
     estimated_subsidy_payment_date: str | None = None
+    zero_stages: tuple[str, ...] = ()
+    full_subsidy: bool = False
 
 
 @dataclass(frozen=True)
@@ -409,7 +411,9 @@ class AccountingWorkspace:
             direct_confirmed=direct, bank_sources_complete=cash_flows is not None, direct_conflict=conflict,
             full_subsidy=full_subsidy)
         plan = self.plan(case_no) if include_sources and self.plan is not None else None
-        if plan is not None and plan.selected_scheme is not None:
+        if full_subsidy and not conflict:
+            scheme = "split"
+        elif plan is not None and plan.selected_scheme is not None:
             scheme = plan.selected_scheme
         from domains.client_finance.subsidy_advance import subsidy_advance_due_date
         estimated_subsidy_payment_date = (
@@ -432,7 +436,9 @@ class AccountingWorkspace:
             staff_total - subsidy if staff_total is not None and subsidy is not None else None,
             arrangement, conflict, direct_arrangement_ready(staff_total, customer_amount, subsidy, fully_received, cash_flows),
             CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(collection_sources, historical=terms.historical_stages),
-            plan, ongoing_case_completed(fully_received, plan),
+            plan, ongoing_case_completed(fully_received, plan) and not (
+                full_subsidy and not conflict and plan is not None and plan.selected_scheme != "split"
+            ),
             customer_paid_ntd=customer_paid, funding=funding,
             cancellation_settlement=self.cancellation(case_no) if include_sources and self.cancellation else None,
             bank_memos=self.bank_memos(case_no) if include_sources and self.bank_memos else (),
@@ -440,6 +446,8 @@ class AccountingWorkspace:
                 scheme, subsidy, terms.service_end_date, client_name, client_items, staff_due,
             ) if include_sources else (),
             estimated_subsidy_payment_date=estimated_subsidy_payment_date,
+            zero_stages=tuple(stage.value for stage in terms.zero_stages if stage.value not in recorded_stages) if not conflict else (),
+            full_subsidy=full_subsidy and not conflict,
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

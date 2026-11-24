@@ -314,6 +314,8 @@ class CaseAccountingView(_StrictModel):
     bank_memos: list[CaseBankMemoView] = Field(default_factory=list)
     subsidy_payments: list[SubsidyPaymentView] = Field(default_factory=list)
     estimated_subsidy_payment_date: str | None = None
+    zero_stages: list[Literal["deposit", "first", "second"]] = Field(default_factory=list)
+    full_subsidy: bool = False
     ongoing_completed: bool = False
     cancellation_settlement: CaseCancellationSettlementView | None = None
 

@@ -207,3 +207,68 @@ def test_query_rejects_status_remaining_contradiction(status, remaining) -> None
         StaffOverpaymentRecoveryQueryView(
             7, "recovery-1", remaining, status, 2, 8, (), (), (), (),
         )
+
+@pytest.mark.parametrize('source_state', [
+    'valid', 'missing_bank', 'missing_payout', 'wrong_case', 'wrong_staff', 'reversed', 'partly_dangling',
+])
+def test_disposition_query_binds_only_existing_case_and_staff_cash_sources(source_state):
+    import json
+    from infrastructure.mysql.staff_recovery_disposition_repository import MySqlStaffRecoveryDispositionRepository
+
+    class Cursor:
+        def __init__(self):
+            self.result = []
+            self.statements = []
+
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+
+        def execute(self, statement, params=()):
+            self.statements.append(statement)
+            assert statement.lstrip().upper().startswith('SELECT')
+            assert 'FOR UPDATE' not in statement.upper()
+            if 'FROM staff_overpayment_recoveries r' in statement:
+                self.result = [{
+                    'recovery_identity': 'recovery-1', 'staff_id': 7, 'party': 'Synthetic',
+                    'original_amount_ntd': 500, 'remaining_amount_ntd': 500,
+                    'noncash': 0, 'aggregate_version': 2,
+                    'source_bank_fact_identities': json.dumps(['finance-import-row:11', 'finance-import-row:12'] if source_state == 'partly_dangling' else ['finance-import-row:11']),
+                    'source_payout_event_ids': '[9]',
+                    'source_obligation_identities': '["staff-1"]',
+                }]
+            elif 'FROM staff_payout_events e' in statement:
+                assert 'JOIN staff_payout_obligation_links' in statement
+                assert 'JOIN staff_obligations' in statement and 'JOIN finance_import_rows' in statement
+                assert 'o.case_no=%s' in statement and 'o.staff_id=%s' in statement and 'e.staff_id=%s' in statement
+                assert params[:3] == ('CASE-1', 7, 7)
+                assert 'reversal_of_event_id' in statement
+                self.result = ([{'obligation_identity': 'staff-1', 'payout_event_id': 9, 'finance_import_row_id': 11}]
+                    if source_state in {'valid', 'partly_dangling'} else [])
+            elif 'SELECT DISTINCT o.case_no' in statement:
+                self.result = [{'case_no': 'CASE-1'}]
+            elif 'FROM staff_obligations o' in statement:
+                assert 'o.case_no=%s' in statement and 'o.staff_id=%s' in statement
+                assert params[:2] == ('CASE-1', 7)
+                self.result = ([] if source_state in {'wrong_case', 'wrong_staff'}
+                    else [{'obligation_identity': 'staff-1'}])
+            elif 'FROM staff_recovery_noncash_events' in statement:
+                self.result = []
+            else:
+                raise AssertionError(f'unexpected query: {statement}')
+
+        def fetchall(self): return self.result
+        def fetchone(self): return self.result[0] if self.result else None
+
+    class Connection:
+        def __init__(self): self.reader = Cursor()
+        def cursor(self): return self.reader
+        def commit(self): raise AssertionError('read-only query must not commit')
+        def rollback(self): raise AssertionError('read-only query must not roll back')
+
+    connection = Connection()
+    result = MySqlStaffRecoveryDispositionRepository(connection).query('CASE-1')
+    [item] = result.items
+    assert item.identity == 'recovery-1' and item.remaining_ntd == 500
+    assert item.source_obligation_identities == (() if source_state in {'wrong_case', 'wrong_staff'} else ('staff-1',))
+    assert item.has_source_cash_evidence is (source_state == 'valid')
+    assert connection.reader.statements

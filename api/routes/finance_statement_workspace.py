@@ -80,6 +80,7 @@ def _case_view(case):
     payload = asdict(case)
     payload.pop("funding")
     payload.pop("customer_paid_ntd")
+    payload["zero_stages"] = list(payload["zero_stages"])
     for field in ("client_items", "staff_items", "transactions", "warnings", "bank_memos", "subsidy_payments"):
         payload[field] = list(payload[field])
     for field in ("client_items", "staff_items"):
