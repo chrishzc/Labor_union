@@ -26,6 +26,7 @@
   - `ui_react/src/components/OrderServiceDatesPanel.tsx`
   - `ui_react/src/components/OrderServiceDateAdjustment.tsx` — 純日期合併、分裂、精確復原與回執後讀回；不編輯帳務。
     - 顯示 Case Import 原始服務方式；人工休假星期僅作當次 server 精算參數，即時更新建議。歷史重啟在同一表單選日期、分配月嫂並儲存班表，成功後回讀正式排班。
+  - `ui_react/src/components/OrderServiceDateAdjustment.css`
   - `ui_react/src/components/OrderServiceDateCalendar.tsx` — 案件內既有月曆，事前日期確認與完工後日期更正共用呈現；不擁有日期寫入規則。
   - `ui_react/src/components/OrderCaregiverScheduleCalendars.tsx` — 首排與正式排班調整共用的逐人月曆區塊，分配結果委派各自的既有寫入流程。
   - `ui_react/src/components/CandidatePlannedServiceDates.tsx` — 初步候選每週說明的單一保存預計日期操作，重用 Service Dates flow；不串接 Actual Start，星期僅為當次試算。

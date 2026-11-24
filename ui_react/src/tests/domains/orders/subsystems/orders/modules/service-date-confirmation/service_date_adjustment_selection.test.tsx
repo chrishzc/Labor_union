@@ -34,16 +34,98 @@ beforeEach(() => {
   mutations.apply.mockReset().mockResolvedValue({ receipt_id: 42, scheduling_version: 6, confirmed_version: null });
 });
 
-function editor() {
-  render(<OrderServiceDateAdjustment caseNo="ADJUST-SELECTION" query={query}
+function editor(currentQuery = query) {
+  render(<OrderServiceDateAdjustment caseNo="ADJUST-SELECTION" query={currentQuery}
     onCancel={vi.fn()} onSaved={vi.fn().mockResolvedValue(undefined)} />);
   return within(screen.getByRole('group', { name: '合併或分裂日期' }));
 }
 
 function chooseTarget(adjust: ReturnType<typeof editor>) {
-  fireEvent.change(adjust.getByLabelText('目標日期 1'), { target: { value: merged.service_date } });
-  fireEvent.change(adjust.getByRole('combobox', { name: /^月嫂 1/ }), { target: { value: '3' } });
+  fireEvent.change(adjust.getByLabelText('套用日期'), { target: { value: merged.service_date } });
+  fireEvent.change(adjust.getByRole('combobox', { name: '服務月嫂' }), { target: { value: '3' } });
 }
+
+it('逐日排班僅有 4 小時時直接開啟合併，先填套用日期仍須選滿兩日', () => {
+  const adjust = editor();
+  expect(adjust.getByRole('heading', { name: '合併服務日期' })).toBeInTheDocument();
+  expect(adjust.getByText('合併日期 4+4→8')).toBeInTheDocument();
+  expect(adjust.queryByRole('button', { name: /合併日期|分裂日期/ })).not.toBeInTheDocument();
+  expect(adjust.getByRole('heading', { name: '選擇要合併的日期' })).toBeInTheDocument();
+  expect(adjust.getByRole('heading', { name: '選擇要套用的日期' })).toBeInTheDocument();
+  chooseTarget(adjust);
+  expect(adjust.getByText('請先完成步驟1的日期選擇。')).toBeInTheDocument();
+  expect(adjust.getByRole('button', { name: '儲存日期調整' })).toBeDisabled();
+  fireEvent.click(adjust.getByRole('button', { name: `服務日期 ${independent.service_date}` }));
+  fireEvent.click(adjust.getByRole('button', { name: `服務日期 ${other.service_date}` }));
+  expect(adjust.getByText('已選 2/2')).toBeInTheDocument();
+  expect(adjust.getByRole('button', { name: '儲存日期調整' })).toBeEnabled();
+  fireEvent.click(adjust.getByRole('button', { name: `移除 ${independent.service_date}` }));
+  expect(adjust.getByRole('button', { name: '儲存日期調整' })).toBeDisabled();
+  expect(mutations.preview).not.toHaveBeenCalled();
+});
+
+it('逐日排班僅有 8 小時時直接開啟分裂，也可復原已合併的服務日', async () => {
+  const adjust = editor({
+    ...query, days: [merged], contracted_daily_hours: 4, total_hours: 8,
+    pairs: [{ receipt_id: 42, removed: [first, second], inserted: [merged] }],
+  });
+  expect(adjust.getByRole('heading', { name: '分裂服務日期' })).toBeInTheDocument();
+  expect(adjust.getByText('分裂日期 8→4+4')).toBeInTheDocument();
+  expect(adjust.queryByRole('button', { name: /合併日期|分裂日期/ })).not.toBeInTheDocument();
+  expect(adjust.getByLabelText('第2天日期')).toBeInTheDocument();
+  fireEvent.click(adjust.getByRole('button', { name: `服務日期 ${merged.service_date}` }));
+  const restore = adjust.getByRole('region', { name: '復原原來的服務日期' });
+  expect(restore).toHaveTextContent(`${first.service_date}・陳月嫂・4 小時`);
+  expect(restore).toHaveTextContent(`${second.service_date}・陳月嫂・4 小時`);
+  expect(adjust.queryByLabelText('第2天日期')).not.toBeInTheDocument();
+  mutations.preview.mockResolvedValue({ ...preview, removed: [merged], inserted: [first, second] });
+  fireEvent.click(adjust.getByRole('button', { name: '儲存日期調整' }));
+  await waitFor(() => expect(mutations.apply).toHaveBeenCalledTimes(1));
+  expect(mutations.preview).toHaveBeenCalledWith('ADJUST-SELECTION', {
+    source_dates: [merged.service_date], targets: [], reverse_receipt_id: 42,
+  });
+});
+
+it('符合條件的 4 與 8 小時排班並存時可切換操作', () => {
+  const adjust = editor({ ...query, days: [...query.days, original], total_hours: 24 });
+  const merge = adjust.getByRole('button', { name: /合併日期/ });
+  const split = adjust.getByRole('button', { name: /分裂日期/ });
+  expect(merge).toHaveAttribute('aria-pressed', 'true');
+  expect(adjust.getByRole('button', { name: `服務日期 ${original.service_date}` })).toBeDisabled();
+  fireEvent.click(split);
+  expect(split).toHaveAttribute('aria-pressed', 'true');
+  expect(adjust.getByRole('button', { name: `服務日期 ${original.service_date}` })).toBeEnabled();
+  expect(adjust.getByRole('button', { name: `服務日期 ${first.service_date}` })).toBeDisabled();
+  expect(adjust.getByLabelText('第1天服務月嫂')).toBeEnabled();
+  fireEvent.click(merge);
+  expect(adjust.getByLabelText('套用日期')).toBeEnabled();
+});
+
+it.each([
+  { name: '只有 9 小時', additionalDays: [] },
+  { name: '另有一個 4 小時日', additionalDays: [first] },
+])('逐日排班 $name 時顯示空態', ({ additionalDays }) => {
+  const nineHours = { ...original, service_hours: 9 };
+  const adjust = editor({ ...query, days: [nineHours, ...additionalDays], pairs: [], total_hours: 9 + additionalDays.length * 4 });
+  expect(adjust.getByText('目前沒有可合併的 4 小時日期或可分裂的 8 小時日期。')).toBeInTheDocument();
+  expect(adjust.getAllByRole('button')).toHaveLength(1);
+  expect(adjust.getByRole('button', { name: '取消日期調整' })).toBeEnabled();
+});
+
+it('查詢更新後切換成可用操作，並清除舊操作的草稿', () => {
+  const onSaved = vi.fn();
+  const onCancel = vi.fn();
+  const { rerender } = render(<OrderServiceDateAdjustment caseNo="ADJUST-SELECTION" query={query}
+    onCancel={onCancel} onSaved={onSaved} />);
+  const adjust = within(screen.getByRole('group', { name: '合併或分裂日期' }));
+  chooseTarget(adjust);
+  fireEvent.click(adjust.getByRole('button', { name: `服務日期 ${independent.service_date}` }));
+  rerender(<OrderServiceDateAdjustment caseNo="ADJUST-SELECTION"
+    query={{ ...query, days: [original], pairs: [], total_hours: 8 }} onCancel={onCancel} onSaved={onSaved} />);
+  expect(adjust.getByRole('heading', { name: '分裂服務日期' })).toBeInTheDocument();
+  expect(adjust.getByText('已選 0/1')).toBeInTheDocument();
+  expect(adjust.getByLabelText('第1天日期')).toHaveValue('');
+});
 
 it('離開復原配對後只合併新選取的兩個服務日', async () => {
   const adjust = editor();

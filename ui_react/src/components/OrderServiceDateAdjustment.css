@@ -1,0 +1,321 @@
+fieldset.service-date-adjustment[aria-label],
+.order-case-page fieldset.service-date-adjustment[aria-label] {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 14px 0;
+  padding: clamp(12px, 2vw, 26px);
+  border: 1px solid #e8ded4;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.service-date-adjustment .service-date-adjustment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.service-date-adjustment .service-date-adjustment-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.service-date-adjustment .service-date-adjustment-header p,
+.service-date-adjustment .service-date-adjustment-step-header p {
+  margin: 6px 0 0;
+  color: #756358;
+  font-size: .85rem;
+  line-height: 1.55;
+}
+
+.service-date-adjustment button.service-date-adjustment-cancel {
+  flex: none;
+  align-self: flex-start;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #d8a990;
+  border-radius: 6px;
+  background: #fff;
+  color: #a33b0d;
+  white-space: nowrap;
+}
+
+.service-date-adjustment button.service-date-adjustment-cancel:hover:not(:disabled),
+.service-date-adjustment .service-date-adjustment-modes button[aria-pressed="false"]:hover:not(:disabled) {
+  border-color: #b95125;
+  background: #fff4ec;
+}
+
+.service-date-adjustment fieldset.service-date-adjustment-editor {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.service-date-adjustment .service-date-adjustment-modes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+
+.service-date-adjustment .service-date-adjustment-modes > span,
+.service-date-adjustment .service-date-adjustment-modes > button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid #e7d6cc;
+  border-radius: 6px;
+  background: #fff;
+  color: #765b4d;
+  font-size: .84rem;
+}
+
+.service-date-adjustment .service-date-adjustment-modes > span {
+  border-color: #edc4ae;
+  background: #fff4ec;
+  color: #983a14;
+  font-weight: 650;
+}
+
+.service-date-adjustment .service-date-adjustment-modes button[aria-pressed="true"],
+.service-date-adjustment .service-date-adjustment-step-number {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+}
+
+.service-date-adjustment .service-date-adjustment-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 24px;
+}
+
+.service-date-adjustment .service-date-adjustment-step {
+  min-width: 0;
+  padding: 20px 0;
+  border-top: 1px solid #eee5de;
+}
+
+.service-date-adjustment .service-date-adjustment-step-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.service-date-adjustment .service-date-adjustment-step-number {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  font-weight: 700;
+}
+
+.service-date-adjustment .service-date-adjustment-step-header h4 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+}
+
+.order-case-page .order-service-dates-panel .service-date-adjustment .calendar-matrix-card {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.service-date-adjustment .calendar-days-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.service-date-adjustment .service-date-weekday {
+  text-align: center;
+}
+
+.order-case-page .order-service-dates-panel .service-date-adjustment .calendar-date-cell {
+  min-width: 0;
+  min-height: 44px;
+  gap: 3px;
+  padding: 4px 2px;
+  border-radius: 5px;
+  font-size: .9rem;
+  text-align: center;
+}
+
+.order-case-page .order-service-dates-panel .service-date-adjustment .calendar-date-cell:not(:disabled, .selected) {
+  border-color: #f0d4c2 !important;
+  background: #fff4ec !important;
+  color: #983a14;
+}
+
+.order-case-page .order-service-dates-panel .service-date-adjustment .calendar-date-cell.selected {
+  border-color: #b95125 !important;
+}
+
+.order-case-page .order-service-dates-panel .service-date-adjustment .calendar-date-cell:disabled:not(.selected) {
+  background: #faf8f6 !important;
+  color: #74675f !important;
+}
+
+.service-date-adjustment .calendar-date-cell small {
+  font-size: .67rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.service-date-adjustment .service-date-adjustment-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  color: #4e4038;
+  font-size: .82rem;
+}
+
+.service-date-adjustment .service-date-adjustment-selection > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding-left: 8px;
+  border: 1px solid #edc4ae;
+  border-radius: 18px;
+  background: #fff5ef;
+  color: #983a14;
+}
+
+.service-date-adjustment .service-date-adjustment-selection button {
+  min-height: 26px;
+  min-width: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+}
+
+.service-date-adjustment .service-date-adjustment-selection button:hover:not(:disabled) {
+  background: #f7e3d7;
+}
+
+.service-date-adjustment .service-date-adjustment-targets,
+.service-date-adjustment .service-date-adjustment-empty {
+  padding: 14px;
+  border: 1px solid #eee4dc;
+  border-radius: 7px;
+  background: #fcfaf8;
+}
+
+.service-date-adjustment .service-date-adjustment-target-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.service-date-adjustment .service-date-adjustment-target-row + .service-date-adjustment-target-row {
+  margin-top: 12px;
+}
+
+.service-date-adjustment .service-date-adjustment-target-row > label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.service-date-adjustment .service-date-adjustment-target-row :is(input, select) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding-inline: 6px;
+}
+
+.service-date-adjustment .service-date-adjustment-target-hours {
+  align-self: end;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  color: #756358;
+  font-size: .82rem;
+  white-space: nowrap;
+}
+
+.service-date-adjustment .service-date-adjustment-notice,
+.service-date-adjustment .service-date-adjustment-coordination {
+  color: #756358;
+  font-size: .82rem;
+}
+
+.service-date-adjustment .service-date-adjustment-notice { margin: 0 0 12px; }
+.service-date-adjustment .service-date-adjustment-coordination { margin: 12px 0 0; }
+
+.service-date-adjustment .service-date-adjustment-restore h5 {
+  margin: 0;
+  font-size: .9rem;
+}
+
+.service-date-adjustment .service-date-adjustment-restore ul {
+  margin: 6px 0 10px;
+  padding-inline-start: 20px;
+  overflow-wrap: anywhere;
+}
+
+.service-date-adjustment .service-date-adjustment-restore button {
+  border-color: #d8a990;
+  background: #fff;
+  color: #a33b0d;
+}
+
+.service-date-adjustment .service-date-adjustment-restore button:hover:not(:disabled) {
+  border-color: #b95125;
+  background: #fff4ec;
+}
+
+.service-date-adjustment .service-date-adjustment-empty {
+  margin: 20px 0 0;
+  padding-block: 24px;
+  color: #756358;
+  text-align: center;
+}
+
+.service-date-adjustment .service-date-adjustment-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 14px;
+  border-top: 1px solid #eee5de;
+}
+
+@media (max-width: 1100px) {
+  .service-date-adjustment .service-date-adjustment-target-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .service-date-adjustment .service-date-adjustment-target-hours {
+    grid-column: 1 / -1;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 800px) {
+  .service-date-adjustment .service-date-adjustment-steps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .service-date-adjustment .service-date-adjustment-target-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

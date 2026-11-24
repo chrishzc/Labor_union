@@ -149,8 +149,8 @@ it('等到讀回同一回執的日期、月嫂和時數才顯示日期調整完�
   const adjust = within(screen.getByRole('group', { name: '合併或分裂日期' }));
   fireEvent.click(adjust.getByRole('button', { name: '服務日期 2026-10-01' }));
   fireEvent.click(adjust.getByRole('button', { name: '服務日期 2026-10-02' }));
-  fireEvent.change(adjust.getByLabelText('目標日期 1'), { target: { value: merged.service_date } });
-  fireEvent.change(adjust.getByLabelText('月嫂 1'), { target: { value: '3' } });
+  fireEvent.change(adjust.getByLabelText('套用日期'), { target: { value: merged.service_date } });
+  fireEvent.change(adjust.getByLabelText('服務月嫂'), { target: { value: '3' } });
   fireEvent.click(adjust.getByRole('button', { name: '儲存日期調整' }));
 
   const readAgain = await adjust.findByRole('button', { name: '重新讀取調整結果' });
@@ -196,11 +196,10 @@ it('完工且有帳務更正擋關時仍可透過純日期操作分裂', async (
   render(<OrderServiceDatesPanel caseNo={CASE} completedCorrection />);
   fireEvent.click(await screen.findByRole('button', { name: '合併或分裂日期' }));
   const adjust = within(await screen.findByRole('group', { name: '合併或分裂日期' }));
-  fireEvent.click(adjust.getByRole('button', { name: '分裂日期' }));
   fireEvent.click(adjust.getByRole('button', { name: '服務日期 2026-10-01' }));
   for (const [index, day] of [first, second].entries()) {
-    fireEvent.change(adjust.getByLabelText(`目標日期 ${index + 1}`), { target: { value: day.service_date } });
-    fireEvent.change(adjust.getByLabelText(`月嫂 ${index + 1}`), { target: { value: '3' } });
+    fireEvent.change(adjust.getByLabelText(`第${index + 1}天日期`), { target: { value: day.service_date } });
+    fireEvent.change(adjust.getByLabelText(`第${index + 1}天服務月嫂`), { target: { value: '3' } });
   }
   fireEvent.click(adjust.getByRole('button', { name: '儲存日期調整' }));
   await screen.findByText('服務日期調整已儲存');
