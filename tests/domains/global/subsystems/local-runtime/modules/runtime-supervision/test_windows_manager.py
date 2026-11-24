@@ -160,9 +160,9 @@ function Invoke-ManagerAction {
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Native Windows startup ordering')
-@pytest.mark.parametrize('failure', ['', 'build', 'database', 'redis', 'supervisor'])
-@pytest.mark.parametrize('shared_redis_mode', ['0', '1'])
-def test_start_checks_build_database_and_redis_before_launching(tmp_path, failure, shared_redis_mode):
+@pytest.mark.parametrize('failure', ['', 'build', 'containers', 'database', 'supervisor'])
+@pytest.mark.parametrize('registration_mode', ['0', '1'])
+def test_start_checks_build_database_and_redis_before_launching(tmp_path, failure, registration_mode):
     result = run_manager_functions(r'''
 $LocalOnly=$true
 $PythonPath='Invoke-TestPython'
@@ -180,20 +180,20 @@ function New-ManagedArtifact {
 }
 function Invoke-TestPython {
     if($args[0] -eq '-c'){
-        if($args[1] -notmatch 'REGISTRATION_USE_SHARED_REDIS_FOR_TEST'){throw 'Unexpected setting read'}
+        if($args[1] -notmatch 'REGISTRATION_REDIS_ADMIN_PASSWORD_FILE'){throw 'Unexpected setting read'}
         $global:LASTEXITCODE=0
-        return $env:SHARED_REDIS_MODE
+        return $env:REGISTRATION_MODE
     }
     if(($args -join '|') -ne '-m|scripts.check_runtime_database'){throw 'Unexpected Python invocation'}
     $script:calls.Add('database');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'database')
 }
 function docker.exe {
-    $expectedDockerArgs='compose|up|-d|redis'
-    if($env:SHARED_REDIS_MODE -eq '1'){
-        $expectedDockerArgs='compose|-f|docker-compose.yml|-f|docker-compose.registration-test.yml|up|-d|redis|registration-intake|registration-token-verifier'
+    $expectedDockerArgs='compose|up|-d|--wait|db|redis'
+    if($env:REGISTRATION_MODE -eq '1'){
+        $expectedDockerArgs='compose|--profile|registration|up|-d|--wait|db|redis|registration-redis|registration-intake|registration-token-verifier'
     }
     if(($args -join '|') -ne $expectedDockerArgs){throw 'Unexpected container operation'}
-    $script:calls.Add('redis');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'redis')
+    $script:calls.Add('containers');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'containers')
 }
 function Start-Process {
     param($FilePath,$ArgumentList,$WorkingDirectory,$WindowStyle,$RedirectStandardOutput,$RedirectStandardError,[switch]$PassThru)
@@ -206,10 +206,10 @@ function Start-Process {
 $rejected=$false
 try{Invoke-ManagerAction start}catch{$rejected=$true}
 if($rejected -ne [bool]$env:FAIL_AT){throw 'Startup failure was hidden or startup failed'}
-$expected=@('build','database','redis','supervisor')
+$expected=@('build','containers','database','supervisor')
 if($env:FAIL_AT){$expected=$expected[0..([array]::IndexOf($expected,$env:FAIL_AT))]}
 if(($script:calls -join ',') -ne ($expected -join ',')){throw ('Unexpected startup effects: '+($script:calls -join ','))}
-''', tmp_path, FAIL_AT=failure, SHARED_REDIS_MODE=shared_redis_mode)
+''', tmp_path, FAIL_AT=failure, REGISTRATION_MODE=registration_mode)
     assert result.returncode == 0, result.stdout + result.stderr
 
 

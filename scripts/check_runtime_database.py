@@ -1,4 +1,4 @@
-"""Read-only MySQL readiness for the development runtime, including NAS targets."""
+"""Read-only MySQL readiness for the single-host and development runtime."""
 
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def check_database(*, dry_run=False, require_remote=False):
     )
     if preview.get("status") != "current":
         raise RuntimeDatabaseBlocked(
-            "MySQL schema is not current; provision or upgrade the NAS test database separately"
+            "MySQL schema is not current; provision or upgrade the target database separately"
         )
     updater.require_current_database(preview)
     return {"status": "passed", "connection": "passed", "schema": "current"}
@@ -99,10 +99,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:
-        result = check_database(
-            dry_run=args.dry_run,
-            require_remote=os.getenv("RUNTIME_DATABASE_TARGET") == "nas",
-        )
+        result = check_database(dry_run=args.dry_run)
     except RuntimeDatabaseBlocked as error:
         result = {"status": "blocked", "error": str(error)}
     except Exception:

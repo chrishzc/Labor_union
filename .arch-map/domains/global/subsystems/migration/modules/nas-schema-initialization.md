@@ -5,7 +5,7 @@
 - subsystem: `migration`
 
 ## Responsibility
-從專案 .env 連接 remote development union_db，預設只初始化空庫；互動模式另提供明確確認後清空重建或建立缺少的測試庫。
+從專案 `.env` 連接同機 Docker 或設定指定之 `union_db`（`APP_ENV=development`），預設只初始化空庫；互動模式另提供明確確認後清空重建或建立缺少的庫。
 載入由 canonical fresh assembly 產生的 compact final schema 與 system seed，不載業務 fixture。
 
 ## Implementation

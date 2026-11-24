@@ -31,10 +31,17 @@ def test_loads_quoted_env_credentials_and_tls(env_file):
     assert config["ssl"]["check_hostname"] is True
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "LOCALHOST.", "::1"])
+def test_accepts_loopback_target_for_single_host_docker(env_file, host):
+    env_file.write_text(env_file.read_text(encoding="utf-8").replace("nas.test", host), encoding="utf-8")
+    config = nas.load_configuration(env_file)
+    assert config["host"] == host and config["database"] == "union_db"
+
+
 @pytest.mark.parametrize("before,after", [
     ("development", "production"), ("union_db", "another_db"),
-    ("nas.test", "127.0.0.2"), ("nas.test", "LOCALHOST."),
-    ("3307", "65536"), ("nas.test", "::1"),
+    ("nas.test", "0.0.0.0"), ("nas.test", "::"),
+    ("3307", "65536"), ("nas.test", ""),
 ])
 def test_refuses_unapproved_target(env_file, before, after):
     env_file.write_text(env_file.read_text(encoding="utf-8").replace(before, after), encoding="utf-8")
