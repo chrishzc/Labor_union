@@ -13,6 +13,7 @@ import os
 import secrets
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
@@ -52,10 +53,14 @@ def api():
     ))
     assert admin_auth_is_enabled()
     password = secrets.token_urlsafe(32)
-    bootstrap_root_admin(
-        connection_factory=get_connection, username="weekly_report_test",
-        password=password, display_name="週報測試管理員",
-    )
+    with pytest.MonkeyPatch.context() as enrollment_env:
+        key = Fernet.generate_key().decode("ascii")
+        enrollment_env.setenv("ACCESS_CONTROL_TOTP_KEYRING", f"ci:{key}")
+        enrollment_env.setenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "ci")
+        bootstrap_root_admin(
+            connection_factory=get_connection, username="weekly_report_test",
+            password=password, display_name="週報測試管理員",
+        )
     session = authenticate_local_developer_root(
         "weekly_report_test", password, connection_factory=get_connection,
     )
