@@ -493,6 +493,15 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             </div>
         </div>
 
+        <div class="form-group">
+            <label class="form-label required" for="ingredient_purchase">代購食材</label>
+            <select class="form-input" id="ingredient_purchase" data-survey="代購食材" required>
+                <option value="">請選擇</option>
+                <option value="需月嫂代購(實報實銷)">需月嫂代購(實報實銷)</option>
+                <option value="自行準備">自行準備</option>
+            </select>
+        </div>
+
         <!-- Section 5: 費用與同意條款 -->
         <div class="section-title">💰 5. 費用與同意條款</div>
         <div class="form-group">
@@ -1177,12 +1186,15 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         const expectedDate = document.getElementById('expected_date');
         const serviceDays = document.getElementById('service_days');
         const multiBirthCount = document.querySelector('input[name="multi_birth_count"]:checked');
+        const ingredientPurchase = document.getElementById('ingredient_purchase');
         const needsCooking = document.querySelector('input[name="needs_cooking"]:checked');
         const refundBankCode = document.getElementById('refund_bank_code');
         const refundBankAccount = document.getElementById('refund_bank_account');
         const agree1 = document.getElementById('agree1');
         const agree2 = document.getElementById('agree2');
         const agree3 = document.getElementById('agree3');
+
+        if (!['需月嫂代購(實報實銷)', '自行準備'].includes(ingredientPurchase.value)) addError(errors, ingredientPurchase, '請選擇代購食材方式。');
 
         const nameValue = name.value.trim();
         if (!nameValue) addError(errors, name, '請填寫產婦姓名。');

@@ -354,6 +354,7 @@ const agree1 = makeControl('agree1'); agree1.checked = true;
 const agree2 = makeControl('agree2'); agree2.checked = true;
 const agree3 = makeControl('agree3'); agree3.checked = true;
 const otherBabies = makeControl('other_babies', '無');
+const ingredientPurchase = makeControl('ingredient_purchase', '自行準備');
 const needsCooking = makeControl('needs_cooking_checked', '需要下廚'); needsCooking.checked = true;
 let refundPolicyAccepted = true;
 let uploadedPassbookFile = { size: 1024 };
@@ -382,6 +383,16 @@ for (const nonCitizenFlag of [false, true]) {
   birthSelected = { value: nonCitizenFlag ? '雙胞胎' : '單胞胎', checked: true };
   const valid = validateRegistrationForm();
   assert.equal(valid.ok, true);
+  for (const answer of ['', '其他']) {
+    ingredientPurchase.value = answer;
+    const invalidPurchase = validateRegistrationForm();
+    assert.equal(invalidPurchase.ok, false);
+    assert.equal(invalidPurchase.message, '請選擇代購食材方式。');
+  }
+  for (const answer of ['需月嫂代購(實報實銷)', '自行準備']) {
+    ingredientPurchase.value = answer;
+    assert.equal(validateRegistrationForm().ok, true);
+  }
 }
 console.log('multi_birth_count validation contract passed');
 '''

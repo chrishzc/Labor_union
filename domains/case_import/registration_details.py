@@ -5,7 +5,9 @@ import re
 from collections.abc import Mapping
 from domains.case_import.refund_account import mask_refund_values
 
-REGISTRATION_DETAIL_FIELDS = ("id_number", "holiday_double_pay")
+REGISTRATION_DETAIL_FIELDS = ("id_number", "holiday_double_pay", "ingredient_purchase")
+INGREDIENT_PURCHASE_SURVEY_FIELD = "代購食材"
+INGREDIENT_PURCHASE_OPTIONS = ("需月嫂代購(實報實銷)", "自行準備")
 HOLIDAY_DOUBLE_PAY_SURVEY_FIELD = "三節假日是否願意支付雙倍薪水"
 _FULLWIDTH_ASCII = str.maketrans({chr(code): chr(code - 0xFEE0) for code in range(0xFF01, 0xFF5F)})
 
@@ -43,6 +45,14 @@ def normalize_holiday_double_pay(value: object) -> str | None:
     return candidate
 
 
+def normalize_ingredient_purchase(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or value.strip() not in INGREDIENT_PURCHASE_OPTIONS:
+        raise ValueError("ingredient_purchase_invalid")
+    return value.strip()
+
+
 def project_registration_details(raw: object) -> dict[str, str | None]:
     if isinstance(raw, str):
         try:
@@ -58,4 +68,8 @@ def project_registration_details(raw: object) -> dict[str, str | None]:
         holiday_double_pay = normalize_holiday_double_pay(survey.get(HOLIDAY_DOUBLE_PAY_SURVEY_FIELD))
     except ValueError:
         holiday_double_pay = None
-    return {"id_number": id_number, "holiday_double_pay": holiday_double_pay}
+    try:
+        ingredient_purchase = normalize_ingredient_purchase(survey.get(INGREDIENT_PURCHASE_SURVEY_FIELD))
+    except ValueError:
+        ingredient_purchase = None
+    return {"id_number": id_number, "holiday_double_pay": holiday_double_pay, "ingredient_purchase": ingredient_purchase}
