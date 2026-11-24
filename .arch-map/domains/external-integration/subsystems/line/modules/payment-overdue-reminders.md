@@ -58,7 +58,7 @@
 - [LINE §6.2 繳款提醒與人工收據](../../../../../requirements/20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範) — 期款提醒使用 LINE 寄送工作；人工入帳通知的標記不觸發推播。
 - `.arch-map/requirements/04_Client_Finance_Domain.md` — 款項期別、正式到期日及餘額。
 
-- [帳務工作台 §§3.1–3.3：進行中案件與精簡抽屜](../../../../../requirements/22B_帳務差額處置與工作台UI正式規格.md#wf-02-精簡案件抽屜) — 仍有有效正額待收且符合寄送條件才可送；未到期本身不阻擋人工提醒，不改自動排程。
+- [帳務工作台 §§3.1–3.3：進行中案件與精簡抽屜](../../../../../requirements/22B_帳務差額處置與工作台UI正式規格.md#finance-six-surfaces-ui) — 仍有有效正額待收且符合寄送條件才可送；未到期本身不阻擋人工提醒，不改自動排程。
 - 案件詳情讀 `GET /api/v1/line/payment-overdue-reminders/cases/{case_no}`：各期回傳可空的 `payment`（待收可為 0）、對象標籤、文案、可否寄送、原因及歷史。確認送出用 `POST /api/v1/line/payment-overdue-reminders/cases/send`：只送該期正額款項快照（案號、期別、義務識別、投影版本、事件識別、到期日、待收金額）及 body `idempotency_key`，回 `data.task_id` 與 `data.status`。欄位型別沿用上列 route DTO 與 React client，不建平行介面。
 - 排入寄送前重讀正式款項，重驗資格並解析當時有效的唯一收件人及文案；發送前再檢查接收者與款項。一般期款提醒不綁定 GET 畫面上的對象版本或文案指紋；取消通知的 Preview fingerprint 是另一契約。排入不當作送達，最後成功時間不取請求或排入時間。
 
