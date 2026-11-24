@@ -1285,3 +1285,56 @@ def test_discard_rejects_automatic_row_even_with_a_matching_preview(monkeypatch)
         service.apply("ignored.xlsx", "auto-discard", preview.preview_fingerprint, "admin", "corr",
                       manual_pairings=(), discarded_rows=(2,))
     assert repository.created == []
+
+
+@pytest.mark.parametrize("manual_pairing", [False, True])
+def test_accepted_field_warnings_preserve_prior_failed_review_and_separate_cases(monkeypatch, manual_pairing):
+    from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
+
+    class ReviewRepository:
+        def __init__(self):
+            self.roots = {}
+
+        def load(self, identity, *, for_update):
+            root = self.roots.get(identity)
+            return None if root is None else SimpleNamespace(root=root)
+
+        def append_invalid_row(self, root):
+            self.roots[root.review_identity] = root
+
+    repository = _ManualPairingRepository() if manual_pairing else _Repository()
+    reviews = ReviewRepository()
+    row = {**_valid_row(), "Email": "not-an-email"}
+    workbook = _workbook(row)
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: workbook)
+    service = intake.ClientBeClassWorkbookImportService(
+        repository, _Reconciliation(), lambda: MySqlUnitOfWork(repository.connection),
+        review_recorder=lambda connection, **kwargs: record_invalid_beclass_row(
+            connection, repository=reviews, **kwargs,
+        ),
+    )
+    payload = intake._normalized_payload(row)
+    failed_identity = service._record_review(workbook, 2, payload, "client_case_binding_no_client")
+    failed_root = reviews.roots[failed_identity]
+    preview = service.preview("ignored.xlsx", manual_pairing=manual_pairing)
+    selections = ((2, "HCM-A"), (2, "HCM-B")) if manual_pairing else None
+    receipt = service.apply(
+        "ignored.xlsx", "accepted-warning", preview.preview_fingerprint, "admin", "corr",
+        manual_pairings=selections,
+    )
+    assert receipt.created_count == 1
+    accepted_identities = [saved["review_identity"] for saved in repository.rows.values()]
+    assert failed_identity not in accepted_identities
+    assert len(set(accepted_identities)) == (2 if manual_pairing else 1)
+    assert reviews.roots[failed_identity] is failed_root
+    assert failed_root.issue_codes == ("client_case_binding_no_client",)
+    for identity in accepted_identities:
+        assert reviews.roots[identity].issue_codes == ("client_field_invalid:Email",)
+    replay = service.apply(
+        "ignored.xlsx", "accepted-warning", preview.preview_fingerprint, "admin", "corr",
+        manual_pairings=selections,
+    )
+    assert replay.replayed_workbook
+    assert len(reviews.roots) == len(accepted_identities) + 1
+    with pytest.raises(RuntimeError, match="beclass_import_review_source_conflict"):
+        service._record_review(workbook, 2, payload, "client_beclass_source_payload_conflict")

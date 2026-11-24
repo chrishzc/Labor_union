@@ -450,7 +450,8 @@ class ClientBeClassWorkbookImportService:
                 return False
             locked_case_no = self._reconcile_cooking(case.case_no)
             review_identity = self._record_field_warnings(
-                workbook, row_number, row, payload, locked_case_no=locked_case_no,
+                workbook, row_number, row, payload, case_no=case.case_no,
+                locked_case_no=locked_case_no,
             )
             self._repository.save_row_receipt(
                 source_identity, fingerprint, root_id, "created", review_identity, actor
@@ -595,25 +596,29 @@ class ClientBeClassWorkbookImportService:
                 return outcome
             locked_case_no = self._reconcile_cooking(case_no)
             review_identity = self._record_field_warnings(
-                workbook, row_number, row, payload, locked_case_no=locked_case_no,
+                workbook, row_number, row, payload, case_no=case_no,
+                locked_case_no=locked_case_no,
             )
             self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", review_identity, actor)
             unit_of_work.commit()
             return "created"
 
-    def _record_field_warnings(self, workbook, row_number, row, payload, *, locked_case_no: str | None):
+    def _record_field_warnings(
+        self, workbook, row_number, row, payload, *, case_no: str, locked_case_no: str | None,
+    ):
         warnings = {field: message for field, message in validate_client_beclass_row(row).items()
                     if field in REPAIRABLE_CLIENT_BECLASS_FIELDS}
         issue_codes = _client_validation_issue_codes(warnings)
-        source_digest = workbook.digest
         if locked_case_no is not None:
             issue_codes += (CLIENT_BECLASS_COOKING_LOCKED_ISSUE,)
-            # Multiple accepted cases can share a workbook row and encounter different order facts.
-            source_digest = fingerprint_payload(
-                {"workbook": workbook.digest, "case_no": locked_case_no}
-            ).value
         if not issue_codes:
             return None
+        # Accepted warnings must not reuse an earlier failed row's immutable review.
+        source_digest = fingerprint_payload({
+            "purpose": "accepted_field_warnings",
+            "workbook": workbook.digest,
+            "case_no": case_no,
+        }).value
         return self._persist_review(
             self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
             source_content_digest=source_digest, source_sheet=workbook.sheet_identity,
