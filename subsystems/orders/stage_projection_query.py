@@ -601,7 +601,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         recommendation_status = "completed" if resume_sent_count else "in_progress" if resume_attempt_count or accepted_count else "not_started" if plan_id is not None else "unavailable"
     handoff_recorded = row["external_signing_session_id"] is not None
     final_document_recorded = row["final_contract_document_id"] is not None
-    dispatch_status: StageStatus = "completed" if handoff_recorded else "in_progress" if staff_document_count or staff_sent_count or staff_signed_count else "not_started" if plan_id is not None else "unavailable"
+    dispatch_status: StageStatus = "completed" if handoff_recorded or final_document_recorded else "in_progress" if staff_document_count or staff_sent_count or staff_signed_count else "not_started" if plan_id is not None else "unavailable"
     signing_status: StageStatus = "completed" if final_document_recorded else "in_progress" if handoff_recorded else "not_started" if plan_id is not None else "unavailable"
     deposit_count = _nonnegative_int(row, "deposit_obligation_count")
     deposit_open = _nonnegative_int(row, "deposit_open_count")

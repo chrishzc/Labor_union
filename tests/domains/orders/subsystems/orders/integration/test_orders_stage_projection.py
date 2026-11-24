@@ -930,7 +930,9 @@ def test_generated_contract_is_in_progress_until_external_handoff_is_recorded() 
     assert steps[6].status == "not_started"
 
 
-def test_final_pdf_completes_signing_without_individual_report_events() -> None:
+@pytest.mark.parametrize("handoff_recorded", (False, True))
+@pytest.mark.parametrize("deposit_open", (0, 1))
+def test_final_pdf_completes_signing_without_individual_report_events(handoff_recorded: bool, deposit_open: int) -> None:
     row = _row()
     row.update({
         "staff_contract_sent_count": 0,
@@ -941,6 +943,10 @@ def test_final_pdf_completes_signing_without_individual_report_events() -> None:
         "staff_contract_signed_at": None,
         "client_contract_signed_count": 0,
         "client_contract_signed_at": None,
+        "external_signing_session_id": "ces_" + "1" * 32 if handoff_recorded else None,
+        "external_signing_status_version": 2 if handoff_recorded else None,
+        "external_signing_handoff_at": NOW if handoff_recorded else None,
+        "deposit_open_count": deposit_open,
     })
 
     steps = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
@@ -951,6 +957,8 @@ def test_final_pdf_completes_signing_without_individual_report_events() -> None:
     assert steps[5].label == "建立契約並送交外部簽署平台"
     assert steps[6].status == "completed"
     assert steps[6].label == "雙方完成外部簽署並回收最終 PDF"
+    assert steps[7].status == ("blocked" if deposit_open else "completed")
+    assert _current_step(OrderLifecycleStatus.DISCUSSION, steps, None) == (8 if deposit_open else 11)
 
 
 @pytest.mark.parametrize(
