@@ -44,6 +44,7 @@ class ControlledFilePurpose(str, Enum):
     STAFF_HEALTH_EXAM = "staff_health_exam"
     CLIENT_PASSBOOK_COVER = "client_passbook_cover"
     RICH_MENU_BACKGROUND = "rich_menu_background"
+    STAFF_PROFILE_PHOTO = "staff_profile_photo"
 
 
 class ControlledFileApplyOutcome(str, Enum):
@@ -82,6 +83,7 @@ _ALLOWED_PURPOSES = {
             ControlledFilePurpose.STAFF_RESUME,
             ControlledFilePurpose.STAFF_CERTIFICATE,
             ControlledFilePurpose.STAFF_HEALTH_EXAM,
+            ControlledFilePurpose.STAFF_PROFILE_PHOTO,
         }
     ),
     ControlledFileOwner.CLIENTS: frozenset(

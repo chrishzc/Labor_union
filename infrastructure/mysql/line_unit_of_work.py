@@ -50,6 +50,8 @@ from infrastructure.mysql.line_webhook_inbox_repository import (
     MySqlLineWebhookInboxRepository,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.staff_retirement_repository import MySqlStaffRetirementRepository
+from infrastructure.mysql.staff_web_profile_repository import MySqlStaffWebProfileRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPaymentQueryRepository
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
@@ -106,6 +108,8 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.reviews = MySqlLineIdentityReviewRepository(connection)
         self.customers = MySqlCustomerIdentityOwnerAdapter(connection)
         self.staff = MySqlStaffIdentityOwnerAdapter(connection)
+        self.staff_web_profiles = MySqlStaffWebProfileRepository(connection)
+        self.staff_lifecycle = MySqlStaffRetirementRepository(connection)
         self.admins = MySqlAdminIdentityOwnerAdapter(connection)
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
         self.deposit_payments = MySqlDepositPaymentQueryRepository(connection)

@@ -181,6 +181,7 @@ def stage_controlled_file(
     principal: AdminPrincipal = Depends(require_persisted_admin),
     workflow: ControlledFileRouteWorkflow = Depends(get_controlled_file_route_workflow),
 ):
+    _require_generic_purpose(purpose, correlation_id)
     limit = (file_transfer_settings().resume_max_bytes
              if owner is ControlledFileOwner.STAFF and purpose is ControlledFilePurpose.STAFF_RESUME
              else _MAXIMUM_STAGING_BYTES)
@@ -262,6 +263,7 @@ def preview_controlled_file(
     workflow: ControlledFileRouteWorkflow = Depends(get_controlled_file_route_workflow),
 ):
     del principal
+    _require_generic_purpose(body.purpose, correlation_id)
     return _call_workflow(
         lambda: BaseResponse(
             data=_preview_view(workflow.preview(body.to_intent())),
@@ -285,6 +287,7 @@ def apply_controlled_file(
     principal: AdminPrincipal = Depends(require_persisted_admin),
     workflow: ControlledFileRouteWorkflow = Depends(get_controlled_file_route_workflow),
 ):
+    _require_generic_purpose(body.purpose, correlation_id)
     return _call_workflow(
         lambda: BaseResponse(
             data=_receipt_view(
@@ -440,6 +443,12 @@ def _receipt_view(receipt: ControlledFileApplyReceipt) -> ControlledFileReceiptV
         sha256_digest=readback.sha256_digest,
         **_detail_view(readback).model_dump(),
     )
+
+
+def _require_generic_purpose(purpose: ControlledFilePurpose, correlation_id: str) -> None:
+    if purpose is ControlledFilePurpose.STAFF_PROFILE_PHOTO:
+        raise typed_http_error(403, "forbidden", "staff_web_owned_upload_required",
+                               "個人網頁照片須從月嫂自助申請或後台審核入口處理。", correlation_id)
 
 
 def _call_workflow(command, correlation_id: str):

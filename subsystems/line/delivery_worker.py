@@ -32,6 +32,7 @@ from subsystems.line.service_completion_notifications import service_completion_
 from subsystems.line.service_day_log_reminders import service_day_log_reminder_delivery_is_current
 from subsystems.line.payment_overdue_reminders import payment_overdue_delivery_is_current
 from subsystems.line.payment_reminder_notifications import payment_reminder_delivery_is_current
+from subsystems.line.staff_web_expiry_reminders import staff_web_expiry_delivery_is_current
 from subsystems.line.payment_receipt_notifications import payment_receipt_delivery_is_current
 from subsystems.line.cancellation_notifications import SOURCE as CANCELLATION_NOTICE_SOURCE, cancellation_notice_delivery_is_current
 from subsystems.line.order_group_application import group_invitation_delivery_is_current
@@ -257,6 +258,13 @@ class LineDeliveryWorker:
                 unit_of_work.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
                     task.task_id, ActorContext(self._worker_identity),
                     IdempotencyKey(f"matching-confirmation-stale:{task.task_id.value}"), task.request.correlation_id,
+                ))
+                unit_of_work.commit()
+                return False
+            if lease_valid and not staff_web_expiry_delivery_is_current(unit_of_work, task, self._now()):
+                unit_of_work.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
+                    task.task_id, ActorContext(self._worker_identity),
+                    IdempotencyKey(f"staff-web-expiry-stale:{task.task_id.value}"), task.request.correlation_id,
                 ))
                 unit_of_work.commit()
                 return False

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>月嫂個人網頁</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.6 "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; color: #1e1b19; background: #fff8f6; }
+    body { margin: 0; }
+    main { box-sizing: border-box; width: min(100% - 32px, 820px); margin: clamp(16px, 4vw, 40px) auto; padding: clamp(16px, 4vw, 36px); background: #fff; border: 1px solid #f2e2dc; border-radius: 12px; }
+    h1 { font-size: clamp(1.75rem, 4vw, 2.25rem); line-height: 1.25; margin: 0; }
+    h2 { font-size: 1.125rem; line-height: 1.4; margin: 0 0 .75rem; }
+    section { border-top: 1px solid #f2e2dc; margin-top: 1.5rem; padding-top: 1.5rem; }
+    .photos { display: flex; gap: .75rem; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; padding-bottom: .35rem; }
+    figure { flex: 0 0 min(85%, 20rem); min-width: 0; margin: 0; scroll-snap-align: start; }
+    .photos img, .unavailable { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #fff8f6; border-radius: .5rem; }
+    .unavailable { display: grid; place-items: center; margin: 0; }
+    figcaption { font-size: .9rem; margin-top: .25rem; overflow-wrap: anywhere; }
+    :focus-visible { outline: 2px solid #c2410c; outline-offset: 2px; }
+  </style>
+  <script defer src="/static/staff_web_profile.js"></script>
+</head>
+<body>
+  <main>
+    <p id="status" role="status">正在確認 LINE 身分…</p>
+    <h1 id="staff-name" hidden></h1>
+    <div id="groups"></div>
+  </main>
+</body>
+</html>
