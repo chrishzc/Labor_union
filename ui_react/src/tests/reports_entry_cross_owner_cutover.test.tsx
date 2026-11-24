@@ -16,6 +16,7 @@ const ANNUAL_ENDPOINT = '/api/v1/finance-reports/subsidy-reconciliation/annual';
 const WEEKLY_ENDPOINT = '/api/v1/operations-reports/weekly';
 const CASE_STATISTICS_ENDPOINT = '/api/v1/operations-reports/case-statistics';
 const SYSTEM_STATUS_ENDPOINT = '/api/v1/system/status/performance-snapshot';
+const APP_SHELL_NOTIFICATION_CATALOG_ENDPOINT = '/api/v1/line/notification-tasks';
 
 type FetchRecord = {
   path: string;
@@ -134,11 +135,16 @@ function installFetchStub(options: FetchStubOptions = {}): FetchRecord[] {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = requestUrl(input);
     const path = url.pathname;
-    requests.push({
+    const request = {
       path,
-      method: String(init?.method ?? 'GET').toUpperCase(),
+      method: (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase(),
       search: url.search,
-    });
+    };
+    requests.push(request);
+
+    if (isAppShellNotificationCatalogRequest(request)) {
+      return jsonResponse({ success: true, message: 'ok', data: [], error: null });
+    }
 
     if (path === '/api/v1/staff/summaries') return jsonResponse({success:true,message:'ok',data:{items:[],next_cursor:null},error:null});
     if (path === SYSTEM_STATUS_ENDPOINT) return jsonResponse(systemStatusEnvelope());
@@ -194,6 +200,10 @@ function authenticate(): void {
 
 function setReportsHash(): void {
   act(() => window.history.replaceState(null, '', '#reports'));
+}
+
+function isAppShellNotificationCatalogRequest({ path, method, search }: FetchRecord): boolean {
+  return path === APP_SHELL_NOTIFICATION_CATALOG_ENDPOINT && method === 'GET' && search === '';
 }
 
 function countPath(requests: readonly FetchRecord[], path: string): number {
@@ -257,9 +267,11 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     expect(document.querySelector('[data-control-id="reports.export.annual-xlsx"]')).toBeEnabled();
     expect(screen.queryByText(/未開放|後端尚未提供/)).not.toBeInTheDocument();
 
+    expect(countPath(requests, WEEKLY_ENDPOINT)).toBe(1);
     expect(countPath(requests, QUARTERLY_ENDPOINT)).toBe(1);
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
-    expect(requests.filter((request) => ![
+    // The authenticated shell reads its badge catalog independently of the current page.
+    expect(requests.filter((request) => !isAppShellNotificationCatalogRequest(request) && ![
       '/api/v1/staff/summaries',
       QUARTERLY_ENDPOINT,
       ANNUAL_ENDPOINT,

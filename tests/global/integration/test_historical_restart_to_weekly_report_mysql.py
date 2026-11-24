@@ -644,7 +644,11 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
 ) -> None:
     suffix = "unserved" if historical_status == "歷史訂單－未服務" else "in_service"
     database = f"{DATABASE}_{suffix}"
-    bootstrap(_arguments(database))
+    arguments = _arguments(database)
+    if arguments.host not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("historical restart requires a disposable localhost database")
+    bootstrap(arguments)
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
     from infrastructure.mysql.scheduling_current_projection_repository import (
         MySqlSchedulingCurrentProjectionRepository,
     )
@@ -664,7 +668,7 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
 
     case_no = "HIST-UNSERVED" if historical_status.endswith("未服務") else "HIST-IN-SERVICE"
     connection = pymysql.connect(
-        host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        host=arguments.host,
         port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
         user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
         password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
@@ -674,6 +678,8 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
         autocommit=False,
     )
     try:
+        # This fixture bypasses the API lifespan that installs the scheduling routines.
+        ensure_nas_procedures(connection)
         with connection.cursor() as cursor:
             staff_id, _legacy_assignment_id = _seed_owner_roots(cursor, case_no, historical_status)
             _seed_settled_deposit(cursor, case_no)
