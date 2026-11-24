@@ -40,7 +40,7 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
-export function StaffProfileChangeReview({ requestId }: { requestId: number }) {
+export function StaffProfileChangeReview({ requestId, returnToWeb = false }: { requestId: number; returnToWeb?: boolean }) {
   const [review, setReview] = useState<Review | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -80,7 +80,7 @@ export function StaffProfileChangeReview({ requestId }: { requestId: number }) {
 
   return <section className="staff-holiday-op-card" aria-labelledby="staff-change-review">
     <h2 id="staff-change-review">月嫂資料異動申請 #{requestId}</h2>
-    <p><a href="#notifications">返回通知事項</a></p>
+    <p>{returnToWeb ? <a href="#staff?tab=web&view=review">返回照片審核</a> : <a href="#notifications">返回通知事項</a>}</p>
     {!review && !error && <p role="status">正在讀取申請…</p>}
     {review && <>
       <p role="status">月嫂 #{review.staff_id} · {statusLabels[review.status]}</p>
