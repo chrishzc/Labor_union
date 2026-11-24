@@ -63,10 +63,11 @@ export class ClientBeClassWorkbookSnapshot {
     return data;
   }
 
-  toApplyFormData(previewFingerprint: string, pairings?: readonly ClientBeClassPairing[]): FormData {
+  toApplyFormData(previewFingerprint: string, pairings?: readonly ClientBeClassPairing[], discardedRows?: readonly number[]): FormData {
     const data = this.toFormData();
     data.append('preview_fingerprint', previewFingerprint);
     if (pairings?.length) data.append('manual_pairings', JSON.stringify(pairings));
+    if (discardedRows?.length) data.append('discarded_rows', JSON.stringify(discardedRows));
     return data;
   }
 }
@@ -97,6 +98,7 @@ interface ClientBeClassApplyOptions {
   correlationId: string;
   signal?: AbortSignal;
   manualPairings?: readonly ClientBeClassPairing[];
+  discardedRows?: readonly number[];
 }
 
 export async function previewClientBeClassWorkbook(
@@ -121,7 +123,7 @@ export async function applyClientBeClassWorkbook(
   options: ClientBeClassApplyOptions
 ): Promise<ClientBeClassWorkbookReceipt> {
   try {
-    const raw = await transport.post(CLIENT_BECLASS_WORKBOOK_APPLY_PATH, snapshot.toApplyFormData(previewFingerprint, options.manualPairings), applyRequestOptions(options.idempotencyKey, options.correlationId, options.signal));
+    const raw = await transport.post(CLIENT_BECLASS_WORKBOOK_APPLY_PATH, snapshot.toApplyFormData(previewFingerprint, options.manualPairings, options.discardedRows), applyRequestOptions(options.idempotencyKey, options.correlationId, options.signal));
     const receipt = decodePayload(ClientBeClassWorkbookReceiptEnvelopeSchema, raw).data;
     if (receipt.source_content_digest !== snapshot.sha256) throw new ClientBeClassWorkbookContractError('client_beclass_apply_source_digest_mismatch', '套用收據摘要與已選檔案不一致。');
     return receipt;

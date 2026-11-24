@@ -21,6 +21,7 @@ export interface WorkbookImportResult {
 }
 
 const REASON_LABELS: Record<string, string> = {
+  client_beclass_row_discarded: '承辦人已捨棄本列，本次不匯入',
   client_beclass_source_payload_conflict: '同一查詢序號已有不同來源內容',
   client_case_binding_no_client: '姓名與電話找不到可配對的客戶',
   client_case_binding_multiple_clients: '姓名與電話對應多位客戶，無法確定對象',

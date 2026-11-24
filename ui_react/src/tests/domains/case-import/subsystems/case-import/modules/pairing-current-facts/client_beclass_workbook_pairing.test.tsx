@@ -1,3 +1,4 @@
+import { ClientBeClassWorkbookPairing } from '../../../../../../../components/ClientBeClassWorkbookPairing';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
@@ -108,4 +109,31 @@ it('groups shared cases in a drawer, retains links across groups and closing, an
   const applied = request.mock.calls[1][1].body as FormData;
   expect(applied.get('preview_fingerprint')).toBe(previewFingerprint);
   expect(JSON.parse(String(applied.get('manual_pairings')))).toEqual(pairings);
+});
+
+
+it('discards a surplus questionnaire, restores it, and submits the retained pairing', () => {
+  const onConfirm = vi.fn();
+  render(<ClientBeClassWorkbookPairing onConfirm={onConfirm} preview={{
+    sourceContentDigest: 'a'.repeat(64), sheetIdentity: 'b'.repeat(64), previewFingerprint: 'c'.repeat(64),
+    sourceRowCount: 3, createCount: 1, reviewRequiredCount: 0, existingConflictCount: 0,
+    existingSourceCount: 0, rowIssues: [],
+    manualRows: [2, 3].map(source_row => ({ source_row, query_no: `Q${source_row}`, name: '測試',
+      masked_phone: '09•••••678', city: null, submitted_at: null, case_nos: ['HCM-A'] })),
+    candidates: [{ case_no: 'HCM-A', client_id: 1, name: '測試', masked_phone: '09•••••678',
+      city: null, created_at: null, start_date: null }],
+  }} />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟人工配對' }));
+  fireEvent.click(screen.getByRole('button', { name: /Q2/ }));
+  fireEvent.click(screen.getByRole('button', { name: /HCM-A/ }));
+  expect(screen.getByRole('button', { name: '檢查配對' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '捨棄 Excel 第 3 列' }));
+  expect(screen.getByRole('button', { name: '檢查配對' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: '恢復 Excel 第 3 列' }));
+  expect(screen.getByRole('button', { name: '檢查配對' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '捨棄 Excel 第 3 列' }));
+  fireEvent.click(screen.getByRole('button', { name: '檢查配對' }));
+  expect(screen.getByText(/第 3 列 · Q3/)).toHaveTextContent('本次捨棄，不匯入');
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
+  expect(onConfirm).toHaveBeenCalledWith([{ source_row: 2, case_no: 'HCM-A' }], [3]);
 });

@@ -1232,3 +1232,56 @@ def test_repairable_email_city_do_not_bypass_identity_or_source_conflicts(monkey
     assert preview.review_required_count == 1
     assert set(preview.row_issues[0].fields) == {"查詢序號", "姓名", "行動電話"}
     assert not repository.created
+
+
+@pytest.mark.parametrize("all_discarded", [False, True])
+def test_manual_duplicate_can_be_discarded_without_blocking_other_rows(monkeypatch, all_discarded):
+    repository = _ManualPairingRepository()
+    service = _service(repository)
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row("KEEP"), _valid_row("DROP")))
+    preview = service.preview("ignored.xlsx", manual_pairing=True)
+    selections = () if all_discarded else ((2, "HCM-A"),)
+    discarded = (2, 3) if all_discarded else (3,)
+    receipt = service.apply("ignored.xlsx", "discard", preview.preview_fingerprint, "admin", "corr",
+                            manual_pairings=selections, discarded_rows=discarded)
+    assert receipt.created_count == (0 if all_discarded else 1)
+    assert receipt.review_required_count == len(discarded)
+    assert all(row["query_no"] != "DROP" for row in repository.created)
+    assert [(issue.source_row, issue.query_no, issue.issue_codes) for issue in receipt.row_issues] == [
+        (row, "KEEP" if row == 2 else "DROP", ("client_beclass_row_discarded",)) for row in discarded
+    ]
+    replay = service.apply("ignored.xlsx", "discard", preview.preview_fingerprint, "admin", "corr",
+                           manual_pairings=selections, discarded_rows=discarded)
+    assert replay.replayed_workbook
+    with pytest.raises(intake.ClientBeClassWorkbookConflict):
+        service.apply("ignored.xlsx", "discard", preview.preview_fingerprint, "admin", "corr",
+                      manual_pairings=selections, discarded_rows=())
+
+
+def test_discard_cannot_overlap_pairing_or_hide_an_unresolved_row(monkeypatch):
+    repository = _ManualPairingRepository()
+    service = _service(repository)
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row("KEEP"), _valid_row("DROP")))
+    preview = service.preview("ignored.xlsx", manual_pairing=True)
+    with pytest.raises(ValueError, match="discarded_rows_overlap"):
+        service.apply("ignored.xlsx", "overlap", preview.preview_fingerprint, "admin", "corr",
+                      manual_pairings=((2, "HCM-A"),), discarded_rows=(2,))
+    with pytest.raises(ValueError, match="manual_pairings_required"):
+        service.apply("ignored.xlsx", "unresolved", preview.preview_fingerprint, "admin", "corr",
+                      manual_pairings=(), discarded_rows=(3,))
+    assert repository.created == []
+
+
+def test_discard_rejects_automatic_row_even_with_a_matching_preview(monkeypatch):
+    class AutomaticRowRepository(_Repository):
+        def load_workbook_claim(self, key):
+            return None
+
+    repository = AutomaticRowRepository()
+    service = _service(repository)
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
+    preview = service.preview("ignored.xlsx", manual_pairing=True)
+    with pytest.raises(ValueError, match="discarded_rows_not_manual"):
+        service.apply("ignored.xlsx", "auto-discard", preview.preview_fingerprint, "admin", "corr",
+                      manual_pairings=(), discarded_rows=(2,))
+    assert repository.created == []

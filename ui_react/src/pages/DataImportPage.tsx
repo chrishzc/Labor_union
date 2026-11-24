@@ -109,6 +109,7 @@ interface WorkbookCommandOptions {
   idempotencyKey: string;
   correlationId: string;
   manualPairings?: readonly ClientBeClassPairing[];
+  discardedRows?: readonly number[];
 }
 
 const HISTORICAL_ORDERS_IMPORT = 'historical-orders-authoritative-v3';
@@ -214,7 +215,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
     }
   };
 
-  const applyWorkbook = useCallback(async (manualPairings?: readonly ClientBeClassPairing[]) => {
+  const applyWorkbook = useCallback(async (manualPairings?: readonly ClientBeClassPairing[], discardedRows?: readonly number[]) => {
     const snapshot = snapshotRef.current;
     const command = commandRef.current;
     const checked = checkedRef.current;
@@ -222,8 +223,9 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
     if (manualPairings) {
       if (command.manualPairings) return;
       command.manualPairings = manualPairings;
+      command.discardedRows = discardedRows;
     }
-    if (checked.manualRows?.length && !command.manualPairings?.length) return;
+    if (checked.manualRows?.length && !command.manualPairings?.length && !command.discardedRows?.length) return;
     applyInFlightRef.current = true;
     const generation = generationRef.current;
     setApplyState({ kind: 'loading' });
@@ -300,7 +302,7 @@ interface CaseWorkbookPreviewCardProps {
   onSelect: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onClear: () => void;
   onPreview: () => Promise<void>;
-  onApply: (pairings?: readonly ClientBeClassPairing[]) => Promise<void>;
+  onApply: (pairings?: readonly ClientBeClassPairing[], discardedRows?: readonly number[]) => Promise<void>;
   beclassPreview?: ClientBeClassWorkbookPreviewModel;
 }
 
@@ -350,7 +352,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
         <header className="import-simple-result-heading"><h3>{done ? '匯入結果' : '預覽結果'}</h3><span>{result?.replayedWorkbook ? '已處理過，以下為原處理結果' : done && result?.importedCount === null ? '舊紀錄未提供完整筆數' : done ? '本次處理筆數' : '匯入後顯示實際結果'}</span></header>
         {(!manual || done) && <dl className="import-simple-metrics">{metrics.map(([label, value, className]) => <div key={label} className={className}><dt>{label}</dt><dd><span>{value ?? '—'}</span>{value !== null && <small>筆</small>}</dd></div>)}</dl>}
         {beclassPreview && manual && applyState.kind === 'idle' &&
-          <ClientBeClassWorkbookPairing key={beclassPreview.previewFingerprint} preview={beclassPreview} onConfirm={pairings => void onApply(pairings)} />}
+          <ClientBeClassWorkbookPairing key={beclassPreview.previewFingerprint} preview={beclassPreview} onConfirm={(pairings, discardedRows) => void onApply(pairings, discardedRows)} />}
         {!!result?.manualBindings?.length && <details className="import-not-imported-details beclass-binding-results" open>
           <summary>人工綁定明細（{result.manualBindings.length} 筆）</summary>
           <div className="import-details-scroll"><table>

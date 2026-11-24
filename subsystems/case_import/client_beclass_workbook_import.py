@@ -299,6 +299,7 @@ class ClientBeClassWorkbookImportService:
         original_review_identity: str | None = None,
         *,
         manual_pairings: tuple[tuple[int, str], ...] | None = None,
+        discarded_rows: tuple[int, ...] = (),
     ) -> ClientBeClassWorkbookReceipt:
         # Restricted historical callers may still provide the retired pairing
         # lineage hint; it is intentionally ignored and never persisted.
@@ -308,6 +309,9 @@ class ClientBeClassWorkbookImportService:
         try:
             workbook = _load_workbook(source_path)
             pairings = manual_pairings or ()
+            discarded = frozenset(discarded_rows)
+            if len(discarded) != len(discarded_rows):
+                raise ValueError("client_beclass_discarded_rows_invalid")
             if len({case_no.casefold() for _, case_no in pairings}) != len(pairings):
                 raise ValueError("client_beclass_manual_pairings_not_unique")
             selections: dict[int, list[str]] = {}
@@ -317,21 +321,30 @@ class ClientBeClassWorkbookImportService:
                 row_number for row_number, row in workbook.rows if not blocking_client_beclass_errors(row)
             }:
                 raise ValueError("client_beclass_manual_pairing_row_invalid")
+            if discarded & selections.keys():
+                raise ValueError("client_beclass_discarded_rows_overlap")
+            if discarded and not discarded <= {number for number, _ in workbook.rows}:
+                raise ValueError("client_beclass_discarded_rows_invalid")
             request_fingerprint = workbook.digest
-            if selections:
+            if selections or discarded:
                 request_fingerprint = fingerprint_payload({
                     "digest": workbook.digest,
                     "preview": supplied_preview,
                     "pairings": sorted(pairings),
+                    **({"discarded_rows": sorted(discarded)} if discarded else {}),
                 }).value
             replay = self._stored_replay(key, request_fingerprint)
             if replay is not None:
                 return replay
-            prior_claim = self._workbook_claim(key) if selections else None
+            prior_claim = self._workbook_claim(key) if selections or discarded else None
             if prior_claim is not None and prior_claim != request_fingerprint:
                 raise ClientBeClassWorkbookConflict("client_beclass_workbook_idempotency_conflict")
             if prior_claim is None:
-                preview = self._preview_workbook(workbook, manual_pairings is not None, frozenset(selections))
+                if discarded:
+                    eligible = self._preview_workbook(workbook, True)
+                    if not discarded <= {row.source_row for row in eligible.manual_rows}:
+                        raise ValueError("client_beclass_discarded_rows_not_manual")
+                preview = self._preview_workbook(workbook, manual_pairings is not None, frozenset(selections) | discarded)
                 if preview.preview_fingerprint != supplied_preview:
                     raise ClientBeClassWorkbookConflict("client_beclass_preview_stale")
                 if preview.manual_rows:
@@ -341,7 +354,12 @@ class ClientBeClassWorkbookImportService:
             bindings: list[ClientBeClassManualBinding] = []
             outcomes: Counter[str] = Counter()
             for row_number, row in workbook.rows:
-                if row_number in selections:
+                if row_number in discarded:
+                    row_issues.append(ClientBeClassWorkbookRowIssue(
+                        row_number, _normalized_payload(row)["query_no"], (), ("client_beclass_row_discarded",),
+                    ))
+                    outcome = "review_required"
+                elif row_number in selections:
                     outcome = self._apply_manual_row(
                         workbook, row_number, row, selections[row_number], actor,
                         correlation_id, row_issues, bindings,

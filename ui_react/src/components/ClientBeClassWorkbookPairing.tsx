@@ -9,7 +9,7 @@ import type { ClientBeClassPairing } from '../api/case_import/client_beclass_wor
 
 interface Props {
   preview: ClientBeClassWorkbookPreviewModel;
-  onConfirm: (pairings: readonly ClientBeClassPairing[]) => void;
+  onConfirm: (pairings: readonly ClientBeClassPairing[], discardedRows?: readonly number[]) => void;
 }
 
 type ManualRow = ClientBeClassWorkbookPreviewModel['manualRows'][number];
@@ -61,6 +61,7 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
   const [open, setOpen] = useState(false);
   const [groupIndex, setGroupIndex] = useState(0);
   const [selected, setSelected] = useState(new Map<number, string[]>());
+  const [discarded, setDiscarded] = useState(new Set<number>());
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [paths, setPaths] = useState<Array<{ caseNo: string; path: string }>>([]);
@@ -112,15 +113,15 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
   const pairings = Array.from(selected).flatMap(([source_row, caseNos]) =>
     caseNos.map(case_no => ({ source_row, case_no }))
   );
-  const confirm = () => onConfirm(pairings);
+  const confirm = () => onConfirm(pairings, [...discarded]);
   useLayoutEffect(() => {
     if (confirming) backRef.current?.focus();
     else checkRef.current?.focus();
   }, [confirming]);
-  const progress = `已配對 ${selected.size} / ${manualRows.length} 筆`;
+  const progress = `已配對 ${selected.size} / ${manualRows.length} 筆 · 已捨棄 ${discarded.size} 筆`;
   const notImported = preview.reviewRequiredCount + preview.existingConflictCount;
 
-  const pendingByGroup = groups.map(item => item.rows.filter(row => !selected.has(row.source_row)).length);
+  const pendingByGroup = groups.map(item => item.rows.filter(row => !selected.has(row.source_row) && !discarded.has(row.source_row)).length);
   const nextPending = pendingByGroup.findIndex((pending, index) => index > groupIndex && pending > 0);
   const nextGroup = nextPending === -1 ? pendingByGroup.findIndex((pending, index) => index !== groupIndex && pending > 0) : nextPending;
   const chooseGroup = (index: number) => {
@@ -129,7 +130,7 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
   };
 
   return <section className="beclass-pairing" aria-label="人工配對">
-    <p>可直接匯入 {preview.createCount} 筆 · 待配對 {manualRows.length - selected.size} 筆 · 重複略過 {preview.existingSourceCount} 筆 · 未匯入 {notImported} 筆</p>
+    <p>可直接匯入 {preview.createCount} 筆 · 待配對 {manualRows.length - selected.size - discarded.size} 筆 · 重複略過 {preview.existingSourceCount} 筆 · 未匯入 {notImported} 筆</p>
     <div className="beclass-pairing-actions">
       <p>{groups.length} 組 · {progress}</p>
       <button type="button" className="import-apply-btn" onClick={() => setOpen(true)}>開啟人工配對</button>
@@ -143,7 +144,7 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
           <button type="button" className="import-apply-btn" onClick={confirm}>確認匯入</button>
         </> : <>
           {nextGroup !== -1 && <button type="button" className="beclass-pairing-secondary" onClick={() => chooseGroup(nextGroup)}>下一組待配對</button>}
-          <button ref={checkRef} type="button" className="import-apply-btn" disabled={selected.size !== manualRows.length}
+          <button ref={checkRef} type="button" className="import-apply-btn" disabled={selected.size + discarded.size !== manualRows.length}
             onClick={() => { setActiveRow(null); setConfirming(true); }}>檢查配對</button>
         </>}
       </div>}>
@@ -157,9 +158,9 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
       </select>
     </label>}
     {confirming ? <>
-      <p>{preview.createCount} 筆可直接匯入、{selected.size} 份問卷將套用至 {pairings.length} 個案件、{preview.existingSourceCount} 筆重複略過、{notImported} 筆未匯入。</p>
+      <p>{preview.createCount} 筆可直接匯入、{selected.size} 份問卷將套用至 {pairings.length} 個案件、{preview.existingSourceCount} 筆重複略過、{notImported} 筆未匯入、{discarded.size} 筆捨棄。</p>
       <ul className="beclass-confirmed-pairs">
-        {groupRows.map(row => <li key={row.source_row}>第 {row.source_row} 列 · {row.query_no} → <strong>{selected.get(row.source_row)?.join('、')}</strong></li>)}
+        {manualRows.map(row => <li key={row.source_row}>第 {row.source_row} 列 · {row.query_no} → <strong>{discarded.has(row.source_row) ? '本次捨棄，不匯入' : selected.get(row.source_row)?.join('、')}</strong></li>)}
       </ul>
     </> : <>
     <p>先點左側問卷，再勾選右側同一位客戶的案件。再次點選案件可解除連線。</p>
@@ -175,16 +176,21 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
           const isActive = activeRow === row.source_row;
           return <div key={row.source_row} className={`beclass-pairing-card source${isActive ? ' active' : ''}${match ? ' linked' : ''}${index % 2 === 1 ? ' alternate' : ''}`}>
             <button className="beclass-pairing-pick" type="button" aria-pressed={isActive}
-              onClick={() => setActiveRow(row.source_row)}>
+              disabled={discarded.has(row.source_row)} onClick={() => setActiveRow(row.source_row)}>
               <strong>{row.query_no}</strong>
               <small>Excel 第 {row.source_row} 列</small>
               <ComparisonFacts name={row.name} phone={row.masked_phone} city={row.city} dateLabel="問卷報名時間" date={row.submitted_at} />
-              <span className="beclass-pairing-state">{match ? `已連 ${match.join('、')}` : isActive ? '已選取，請點右側' : '待配對'}</span>
+              <span className="beclass-pairing-state">{discarded.has(row.source_row) ? '本次捨棄，不匯入' : match ? `已連 ${match.join('、')}` : isActive ? '已選取，請點右側' : '待配對'}</span>
             </button>
             <span className="beclass-pairing-port" aria-hidden="true" ref={node => {
               if (node) sourcePorts.current.set(row.source_row, node);
               else sourcePorts.current.delete(row.source_row);
             }} />
+            <button type="button" className="beclass-pairing-unlink" aria-label={`${discarded.has(row.source_row) ? '恢復' : '捨棄'} Excel 第 ${row.source_row} 列`} onClick={() => {
+              setSelected(previous => { const updated = new Map(previous); updated.delete(row.source_row); return updated; });
+              setDiscarded(previous => { const updated = new Set(previous); if (updated.has(row.source_row)) updated.delete(row.source_row); else updated.add(row.source_row); return updated; });
+              setActiveRow(null);
+            }}>{discarded.has(row.source_row) ? '恢復配對' : '捨棄本列'}</button>
             {match && <button className="beclass-pairing-unlink" type="button" aria-label={`解除 ${row.query_no} 的配對`} onClick={event => {
               setSelected(previous => {
                 const updated = new Map(previous);

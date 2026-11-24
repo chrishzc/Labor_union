@@ -10,7 +10,7 @@ import tempfile
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from pydantic import TypeAdapter, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
@@ -56,16 +56,19 @@ async def apply_client_beclass_workbook(
     principal: AdminPrincipal = Depends(require_admin),
     service=Depends(get_client_beclass_workbook_import_service),
     manual_pairings: str = Form("[]"),
+    discarded_rows: Annotated[str, Form()] = "[]",
 ):
     def apply(path):
         try:
             selections = _Pairings.validate_json(manual_pairings)
+            discarded = TypeAdapter(list[Annotated[int, Field(strict=True, ge=2)]]).validate_json(discarded_rows)
         except ValidationError:
             raise ValueError("client_beclass_manual_pairings_invalid") from None
         return service.apply(
             str(path), idempotency_key, preview_fingerprint,
             str(principal.username or "admin"), correlation_id,
             manual_pairings=tuple((item.source_row, item.case_no) for item in selections),
+            discarded_rows=tuple(discarded),
         )
 
     return await _with_workbook(
