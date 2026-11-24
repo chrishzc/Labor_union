@@ -34,6 +34,12 @@
 - operator runbook: `document/line/LINE_AI客服題庫Production匯入操作手冊.md`
 - consumer: LINE AI customer-service studio and knowledge answer worker.
 
+## 匯入、發布、索引與 LIFF 交接
+
+- 維運依 [正式匯入手冊](../../../../../../document/line/LINE_AI客服題庫Production匯入操作手冊.md) 核對計畫與目標。空庫首次匯入例為 54 題、40 題初始發布候選；已有人工修改時不覆寫、不自動發布。Apply 的 `committed` 是匯入／發布回執，不代表索引已可用；索引失敗不回滾已匯入的題目。
+- Knowledge owner 在個別 publish／retire 的同一交易送出索引工作（`application.py::_transition_and_request_index`）。`KnowledgeWorker._build_index` 取已發布資料重建，成功才完成目標索引。交接時以回執的 `index_job_id` 追該次工作及其目標版本，不拿舊的 `READY` 當本次已通過；重建失敗先查工作結果，不直接刪題庫或版本。
+- LIFF 讀回見 [需求書 #29](../../../../../requirements/29_LINE服務說明、客服互動與選單角色正式規格.md)。用已發布題目的精確問句或別名核對答案，區分 `source_identity`、`source_version` 和 `index_version`；有驗證身分並完成記錄才另有互動／答案回執。驗證入口 `test_liff_response_exposes_source_and_index_versions` 與 `test_verified_liff_interaction_is_bound_to_persisted_answer_receipt` 用替身查欄位與交接，不證明已連 LINE、向量服務或正式資料庫。
+
 ## Verification
 
 - layout_status: `custom_current`
