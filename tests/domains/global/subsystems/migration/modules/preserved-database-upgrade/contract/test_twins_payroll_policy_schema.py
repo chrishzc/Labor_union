@@ -376,6 +376,7 @@ def test_candidate_runner_executes_declared_backfill_dry_apply_verify(
         "lu_test_candidate",
         tmp_path / "operation.json",
         mysql_container=None,
+        source_objects={"1037_twins_payroll_policy.sql": "absent"},
     )
 
     assert calls == ["dry-run", "apply", "verify"]

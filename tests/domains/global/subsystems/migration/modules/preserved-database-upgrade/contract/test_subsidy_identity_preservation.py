@@ -36,7 +36,7 @@ def test_stale_runner_selection_cannot_execute_the_legacy_script(monkeypatch, tm
     monkeypatch.setattr(migration, '_candidate_preddl_dump', lambda *_args, **_kw: pytest.fail('retired backfill must stop before backup or DB access'))
     monkeypatch.setattr(migration.subprocess, 'run', lambda *_args, **_kw: pytest.fail('retired backfill must never execute'))
     with pytest.raises(migration.UpgradeBlocked, match='subsidy_identity_backfill_retired'):
-        migration._run_manifest_backfills(object(), 'lu_test_identity', tmp_path / 'operation.json', mysql_container=None)
+        migration._run_manifest_backfills(object(), 'lu_test_identity', tmp_path / 'operation.json', mysql_container=None, source_objects={})
 
 
 def test_legacy_backfill_receipt_cannot_approve_a_candidate_in_current_upgrade(monkeypatch, tmp_path):

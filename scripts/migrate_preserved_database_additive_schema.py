@@ -5398,7 +5398,7 @@ def build_plan(
         "backfills": [
             {"backfill_id": item.backfill_id, "artifact": item.artifact.name,
              "sha256": item.artifact.sha256}
-            for item in RELEASE_MANIFEST.backfills
+            for item in _required_manifest_backfills(source_objects)
         ],
         "source_schema_sha256": source_snapshot["sha256"],
         "source_objects": source_objects,
@@ -9505,6 +9505,7 @@ def run_candidate_post_schema(
             candidate,
             operation_receipt_path,
             mysql_container=mysql_container,
+            source_objects=_upgrade_admission_states(_schema_snapshot(config, source)),
         )
         owned_objects = receipt.get("owned_objects")
         verification_receipts = ()
@@ -9662,15 +9663,28 @@ def run_candidate_post_schema(
     return receipt
 
 
+def _required_manifest_backfills(source_objects: Mapping[str, str]) -> tuple[Any, ...]:
+    backfills = tuple(getattr(RELEASE_MANIFEST, "backfills", ()))
+    _reject_retired_subsidy_backfill(backfills)
+    # Existing Payroll facts belong to runtime writers, not later schema upgrades.
+    return tuple(
+        item for item in backfills
+        if not (
+            item.backfill_id == "twins-payroll-rate-snapshots-v1"
+            and source_objects.get("1037_twins_payroll_policy.sql") == "exact"
+        )
+    )
+
+
 def _run_manifest_backfills(
     config: DatabaseConfig | SeparateDatabaseConfig,
     candidate: str,
     operation_receipt_path: Path,
     *,
     mysql_container: str | None,
+    source_objects: Mapping[str, str],
 ) -> tuple[dict[str, Any], ...]:
-    backfills = tuple(getattr(RELEASE_MANIFEST, "backfills", ()))
-    _reject_retired_subsidy_backfill(backfills)
+    backfills = _required_manifest_backfills(source_objects)
     if not backfills:
         return ()
     artifact_dir = operation_receipt_path.expanduser().resolve().parent
