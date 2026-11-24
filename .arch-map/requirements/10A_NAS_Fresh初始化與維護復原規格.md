@@ -32,6 +32,8 @@
 - **舊全域收款帳戶三表移除（`scripts/retire_client_payment_destination.py`）**：
   - `client_payment_destination_configuration_{current,events,receipts}` 加入 fresh retirement register；針對已有開發庫提供獨立受控清理工具，依 `receipts → current → events` 順序連帶 table-owned trigger 移除三表（限 `localhost` development，Apply 前強制驗證 plan fingerprint、metadata、無外部 FK 與完整備份，不得混充 additive schema）。
 
+<a id="4-dsm-冷備份副本受控升級upgrade-databasesh--update_nas_databasepy"></a>
+
 ## 4. 舊 DSM 冷備份副本升級（不再列入部署）（`upgrade-database.sh` / `update_nas_database.py`）
 
 - 此節是舊 NAS 入口仍留在原始碼時的相容契約，不是現行部署或本機日常升級步驟。禁止排程自動切換。`--update` 於鎖內串接「冷備份卷身分核對 → 還原副本卷 → network-none 啟動同版 MySQL 並委派 `scripts.update_local_database` 完成 preserve-data 升級與驗證 → 通過後方更新 Compose physical volume 與 `NAS_IMAGE` 並啟動服務」。
