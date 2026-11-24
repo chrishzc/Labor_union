@@ -51,6 +51,10 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
       },
+      '/static/staff_web_profile.js': {
+        target: apiTarget,
+        changeOrigin: true,
+      },
       '/webhook': {
         target: apiTarget,
         changeOrigin: true,
