@@ -83,6 +83,8 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 
 [需求書 §2.1「每週人工指標：未登錄與實際零」](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-metrics-null-zero) 定義畫面和匯出行為。`WeeklyMetricsEditor.tsx` 將空欄轉成 `null`，數字 `0` 則原樣經 `weekly_report_metrics_client.ts` 交給管理員的週指標 PUT 路由。`WeeklyReportMetricsService.save_metric` 在寫入前驗證星期一與非負數，再用 `week_start_date` 更新 `weekly_report_metrics` 的兩個可空欄位；非星期一由路由回傳 400，不寫入。
 
+例如管理員呼叫 `PUT /api/v1/operations-reports/weekly/metrics/2026-08-24`，主體為 `{"promotion_count":0,"inquiry_count":null}`：兩個鍵都必填，`0` 儲存實際零，明傳 `null` 會清除該週欄位的舊值。成功回應的 `data` 是整列，含 `week_start_date`、`week_end_date`、兩個計數及 `updated_at`，沒有版本欄位。省略任一鍵回 422；兩鍵合法但把週起日改為 2026-08-25（週二），回 400 `weekly_report_metric_invalid`。兩例都不變更已存資料。
+
 週報明細用 `week_start_date` 對應當週指標，不從案件列推算。React 的 `OperationsReportsWorkspace.tsx` 對該週只畫一次，經 `displayWeeklyMetric` 將 `null` 顯示為「未登錄／待補正」；XLSX 由 `weekly_operations_report_export.py` 每週各寫一次，`null` 寫為「未登錄」。兩邊的實際零都保留。
 
 驗證定位：`tests/test_weekly_operations_report_contract.py::test_weekly_metrics_list_and_save_are_monday_keyed` 驗證 API 的週起日、`0`、`null` 和拒絕週二；同檔 `test_weekly_metric_storage_preserves_null_zero_and_rejects_non_monday_key` 使用替身連線驗證服務層。這兩例不驗證真實 MySQL 或畫面／XLSX。
