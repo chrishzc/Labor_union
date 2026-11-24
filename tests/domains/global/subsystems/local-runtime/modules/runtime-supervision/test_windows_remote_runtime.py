@@ -54,6 +54,96 @@ def test_prefix_static_and_private_paths_never_reach_api(artifact):
     assert calls == ['/api/v1/admin/auth/me', '/api/v1/admin/auth/me']
 
 
+def test_staff_web_profile_reaches_the_existing_same_origin_reader(artifact):
+    calls: list[httpx.Request] = []
+    profile_path = '/line-staff-web-profile'
+    script_path = '/static/staff_web_profile.js'
+    reader_path = '/api/v1/admin/staff-web-profile/1/website'
+    query = 'staff_id=1&mode=admin&name=a%2Fb'
+
+    def api(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v1/admin/auth/me':
+            return httpx.Response(401)
+        calls.append(request)
+        if request.url.path == profile_path and request.method == 'GET':
+            return httpx.Response(
+                200, headers={'content-type': 'text/html'},
+                stream=httpx.ByteStream(b'<main>Profile</main>'),
+            )
+        if request.url.path == script_path:
+            return httpx.Response(
+                200, headers={'content-type': 'text/javascript'},
+                stream=httpx.ByteStream(b'// profile script' if request.method == 'GET' else b''),
+            )
+        if request.url.path == reader_path:
+            if request.headers.get('authorization') != 'Bearer synthetic-session':
+                return httpx.Response(401, stream=httpx.ByteStream(b''))
+            return httpx.Response(200, stream=httpx.ByteStream(b'{"data":{"name":"Example","groups":[]}}'))
+        return httpx.Response(404, stream=httpx.ByteStream(b''))
+
+    app = remote.create_gateway(artifact, transport=httpx.MockTransport(api))
+    with TestClient(app, base_url='http://localhost:5173') as client:
+        location = f'/test{profile_path}?{query}'
+        for host in ('localhost:5173', '127.0.0.1:5173'):
+            for method in ('GET', 'HEAD'):
+                alias = client.request(method, f'{profile_path}?{query}',
+                                       headers={'host': host}, follow_redirects=False)
+                assert alias.status_code == 307
+                assert alias.headers['location'] == location
+                assert alias.headers['cache-control'] == 'no-store'
+        assert calls == []
+        for path, media_type, content in (
+            (location, 'text/html', b'<main>Profile</main>'),
+            (f'/test{script_path}', 'text/javascript', b'// profile script'),
+        ):
+            for method in ('GET', 'HEAD'):
+                response = client.request(method, path)
+                assert response.status_code == 200
+                assert response.headers['content-type'] == media_type
+                assert response.headers['cache-control'] == 'no-store'
+                assert response.content == (content if method == 'GET' else b'')
+        assert client.get(f'/test{reader_path}').status_code == 401
+        response = client.get(f'/test{reader_path}', headers={
+            'authorization': 'Bearer synthetic-session',
+            'x-forwarded-user': 'forged-user',
+        })
+        assert response.json() == {'data': {'name': 'Example', 'groups': []}}
+
+    assert [(request.method, request.url.path) for request in calls] == [
+        ('GET', profile_path), ('GET', profile_path), ('GET', script_path), ('HEAD', script_path),
+        ('GET', reader_path), ('GET', reader_path),
+    ]
+    assert calls[0].url.query == calls[1].url.query == query.encode('ascii')
+    assert 'x-forwarded-user' not in calls[-1].headers
+
+
+def test_staff_web_profile_does_not_expose_other_gateway_paths(artifact, monkeypatch):
+    monkeypatch.setenv('ALLOWED_ORIGINS', 'https://admin.union-example.org.tw')
+    calls: list[str] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(401)
+
+    app = remote.create_gateway(artifact, transport=httpx.MockTransport(api))
+    with TestClient(app, base_url='http://localhost:5173') as client:
+        for host in ('chrishzc.com', 'admin.union-example.org.tw'):
+            response = client.get('/line-staff-web-profile', headers={'host': host})
+            assert response.status_code == 404
+        response = client.get('/test/line-staff-web-profile', headers={'host': 'foreign.invalid'})
+        assert response.status_code == 403
+        response = client.get('/test/line-staff-web-profile', headers={'origin': 'https://foreign.invalid'})
+        assert response.status_code == 403
+        for path in ('/line-staff-web-profile', '/test/line-staff-web-profile',
+                     '/test/static/staff_web_profile.js'):
+            assert client.post(path).status_code == 405
+        for path in ('/static/staff_web_profile.js', '/test/static/other.js', '/test/line-staff-schedule',
+                     '/api/v1/admin/staff-web-profile/1/website',
+                     '/test/api/v1/admin/auth/development-session'):
+            assert client.get(path).status_code == 404, path
+    assert calls == ['/api/v1/admin/auth/me']
+
+
 def test_api_upload_query_and_binary_download_keep_prefix_and_session(artifact):
     calls = []
 

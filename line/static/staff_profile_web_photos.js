@@ -3,7 +3,7 @@ function createProfilePhotoForm() {
   const files = document.getElementById("photo-files");
   const root = document.getElementById("photo-drafts");
   const status = document.getElementById("photo-status");
-  const categories = { photo: "照片", certificate: "證照", other: "其他" };
+  const categories = { photo: "照片", certificate: "證照", other: "其他", feedback: "客戶反饋" };
   const drafts = [];
   let templates = [];
   let published = [];

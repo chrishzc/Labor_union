@@ -5,13 +5,14 @@ import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../shared/typed_
 
 const id = z.number().int().positive();
 const fileId = z.string().regex(/^cf_[a-f0-9]{32}$/);
-const category = z.enum(['photo', 'certificate', 'other']);
+const category = z.enum(['photo', 'certificate', 'other', 'feedback']);
 const templatesPath = '/api/v1/admin/staff-web-profile/templates';
 const rosterPath = (staffId: number) => `/api/v1/admin/staff-web-profile/${staffId}`;
 const reviewPath = (id: number) => `/api/v1/admin/staff-profile-change-requests/${id}`;
 const reviewPhotoPath = (requestId: number, index: number) => `${reviewPath(requestId)}/web-photos/${index}`;
 
-export const webProfileCategoryLabels = { photo: '照片', certificate: '證照', other: '其他' };
+export const webProfileCategories = category.options;
+export const webProfileCategoryLabels = { photo: '照片', certificate: '證照', other: '其他', feedback: '客戶反饋' } satisfies Record<WebProfileCategory, string>;
 const entryVersionSchema = z.strictObject({ entry_id: id, entry_version: id });
 const folderFileSchema = entryVersionSchema.extend({ filename: z.string().min(1), expiry_date: z.iso.date().nullable() });
 const folderSchema = z.strictObject({
@@ -38,7 +39,7 @@ const templateSchema = z.object({
 const publishedImageSchema = z.object({ item_name: z.string(), image_entry: id, image_version: id });
 const publishedProfileSchema = z.object({
   name: z.string(),
-  groups: z.array(z.object({ category, images: z.array(publishedImageSchema) })).max(3),
+  groups: z.array(z.object({ category, images: z.array(publishedImageSchema) })).max(webProfileCategories.length),
 });
 const pendingPhotoSchema = z.object({
   template_item_id: id,

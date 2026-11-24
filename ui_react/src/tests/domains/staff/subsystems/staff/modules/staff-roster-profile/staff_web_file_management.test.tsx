@@ -18,6 +18,20 @@ beforeEach(() => {
   get.mockResolvedValue({ data: { items: [photo, other] } });
 });
 
+it.each(['', '/test'])('opens the staff website in the same tab with prefix "%s"', async prefix => {
+  vi.stubEnv('VITE_PUBLIC_PATH_PREFIX', prefix);
+  const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+  try {
+    render(<StaffWebFileManagement staffId={7} staffName="測試月嫂" canWrite />);
+    fireEvent.click(screen.getByRole('button', { name: '查看履歷網頁' }));
+    expect(assign).toHaveBeenCalledWith(`${prefix}/line-staff-web-profile?staff_id=7&mode=admin`);
+    await screen.findByRole('button', { name: '開啟資料夾 生活照' });
+  } finally {
+    assign.mockRestore();
+    vi.unstubAllEnvs();
+  }
+});
+
 it('shows metadata and an empty folder and removes only the confirmed entry', async () => {
   const view = render(<StaffWebFileManagement staffId={7} staffName="測試月嫂" canWrite />);
   await screen.findByRole('button', { name: '開啟資料夾 生活照' });
@@ -42,6 +56,30 @@ it('shows metadata and an empty folder and removes only the confirmed entry', as
   expect(await within(folder).findByText('資料夾內沒有已發布照片。')).toBeInTheDocument();
   expect(remove).toHaveBeenCalledWith(`${staffPath}/folders/42/entries/19`,
     expect.objectContaining({ params: { template_version: 2, entry_version: 4 } }));
+});
+
+it('shows customer feedback fourth and allows multiple photos without an expiry date', async () => {
+  const certificate = { ...photo, template_item_id: 44, name: '專業證照', category: 'certificate' };
+  const feedback = { ...photo, template_item_id: 45, name: '客戶反饋', category: 'feedback' };
+  get.mockResolvedValueOnce({ data: { items: [feedback, other, certificate, photo] } });
+  render(<StaffWebFileManagement staffId={7} staffName="測試月嫂" canWrite />);
+
+  await screen.findByRole('button', { name: '開啟資料夾 客戶反饋' });
+  expect(screen.getAllByRole('heading', { level: 4 }).map(heading => heading.textContent))
+    .toEqual(['照片', '證照', '其他', '客戶反饋']);
+  fireEvent.click(screen.getByRole('button', { name: '代傳照片' }));
+  const dialog = await screen.findByRole('dialog', { name: '代傳照片' });
+  fireEvent.change(within(dialog).getByLabelText('分類'), { target: { value: 'feedback' } });
+  expect(within(dialog).queryByLabelText(/到期日/)).not.toBeInTheDocument();
+  const picker = within(dialog).getByLabelText('選擇照片');
+  expect(picker).toBeEnabled();
+  expect(picker).toHaveAttribute('multiple');
+  fireEvent.change(picker, { target: { files: [
+    new File(['test'], 'feedback-one.jpeg', { type: 'image/jpeg' }),
+    new File(['test'], 'feedback-two.jpeg', { type: 'image/jpeg' }),
+  ] } });
+  expect(within(dialog).getByText('已選 2 張')).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: '確認發布' })).toBeEnabled();
 });
 
 it('uses the selected Other folder version and displays no image while choosing files', async () => {

@@ -1,13 +1,13 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-staff-web-file-management-v1",
+  "release_id": "labor-union-validation-schema-staff-web-feedback-v1",
   "source_bindings": {
-    "assembly_sha256": "f99dcc902eacb826809d73665422bd037c40caf1a24916e4aff07251fd400181",
-    "validation_manifest_sha256": "251f1fc6b1dfbd9826250ff83e1fb207c1130bc4152b8ed3275ff3bfc8169764",
+    "assembly_sha256": "f64139bd39e9aaa8407bae3d718b50f41d485fdc0c591b3fb64c2e56a446e0a3",
+    "validation_manifest_sha256": "bee5124494c36aa731ada83486e306b4a9714e717fde57770f1b3365fb1fd9be",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
-  "sql_sha256": "3db393811b8d95099b15158aa3b240dec34bd3d40264c68cd069d8c6655879fb",
+  "sql_sha256": "e46b70b670d41b74457c417ac55227871a3bbc6e3cfcd67ae4e02926d3b33a3e",
   "objects": {
     "tables": 405,
     "views": 2,

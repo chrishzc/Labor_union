@@ -1,14 +1,13 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  staffWebFileError, staffWebProfileClient, webProfileCategoryLabels,
+  staffWebFileError, staffWebProfileClient, webProfileCategories, webProfileCategoryLabels,
   type WebProfileCategory, type WebProfileFolder, type WebProfileFolderFile, type WebProfilePublicationInput,
 } from '../api/staff/staff_web_profile_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import './StaffWebFileManagement.css';
 
-const categories: WebProfileCategory[] = ['photo', 'certificate', 'other'];
 const supportedPhotos = 'image/jpeg,image/png,image/webp';
 type DraftPhoto = { file: File; uploadId: string };
 type UploadDraft = {
@@ -204,7 +203,8 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
       <h3 id={sectionTitle}>履歷網頁與照片</h3>
       <div>
         <button type="button" className="staff-secondary-btn" onClick={() => requestLeave(() => {
-          window.location.assign(`/line-staff-web-profile?staff_id=${staffId}&mode=admin`);
+          const prefix = import.meta.env.VITE_PUBLIC_PATH_PREFIX || '';
+          window.location.assign(`${prefix}/line-staff-web-profile?staff_id=${staffId}&mode=admin`);
         })}>查看履歷網頁</button>
         {canWrite && <button type="button" className="staff-primary-btn" disabled={!folders?.length || loading} onClick={event => openUpload(event.currentTarget)}>代傳照片</button>}
       </div>
@@ -214,7 +214,7 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
       {message.error && <button type="button" className="staff-secondary-btn" disabled={loading} onClick={() => void reload()}>重試讀取清單</button>}
     </p>}
     {folders?.length === 0 && <p>目前沒有模板項目。</p>}
-    {categories.map(category => {
+    {webProfileCategories.map(category => {
       const items = folders?.filter(folder => folder.category === category);
       if (!items?.length) return null;
       return <section className="staff-web-files-group" key={category} aria-label={webProfileCategoryLabels[category]}>
@@ -256,10 +256,10 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
             <div>
               <label>分類
                 <select value={upload.category} onChange={event => {
-                  const category = categories.find(value => value === event.target.value);
+                  const category = webProfileCategories.find(value => value === event.target.value);
                   if (category) setUpload({ category, folder: folders?.find(folder => folder.category === category), photos: [], expiry: '' });
                 }}>
-                  {categories.map(category => <option key={category} value={category}>{webProfileCategoryLabels[category]}</option>)}
+                  {webProfileCategories.map(category => <option key={category} value={category}>{webProfileCategoryLabels[category]}</option>)}
                 </select>
               </label>
               <label>模板項目

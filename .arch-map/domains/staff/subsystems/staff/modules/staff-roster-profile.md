@@ -7,7 +7,7 @@
 ## Responsibility
 提供選定單一月嫂的 bounded、authenticated 個人、聯絡與銀行帳戶投影及 owner-routed mutation；管理 UI 可讀完整身分證與緊急聯絡電話，但銀行帳號固定只讀末四碼，且不輸出 IP、LINE User ID 或 raw source。Staff Profile 與 Staff Bank Account 各自維持 version、Preview／Apply、稽核與 readback。
 
-Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。月嫂在原「我的資料」申請一併送件，管理員依目前版本裁切、退回或手動發布。客戶只看推薦授權範圍內的姓名與發布圖片。
+Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。月嫂在原「我的資料」申請一併送件，管理員依目前版本裁切、退回或手動發布。客戶只看推薦授權範圍內的姓名與發布圖片，依照片、證照、其他、客戶反饋順序顯示有圖片的橫列。客戶反饋各項可有多張圖片，無須填寫到期日，也不發送到期提醒。
 
 ## Implementation
 - primary:

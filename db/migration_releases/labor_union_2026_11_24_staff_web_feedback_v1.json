@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-staff-web-feedback-2026-11-24-v1",
+  "release_metadata": {
+    "release_name": "Staff web customer feedback",
+    "application_version": "staff-web-feedback-v1",
+    "published_at": "2026-11-24",
+    "description": "Append the customer feedback category to Staff web templates while preserving existing categories and rows."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-staff-web-file-management-2026-11-24-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1086_staff_web_feedback.sql",
+      "relative_path": "db/schema_parts/1086_staff_web_feedback.sql",
+      "sha256": "073bd731cab0ea8d2fce49b5d5b0b3de2844d243cee1e2bef429af09f03ffbab",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-existing-categories-and-feedback-rows-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "staff-web-feedback-schema-exact",
+      "phase": "post-schema",
+      "policy": "Verify the exact expanded template category enum and preserved business rows.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "staff-web-feedback-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "staff-web-feedback-schema-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_24_staff_web_feedback_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_24_staff_web_feedback_v1.descriptors.json",
+    "sha256": "a243dafd21605397fb0dd4fc8a2824dcc2fe3c658b9453b855759fbf27b29651",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

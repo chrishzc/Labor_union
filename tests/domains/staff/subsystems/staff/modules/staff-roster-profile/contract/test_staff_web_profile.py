@@ -45,6 +45,7 @@ CROP = "cf_" + "c" * 32
 OTHER_STAFF = "cf_" + "d" * 32
 SECOND_PHOTO = "cf_" + "e" * 32
 SECOND_OTHER = "cf_" + "f" * 32
+FEEDBACK_PHOTO = "cf_" + "1" * 32
 ACTOR = ActorContext("admin:fixture")
 
 
@@ -58,6 +59,7 @@ def web_fixture():
         ORIGINAL: (7, "staff-web/original"), REPLACEMENT: (7, "staff-web/original"),
         CROP: (7, f"staff-web/crop/{REPLACEMENT}"), OTHER_STAFF: (8, "staff-web/original"),
         SECOND_PHOTO: (7, "staff-web/original"), SECOND_OTHER: (7, "staff-web/original"),
+        FEEDBACK_PHOTO: (7, "staff-web/original"),
     }
 
     @contextmanager
@@ -186,6 +188,43 @@ def test_crop_replacement_keeps_published_pointer_until_approval(web_fixture):
         web.customer_image(7, 1, 1)
     with pytest.raises(WebProfileConflict, match="publication_stale"):
         web.apply_in_current_uow(7, [cropped], uuid4(), ACTOR)
+
+
+def test_feedback_stays_private_until_two_photos_are_published_without_expiry(web_fixture) -> None:
+    web, _, _ = web_fixture
+    feedback = web.save_template(
+        WebProfileTemplateItem(None, 0, "客戶反饋", WebProfileCategory.FEEDBACK, 0, True), ACTOR,
+    )
+    certificate = web.save_template(
+        WebProfileTemplateItem(None, 0, "專業證照", WebProfileCategory.CERTIFICATE, 30), ACTOR,
+    )
+    assert feedback.item_id is not None and certificate.item_id is not None
+    expiry = date(2026, 12, 31)
+    web.publish_uploaded(7, [
+        WebProfilePhoto(42, ORIGINAL, expiry, template_version=1),
+        WebProfilePhoto(certificate.item_id, REPLACEMENT, template_version=certificate.version),
+        WebProfilePhoto(43, SECOND_PHOTO, template_version=1),
+    ], uuid4(), ACTOR)
+    assert [group["category"] for group in web.customer_page(7)["groups"]] == ["photo", "certificate", "other"]
+
+    pending = web.prepare(7, [
+        WebProfilePhoto(feedback.item_id, SECOND_OTHER, template_version=feedback.version),
+        WebProfilePhoto(feedback.item_id, FEEDBACK_PHOTO, template_version=feedback.version),
+    ])
+    assert [group["category"] for group in web.customer_page(7)["groups"]] == ["photo", "certificate", "other"]
+
+    published = web.publish_uploaded(7, pending, uuid4(), ACTOR)
+    groups = web.customer_page(7)["groups"]
+    assert [group["category"] for group in groups] == ["photo", "certificate", "other", "feedback"]
+    assert groups[-1]["images"] == [
+        {"item_name": "客戶反饋", "image_entry": entry.entry_id, "image_version": entry.entry_version}
+        for entry in published
+    ]
+    assert len(groups[-1]["images"]) == 2
+    folder = next(folder for folder in web.folders(7) if folder.template_item_id == feedback.item_id)
+    assert [file.expiry_date for file in folder.files] == [None, None]
+    assert feedback.reminder_enabled is False
+    assert not feedback.reminder_due(expiry, date(2026, 12, 1))
 
 
 def test_reject_foreign_file_missing_date_and_stale_template(web_fixture):

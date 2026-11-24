@@ -8320,7 +8320,7 @@ CREATE TABLE `staff_web_template_items` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `version` bigint unsigned NOT NULL DEFAULT '1',
   `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `category` enum('photo','certificate','other') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category` enum('photo','certificate','other','feedback') COLLATE utf8mb4_unicode_ci NOT NULL,
   `display_order` int unsigned NOT NULL,
   `reminder_enabled` tinyint(1) NOT NULL DEFAULT '0',
   `reminder_months` smallint unsigned NOT NULL DEFAULT '1',

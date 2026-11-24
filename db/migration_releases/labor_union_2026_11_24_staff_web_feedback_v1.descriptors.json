@@ -1,0 +1,25 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-web-feedback-2026-11-24-v1",
+  "descriptors": {
+    "1086_staff_web_feedback.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "parent_columns": {
+        "staff_web_template_items": {
+          "category": {
+            "column_type": "enum('photo','certificate','other','feedback')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        }
+      }
+    }
+  }
+}

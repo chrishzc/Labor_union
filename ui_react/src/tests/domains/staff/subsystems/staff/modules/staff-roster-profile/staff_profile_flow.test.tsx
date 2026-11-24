@@ -96,7 +96,7 @@ describe('Staff roster profile flow', () => {
     render(<UnsavedChangesProvider><StaffPage /></UnsavedChangesProvider>);
     fireEvent.click(await screen.findByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
     await screen.findByLabelText('公會編號');
-    if (pendingQuery === 'qualification') expect(screen.getByText('正在載入專業資格…')).toBeInTheDocument();
+    if (pendingQuery === 'qualification') expect(screen.getByText('正在載入交通與照顧人數…')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
     expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -191,7 +191,7 @@ describe('Staff roster profile flow', () => {
     expect(staffProfileClient.query).toHaveBeenCalledWith(11, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
-  it('shows complete identity, contact facts, bank accounts, and canonical certifications', async () => {
+  it('shows complete identity, contact facts and bank accounts without the qualification summary', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     expect(screen.queryByRole('tablist', { name: '服務人員管理分頁' })).not.toBeInTheDocument();
@@ -231,7 +231,8 @@ describe('Staff roster profile flow', () => {
     expect(await screen.findByRole('combobox', { name: '可承接區域值1' })).toHaveValue('北區');
     expect(screen.getByText('來源資料：T01 six region final')).toBeInTheDocument();
     expect(within(screen.getByRole('table', { name: '月嫂名冊清單' })).getByText(/T01 six region final/)).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: '證照' })).toHaveTextContent('資格證明：托育人員證照');
+    expect(within(masterSection).queryByRole('heading', { name: /資格狀態與來源摘要/ })).not.toBeInTheDocument();
+    expect(within(masterSection).queryByRole('group', { name: '證照' })).not.toBeInTheDocument();
 
   });
 

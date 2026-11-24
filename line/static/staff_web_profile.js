@@ -1,7 +1,7 @@
 const statusMessage = document.getElementById("status");
 const nameHeading = document.getElementById("staff-name");
 const groupsRoot = document.getElementById("groups");
-const categories = [["photo", "照片"], ["certificate", "證照"], ["other", "其他"]];
+const categories = [["photo", "照片"], ["certificate", "證照"], ["other", "其他"], ["feedback", "客戶反饋"]];
 let activeRequest;
 let liffScript;
 const imageUrls = new Set();
@@ -63,7 +63,7 @@ function loadLiff() {
 }
 
 async function customerRequest(interaction, signal) {
-  const config = await fetch("/api/v1/line/identity/runtime-config", { cache: "no-store", signal });
+  const config = await fetch("./api/v1/line/identity/runtime-config", { cache: "no-store", signal });
   const { data } = await config.json();
   if (!config.ok || !data?.liff_id) throw new Error("LINE 登入暫時無法使用。");
   const liff = await loadLiff();
@@ -102,10 +102,10 @@ async function openProfile() {
       const token = window.sessionStorage.getItem("union_admin_session_token");
       if (!token) throw new Error("請先登入後台，再從月嫂名冊重新開啟。");
       request = { method: "GET", headers: { Authorization: `Bearer ${token}` } };
-      path = `/api/v1/admin/staff-web-profile/${staffId}/website`;
+      path = `./api/v1/admin/staff-web-profile/${staffId}/website`;
     } else {
       request = await customerRequest(interaction, signal);
-      path = `/api/v1/line/staff-web-profiles/${staffId}`;
+      path = `./api/v1/line/staff-web-profiles/${staffId}`;
     }
     if (!request || signal.aborted) return;
     const response = await readProfile(admin ? path : `${path}/query`, request, signal);

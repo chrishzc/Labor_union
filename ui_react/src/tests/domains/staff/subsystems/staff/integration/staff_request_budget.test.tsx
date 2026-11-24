@@ -69,30 +69,45 @@ describe('Staff request budget', () => {
     expect(staffCasePreferenceManualClient.queryOptions).toHaveBeenCalledTimes(2);
   });
 
-  it('availability create uses one range GET plus preview/apply/requery and refreshes the qualification summary', async () => {
-    vi.mocked(staffQualificationMasterClient.query)
-      .mockResolvedValueOnce(STAFF_QUALIFICATION_MASTER)
-      .mockResolvedValueOnce({ ...STAFF_QUALIFICATION_MASTER, as_of: '2026-10-13', overall_availability: 'unavailable' });
-    vi.spyOn(staffAvailabilityClient, 'getAllBlocks').mockResolvedValue([STAFF_AVAILABILITY_BLOCK]);
-    vi.spyOn(staffAvailabilityClient, 'previewChange').mockResolvedValue(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
-    vi.spyOn(staffAvailabilityClient, 'applyChange').mockResolvedValue(STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!);
+  it('availability create uses one range GET plus preview/apply/requery', async () => {
+    const existingBlock = { ...STAFF_AVAILABILITY_BLOCK, staff_id: 11 };
+    const createdBlock = {
+      ...existingBlock, block_id: 92, start_date: '2026-10-01', end_date: '2026-10-31', reason: '排定休假',
+    };
+    vi.spyOn(staffAvailabilityClient, 'getAllBlocks')
+      .mockResolvedValue([existingBlock, createdBlock])
+      .mockResolvedValueOnce([existingBlock]);
+    vi.spyOn(staffAvailabilityClient, 'previewChange').mockResolvedValue({
+      ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data,
+      staff_id: createdBlock.staff_id,
+      action: 'create_long_leave',
+      candidate_kind: createdBlock.kind,
+      candidate_start_date: createdBlock.start_date,
+      candidate_end_date: createdBlock.end_date,
+    });
+    vi.spyOn(staffAvailabilityClient, 'applyChange').mockResolvedValue({
+      ...STAFF_AVAILABILITY_RECEIPT_RESPONSE.data,
+      staff_id: createdBlock.staff_id,
+      action: 'create_long_leave',
+      block: createdBlock,
+    });
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
     fireEvent.click(screen.getByRole('button', { name: '新增' }));
-    fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
-    fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
-    fireEvent.change(screen.getByLabelText('新增暫停備註（選填）'), { target: { value: '排定休假' } });
+    fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: createdBlock.start_date } });
+    fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: createdBlock.end_date } });
+    fireEvent.change(screen.getByLabelText('新增暫停備註（選填）'), { target: { value: createdBlock.reason } });
     await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
+    expect(screen.queryByText('2026-10-01 ～ 2026-10-31')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '儲存新增' }));
     expect(screen.queryByRole('button', { name: '套用新增' })).not.toBeInTheDocument();
-    await waitFor(() => expect(staffAvailabilityClient.getAllBlocks).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('2026-10-01 ～ 2026-10-31')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '新增' })).toBeInTheDocument();
+    expect(staffAvailabilityClient.getAllBlocks).toHaveBeenCalledTimes(2);
     expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1);
     expect(staffAvailabilityClient.applyChange).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(staffQualificationMasterClient.query).toHaveBeenCalledTimes(2));
-    const masterSection = screen.getByRole('region', { name: '完整資格主檔' });
-    expect(await within(masterSection).findByText(/資料基準日：2026-10-13/)).toBeInTheDocument();
-    expect(masterSection).toHaveTextContent('整體狀態：目前不可服務');
+    expect(staffQualificationMasterClient.query).toHaveBeenCalledTimes(1);
   });
 
   it('lifecycle uses one query plus preview/apply/requery', async () => {

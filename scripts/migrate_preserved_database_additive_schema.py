@@ -395,10 +395,13 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_24_staff_web_profile_v1.json",
     "labor_union_2026_11_24_staff_payable_projection_zero_v1.json",
     "labor_union_2026_11_24_staff_web_file_management_v1.json",
+    "labor_union_2026_11_24_staff_web_feedback_v1.json",
 )
 _STAFF_WEB_PROFILE_ARTIFACT = "1083_staff_web_profile.sql"
 _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT = "1085_staff_web_file_management.sql"
+_STAFF_WEB_FEEDBACK_ARTIFACT = "1086_staff_web_feedback.sql"
 _STAFF_WEB_ENTRY_TABLE = "staff_web_entries"
+_STAFF_WEB_TEMPLATE_TABLE = "staff_web_template_items"
 _STAFF_PAYOUT_LEDGER_ARTIFACT = "114_staff_payout_ledger.sql"
 _STAFF_PAYABLE_ZERO_ARTIFACT = "1084_staff_payable_projection_zero.sql"
 _STAFF_PAYABLE_MONEY_CHECK = (
@@ -2343,6 +2346,11 @@ def _modified_parent_predecessor_absent_state(
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
     predecessor_columns = {
+        _STAFF_WEB_FEEDBACK_ARTIFACT: {
+            _STAFF_WEB_TEMPLATE_TABLE: {
+                "category": _column_contract("enum('photo','certificate','other')", "NO"),
+            },
+        },
         "1074_historical_open_order_terms_receipt_status.sql": {
             "order_terms_apply_receipts": {"lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件')", "NO")},
         },
@@ -4269,6 +4277,7 @@ def _local_classify_statement(statement: str) -> str:
             "alter table case_architecture_bootstrap_events ",
             "alter table beclass_records drop index query_no,",
             "alter table scheduling_staff_unavailability_blocks ",
+            "alter table staff_web_template_items modify column category ",
         )):
             for artifact in (
                 "1070_historical_order_terms_receipt_status.sql",
@@ -4277,6 +4286,7 @@ def _local_classify_statement(statement: str) -> str:
                 "1073_client_beclass_query_case_uniqueness.sql",
                 "1074_historical_open_order_terms_receipt_status.sql",
                 "1076_staff_availability_optional_reason.sql",
+                _STAFF_WEB_FEEDBACK_ARTIFACT,
             ):
                 canonical = ROOT / "db/schema_parts" / artifact
                 (sql,) = split_sql(canonical.read_text(encoding="utf-8"))
@@ -6294,7 +6304,7 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         path = ROOT / "db/schema_parts" / part_name
     if path is None and part_name == "1075_controlled_file_client_passbook_cover.sql" and _staff_web_release_selected():
         path = ROOT / "db/schema_parts" / part_name
-    if path is None and part_name == _STAFF_WEB_PROFILE_ARTIFACT and _staff_web_file_management_selected():
+    if path is None and part_name == _STAFF_WEB_PROFILE_ARTIFACT and _staff_web_release_selected():
         path = ROOT / "db/schema_parts" / part_name
     if path is None and part_name == _STAFF_PAYOUT_LEDGER_ARTIFACT and any(
         item.name == _STAFF_PAYABLE_ZERO_ARTIFACT for item in SCHEMA_PARTS
@@ -6773,7 +6783,9 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "'訂單完成','訂單取消','歷史訂單－未服務','歷史訂單－服務中',"
                 "'歷史訂單－服務完成','歷史訂單－帳務完成')"
             )
-    if part_name in {"1075_controlled_file_client_passbook_cover.sql", _STAFF_WEB_PROFILE_ARTIFACT}:
+    if part_name in {
+        "1075_controlled_file_client_passbook_cover.sql", _STAFF_WEB_PROFILE_ARTIFACT, _STAFF_WEB_FEEDBACK_ARTIFACT,
+    }:
         for statement in split_sql(sql):
             match = re.match(r"ALTER TABLE (\w+)\s+MODIFY COLUMN (.+)", statement, re.S)
             if not match:
@@ -6789,10 +6801,11 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 elif clause.startswith("ADD CONSTRAINT "):
                     name, expression = clause.removeprefix("ADD CONSTRAINT ").split(" CHECK ", 1)
                     descriptor["checks"][(table, name)] = _normalize_sql_contract(expression)
-        key = ("controlled_file_objects", "fk_controlled_file_object_supersedes")
-        descriptor["foreign_keys"][key] = _canonical_artifact_descriptor(
-            "1005_contract_external_signing_successor.sql"
-        )["foreign_keys"][key]
+        if part_name != _STAFF_WEB_FEEDBACK_ARTIFACT:
+            key = ("controlled_file_objects", "fk_controlled_file_object_supersedes")
+            descriptor["foreign_keys"][key] = _canonical_artifact_descriptor(
+                "1005_contract_external_signing_successor.sql"
+            )["foreign_keys"][key]
     if part_name == "1005_contract_external_signing_successor.sql":
         purpose_column = _column_contract(
             "enum('unsigned_contract','final_signed_contract',"
@@ -7426,6 +7439,7 @@ def _release_descriptor_metadata_state(
         "1075_controlled_file_client_passbook_cover.sql",
         "1076_staff_availability_optional_reason.sql",
         _STAFF_WEB_PROFILE_ARTIFACT,
+        _STAFF_WEB_FEEDBACK_ARTIFACT,
         _STAFF_PAYABLE_ZERO_ARTIFACT,
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
@@ -7623,7 +7637,9 @@ def _passbook_release_selected() -> bool:
 
 
 def _staff_web_release_selected() -> bool:
-    return any(path.name == _STAFF_WEB_PROFILE_ARTIFACT for path in SCHEMA_PARTS) or _staff_web_file_management_selected()
+    return any(path.name in {
+        _STAFF_WEB_PROFILE_ARTIFACT, _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT, _STAFF_WEB_FEEDBACK_ARTIFACT,
+    } for path in SCHEMA_PARTS)
 
 
 def _staff_web_file_management_selected() -> bool:
@@ -8613,6 +8629,13 @@ def _allowed_successor_column_types(
     part_name: str, table: str, column: str,
 ) -> tuple[str, ...]:
     """Return exact types from declared successors of the owned column."""
+    if (
+        part_name == _STAFF_WEB_PROFILE_ARTIFACT
+        and (table, column) == (_STAFF_WEB_TEMPLATE_TABLE, "category")
+        and any(path.name == _STAFF_WEB_FEEDBACK_ARTIFACT for path in SCHEMA_PARTS)
+    ):
+        successor = _canonical_artifact_descriptor(_STAFF_WEB_FEEDBACK_ARTIFACT)
+        return (successor["parent_columns"][table][column]["column_type"],)
     unserved = "1081_order_established_unserved_status.sql"
     status_columns = {("orders", "status"), ("order_terms_apply_receipts", "lifecycle_status"), ("order_cancellation_apply_receipts", "lifecycle_status")}
     if part_name != unserved and (table, column) in status_columns and any(path.name == unserved for path in SCHEMA_PARTS):

@@ -28,6 +28,7 @@ from infrastructure.runtime.react_admin_artifact import (
 
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = os.environ.get('WINDOWS_REMOTE_PREFIX', '/test')
+_STAFF_WEB_PROFILE_PATH = '/line-staff-web-profile'
 _HOP_HEADERS = frozenset({
     'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
     'te', 'trailer', 'transfer-encoding', 'upgrade',
@@ -119,7 +120,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
             app.state.api_client = client
             yield
 
-    async def proxy(request: Request):
+    async def proxy(request: Request) -> PlainTextResponse | StreamingResponse:
         path = request.url.path.removeprefix(PREFIX)
         if path == '/api/v1/admin/auth/development-session':
             return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
@@ -132,9 +133,11 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
             # input with this endpoint's facts for the loopback API's origin check.
             upstream_headers['host'] = request.headers['host']
             upstream_headers['x-forwarded-proto'] = request.url.scheme
+        # The canonical profile page declares GET only.
+        profile_head = request.method == 'HEAD' and path == _STAFF_WEB_PROFILE_PATH
         try:
             upstream = client.build_request(
-                request.method, url, headers=upstream_headers,
+                'GET' if profile_head else request.method, url, headers=upstream_headers,
                 content=request.stream(),
             )
             response = await client.send(upstream, stream=True)
@@ -146,7 +149,8 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
             headers['location'] = PREFIX + location
         headers['cache-control'] = 'no-store'
         return StreamingResponse(
-            response.aiter_raw(), status_code=response.status_code, headers=headers,
+            iter(()) if profile_head else response.aiter_raw(),
+            status_code=response.status_code, headers=headers,
             background=BackgroundTask(response.aclose),
         )
 
@@ -158,12 +162,21 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
             return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         return RedirectResponse('/admin/', status_code=307, headers={'Cache-Control': 'no-store'})
 
+    async def local_staff_web_profile_redirect(request: Request) -> RedirectResponse:
+        target = PREFIX + _STAFF_WEB_PROFILE_PATH
+        if request.url.query:
+            target += '?' + request.url.query
+        return RedirectResponse(target, status_code=307, headers={'Cache-Control': 'no-store'})
+
     static_app = ResponseCompressionMiddleware(
         ReactAdminStaticApplication(artifact), minimum_size=1024, compresslevel=5,
     )
     routes = [
         Route('/', root_redirect, methods=['GET', 'HEAD']),
+        Route(_STAFF_WEB_PROFILE_PATH, local_staff_web_profile_redirect, methods=['GET', 'HEAD']),
         Route(PREFIX, redirect, methods=['GET', 'HEAD']),
+        Route(PREFIX + _STAFF_WEB_PROFILE_PATH, proxy, methods=['GET', 'HEAD']),
+        Route(PREFIX + '/static/staff_web_profile.js', proxy, methods=['GET', 'HEAD']),
         Route(PREFIX + '/api/{path:path}', proxy,
               methods=['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']),
         Mount(PREFIX, app=static_app),
@@ -179,6 +192,8 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         if request.url.hostname not in allowed_hosts:
             return PlainTextResponse('Forbidden', status_code=403, headers={'Cache-Control': 'no-store'})
         if request.url.hostname == 'chrishzc.com' and not request.url.path.startswith(PREFIX):
+            return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
+        if request.url.path == _STAFF_WEB_PROFILE_PATH and request.url.hostname not in {'127.0.0.1', 'localhost'}:
             return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         if (request.url.path == '/admin' or request.url.path.startswith('/admin/')) and (
             request.url.hostname == 'chrishzc.com'

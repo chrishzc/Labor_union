@@ -189,9 +189,10 @@
     <div class="section">
       <fieldset id="profile-photos">
         <legend>履歷網頁照片與證照</legend>
+        <p class="help" id="photo-privacy-notice">上傳前請確認個資已經遮蔽，若無遮蔽則視為不介意讓客戶得知。</p>
         <div class="field-grid">
           <label>模板項目<select id="photo-template"><option value="">請選擇項目</option></select></label>
-          <label>選擇照片<input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled></label>
+          <label>選擇照片<input id="photo-files" aria-describedby="photo-privacy-notice" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled></label>
         </div>
         <p class="help" id="photo-status" role="status"></p>
         <div id="photo-drafts"></div>

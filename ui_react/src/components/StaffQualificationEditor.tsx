@@ -1,20 +1,24 @@
-import { useUnsavedDraft } from './UnsavedChanges';
-import { useEffect, useId, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { staffQualificationEditingClient, type QualificationFacts, type QualificationSnapshot } from '../api/staff/qualification_editing_client';
+import { useUnsavedDraft } from './UnsavedChanges';
 
-const labels: Record<keyof QualificationFacts, string> = { special_skills: '專業技能', has_massage_cert: '按摩證書', certifications: '一般證照', care_babies: '最多照顧寶寶數', transportation: '交通方式' };
-const listKeys = ['special_skills', 'certifications', 'transportation'] as const;
-const display = (value: QualificationFacts[keyof QualificationFacts]) => Array.isArray(value) ? value.join('、') || '尚未登錄' : value === null ? '尚未登錄' : typeof value === 'boolean' ? value ? '有' : '無' : String(value);
+const editorTitle = '交通與照顧人數';
+const editableFields = ['transportation', 'care_babies'] as const;
+type EditableField = typeof editableFields[number];
+const labels: Record<EditableField, string> = {
+  transportation: '交通方式',
+  care_babies: '最多照顧寶寶數',
+};
 
-export function StaffQualificationEditor({ staffId, onUpdated, importedServiceInformation }: { staffId: number; onUpdated: () => void | Promise<void>; importedServiceInformation?: ReactNode }) {
-  const saveGuidanceId = useId();
+function display(value: QualificationFacts[EditableField]): string {
+  return (Array.isArray(value) ? value.join('、') : value?.toString()) || '尚未登錄';
+}
+
+export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: number; onUpdated: () => void | Promise<void> }) {
   const [messageError, setMessageError] = useState(false);
   const [snapshot, setSnapshot] = useState<QualificationSnapshot | null>(null);
-  const [lists, setLists] = useState({ special_skills: '', certifications: '', transportation: '' });
-  const [massage, setMassage] = useState('');
-  const [care, setCare] = useState('');
-  const [reason, setReason] = useState('');
+  const [transportation, setTransportation] = useState('');
+  const [careBabies, setCareBabies] = useState('');
   const [preview, setPreview] = useState<QualificationSnapshot | null>(null);
   const [key, setKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -22,47 +26,149 @@ export function StaffQualificationEditor({ staffId, onUpdated, importedServiceIn
   const [needsRequery, setNeedsRequery] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const epoch = useRef(0);
-  const reset = (value: QualificationSnapshot) => { setLists({ special_skills: value.after.special_skills.join('\n'), certifications: value.after.certifications.join('\n'), transportation: value.after.transportation.join('\n') }); setMassage(value.after.has_massage_cert === null ? '' : String(value.after.has_massage_cert)); setCare(value.after.care_babies === null ? '' : String(value.after.care_babies)); setReason(''); setPreview(null); setKey(null); };
-  const invalidate = () => { setMessageError(false); setPreview(null); setKey(null); setMessage(''); };
+
+  const reset = (value: QualificationSnapshot) => {
+    setTransportation(value.after.transportation.join('\n'));
+    setCareBabies(value.after.care_babies?.toString() ?? '');
+    setPreview(null);
+    setKey(null);
+  };
+
+  const invalidate = () => {
+    setMessageError(false);
+    setPreview(null);
+    setKey(null);
+    setMessage('');
+  };
+
   const load = async () => {
     const current = ++epoch.current;
-    controller.current?.abort(); controller.current = new AbortController();
-    setBusy(true); setMessageError(false); setNeedsRequery(false); setSnapshot(null); setMessage('正在載入專業資格…');
-    try { const value = await staffQualificationEditingClient.query(staffId, controller.current.signal); if (current !== epoch.current) return false; setSnapshot(value); reset(value); setMessage(''); return true; }
-    catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '資格載入失敗。'); } return false; }
-    finally { if (current === epoch.current) setBusy(false); }
+    controller.current?.abort();
+    controller.current = new AbortController();
+    setBusy(true);
+    setMessageError(false);
+    setNeedsRequery(false);
+    setSnapshot(null);
+    setMessage('正在載入交通與照顧人數…');
+    try {
+      const value = await staffQualificationEditingClient.query(staffId, controller.current.signal);
+      if (current !== epoch.current) return false;
+      setSnapshot(value);
+      reset(value);
+      setMessage('');
+      return true;
+    } catch (error) {
+      if (current === epoch.current) {
+        setMessageError(true);
+        setNeedsRequery(true);
+        setMessage(error instanceof Error ? error.message : '交通與照顧人數載入失敗。');
+      }
+      return false;
+    } finally {
+      if (current === epoch.current) setBusy(false);
+    }
   };
-  useEffect(() => { void load(); return () => { ++epoch.current; controller.current?.abort(); }; }, [staffId]);
-  const unsavedRef = useUnsavedDraft('專業資格與服務資料', { '專業技能': lists.special_skills, '一般證照': lists.certifications, '交通方式': lists.transportation, '按摩證書': massage, '最多照顧寶寶數': care, '備註': reason }, { enabled: !!snapshot, busy: busy && (!!snapshot || !!preview), baseline: snapshot ? { '專業技能': snapshot.after.special_skills.join('\n'), '一般證照': snapshot.after.certifications.join('\n'), '交通方式': snapshot.after.transportation.join('\n'), '按摩證書': snapshot.after.has_massage_cert === null ? '' : String(snapshot.after.has_massage_cert), '最多照顧寶寶數': snapshot.after.care_babies === null ? '' : String(snapshot.after.care_babies), '備註': '' } : null });
-  const facts = (): QualificationFacts => ({ special_skills: lists.special_skills.split('\n').map(v => v.trim()).filter(Boolean), certifications: lists.certifications.split('\n').map(v => v.trim()).filter(Boolean), transportation: lists.transportation.split('\n').map(v => v.trim()).filter(Boolean), has_massage_cert: massage === '' ? null : massage === 'true', care_babies: care === '' ? null : Number(care) });
+
+  useEffect(() => {
+    void load();
+    return () => {
+      ++epoch.current;
+      controller.current?.abort();
+    };
+  }, [staffId]);
+
+  const unsavedRef = useUnsavedDraft(
+    editorTitle,
+    { [labels.transportation]: transportation, [labels.care_babies]: careBabies },
+    {
+      enabled: !!snapshot,
+      busy: busy && (!!snapshot || !!preview),
+      baseline: snapshot ? {
+        [labels.transportation]: snapshot.after.transportation.join('\n'),
+        [labels.care_babies]: snapshot.after.care_babies?.toString() ?? '',
+      } : null,
+    }
+  );
+
   const doApply = async () => {
     if (busy || !snapshot) return;
+    const current = epoch.current;
     setMessageError(false);
-    const current = epoch.current; setBusy(true);
+    setBusy(true);
     try {
-      const submitted = facts();
+      const submitted: QualificationFacts = {
+        ...snapshot.after,
+        transportation: transportation.split('\n').map(value => value.trim()).filter(Boolean),
+        care_babies: careBabies === '' ? null : Number(careBabies),
+      };
       const approved = preview ?? await staffQualificationEditingClient.preview(staffId, submitted, controller.current?.signal);
       if (current !== epoch.current) return;
+      if (approved.snapshot_fingerprint !== snapshot.snapshot_fingerprint) {
+        setMessageError(true);
+        setNeedsRequery(true);
+        setMessage('資料已有更新，請重新查詢後再儲存。');
+        return;
+      }
       const intent = key ?? `staff-qualification-${crypto.randomUUID()}`;
-      setPreview(approved); setKey(intent);
-      await staffQualificationEditingClient.apply(staffId, submitted, approved, reason.trim(), intent, controller.current?.signal); if (current !== epoch.current) return; const refreshed = await load(); if (current + 1 !== epoch.current) return; setMessage(refreshed ? '專業資格與服務資料已儲存。' : '資料已儲存，但重新查詢失敗，請重試查詢。'); await onUpdated(); }
-    catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。'); } }
-    finally { if (current === epoch.current) setBusy(false); }
+      setPreview(approved);
+      setKey(intent);
+      await staffQualificationEditingClient.apply(staffId, submitted, approved, '', intent, controller.current?.signal);
+      if (current !== epoch.current) return;
+      const refreshed = await load();
+      if (current + 1 !== epoch.current) return;
+      setMessage(refreshed ? '交通與照顧人數已儲存。' : '資料已儲存，但重新查詢失敗，請重試查詢。');
+      await onUpdated();
+    } catch (error) {
+      if (current === epoch.current) {
+        setMessageError(true);
+        setNeedsRequery(true);
+        setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。');
+      }
+    } finally {
+      if (current === epoch.current) setBusy(false);
+    }
   };
-  return <section ref={unsavedRef} className="staff-holiday-op-card staff-qualification-editor" aria-label="專業資格與服務資料編輯">
-    <h3 className="staff-op-title">✏️ 專業資格與服務資料</h3>
-    <p>技能、一般證照及交通方式每行填一項；刪除該行即可移除。按摩證書獨立登錄，與一般證照分開保存。</p>
-    {snapshot && <><div className="staff-op-grid staff-qualification-list-grid">
-      {listKeys.map(field => <label className="staff-op-field" key={field}>{labels[field]}<textarea rows={3} disabled={busy} value={lists[field]} onChange={event => { setLists(value => ({ ...value, [field]: event.target.value })); invalidate(); }} /></label>)}
-    </div><div className="staff-op-grid staff-qualification-details-grid">
-      <label className="staff-op-field">按摩證書<select disabled={busy} value={massage} onChange={event => { setMassage(event.target.value); invalidate(); }}><option value="">尚未登錄</option><option value="true">有</option><option value="false">無</option></select></label>
-      <label className="staff-op-field">最多照顧寶寶數<input type="number" min={1} step={1} max={2147483647} disabled={busy} value={care} onChange={event => { setCare(event.target.value); invalidate(); }} /></label>
-    </div><label className="staff-op-field">備註（選填）<input aria-label="專業資格備註（選填）" placeholder="有需要補充的內容再填寫" maxLength={500} disabled={busy} value={reason} onChange={event => { setReason(event.target.value); if (messageError) { setMessageError(false); setMessage(''); } }} /></label>
-    {preview && <div aria-label="專業資格變更預覽">{(Object.keys(labels) as Array<keyof QualificationFacts>).filter(field => JSON.stringify(preview.before[field]) !== JSON.stringify(preview.after[field])).map(field => <p key={field}><strong>{labels[field]}</strong>：{display(preview.before[field])} → {display(preview.after[field])}</p>)}</div>}
-    <p id={saveGuidanceId} className="staff-op-hint">{busy ? '正在處理，請稍候。' : '可直接儲存；備註可留白。'}</p>
-    <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessageError(false); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={busy} onClick={() => void doApply()}>儲存</button></div></>}
-    {importedServiceInformation}
-    {needsRequery && <button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => void load()}>重試讀取專業資格</button>}
-    {message && <p role={messageError ? "alert" : "status"} className={messageError ? "staff-op-error" : undefined}>{message}</p>}
-  </section>;
+
+  return (
+    <section ref={unsavedRef} className="staff-qualification-editor" aria-label={editorTitle}>
+      <h4 className="staff-op-title">{editorTitle}</h4>
+      {snapshot && <>
+        <p>交通方式每行填一項，刪除該行即可移除。</p>
+        <div className="staff-op-grid staff-qualification-details-grid">
+          <label className="staff-op-field">
+            {labels.transportation}
+            <textarea rows={3} disabled={busy} value={transportation} onChange={event => {
+              setTransportation(event.target.value);
+              invalidate();
+            }} />
+          </label>
+          <label className="staff-op-field">
+            {labels.care_babies}
+            <input type="number" min={1} step={1} max={2147483647} disabled={busy} value={careBabies} onChange={event => {
+              setCareBabies(event.target.value);
+              invalidate();
+            }} />
+          </label>
+        </div>
+        {preview && (
+          <div aria-label="交通與照顧人數變更預覽">
+            {editableFields.filter(field => JSON.stringify(preview.before[field]) !== JSON.stringify(preview.after[field])).map(field => (
+              <p key={field}><strong>{labels[field]}</strong>：{display(preview.before[field])} → {display(preview.after[field])}</p>
+            ))}
+          </div>
+        )}
+        {busy && <p role="status" className="staff-op-hint">正在處理，請稍候。</p>}
+        <div className="staff-op-actions">
+          <button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => {
+            reset(snapshot);
+            setMessageError(false);
+            setMessage('已取消變更。');
+          }}>取消變更</button>
+          <button type="button" className="staff-primary-btn" disabled={busy} onClick={() => void doApply()}>儲存</button>
+        </div>
+      </>}
+      {needsRequery && <button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => void load()}>重試讀取交通與照顧人數</button>}
+      {message && <p role={messageError ? 'alert' : 'status'} className={messageError ? 'staff-op-error' : undefined}>{message}</p>}
+    </section>
+  );
 }

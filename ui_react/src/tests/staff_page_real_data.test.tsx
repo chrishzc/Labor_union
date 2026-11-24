@@ -1,6 +1,6 @@
 /**
  * File: staff_page_real_data.test.tsx
- * Description: 驗證 StaffPage bounded clients、資格六區段與 Asia/Taipei 查詢日期邊界。
+ * Description: 驗證 StaffPage 名冊與兩欄編輯的獨立載入，以及 Asia/Taipei 查詢日期邊界。
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
 import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
+import { staffQualificationEditingClient } from '../api/staff/qualification_editing_client';
 import { StaffPage } from '../pages/StaffPage';
 import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
 import { STAFF_LIFECYCLE_VIEW } from './fixtures/staff/staff_lifecycle_contract_fixtures';
@@ -62,19 +63,7 @@ describe('StaffPage real data boundary', () => {
     );
   });
 
-  it('keeps all six qualification sections visible when their item lists are empty', async () => {
-    vi.mocked(staffQualificationMasterClient.query).mockResolvedValue(STAFF_QUALIFICATION_MASTER);
-    render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('row', { name: '開啟 去敏人員甲 的詳情' }));
-
-    for (const label of ['技能', '料理能力', '證照', '醫療／體檢', '資格有效期', '不可服務期間']) {
-      await waitFor(() => expect(screen.getByRole('group', { name: label })).toBeInTheDocument());
-    }
-    expect(screen.getAllByText('尚未登錄。')).toHaveLength(6);
-  });
-
-  it('shows BeClass-adopted service capability facts in the selected staff drawer', async () => {
+  it('shows BeClass-adopted service capability facts in the roster', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
@@ -88,7 +77,7 @@ describe('StaffPage real data boundary', () => {
     expect(screen.queryByText(/cooking_skill_|massage_certificate|special_skill_/)).not.toBeInTheDocument();
   });
 
-  it('renders qualification facts with business labels instead of internal field codes', async () => {
+  it('keeps canonical cooking information in the roster and hides the qualification summary', async () => {
     vi.mocked(staffQualificationMasterClient.query).mockResolvedValue({
       ...STAFF_QUALIFICATION_MASTER,
       sections: STAFF_QUALIFICATION_MASTER.sections.map((section) => {
@@ -124,23 +113,34 @@ describe('StaffPage real data boundary', () => {
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
 
-    expect(await screen.findByRole('group', { name: '料理能力' })).toHaveTextContent('料理類型：素食');
-    expect(screen.getByRole('group', { name: '證照' })).toHaveTextContent('寶寶按摩證照：是');
+    const roster = within(screen.getByRole('table', { name: '月嫂名冊清單' }));
+    expect(await roster.findByRole('cell', { name: '素食' })).toBeInTheDocument();
+    const drawer = within(screen.getByRole('region', { name: '完整資格主檔' }));
+    expect(drawer.queryByRole('heading', { name: /資格狀態與來源摘要/ })).not.toBeInTheDocument();
+    expect(drawer.queryByRole('group', { name: '證照' })).not.toBeInTheDocument();
+    expect(drawer.queryByText('寶寶按摩證照')).not.toBeInTheDocument();
     expect(screen.queryByText(/cooking_skill_1|massage_certificate/)).not.toBeInTheDocument();
     expect(screen.queryByText(/wp85|測試資料污染/i)).not.toBeInTheDocument();
   });
 
-  it('offers a direct qualification retry after a query error', async () => {
-    vi.mocked(staffQualificationMasterClient.query)
-      .mockRejectedValueOnce(new Error('資格暫時失敗'))
-      .mockResolvedValueOnce(STAFF_QUALIFICATION_MASTER);
+  it('loads the two-field editor even when the roster qualification lookup fails', async () => {
+    vi.mocked(staffQualificationMasterClient.query).mockRejectedValueOnce(new Error('名冊資格暫時失敗'));
+    const facts = {
+      special_skills: ['哺乳協助'], certifications: ['托育證照'], transportation: ['公車'],
+      has_massage_cert: true, care_babies: 2,
+    };
+    vi.spyOn(staffQualificationEditingClient, 'query').mockResolvedValue({
+      staff_id: 11, before: facts, after: facts, snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: null,
+    });
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('row', { name: '開啟 去敏人員甲 的詳情' }));
 
-    fireEvent.click(await screen.findByRole('button', { name: '重試資格主檔' }));
-    await waitFor(() => expect(screen.getByText(/整體狀態/)).toBeInTheDocument());
-    expect(staffQualificationMasterClient.query).toHaveBeenCalledTimes(2);
+    const editor = within(screen.getByRole('region', { name: '交通與照顧人數' }));
+    expect(await editor.findByRole('textbox', { name: '交通方式' })).toHaveValue('公車');
+    expect(editor.getByRole('spinbutton', { name: '最多照顧寶寶數' })).toHaveValue(2);
+    expect(editor.queryByText(/哺乳協助|托育證照|按摩證書/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重試資格主檔' })).not.toBeInTheDocument();
   });
 
   it('offers a direct lifecycle retry inside the identity-bound drawer', async () => {

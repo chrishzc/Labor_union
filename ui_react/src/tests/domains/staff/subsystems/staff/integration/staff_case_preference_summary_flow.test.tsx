@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffCasePreferenceSummaryClient } from '../../../../../../api/staff_case_preference_summary/staff_case_preference_summary_client';
 import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../../../../../../api/staff_lifecycle/staff_lifecycle_client';
+import { staffQualificationEditingClient } from '../../../../../../api/staff/qualification_editing_client';
 import { staffQualificationMasterClient } from '../../../../../../api/staff/qualification_master_client';
 import { staffCasePreferenceManualClient } from '../../../../../../api/staff_case_preferences/staff_case_preferences_client';
 import type { StaffCasePreferenceManualSnapshot, StaffCasePreferenceRelations } from '../../../../../../api/staff_case_preferences/staff_case_preferences_schemas';
@@ -53,19 +54,36 @@ describe('Staff case preference summary flow', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('keeps imported service information inside professional data and only two preferences in the drawer', async () => {
+  it('groups the editors and read-only imported information in one service preference card', async () => {
+    const facts = {
+      special_skills: [], certifications: [], transportation: ['公車'], has_massage_cert: false, care_babies: 2,
+    };
+    vi.spyOn(staffQualificationEditingClient, 'query').mockResolvedValue({
+      staff_id: 11, before: facts, after: facts, snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: null,
+    });
     render(<StaffPage />);
     await screen.findByText('去敏人員甲');
     const card = document.querySelector('[data-control-id="staff.row.11"]') as HTMLElement;
     fireEvent.click(within(card).getByRole('button', { name: /查看 .* 的詳情/ }));
     const area = document.querySelector('[data-surface-id="staff.qualification.preferences"]') as HTMLElement;
-    await within(area).findByLabelText('可承接區域值1');
-    const information = within(area).getByRole('region', { name: '匯入服務資訊' });
-    expect(information.closest('[aria-label="專業資格與服務資料編輯"]')).not.toBeNull();
+    const cardRegion = within(area).getByRole('region', { name: '服務偏好' });
+    const preferences = within(cardRegion);
+    expect(preferences.getAllByRole('heading', { level: 3 })).toEqual([
+      preferences.getByRole('heading', { level: 3, name: '服務偏好' }),
+    ]);
+    const qualificationEditor = preferences.getByRole('region', { name: '交通與照顧人數' });
+    expect(await within(qualificationEditor).findByRole('textbox', { name: '交通方式' })).toHaveValue('公車');
+    expect(within(qualificationEditor).getByRole('spinbutton', { name: '最多照顧寶寶數' })).toHaveValue(2);
+    await preferences.findByLabelText('可承接區域值1');
+    const preferenceGroups = preferences.getAllByRole('group');
+    expect(preferenceGroups).toHaveLength(2);
+    const information = preferences.getByRole('region', { name: '匯入服務資訊' });
     expect(within(information).getByText('家常菜')).toBeInTheDocument();
-    const preferences = within(within(area).getByRole('region', { name: '服務偏好' }));
-    expect(preferences.getAllByRole('group')).toHaveLength(2);
-    expect(preferences.queryByText('下廚能力')).not.toBeInTheDocument();
+    expect(preferences.queryByRole('group', { name: '下廚能力' })).not.toBeInTheDocument();
+    expect(within(information).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(qualificationEditor.compareDocumentPosition(preferenceGroups[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(cardRegion.lastElementChild).toBe(information);
+    expect(cardRegion.nextElementSibling).toBe(within(area).getByRole('region', { name: '履歷網頁與照片' }));
     expect(preferences.getByRole('button', { name: '儲存服務偏好' })).toBeEnabled();
     expect(staffCasePreferenceSummaryClient.query).not.toHaveBeenCalled();
   });

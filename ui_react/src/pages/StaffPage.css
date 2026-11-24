@@ -1056,7 +1056,13 @@ p.staff-service-time-rule,
 }
 
 .staff-preference-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.staff-service-preferences > .staff-qualification-editor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
 .staff-imported-service-information { margin: 18px 0; padding-top: 16px; border-top: 1px solid #dec0b6; }
+.staff-service-preferences > .staff-imported-service-information { margin: 0; }
 .staff-imported-service-information h4 { margin: 0 0 6px; color: #4a2818; }
 .staff-imported-service-information > p { color: #74593f; font-size: .9rem; }
 .staff-imported-service-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }

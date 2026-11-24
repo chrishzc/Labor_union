@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { notificationTasksClient, type NotificationPage } from '../api/line_notifications/notification_tasks_client';
 import {
-  staffWebError, staffWebProfileClient, webProfileCategoryLabels,
+  staffWebError, staffWebProfileClient, webProfileCategories, webProfileCategoryLabels,
   type WebProfileTemplate, type WebProfileTemplateInput,
 } from '../api/staff/staff_web_profile_client';
 import { LineNotificationTemplateEditor } from './LineNotificationTemplateEditor';
@@ -83,13 +83,13 @@ function TemplateEditor({ item, reminderOnly, saved, close }: {
         {!reminderOnly && <>
           <label className="staff-op-field">項目名稱<input required maxLength={100} value={draft.name} onChange={event => change({ name: event.target.value })} /></label>
           <label className="staff-op-field">類別<select value={draft.category} onChange={event => {
-            const next = event.target.value;
+            const next = webProfileCategories.find(value => value === event.target.value);
             if (next === 'other') change({ category: next });
-            else if (next === 'photo' || next === 'certificate') {
+            else if (next) {
               change({ category: next, reminder_enabled: false, reminder_months: 1, reminder_days: 0 });
             }
           }}>
-            <option value="photo">照片</option><option value="certificate">證照</option><option value="other">其他</option>
+            {webProfileCategories.map(value => <option key={value} value={value}>{webProfileCategoryLabels[value]}</option>)}
           </select></label>
           <label className="staff-op-field">顯示順序<input type="number" required min={0} max={2147483647} value={draft.display_order} onChange={event => change({ display_order: Number(event.target.value) })} /></label>
         </>}

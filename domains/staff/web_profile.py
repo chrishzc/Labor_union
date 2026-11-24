@@ -8,6 +8,7 @@ class WebProfileCategory(str, Enum):
     PHOTO = "photo"
     CERTIFICATE = "certificate"
     OTHER = "other"
+    FEEDBACK = "feedback"
 
     @property
     def requires_expiry(self) -> bool:

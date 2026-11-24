@@ -53,7 +53,6 @@ import type {
 } from '../api/staff_lifecycle/staff_lifecycle_schemas';
 import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
 import { staffProfileClient } from '../api/staff_profile/staff_profile_client';
-import { StaffQualificationMasterError } from '../api/staff/qualification_master_errors';
 import {
   adaptStaffDirectoryPage,
   compareStaffUnionNumbers,
@@ -68,10 +67,6 @@ import {
   adaptStaffLifecycleView,
   type StaffLifecycleViewModel,
 } from '../adapters/staff/staff_lifecycle_adapter';
-import {
-  adaptStaffQualificationMaster,
-  type StaffQualificationMasterViewModel,
-} from '../adapters/staff/qualification_master_adapter';
 import {
   adaptStaffProfile,
   type StaffProfileViewModel,
@@ -350,7 +345,7 @@ export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCa
   </div>;
 }
 
-export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual', onUpdated, directEditing = false, renderQualifications }: { staffId: number; surfaceId?: string; onUpdated?: () => void | Promise<void>; directEditing?: boolean; renderQualifications?: (information: React.ReactNode) => React.ReactNode }) {
+export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual', onUpdated, directEditing = false, qualificationEditor }: { staffId: number; surfaceId?: string; onUpdated?: () => void | Promise<void>; directEditing?: boolean; qualificationEditor?: React.ReactElement }) {
   const saveGuidanceId = useId();
   const [snapshot, setSnapshot] = useState<StaffCasePreferenceManualSnapshot | null>(null);
   const [draft, setDraft] = useState<StaffCasePreferenceRelations>(() => EMPTY_MANUAL_RELATIONS);
@@ -471,10 +466,11 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   </section>;
 
   return <>
-    {renderQualifications ? renderQualifications(importedInformation) : <section aria-label="專業資格與服務資料"><h3>專業資格與服務資料</h3>{importedInformation}</section>}
-    <section data-surface-id={surfaceId} aria-label="服務偏好">
-      <h3>服務偏好</h3>
-      <p>只維護可承接區域與週間服務。配對池顯示符合狀態及月嫂登錄值，不因偏好排除人選。</p>
+    {!qualificationEditor && <section aria-label="專業資格與服務資料"><h3>專業資格與服務資料</h3>{importedInformation}</section>}
+    <section className={qualificationEditor && 'staff-holiday-op-card staff-service-preferences'} data-surface-id={surfaceId} aria-label="服務偏好">
+      <h3 className="staff-op-title">服務偏好</h3>
+      {qualificationEditor}
+      <p>配對池顯示可承接區域與週間服務的符合狀態及月嫂登錄值，不因偏好排除人選。</p>
       {phase === 'loading' && <p role="status">正在載入服務偏好…</p>}
       {phase === 'ready' && snapshot && <button type="button" className="staff-next-btn" onClick={() => { setDraft(snapshot.after); setStatus(''); setPhase('editing'); }}>編輯服務偏好</button>}
       {snapshot && options && <div className="staff-qual-grid staff-preference-grid">
@@ -506,6 +502,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
       </div>
       {preview && <StaffCasePreferenceManualPreview preview={preview} />}
       {status && <p role={statusError ? 'alert' : 'status'} className={statusError ? 'staff-op-error' : undefined}>{status}</p>}
+      {qualificationEditor && importedInformation}
     </section>
   </>;
 }
@@ -519,38 +516,6 @@ function todayIsoDate(): string {
   }).formatToParts(new Date());
   const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
   return `${value('year')}-${value('month')}-${value('day')}`;
-}
-
-function qualificationSectionLabel(kind: StaffQualificationMasterViewModel['sections'][number]['kind']): string {
-  return {
-    skills: '技能',
-    cooking: '料理能力',
-    certifications: '證照',
-    medical: '醫療／體檢',
-    validity: '資格有效期',
-    unavailability: '不可服務期間',
-  }[kind];
-}
-
-function qualificationFactLabel(
-  kind: StaffQualificationMasterViewModel['sections'][number]['kind'],
-  code: string,
-): string {
-  if (kind === 'skills') return '專長';
-  if (kind === 'cooking') return '料理類型';
-  if (kind === 'certifications' && code === 'massage_certificate') return '寶寶按摩證照';
-  if (kind === 'certifications') return '資格證明';
-  if (kind === 'unavailability') return '不可服務類型';
-  return '資格資料';
-}
-
-function qualificationEmptyMessage(
-  section: StaffQualificationMasterViewModel['sections'][number],
-): string {
-  if (section.kind === 'unavailability' && section.availability === 'available') {
-    return '目前沒有生效中的不可服務期間。';
-  }
-  return '尚未登錄。';
 }
 
 function profileItemsText(items: ReadonlyArray<{ value: string; detail: string | null }>): string {
@@ -614,7 +579,6 @@ const StaffRosterPage: React.FC = () => {
   const [endPauseReason, setEndPauseReason] = useState('');
   const [availabilityAction, setAvailabilityAction] = useState<ActionState<StaffAvailabilityPreview, StaffAvailabilityReceipt, StaffAvailabilityApplyPayload>>(initialActionState);
   const [lifecycle, setLifecycle] = useState<QueryState<StaffLifecycleViewModel>>({ status: 'idle' });
-  const [qualification, setQualification] = useState<QueryState<StaffQualificationMasterViewModel>>({ status: 'idle' });
   const [profile, setProfile] = useState<QueryState<StaffProfileViewModel>>({ status: 'idle' });
   const [lifecycleEffectiveAt, setLifecycleEffectiveAt] = useState('');
   const [lifecycleReasonCode, setLifecycleReasonCode] = useState('');
@@ -779,7 +743,6 @@ const StaffRosterPage: React.FC = () => {
     setEndPauseResumeDate('');
     setEndPauseReason('');
     setLifecycle({ status: 'idle' });
-    setQualification({ status: 'idle' });
     setProfile({ status: 'idle' });
     setLifecycleAction({ ...initialActionState(), action: null });
     if (selectedStaffId === null) return;
@@ -800,10 +763,8 @@ const StaffRosterPage: React.FC = () => {
         if (error instanceof StaffLifecycleAbortedError || !isCurrentSlice(generation, controller.signal)) return;
         setLifecycle({ status: 'error', message: error instanceof Error ? error.message : '任職狀態載入失敗。' });
       });
-      setQualification({ status: 'loading' });
       void staffQualificationMasterClient.query(currentStaffId, todayIsoDate(), { signal: controller.signal }).then((master) => {
         if (isCurrentSlice(generation, controller.signal)) {
-          setQualification({ status: 'ready', data: adaptStaffQualificationMaster(master) });
           const serviceProfile: StaffRosterServiceProfile = {
             ...master.service_profile,
             cooking_skills: (master.sections.find(section => section.kind === 'cooking')?.items ?? [])
@@ -815,10 +776,8 @@ const StaffRosterPage: React.FC = () => {
           setDirectorySearch(current => ({ ...current, items: current.items.map(refreshService) }));
           setSelectedStaff(current => current ? refreshService(current) : current);
         }
-      }).catch((error: unknown) => {
-        if (error instanceof StaffQualificationMasterError && error.code === 'STAFF_QUALIFICATION_ABORTED') return;
-        if (!isCurrentSlice(generation, controller.signal)) return;
-        setQualification({ status: 'error', message: error instanceof Error ? error.message : '資格主檔載入失敗。' });
+      }).catch(() => {
+        // The roster keeps its last known service profile when this refresh fails.
       });
     return () => controller.abort();
   }, [selectedStaffId, sliceRetryGeneration]);
@@ -875,16 +834,6 @@ const StaffRosterPage: React.FC = () => {
     const adapted = adaptStaffAvailabilityBlocks(blocks);
     setAvailability({ status: 'ready', data: adapted });
     return adapted;
-  };
-
-  const refreshQualificationSummary = async (staffId: number, signal: AbortSignal, generation: number) => {
-    setQualification({ status: 'loading' });
-    try {
-      const master = await staffQualificationMasterClient.query(staffId, todayIsoDate(), { signal });
-      if (isCurrentSlice(generation, signal)) setQualification({ status: 'ready', data: adaptStaffQualificationMaster(master) });
-    } catch (error) {
-      if (isCurrentSlice(generation, signal)) setQualification({ status: 'error', message: errorMessage(error, '資格主檔重新查詢失敗。') });
-    }
   };
 
   const previewAvailability = async (intent: StaffAvailabilityIntent) => {
@@ -965,11 +914,9 @@ const StaffRosterPage: React.FC = () => {
               ? '已觀察 server 封閉暫停期間'
               : '已受理，尚未確認暫停接案已結束。',
           }));
-          if (observedClosedPause) void refreshQualificationSummary(currentStaffId, controller.signal, generation);
           return;
         }
         setAvailabilityAction((current) => ({ ...current, phase: 'observed', message: '已觀察最新不可服務期間' }));
-        void refreshQualificationSummary(currentStaffId, controller.signal, generation);
       } catch (error) {
         if (!isCurrentSlice(generation, controller.signal)) return;
         setAvailabilityAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '不可服務期間查詢失敗。')}` }));
@@ -1550,63 +1497,17 @@ const StaffRosterPage: React.FC = () => {
                 )}
 
                 <section data-surface-id="staff.qualification.preferences">
-                  {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} directEditing surfaceId="staff.qualification.case-preference-manual" onUpdated={() => setSliceRetryGeneration(value => value + 1)} renderQualifications={information => (
-                    <section aria-label="專業資格與服務資料">
-                      {qualification.status === 'ready'
-                        ? <StaffQualificationEditor staffId={selectedStaffId} importedServiceInformation={information} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />
-                        : <><h3>專業資格與服務資料</h3>{information}</>}
-                      <StaffWebFileManagement key={selectedStaffId} staffId={selectedStaffId} staffName={selectedStaff.displayName} canWrite={sessionClient.getUser()?.capabilities.includes('data_browser.write') === true} />
-                    </section>
-                  )} />}
+                  {selectedStaffId !== null && <>
+                    <StaffCasePreferenceManualEditor
+                      staffId={selectedStaffId}
+                      directEditing
+                      surfaceId="staff.qualification.case-preference-manual"
+                      onUpdated={() => setSliceRetryGeneration(value => value + 1)}
+                      qualificationEditor={<StaffQualificationEditor key={selectedStaffId} staffId={selectedStaffId} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />}
+                    />
+                    <StaffWebFileManagement key={selectedStaffId} staffId={selectedStaffId} staffName={selectedStaff.displayName} canWrite={sessionClient.getUser()?.capabilities.includes('data_browser.write') === true} />
+                  </>}
                 </section>
-
-                {/* 6 大專業資格審核主檔 */}
-                <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
-                  📋 資格狀態與來源摘要
-                </h3>
-                {qualification.status === 'loading' && <p role="status">正在載入資格主檔…</p>}
-                {qualification.status === 'error' && (
-                  <div role="alert">
-                    <p>{qualification.message}</p>
-                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>重試資格主檔</button>
-                  </div>
-                )}
-                {qualification.status === 'ready' && (
-                  <>
-                    <p style={{ margin: '4px 0 14px', color: '#74593f', fontSize: '0.9rem' }}>
-                      系統狀態依正式資料推導；醫療／體檢及有效期尚無登錄來源，不提供人工修改。<br />
-                      <strong>整體狀態：</strong>{qualification.data.overallAvailabilityLabel}
-                      {' · '}資料基準日：{qualification.data.as_of}
-                    </p>
-                    {qualification.data.officialDataNote && (
-                      <p style={{ fontSize: '0.85rem', color: '#9a3412', background: '#fff7ed', padding: '6px 12px', borderRadius: '6px', margin: '0 0 14px' }}>
-                        {qualification.data.officialDataNote}
-                      </p>
-                    )}
-                    <div className="staff-qual-grid">
-                      {qualification.data.sections.map((section) => {
-                        const label = qualificationSectionLabel(section.kind);
-                        return (
-                          <div key={section.kind} className="staff-qual-card" role="group" aria-label={label}>
-                            <h4>{label} · {section.availabilityLabel}</h4>
-                            {section.items.length === 0 ? (
-                              <small>{qualificationEmptyMessage(section)}</small>
-                            ) : (
-                              <ul>
-                                {section.items.map((item) => (
-                                  <li key={item.code}>
-                                    <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            {section.dataNote && <small>{section.dataNote}</small>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
               </section>
             {/* 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
               <section className="staff-drawer-section" data-surface-id="staff.availability-management" aria-label="接案狀態管理" ref={statusSectionRef}>
