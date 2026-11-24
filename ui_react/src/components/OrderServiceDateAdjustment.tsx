@@ -32,9 +32,10 @@ export type ServiceDateAdjustmentObservation = {
 export function assertServiceDateAdjustmentObserved(
   caseNo: string, query: ServiceDateConfirmationQueryView, { preview, receipt }: ServiceDateAdjustmentObservation,
 ) {
+  const expectedOrderVersion = preview.order_version + (receipt.scheduling_version - preview.scheduling_version);
   const days = new Map(query.date_adjustment?.days.map(day => [day.service_date, day]));
   const insertedDates = new Set(preview.inserted.map(day => day.service_date));
-  if (query.case_no !== caseNo || query.order_version !== preview.order_version
+  if (query.case_no !== caseNo || query.order_version !== expectedOrderVersion
     || query.scheduling_version !== receipt.scheduling_version || query.current_version !== receipt.confirmed_version
     || !query.date_adjustment || preview.inserted.some(expected => {
       const current = days.get(expected.service_date);
@@ -155,7 +156,7 @@ export function OrderServiceDateAdjustment({ caseNo, query, initialDates, onCanc
         {operation && <p>選擇服務日期並安排調整後的日期</p>}
       </div>
       <button type="button" className="service-date-adjustment-cancel" onClick={onCancel}>
-        {observation ? '關閉日期調整' : '取消日期調整'}
+        {observation ? '關閉日期調整' : '取消調整'}
       </button>
     </header>
     {operation ? <fieldset className="service-date-adjustment-editor" disabled={observation !== null}>

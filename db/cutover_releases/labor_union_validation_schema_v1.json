@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-staff-payable-projection-zero-v1",
+  "release_id": "labor-union-validation-schema-staff-web-file-management-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 207,
-    "ordered_digest_sha256": "1c14f5f016a1e8b7f071c25831ac1e05eb9d915da53b6f18626445370ccddea9",
-    "terminal_artifact": "1084_staff_payable_projection_zero.sql"
+    "expected_count": 208,
+    "ordered_digest_sha256": "1704f5dd371e622c8d405cb46cd82dfcb44b3b72e33e01888a907e823459a1ef",
+    "terminal_artifact": "1085_staff_web_file_management.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "cd43d260f174518b2ec7a14dfc35ca4df078084f7bf5286ffe7c2048cff9ad76"
+    "sha256": "f99dcc902eacb826809d73665422bd037c40caf1a24916e4aff07251fd400181"
   },
   "full_release": {
     "path": "scratch/validation-schema/labor_union_validation_schema.sql",

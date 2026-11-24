@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.routes import matches
+from api.routes import matches, staff_web_profile
 from domains.line.identities import LineSourceType, LineUserId
 from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.matching_communication import (
@@ -204,8 +204,7 @@ def test_customer_confirmation_http_preview_and_send_share_blocker(monkeypatch, 
         "order_information_1_ready": True, "order_information_2_ready": True,
         "weekly_service_ready": True, "weekly_service_row_count": 1,
         "order_information_1": (), "order_information_2": (), "weekly_service_rows": (),
-        "caregiver_resumes": ({"staff_id": 30, "staff_name": "測試月嫂", "ready": True,
-                               "filename": "synthetic.pdf", "version": 1, "blocker": None},),
+        "caregiver_web_profiles": ({"id": 30, "name": "測試月嫂"},),
         "blockers": (),
     }
     day = "2026-11-03"
@@ -232,6 +231,7 @@ def test_customer_confirmation_http_preview_and_send_share_blocker(monkeypatch, 
         effective_capabilities=lambda: frozenset({"line.matching.read", "line.matching.send"}),
     )
     api = FastAPI()
+    api.include_router(staff_web_profile.router)
     api.include_router(matches.router)
     api.dependency_overrides[matches.require_line_matching_reader] = lambda: principal
     api.dependency_overrides[matches.require_line_matching_sender] = lambda: principal
@@ -291,14 +291,17 @@ def test_resend_uses_current_snapshot_and_replay_does_not_revoke_again(monkeypat
     snapshots = []
     current = {"fee": 48000}
     repository.customer_confirmation_package = lambda *_: {
-        "profiles": ({"id": 30},), "order_information_1": ({"fee": current["fee"]},),
-        "order_information_2": (), "weekly_service_rows": (), "caregiver_resumes": ({"staff_id": 30, "file_id": "cf_demo"},),
+        "profiles": ({"id": 30, "name": "測試月嫂"},), "order_information_1": ({"fee": current["fee"]},),
+        "order_information_2": (), "weekly_service_rows": (),
     }
     app = _app(uow)
-    rendered = []
-    app._resume_page_renderer = lambda file, budget: rendered.append((file, budget)) or (b"page",)
-    def append(_unit, command, _recipient, _segment, _kind, snapshot, *_args, resume_pages):
-        assert resume_pages == (b"page",)
+    app._staff_web_profile_url = lambda staff_id, token: f"https://example.test/profile/{staff_id}?interaction={token}"
+    def append(_unit, command, _recipient, _segment, _kind, snapshot, payload, token, _scope):
+        caregiver = json.loads(payload)["contents"]["contents"][0]
+        assert caregiver["body"]["contents"][0]["text"] == "測試月嫂"
+        assert caregiver["footer"]["contents"][0]["action"]["uri"] == f"https://example.test/profile/30?interaction={token}"
+        assert snapshot["staff_web_profile_ids"] == [30]
+        assert "caregiver_resumes" not in snapshot
         snapshots.append(snapshot)
         receipt = object()
         receipts[command.idempotency_key.value, command.fingerprint.value] = receipt
@@ -314,11 +317,6 @@ def test_resend_uses_current_snapshot_and_replay_does_not_revoke_again(monkeypat
     assert app.request_customer_confirmation(command("updated")) is not original
     assert [snapshot["order_information_1"][0]["fee"] for snapshot in snapshots] == [48000, 52000]
     assert revocations == [10, 10]
-    assert rendered == [("cf_demo", 4), ("cf_demo", 4)]
-    original_package = repository.customer_confirmation_package
-    repository.customer_confirmation_package = lambda *args: {**original_package(*args), "caregiver_resumes": ()}
-    with pytest.raises(ValueError, match="皆須上傳履歷 PDF"):
-        app.request_customer_confirmation(command("missing-resume"))
     assert revocations == [10, 10] and len(snapshots) == 2
     repository = uow.matching_notifications
     repository.state = replace(repository.state, customer_decision=CustomerMatchingDecision.ACCEPTED)

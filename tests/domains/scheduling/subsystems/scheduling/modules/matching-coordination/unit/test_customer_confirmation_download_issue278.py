@@ -152,8 +152,7 @@ def test_confirmation_preview_reports_missing_resume():
 
 @pytest.mark.parametrize("hours_per_day,work_days", [(8, 5), (8.5, 1)])
 @pytest.mark.parametrize("line_bound", [True, False])
-@pytest.mark.parametrize("has_resume", [True, False])
-def test_confirmation_preview_is_readable_with_or_without_line_binding(hours_per_day, work_days, line_bound, has_resume):
+def test_web_confirmation_preview_is_readable_with_or_without_line_binding(hours_per_day, work_days, line_bound):
     plan = MatchingPlanReference("CASE-278", 51, 4)
     state = SimpleNamespace(
         plan=plan,
@@ -184,15 +183,7 @@ def test_confirmation_preview_is_readable_with_or_without_line_binding(hours_per
                 "order_information_2": ({"segment_id": 71, "staff_id": 100, "staff_name": "王小美", "text": "訂單資訊－2",
                     "line_sections": ({"title": "飲食與照護需求", "rows": (("飲食習慣", "清淡"),)},)},),
                 "weekly_service_rows": ({"serial_number": 1, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": hours_per_day, "weekly_work_days": work_days, "weekly_hours": hours_per_day * work_days},),
-                "caregiver_resumes": ({
-                    "staff_id": 100,
-                    "staff_name": "王小美",
-                    "ready": has_resume,
-                    "filename": "demo.pdf" if has_resume else None,
-                    "version": 1 if has_resume else None,
-                    "blocker": None if has_resume else "月嫂 王小美 尚未上傳履歷 PDF。",
-                },),
-                "resume_files": ({"file_id": "demo"},) if has_resume else (),
+                "caregiver_web_profiles": ({"id": 100, "name": "王小美"},),
                 "blockers": (),
             }
 
@@ -205,29 +196,21 @@ def test_confirmation_preview_is_readable_with_or_without_line_binding(hours_per
         def __exit__(self, *_args):
             return None
 
-    def render_resume(file_id, budget):
-        assert (file_id, budget) == ("demo", 4)
-        return (b"page1", b"page2")
-
     application = MatchingNotificationApplication(
         UnitOfWork,
         lambda: datetime(2026, 9, 12, tzinfo=timezone.utc),
         availability_validator=lambda _state: None,
-        resume_page_renderer=render_resume,
     )
 
     preview = application.preview_customer_confirmation(
         ActorContext("admin:7", ("line.matching.read",)),
         plan,
-        include_resume_images=True,
     )
 
     binding_blockers = () if line_bound else ("客戶尚未完成 LINE 綁定。",)
-    resume_blockers = () if has_resume else ("月嫂 王小美 尚未上傳履歷 PDF。",)
-    assert preview.blockers == (*binding_blockers, *resume_blockers)
-    assert preview.send_allowed is (line_bound and has_resume)
-    assert preview.resume_images == ((b"page1", b"page2") if has_resume else ())
-    assert preview.caregiver_resumes[0].staff_name == "王小美"
+    assert preview.blockers == binding_blockers
+    assert preview.send_allowed is line_bound
+    assert preview.caregiver_web_profiles[0].staff_name == "王小美"
     assert preview.order_information_1[0].text == "訂單資訊－1"
     assert preview.order_information_1[0].line_sections[0].rows == (("客戶應付總額", "NT$ 48,000"),)
     assert preview.order_information_2[0].line_sections[0].rows == (("飲食習慣", "清淡"),)

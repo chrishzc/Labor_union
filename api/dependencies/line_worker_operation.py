@@ -234,9 +234,11 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
     from subsystems.line.delivery_retention import LineDeliveryRetentionApplication
     from api.dependencies.line_deposit import get_deposit_notifications
     from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationWorker
+    from subsystems.line.staff_web_expiry_reminders import StaffWebExpiryReminderWorker
     return {
         "service_start_day_greeting": ServiceStartDayGreetingWorker(open_line_unit_of_work, now),
         "payment_reminder_notifications": PaymentReminderNotificationWorker(open_line_unit_of_work,now,get_deposit_notifications()),
+        "staff_web_expiry_reminders": StaffWebExpiryReminderWorker(open_line_unit_of_work, now),
         "deposit_settlement_notifications": get_deposit_notifications(),
         "service_day_checkpoints": MySqlServiceDayCheckpointWorker(get_connection, now),
         "service_day_checkpoint_notification_sources": MySqlSchedulingCheckpointNotificationSourceWorker(get_connection, now),

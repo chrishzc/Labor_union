@@ -10,6 +10,9 @@
 
 服務完成可在 Orders 既有 UoW 呼叫 `synchronize_in_unit_of_work`，應付動作全部未變時不寫入重建結果；使用分段計價時仍同步分期。不建立新人工步驟，交易由呼叫方持有。
 
+純日期合併、分裂及復原使用 Scheduling 的原財務日期讀取投影，保留原受款人、時數、費率及樓層費分配。current generation 完整原列優先；僅純 Actual Start 的同月嫂 lineage 可承接最近完整基準，真正財務更正沿自身 current effective 口徑。
+neutral 重排承接原財務指派身分作樓層費同餘數排序，計算結果仍使用 current assignment；此身分只存在於計算輸入，不新增資料庫或畫面欄位。
+
 ## Implementation
 - primary:
   - `subsystems/payroll/rebuild_workflow.py`
@@ -18,6 +21,7 @@
 
 ## Dependencies
 - inbound: `scheduling/scheduling` — 正式 assignment 與服務時數。
+- inbound: `infrastructure/mysql/service_date_adjustment_repository.py::load_payroll_service_dates` — 純日期調整與 neutral Actual Start 的原財務日期投影。
 - inbound: `orders/orders` — current order terms。
 - inbound: `case-import/case-import/pairing-current-facts` — 服務前正式 BeClass 胎數 correction 的 effective rate override。
 

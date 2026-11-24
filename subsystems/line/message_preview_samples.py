@@ -16,9 +16,11 @@ CASE = PreviewCase("DEMO-CASE-001", "王小姐（範例）", "2026-11-02", "2026
 STAFF = PreviewStaff(1, "陳月嫂（範例）", "新竹市", 1, True, ("新竹市", "竹北市"), ("新生兒照護", "月子餐"))
 LEAVE = PreviewLeave(1, 1, "2026-11-10", "2026-11-11")
 DEFAULT_DRAFT = "請協助確認本次服務時段，謝謝。"
+STAFF_WEB_PREVIEW_URL = "https://preview.invalid/staff-web-profile"
 VALUES = {
     **asdict(CASE), "name": CASE.client_name, "planned_start_date": CASE.start_date,
     "staff_name": STAFF.name, "caregiver_name": STAFF.name, "service_date": "2026-11-03",
+    "item_name": "健康檢查", "expiry_date": "2026-12-31",
     "url": "［公版服務申請連結；不建立實際連結］", "bind_url": "［公版身分綁定連結；不建立實際連結］",
     "first_payment_amount": "NT$ 12,000", "first_payment_status": "尚未繳納（範例）",
     "first_payment_notice": "第一期款尚待繳納：12,000 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
@@ -41,7 +43,7 @@ LABELS = {
     "leave_start_date": "請假開始日", "leave_end_date": "請假結束日", "week_number": "週數", "serial_number": "序號",
     "week_start_date": "每週開始日", "week_end_date": "每週結束日", "service_hours_per_day": "每日服務時數",
     "weekly_work_days": "每週工作日數", "weekly_hours": "每週工時", "employer_name": "雇主姓名",
-    "content": "預覽文案", "description": "通知說明", "resume": "履歷下載按鈕",
+    "content": "預覽文案", "description": "通知說明", "staff_web_profile": "月嫂個人網頁連結",
 }
 INFO_1 = ("case_no", "start_date", "end_date", "city", "service_type")
 WEEKLY = ("week_number", "serial_number", "case_no", "employer_name", "week_start_date", "week_end_date",
@@ -88,7 +90,8 @@ class PublicPreviewReader:
                 text, _ = build_order_information_message(number, ORDER_FACTS, {}, "公版範例；實際內容由正式方案帶入。")
                 return ({"text": text, 'line_sections': tuple({'title': section.title, 'rows': section.rows}
                     for section in build_formal_information_sections(number, ORDER_FACTS, {}))},)
-            payload = customer_confirmation_card(CASE.case_no, (asdict(STAFF),), information(1), information(2),
+            profile = {**asdict(STAFF), "staff_web_url": STAFF_WEB_PREVIEW_URL}
+            payload = customer_confirmation_card(CASE.case_no, (profile,), information(1), information(2),
                 ({key: VALUES[key] for key in WEEKLY},), "preview-only", "")
             documents = (information_document('訂單資訊－1｜客戶費用', CASE.case_no, information(1), info_type=1),
                 information_document('訂單資訊－2', CASE.case_no, information(2), info_type=2),
@@ -121,9 +124,8 @@ def sample_bindings(descriptor, template, content, rendered_text):
         values["description"] = rendered_text
     elif key in {"card-customer-profiles", "card-customer-confirmation"}:
         keys.append("case_no")
-        profile_labels = {"name": "月嫂姓名", "city": "月嫂居住地", "care_babies": "照護寶寶數", "has_massage_cert": "嬰幼兒按摩證書",
-                          "service_regions": "服務區域", "special_skills": "技能與偏好"}
-        for field, label in profile_labels.items():
+        profile_labels = {"name": "月嫂姓名"}
+        for field in profile_labels:
             name = f"profiles[0].{field}"
             value = asdict(STAFF)[field]
             values[name] = "、".join(value) if isinstance(value, tuple) else ("有" if value is True else value)
@@ -132,8 +134,8 @@ def sample_bindings(descriptor, template, content, rendered_text):
             values["description"] = rendered_text
             keys.append("description")
         if key == "card-customer-confirmation":
-            keys.extend((*WEEKLY, "resume"))
-            values["resume"] = "寄送時將月嫂履歷 PDF 逐頁轉為圖片"
+            keys.extend((*WEEKLY, "staff_web_profile"))
+            values["staff_web_profile"] = "使用實際推薦收件人與方案授權"
     elif key in {"card-caregiver-information", "card-caregiver-information-2"}:
         keys.extend(INFO_1 if key == "card-caregiver-information" else ("case_no", "start_date", "end_date", "city", "service_time", "multi_birth_count", "residence_type"))
     elif key.startswith("card-candidate-information-"):
@@ -306,6 +308,12 @@ def current_message_sample(key):
     elif key == "service-day-log-reminder":
         from subsystems.line.service_day_log_reminders import reminder_text
         payload = text(reminder_text(field("月嫂姓名", "staff_name", STAFF.name)))
+    elif key == "staff-web-expiry-reminder":
+        from subsystems.line.staff_web_expiry_reminders import DEFAULT_COPY
+        field("收件人", "recipient", "月嫂私人聊天室")
+        item = field("模板項目", "item_name", VALUES["item_name"])
+        expiry = field("正式到期日", "expiry_date", VALUES["expiry_date"])
+        payload = text(DEFAULT_COPY.format(item_name=item, expiry_date=expiry))
     elif key == "payment-reminder-ack":
         from subsystems.line.deposit_notifications import PAYMENT_ACK_REPLY
         payload = text(PAYMENT_ACK_REPLY)

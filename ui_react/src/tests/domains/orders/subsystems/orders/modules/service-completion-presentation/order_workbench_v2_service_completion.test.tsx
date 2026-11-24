@@ -5,8 +5,8 @@ import {
   CORE_STAGE_CODES,
   SUBSTATUS_BY_STAGE_STATUS,
   type CoreStageCode,
-} from '../api/orders/order_core_stage_projection_schemas';
-import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
+} from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 
 const mocks = vi.hoisted(() => ({
   getCoreStageTimelines: vi.fn(),
@@ -15,13 +15,13 @@ const mocks = vi.hoisted(() => ({
   getAssignmentPlan: vi.fn(),
 }));
 
-vi.mock('../api/orders/order_core_stage_projection_client', () => ({
+vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: {
     getCoreStageTimelines: mocks.getCoreStageTimelines,
   },
 }));
 
-vi.mock('../api/orders/order_query_client', () => ({
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   ordersQueryClient: {
     getOrderDetail: mocks.getOrderDetail,
     getOrderTerms: mocks.getOrderTerms,
@@ -29,20 +29,20 @@ vi.mock('../api/orders/order_query_client', () => ({
   },
 }));
 
-vi.mock('../components/OrderAutomaticCompletionStatus', () => ({
+vi.mock('../../../../../../../components/OrderAutomaticCompletionStatus', () => ({
   OrderAutomaticCompletionStatus: ({ caseNo, onObserved }: { caseNo: string; onObserved: () => void }) => <section aria-label="自動完工狀態"><p>預計服務完成時間・{caseNo}</p><p>尚未到服務完成時間</p><button type="button" onClick={onObserved}>test-owner-background-readback</button></section>,
 }));
-vi.mock('../components/ServiceArrangementDepositGate', () => ({ ServiceArrangementDepositGate: () => <p>訂金鎖狀態</p> }));
-vi.mock('../components/ContractExternalSigningActions', () => ({
+vi.mock('../../../../../../../components/ServiceArrangementDepositGate', () => ({ ServiceArrangementDepositGate: () => <p>訂金鎖狀態</p> }));
+vi.mock('../../../../../../../components/ContractExternalSigningActions', () => ({
   ContractExternalSigningActions: ({ onCommitted, onOpenServiceDates }: { onCommitted: () => void; onOpenServiceDates: () => void }) => <section><button type="button" onClick={onCommitted}>test-signing-completed</button><button type="button" onClick={onOpenServiceDates}>前往確認服務日期與排班 →</button></section>,
 }));
-vi.mock('../components/OrderServiceDatesPanel', () => ({
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({
   OrderServiceDatesPanel: () => <p>服務日期工作區</p>,
 }));
-vi.mock('../components/OrderAssignmentPlanPanel', () => ({
+vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({
   OrderAssignmentPlanPanel: () => <p>正式排班工作區</p>,
 }));
-vi.mock('../components/OrderActualStartPanel', () => ({
+vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({
   OrderActualStartPanel: () => <section aria-label="已開啟開始日調整">開始日調整表單</section>,
 }));
 
@@ -170,7 +170,11 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
     assignmentIds.forEach((id, index) => {
       expect(links[index]).toHaveAttribute('href', `#scheduling?tab=handover&case_no=CASE-142&assignment_id=${id}`);
     });
-    fireEvent.click(screen.getByRole('button', { name: '多月嫂排班' }));
+    if (assignmentIds.length === 1) {
+      fireEvent.click(screen.getByRole('button', { name: '多月嫂排班' }));
+    } else {
+      expect(screen.getByRole('button', { name: '返回服務安排' })).toBeVisible();
+    }
     const editor = screen.getByRole('region', { name: '多月嫂排班' });
     const calendars = within(editor).getByRole('region', { name: '月嫂分配' });
     const blocks = within(calendars).getAllByRole('region');

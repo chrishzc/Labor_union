@@ -51,7 +51,7 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 
 計薪前先確認服務量來源：一般訂單、尚未採用服務量更正的歷史已完成訂單，以及已有正式採用版本的歷史多人案件，分別依下列規則取數。
 
-- **一般訂單服務量**：按月嫂歸屬加總正式排班的有效服務工時。
+- **一般訂單服務量**：按月嫂歸屬加總正式排班的有效服務工時。[純日期合併、分裂及復原](02_Assignments_Scheduling_Domain.md#service-date-merge-split) 只改實際服務安排，Payroll 仍使用 Scheduling 保存的原財務服務日期及原受款歸屬，按原每日時數、指派費率與樓層費規則計算。完整未覆寫工作日原列包含已退出生效的來源日；純 Actual Start 重排若只承接調整後班次，沿同月嫂的 `orders_actual_start_rebuild` lineage 讀取最近完整原基準並映射至 current assignment，不把零實際班次的原受款人排除。完整 current generation 原基準優先，真正條款或服務歸屬財務更正不跨代凍結舊基準，保留其 current effective 口徑。純 Actual Start 重排承接原財務指派身分處理樓層費同餘數排序，結果映回目前指派，避免換指派 ID 改變各人的整數分配。本例外亦適用於完工同步及付款日計算使用的服務量，不新增帳務 writer 或修改實際班次。
 - **歷史已完成訂單基準服務量**。尚無採用的服務量更正時，基準總工時取 HCM 匯入的 `orders.service_days × orders.service_hours_per_day`，以已採納的唯一歷史指派確認月嫂。月嫂時薪先取 `assignment_payroll_rate_snapshots.hourly_rate_ntd`，缺指派快照時取 `case_payroll_rate_policy_snapshots.hourly_rate_ntd`。基準計算直接使用登記服務量。
 - **已採用的歷史多人服務量**。有 [歷史服務歸屬更正](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-service-attribution-correction) 時，以該版本的各人服務量為計薪依據，按各人的可證實費率及本節樓層費規則計算。原登記總量只供基準比較。
 

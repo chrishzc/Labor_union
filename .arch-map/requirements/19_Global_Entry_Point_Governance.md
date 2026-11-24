@@ -58,7 +58,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **舊帳戶維護端點**：`/api/v1/client-finance/payment-destination`（GET、`/preview`、`/apply`）已自路由與 OpenAPI 移除。
 - **LINE 簽署提醒**。`/api/v1/orders/{case_no}/contract-external-signing` 下的 `POST /reminders`、`POST /staff-segments/{segment_id}/reminders` 及 `GET /staff-segments/{segment_id}/reminder-readiness` 自路由與 OpenAPI 移除。工會人員在 LINE 官方帳號聊天後台手動選用範本，送交記錄與簽回確認繼續使用既有工會系統入口。
 - **LINE 契約下載通知**。`/api/v1/orders/{case_no}/contract-signing` 下的 `POST /client/send` 及 `POST /staff-segments/{segment_id}/send` 自路由與 OpenAPI 移除。歷史文件的授權下載、簽回與人工證據入口繼續沿用。
-- **客戶確認包履歷下載退役**。舊入口 `GET /api/v1/matching-confirmation-files/{token}`、`GET /line-matching-resume` 與 `POST /api/v1/line/matching-resume/download` 均回 410。履歷圖片直接顯示於 LINE 確認包輪播首頁起的各頁。
+- **客戶確認包履歷下載退役**。舊入口 `GET /api/v1/matching-confirmation-files/{token}`、`GET /line-matching-resume` 與 `POST /api/v1/line/matching-resume/download` 均回 410。客戶月嫂資訊的替代入口依[月嫂個人網頁規格](35_月嫂個人網頁與照片審核發布正式規格.md#23-客戶個人網頁staff-web-03)，確認包組合依[媒合規格](02A_媒合候選池與客戶決定及通勤規格.md#32-客戶推薦確認手動更正與服務前整案換人r-04)。
 - **Data Browser 原始資料表端點**：僅依名冊契約保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 之 authenticated bounded archive Query；移除 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 路由。
 - **非市民歷史補登**：移除表單與 `POST /api/v1/admin/registration-applications/manual-non-citizen/check`，手動建案只接受後端正式配號的新案。既有案件及虛擬帳號對照保留。
 - **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。
@@ -70,14 +70,10 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 
 - **請假送件與代班待辦入口**。排班頁移除「代班待辦」分頁及其中的歷史請假畫面，桌面與行動通知不提供開工、延期衝突或局部代班待辦續辦入口。`staff_leave_apply` 連結顯示雙方合意延期指引。月嫂直送 `POST /api/v1/line/staff-self-service/leave-results/submit` 及雙邊確認 `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 回 `410 Gone`。工會端原服務開始 `dates` 動作的局部代班分支拒絕新提交並回 `410 Gone`。歷史記錄及成功操作收據保留唯讀與原鍵讀回，不恢復請假或代班續辦流程。正常開工、合意延期與服務中換人依 [Scheduling](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 各自契約處理，管理員排班由 [案件人力配置](31_MultiCaregiver_Admin_UI正式規格.md#case-staffing) 承接。
 
-### 3.3 資料庫備份 API 與舊 NAS 相容入口
+### 3.3 Windows 本機資料庫維護入口
 
-以下批次檔保留為舊 Windows NAS 部署的相容入口，不是現行部署或標準本機升級入口。
-
-- `initialize_nas_schema.bat`：僅執行備份後的 candidate 安全升級，不委派 fresh／reset（低階 Python／Unix `.sh` 仍保留供 disposable 環境測試）。
+- `initialize_nas_schema.bat`：僅執行備份後的 candidate 安全升級，不委派 fresh／reset（低階 Python／Unix `.sh` 仍保留供單機空庫／disposable 環境初始化）。
 - `backup_nas_database.bat` 與 `restore_nas_database.bat`：提供明確備份／還原操作。
-管理端備份 API 與上述舊批次入口分開：
-
 - `GET /api/v1/system/database-backup` 與 `PUT /api/v1/system/database-backup/schedule`：限已認證管理員查閱狀態與設定每日備份時間，不提供 reset、SQL 執行、備份下載或網頁復原。
 
 ## 4. Standard local runtime

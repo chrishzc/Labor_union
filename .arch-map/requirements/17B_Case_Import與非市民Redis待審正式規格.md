@@ -48,6 +48,7 @@
 - **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆於銀行帳號欄位固定備註「**請填入產婦本人銀行帳號**」，並皆須必填上傳「**存摺封面**」圖片（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼並一併歸檔至 NAS `02_客戶存摺封面` 資料夾；皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
 - **後台手動新案必填**。客戶姓名、連絡電話、預計服務開始日、服務天數、服務時段、胎數、電子郵件、退款銀行代號（含分行共 7 碼）及退款銀行帳號均為必填。胎數只接受單胞胎或雙胞胎；同一建案交易寫入 BeClass「特殊計費:胎數」，並以此胎數初始化客戶帳務及月嫂薪資。後台表單與建案 API 均拒絕缺漏或只有空白的值。
 - **需求調查時薪**。市民與非市民 LIFF 在單胞胎及雙胞胎選項旁顯示 [Client Finance 計價政策](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 的服務時薪。市民以一般市民費率為參考，區分補助內及用盡後費率。非市民顯示自費費率。
+- **代購食材**。市民與非市民 LIFF 均必填，僅接受「需月嫂代購(實報實銷)」或「自行準備」，保存於 BeClass `survey_details` 的「代購食材」。後台 BeClass 可顯示及修正；歷史未填資料維持未登錄，不猜補答案。
 - **三節假日雙薪意願**。市民與非市民 LIFF 的「費用與同意條款」及後台手動非市民新案均提供選填欄位，記錄遇端午、中秋、除夕、初一或初二服務時的雙薪意願。可選「是」、「否」或未填。答案保存於需求調查，供名冊維護，業務語意依 [CRX-REGISTRATION-01](33_案件與月嫂整合名冊正式規格.md#52-client-profile-與-beclass-欄位及照護修正crx-account-01)。
 - **非市民表單服務時段**。LIFF 與後台手動新案提供相同的服務方式、生產方式及居住型態選項。每日服務時段提供 08:30–12:30（4 小時）、08:30–16:30（8 小時）、09:00–17:00（8 小時）、13:00–17:00（4 小時）。LIFF 表單及 Preview／Apply 僅接受這四個時段。後台手動新案及原案資料帶入可調整每日開始與結束時間，同日起訖時間差須大於或等於所選的 4 或 8 小時；多出的時間可供客戶與月嫂協調休息，不自動增加每日服務時數或扣除固定午休。服務時數與起訖時間分別保存，例如 08:00–17:00 選 8 小時時，每日服務時數仍為 8 小時。前端與手動建案 API 使用相同驗證。LIFF 依預計服務開始日、天數及休假規則推算結束日。退款帳號正規化後須有數字。
 - **年度流水配號與後續對齊（`NC-NUMBER-01～02`、`NC-FLOW-01`、`NC-PAYMENT-01`）**：案號採 `A＋民國年度＋3碼流水號`，依正式建案日的臺灣時間年度自 `001` 起算。虛擬帳號依 [Client Finance 帳號規則](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 解析。LINE 申請在核准時正式配號。手動新案先唯讀顯示預估案號與帳號，送出時與 LINE 核准共用年度流水號，在同一建案交易內鎖定取號並跳過已使用的案號或帳號，成功後顯示實際配號。可表示的流水號用完時回報衝突。正式建案後的統計、推薦媒合、契約簽署、5 天訂金與分期計價及排班結算沿用既有 owner 流程（見 [營運報表與統計口徑 §5](34_營運報表與統計口徑正式規格.md#noncitizen-statistics-20261029)、[Client Finance §2.3](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 與 [Contract Signing](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)）。
@@ -79,15 +80,13 @@
   - 查到待審申請只表示收件，不表示已建正式案件。核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
   - 對外收件容器 `registration-intake` 僅持 LIFF token 驗證與專用 `registration-redis` 受限 ACL（僅可讀寫待審內容與計數器命名空間，完全不配置 MySQL 憑證、網路路徑或審核決策權限）；瀏覽器僅呼叫 bounded API。
   - 管理員審核核准於 MySQL 唯一 outer UoW 透過各 owning Domain writer 原子建立正式 Client／BeClass（含同步保存 `beclass_records.refund_bank_code` 與 `refund_account_no`，依 `REG-REFUND-01～03`）／Orders（含非市民建檔）與 LINE binding，並透過 Controlled File Storage boundary 將暫存的存摺封面歸檔至 NAS `02_客戶存摺封面` 資料夾，確認完成後方清除 Redis 問卷原文與暫存圖檔。
-- **`REG-REDIS-01～04`（持久化設定與編號）**：專用 `registration-redis`（Redis 7 獨立實例＋持久化卷，禁與 cache 共用；關閉 host port；設定 `appendonly yes`、`appendfsync always`、`noeviction`、`maxmemory 256mb`、`auto-aof-rewrite-percentage 100`、`auto-aof-rewrite-min-size 64mb`）。容量滿或 AOF 錯誤一律拒收而不退回 MySQL。專用 Redis 持久化計數器須於還原後與 MySQL 核對最大已用編號（禁擅自以空庫或已核准值重設）。
-  - **無正式資料的部署測試**。使用 `REGISTRATION_USE_SHARED_REDIS_FOR_TEST=1` 時，收件與管理端共用一般 Redis 的同一個實例和資料庫，可在正式登入模式下以測試資料驗證流程。收件端使用 `docker-compose.registration-test.yml`，保留 LINE 驗證服務與無 MySQL 的收件容器。測試暫存沿用既有命名空間。正式資料環境使用專用 Redis。
-  - S：部署測試環境只有一般 Redis，管理端使用正式登入。T：讓測試申請寫入與待審清單使用同一暫存來源。A：收件與管理端啟用共用 Redis 測試設定，送出一筆測試申請並開啟待審清單。R：兩端使用相同 Redis 資料庫，管理端可看到該筆申請。停用設定後，正式模式恢復要求各自的專用 Redis 憑證。
+- **`REG-REDIS-01～04`（持久化設定與編號）**：專用 `registration-redis`（Redis 7 獨立實例＋持久化卷，禁與 cache 共用；僅綁定 `127.0.0.1` loopback 供本機 Windows 管理端連線，禁止對外公開；設定 `appendonly yes`、`appendfsync always`、`noeviction`、`maxmemory 256mb`、`auto-aof-rewrite-percentage 100`、`auto-aof-rewrite-min-size 64mb`）。容量滿或 AOF 錯誤一律拒收而不退回 MySQL。專用 Redis 持久化計數器須於還原後與 MySQL 核對最大已用編號（禁擅自以空庫或已核准值重設）。
 - **`REG-REDIS-05` & `REG-EXPIRY-01～04`（14 天自動清除與拒絕終態）**：
   - 待審申請自伺服器提交時起算固定 **14 × 24 小時（14 天）**，設定不可延長之絕對 `expires_at` 與 Redis TTL（重開／查詢不延長；到期立即清除問卷並釋放主體占用，保留最小「已到期」狀態供查「申請已到期，請重新申請」；轉入核准處理中立即解除 TTL 改受恢復索引保護以防 MySQL 交易中途遺失）。
   - 明確拒絕立終態並立即清除問卷原文（僅留申請號、拒絕時間與操作人供授權回讀）；拒絕或到期後可重新提出新申請（原號重送僅回原終態）。
 - **`REG-REDIS-06～08`（兩儲存故障恢復、維護與 AOF 實體整理）**：
   - 核准中斷後先分清 MySQL 是否已提交。若未提交，恢復作業讀取處理中索引，以原操作識別續走冪等 MySQL writer；若已提交但 Redis 未清除，核對已 commit 回執後只補做 Redis 終態與刪除，絕不重建案號或 Client。
-  - 內部維運排程除設定原生 AOF rewrite 外，每小時偵測自上次整理後如有問卷清除則執行一次 `BGREWRITEAOF`，實體抹除舊 AOF 內容（禁止腳本手動刪 AOF）；獨立容器拓樸由 `docker-compose.registration.yml` 與 `REGISTRATION_REDIS_ADMIN_PASSWORD_FILE` 隔離（`registration-intake` 不掛 `.env` 或管理 secret），首次全新空實例以 `scripts.registration_maintenance --initialize-new-instance --once` 初始化並於一般啟動／還原核對既有 SQL 最大編號。
+  - 內部維運排程除設定原生 AOF rewrite 外，每小時偵測自上次整理後如有問卷清除則執行一次 `BGREWRITEAOF`，實體抹除舊 AOF 內容（禁止腳本手動刪 AOF）；獨立容器拓樸統一編排於根目錄 `docker-compose.yml`（`registration` profile，搭配 `REGISTRATION_REDIS_ADMIN_PASSWORD_FILE` 與 `REGISTRATION_REDIS_INTAKE_PASSWORD_FILE`，`registration-intake` 僅綁定 `127.0.0.1`、保持 `internal` 容器網路且不掛 `.env` 或 MySQL 憑證），首次全新空實例以 `scripts.registration_maintenance --initialize-new-instance --once` 初始化並於一般啟動／還原核對既有 SQL 最大編號。
 
 ## 4. HCM 進件規範、欄位警示與 `BECLASS-001／IMPORT-003`
 

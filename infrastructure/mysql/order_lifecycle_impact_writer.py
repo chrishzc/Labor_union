@@ -6,6 +6,7 @@ Description: 寫入 Orders 條款造成的 typed lifecycle 事件、資料鎖與
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.orders.terms_workflow import (
@@ -39,6 +40,19 @@ def persist_order_lifecycle_projection(cursor, command) -> None:
             lifecycle.case_no,
             command.expected_order_version,
         ),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError("order_version_conflict")
+
+
+def persist_order_scheduled_end_projection(
+    cursor, *, case_no: str, actual_end_date: date, expected_order_version: int,
+) -> None:
+    """Synchronize a scheduling-only end without changing lifecycle or billing facts."""
+    cursor.execute(
+        "UPDATE orders SET actual_end_date=%s,lifecycle_version=lifecycle_version+1 "
+        "WHERE case_no=%s AND lifecycle_version=%s",
+        (actual_end_date, case_no, expected_order_version),
     )
     if cursor.rowcount != 1:
         raise RuntimeError("order_version_conflict")

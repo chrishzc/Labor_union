@@ -12,7 +12,6 @@ Windows 日常啟停／更新／搬機改用專案根目錄的 `Windows管理.ba
 | `start_windows_remote.bat` | 舊參數的薄轉接：`--connect`→start、`--update-frontend`→frontend、`--prepare`→prepare、`--dry-run`→check；無參數→start LocalOnly。 |
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
-| `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
 | `backup_nas_database.bat` | 手動備份或設定每日 18:00 的 NAS SQL 備份。 |
 | `initialize_nas_schema.bat` | NAS 安全升級：先備份，在新庫升級並驗證後切換，不清空原庫。 |
 | `restore_nas_database.bat` | 選擇成功備份，驗證後復原至原本庫名，完成後清除本次暫存資料。 |
@@ -150,47 +149,39 @@ SQL 不包含 MySQL 帳號／GRANT、照片／附件、Windows 設定與 MFA 加
 
 首次空庫建置仍由技術人員使用低階 `python -m scripts.initialize_nas_schema --apply`（或 Unix `.sh`）；此路徑拒絕覆蓋非空庫，不是三個日常 Windows 入口的一部分。
 
-Compose 現在只啟動 Redis；所有開發入口直接連線 `.env`／process environment 的 MySQL，
-不再啟動或管理 `mysql_db`。既有容器與資料卷保留，請勿使用 `down -v` 或 `--remove-orphans` 清除。
+Compose 統一管理本機 Docker MySQL（`db`／`mysql_db`）與 Redis（`redis`／`union_redis`），兩者均僅綁定 `127.0.0.1` loopback。請勿使用 `down -v` 清除具名 `mysql-data` 資料卷。
 
-先在 NAS 準備好與目前程式版本一致的 MySQL 測試資料庫及應用程式帳號，再編輯本機 `.env`：
+先確認本機 `.env` 已設定資料庫連線與儲存根目錄，例如：
 
 ```dotenv
 APP_ENV=development
-DB_HOST=192.168.1.100
+DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=union_app
-DB_PASSWORD="replace_with_nas_test_password"
-DB_DATABASE=union_db_test
+DB_PASSWORD="replace_with_application_db_password"
+DB_DATABASE=union_db
 REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
-IP、port、帳號及資料庫名稱請依 NAS 設定修改；密碼含 `#` 或空白時請保留引號。
+IP、port、帳號及資料庫名稱請依實際本機容器設定修改；密碼含 `#` 或空白時請保留引號。
 Process environment 的 `DB_*` 優先於 `.env`，readiness 與 API 使用同一組設定。
 若原本使用不同的 Redis port，也要同步修改 `REDIS_PORT` 與 `REDIS_URL`。
-NAS 防火牆與 MySQL 帳號只開放測試電腦的內網來源，不將 MySQL port 轉發至 Internet。
-若 NAS 已配置 mTLS，可沿用既有 `DB_SSL_MODE=verify_identity` 與
-`DB_SSL_CA`、`DB_SSL_CERT`、`DB_SSL_KEY`；檔案放本機私有位置。
 
-Windows：
+空白庫建置完成後，可用標準入口啟動並檢視狀態：
 
 ```powershell
-.\scripts\launchers\start_nas_development.bat --dry-run
-.\scripts\launchers\start_nas_development.bat
+.\scripts\launchers\start_local_development.bat --dry-run
+.\scripts\launchers\start_local_development.bat
 ```
-
-macOS／Linux：
 
 ```bash
-bash ./scripts/launchers/start_nas_development.sh --dry-run
-bash ./scripts/launchers/start_nas_development.sh
+./scripts/launchers/start_local_development.sh --dry-run
+./scripts/launchers/start_local_development.sh
 ```
 
-`--dry-run` 不連線 NAS。若要只驗證連線與 schema、不啟動任何服務，可執行：
+`--dry-run` 不連線資料庫。若要只驗證連線與 schema、不啟動任何服務，可執行：
 
 ```powershell
-$env:APP_ENV = 'development'
-$env:RUNTIME_DATABASE_TARGET = 'nas'
 .\.venv\Scripts\python.exe -m scripts.check_runtime_database
 ```
 

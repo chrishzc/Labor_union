@@ -206,6 +206,8 @@
     const entryParam = urlParams.get('entry') || liffStateParams.get('entry');
     const flowPurpose = urlParams.get('purpose') || liffStateParams.get('purpose') || '';
     const flowId = urlParams.get('flow_id') || liffStateParams.get('flow_id') || '';
+    const webProfileStaff = urlParams.get('staff_id') || liffStateParams.get('staff_id') || '';
+    const webProfileInteraction = urlParams.get('interaction') || liffStateParams.get('interaction') || '';
     const scheduleMode = urlParams.get('mode') || liffStateParams.get('mode') || '';
     const scheduleCaseNo = urlParams.get('case_no') || liffStateParams.get('case_no') || '';
     const scheduleGroupReply = (urlParams.get('group_reply') || liffStateParams.get('group_reply')) === '1';
@@ -325,6 +327,12 @@
             }
 
             if (!liff.getIDToken()) throw new Error('無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。');
+            if (flowPurpose === 'staff_web_profile') {
+                if (!webProfileStaff || !webProfileInteraction) throw new Error('連結不完整，請從推薦訊息重新開啟。');
+                const query = new URLSearchParams({ staff_id: webProfileStaff, interaction: webProfileInteraction });
+                navigateTo(`/line-staff-web-profile?${query}`, false);
+                return;
+            }
             if (directPath) {
                 navigateTo(directPath, false);
                 return;

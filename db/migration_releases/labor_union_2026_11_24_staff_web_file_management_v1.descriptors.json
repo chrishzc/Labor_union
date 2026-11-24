@@ -1,0 +1,97 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-web-file-management-2026-11-24-v1",
+  "descriptors": {
+    "1085_staff_web_file_management.sql": {
+      "tables": {
+        "staff_web_entries": {
+          "id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "template_item_id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "published_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "removed_at": {
+            "column_type": "datetime(6)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "removed_by": {
+            "column_type": "varchar(191)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "removed_as_other": {
+            "column_type": "tinyint(1)",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {
+        "staff_web_entries.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "staff_web_entries.idx_staff_web_entry_staff": {
+          "non_unique": 1,
+          "columns": [
+            "staff_id",
+            "template_item_id",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "staff_web_entries.fk_staff_web_entry_staff": {
+          "columns": [
+            "staff_id"
+          ],
+          "referenced_table": "staff",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_web_entries.fk_staff_web_entry_template": {
+          "columns": [
+            "template_item_id"
+          ],
+          "referenced_table": "staff_web_template_items",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {},
+      "triggers": [],
+      "parent_columns": {}
+    }
+  }
+}

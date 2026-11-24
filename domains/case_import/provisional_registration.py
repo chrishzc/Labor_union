@@ -13,7 +13,7 @@ from typing import Any, Literal, Mapping
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from domains.case_import.refund_account import refund_fields_from_survey
-from domains.case_import.registration_details import HOLIDAY_DOUBLE_PAY_SURVEY_FIELD, normalize_holiday_double_pay, normalize_id_number
+from domains.case_import.registration_details import HOLIDAY_DOUBLE_PAY_SURVEY_FIELD, normalize_holiday_double_pay, normalize_id_number, INGREDIENT_PURCHASE_SURVEY_FIELD, normalize_ingredient_purchase
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 
 
@@ -83,6 +83,15 @@ def build_provisional_registration_candidate(
     optional = _optional_payload(intent)
     survey_details = dict(_survey_details(intent.survey_details))
     survey_details["特殊計費:胎數"] = _required_multi_birth_count(survey_details)
+    try:
+        purchase = normalize_ingredient_purchase(survey_details.get(INGREDIENT_PURCHASE_SURVEY_FIELD))
+        if purchase is None:
+            raise ValueError("ingredient_purchase_required")
+    except ValueError:
+        raise ProvisionalRegistrationDomainError(
+            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, "代購食材須選擇需月嫂代購(實報實銷)或自行準備。"
+        ) from None
+    survey_details[INGREDIENT_PURCHASE_SURVEY_FIELD] = purchase
     if HOLIDAY_DOUBLE_PAY_SURVEY_FIELD in survey_details:
         try:
             survey_details[HOLIDAY_DOUBLE_PAY_SURVEY_FIELD] = normalize_holiday_double_pay(

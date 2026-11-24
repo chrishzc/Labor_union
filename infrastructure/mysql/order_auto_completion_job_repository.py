@@ -57,10 +57,17 @@ FROM (
     SELECT
         orders.case_no,
         orders.lifecycle_version,
-        TIMESTAMP(
-            DATE_ADD(MAX(schedule.work_date), INTERVAL orders.service_end_day_offset DAY),
-            orders.service_end_time
-        ) AS completion_instant,
+        CASE
+            WHEN MAX(CASE WHEN schedule.work_date = orders.actual_end_date
+                           AND schedule.service_hours_override IS NOT NULL THEN 1 ELSE 0 END) = 1
+              OR (orders.service_start_time IS NULL AND orders.service_end_time IS NULL
+                  AND orders.service_end_day_offset IS NULL)
+            THEN TIMESTAMP(orders.actual_end_date, '23:59:59.999999')
+            ELSE TIMESTAMP(
+                DATE_ADD(orders.actual_end_date, INTERVAL orders.service_end_day_offset DAY),
+                orders.service_end_time
+            )
+        END AS completion_instant,
         'normal' AS completion_kind
     FROM orders
     JOIN scheduling_aggregates aggregate_root
@@ -75,14 +82,18 @@ FROM (
      AND schedule.generation_id = generation.id
      AND schedule.effective_marker = 1
      AND schedule.is_work_day = 1
-    JOIN case_staff_assignments assignment
+    LEFT JOIN case_staff_assignments assignment
       ON assignment.id = schedule.assignment_id
      AND assignment.generation_id = generation.id
      AND assignment.status IN ('active', 'planned', 'completed')
     WHERE orders.status = '服務中'
       AND orders.actual_end_date IS NOT NULL
-      AND orders.service_end_time IS NOT NULL
-      AND orders.service_end_day_offset IN (0, 1)
+      AND NOT EXISTS (
+          SELECT 1 FROM case_staff_assignments invalid_assignment
+          WHERE invalid_assignment.generation_id = generation.id
+            AND (invalid_assignment.status NOT IN ('active', 'planned', 'completed')
+                 OR invalid_assignment.status IS NULL)
+      )
       AND NOT EXISTS (
           SELECT 1
           FROM order_lifecycle_control_state control_state
@@ -94,12 +105,32 @@ FROM (
         orders.case_no,
         orders.lifecycle_version,
         orders.service_days,
+        orders.service_hours_per_day,
         orders.actual_end_date,
+        orders.service_start_time,
         orders.service_end_time,
         orders.service_end_day_offset
-    HAVING COUNT(*) = orders.service_days
-       AND COUNT(DISTINCT schedule.work_date) = orders.service_days
+    HAVING COUNT(assignment.id) = COUNT(*)
+       AND COUNT(DISTINCT schedule.work_date) = COUNT(*)
+       AND (
+           (SUM(schedule.service_hours_override IS NOT NULL) = 0
+            AND COUNT(*) = orders.service_days)
+           OR (SUM(schedule.service_hours_override IS NOT NULL) > 0
+               AND orders.service_hours_per_day > 0
+               AND SUM(CASE WHEN schedule.service_hours_override IS NOT NULL
+                             AND schedule.service_hours_override NOT IN (4, 8) THEN 1 ELSE 0 END) = 0
+               AND SUM(COALESCE(schedule.service_hours_override, orders.service_hours_per_day))
+                   = orders.service_days * orders.service_hours_per_day)
+       )
        AND MAX(schedule.work_date) = orders.actual_end_date
+       AND (
+           MAX(CASE WHEN schedule.work_date = orders.actual_end_date
+                     AND schedule.service_hours_override IS NOT NULL THEN 1 ELSE 0 END) = 1
+           OR (orders.service_start_time IS NULL AND orders.service_end_time IS NULL
+               AND orders.service_end_day_offset IS NULL)
+           OR (orders.service_start_time IS NOT NULL AND orders.service_end_time IS NOT NULL
+               AND orders.service_end_day_offset IN (0, 1))
+       )
        AND completion_instant <= %s
 
     UNION ALL

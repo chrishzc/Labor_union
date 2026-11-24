@@ -724,6 +724,9 @@ def _storage_locator_for(candidate, staging, *, version=1, staff_record=None, cl
                 raise RuntimeError("controlled_file_staff_storage_subject_missing")
             number = safe_filename_component(staff_record.get("union_no") or f"ID{staff_record['id']}")
             name = safe_filename_component(staff_record["name"])
+            if candidate.purpose is ControlledFilePurpose.STAFF_PROFILE_PHOTO:
+                object_key = safe_filename_component(candidate.object_key)
+                return f"{STAFF_DIRECTORY}/{number}_{name}/web_profile/{object_key}_v{version}_{digest}{extension}"
             section, label = {
                 ControlledFilePurpose.STAFF_RESUME: ("resume", "月嫂履歷"),
                 ControlledFilePurpose.STAFF_CERTIFICATE: ("certificates", "證照"),

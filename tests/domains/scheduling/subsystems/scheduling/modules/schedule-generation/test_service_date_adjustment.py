@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ from domains.scheduling.service_date_adjustment import (
     plan_service_date_adjustment,
 )
 from infrastructure.mysql.service_date_adjustment_repository import load_first_schedule_dates
+from infrastructure.mysql.service_date_adjustment_repository import MySqlServiceDateAdjustmentRepository
 from subsystems.scheduling.service_date_adjustment import (
     ServiceDateAdjustmentFacts,
     ServiceDateAdjustmentIntent,
@@ -147,3 +149,68 @@ def test_first_schedule_uses_original_basis_after_chained_planned_adjustments(re
     assert basis == (ServiceDay(first, 3, None), ServiceDay(second, 7, None))
     assert actual == tuple(ServiceDay(item["service_date"], item["staff_id"], item["service_hours_override"])
                            for item in current)
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restore, monkeypatch):
+    first, second, target = date(2026, 11, 1), date(2026, 11, 2), date(2026, 12, 3)
+    original = (ServiceDay(first, 3, None), ServiceDay(second, 3, None))
+    merged = plan_service_date_adjustment(original, Decimal(4), (first, second), (AdjustmentTarget(target, 3),))
+    facts = ServiceDateAdjustmentFacts(
+        "CASE-1", 3, 4, None, 12, Decimal(4), merged.days if restore else original,
+        ((3, "Staff"),), (ServiceDateAdjustmentPair(41, merged),) if restore else (), 2, (),
+    )
+    intent = (ServiceDateAdjustmentIntent((target,), (), reverse_receipt_id=41) if restore
+              else ServiceDateAdjustmentIntent((first, second), (AdjustmentTarget(target, 3),)))
+    planning_repository = Mock()
+    planning_repository.load.return_value = facts
+    preview = ServiceDateAdjustmentWorkflow(planning_repository, Mock()).preview("CASE-1", intent)
+    cursor = Mock(rowcount=1, lastrowid=42)
+    connection = Mock()
+    connection.cursor.return_value.__enter__ = Mock(return_value=cursor)
+    connection.cursor.return_value.__exit__ = Mock(return_value=False)
+    monkeypatch.setattr("infrastructure.mysql.service_date_adjustment_repository._write_formal", Mock())
+
+    receipt = MySqlServiceDateAdjustmentRepository(connection).save(
+        preview, intent, key="adjust-end", fingerprint="a" * 64, actor="admin",
+    )
+
+    order_writes = [call.args for call in cursor.execute.call_args_list if call.args[0].startswith("UPDATE orders ")]
+    assert len(order_writes) == 1
+    sql, values = order_writes[0]
+    assert values == (second if restore else target, "CASE-1", 3)
+    assert "actual_end_date=%s,lifecycle_version=lifecycle_version+1" in sql
+    assert receipt.scheduling_version == 5
+    assert all(token not in sql for token in ("status=", "actual_start_date=", "staff_payment_due_date="))
+
+
+def test_first_assignment_orders_impact_uses_the_adjusted_end(monkeypatch):
+    from infrastructure.mysql.assignment_plan_impact_ports import MySqlOrdersAssignmentImpactPort
+
+    original = (ServiceDay(date(2026, 11, 1), 3, None), ServiceDay(date(2026, 11, 2), 3, None))
+    adjusted = (ServiceDay(date(2026, 12, 3), 3, 8),)
+    monkeypatch.setattr("infrastructure.mysql.service_date_adjustment_repository.load_first_schedule_dates",
+                        Mock(return_value=(original, adjusted)))
+    builder = Mock()
+    monkeypatch.setattr("infrastructure.mysql.assignment_plan_impact_ports.build_orders_assignment_impact", builder)
+    facts = SimpleNamespace(assignment_plan=SimpleNamespace(effective_assignments=(), office_schedule=True))
+    connection = Mock()
+    connection.cursor.return_value.__enter__ = Mock(return_value=Mock())
+    connection.cursor.return_value.__exit__ = Mock(return_value=False)
+
+    MySqlOrdersAssignmentImpactPort(connection, Mock()).preview_assignment_plan(
+        facts, SimpleNamespace(case_no="CASE-1"), Mock(),
+    )
+
+    assert builder.call_args.kwargs == {
+        "effective_service_end": date(2026, 12, 3), "coordinated_final_day": True,
+    }
+
+
+def test_scheduled_end_projection_rejects_stale_order_version():
+    from infrastructure.mysql.order_lifecycle_impact_writer import persist_order_scheduled_end_projection
+
+    with pytest.raises(RuntimeError, match="order_version_conflict"):
+        persist_order_scheduled_end_projection(
+            Mock(rowcount=0), case_no="CASE-1", actual_end_date=date(2026, 12, 3), expected_order_version=3,
+        )

@@ -5,12 +5,12 @@
 ================================================================================
 """
 
-from contextlib import contextmanager
-from base64 import b64encode
 from dataclasses import asdict
 from datetime import datetime, timezone
+from urllib.parse import urlencode
+import os
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
 from subsystems.scheduling.matching_plan_workflow import (
@@ -86,37 +86,30 @@ from subsystems.scheduling.matching_notification_contracts import (
     RequestCaregiverInformationCommand,
     RequestCustomerProfilesCommand,
 )
-from infrastructure.line.table_image_renderer import render_resume_pages
-from infrastructure.file.storage_layout import StorageLayoutError
-from pymysql.err import OperationalError
-from subsystems.controlled_files.contracts import ControlledFileStorageError
+from api.routes.line_identity import _safe_line_public_base_url
 from subsystems.line.table_image_contracts import TableImageUnavailable
-from api.dependencies.controlled_files import get_controlled_file_workflow
-from subsystems.controlled_files.workflow import ControlledFileWorkflowError
 
 router = APIRouter(prefix="/api/v1", tags=["Matches 案件配對與 LINE 訊息推播"])
 resume_router = APIRouter(tags=["LINE Matching Resume"])
 resume_page_router = APIRouter(tags=["LINE Matching Resume Page"])
 
 
-def _render_matching_resume(file_id: str, page_budget: int) -> tuple[bytes, ...]:
-    try:
-        with contextmanager(get_controlled_file_workflow)() as workflow:
-            file = workflow.download(file_id)
-    except ControlledFileWorkflowError as error:
-        raise ValueError("履歷檔案無法讀取，請重新上傳。") from error
-    except (ControlledFileStorageError, StorageLayoutError, OperationalError) as error:
-        raise TableImageUnavailable("履歷儲存服務暫時無法使用。") from error
-    if file.content_type != "application/pdf":
-        raise ValueError("履歷檔案格式無效，請重新上傳 PDF。")
-    return render_resume_pages(file.content, page_budget)
+def _staff_web_profile_url(staff_id: int, token: str) -> str:
+    query = urlencode({"purpose": "staff_web_profile", "staff_id": staff_id, "interaction": token})
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if liff_id and liff_id != "your_liff_id_here":
+        return f"https://liff.line.me/{liff_id}/?{query}"
+    base_url = _safe_line_public_base_url()
+    if base_url is None:
+        raise ValueError("月嫂個人網頁連結尚未設定。")
+    return f"{base_url}/line-staff-web-profile?{query}"
 
 
 matching_notifications = MatchingNotificationApplication(
     open_line_unit_of_work,
     lambda: datetime.now(timezone.utc),
     availability_facts_port=_matching_facts_port,
-    resume_page_renderer=_render_matching_resume,
+    staff_web_profile_url=_staff_web_profile_url,
 )
 
 
@@ -211,22 +204,18 @@ def get_matching_plan_contact_state_route(
 def preview_matching_plan_customer_confirmation_route(
     case_no: str,
     plan_id: int,
-    response: Response,
+    request: Request,
     expected_version: int = Query(..., ge=0),
     principal: AdminPrincipal = Depends(require_line_matching_reader),
-    include_resume_images: bool = False,
 ):
-    if include_resume_images:
-        response.headers["Cache-Control"] = "private, no-store"
     try:
         preview = matching_notifications.preview_customer_confirmation(
             admin_actor_context(principal),
             MatchingPlanReference(case_no, plan_id, expected_version),
-            include_resume_images=include_resume_images,
         )
         return BaseResponse(
             data=CustomerConfirmationPreviewView.model_validate(
-                _customer_confirmation_preview_data(preview)
+                _customer_confirmation_preview_data(preview, request)
             ),
             message="成功檢查客戶確認資訊",
         )
@@ -832,7 +821,7 @@ def _contact_state_data(state) -> dict[str, Any]:
     }
 
 
-def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
+def _customer_confirmation_preview_data(preview, request: Request) -> dict[str, Any]:
     return {
         "case_no": preview.plan.case_no,
         "plan_id": preview.plan.plan_id,
@@ -858,21 +847,16 @@ def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
             }
             for item in preview.weekly_service_rows
         ],
-        "caregiver_resumes": [
+        "caregiver_web_profiles": [
             {
-                "staff_id": item.staff_id,
-                "staff_name": item.staff_name,
-                "ready": item.ready,
-                "filename": item.filename,
-                "version": item.version,
-                "blocker": item.blocker,
+                **asdict(item),
+                "admin_preview_url": request.url_for(
+                    "preview_published_staff_web_profile", staff_id=item.staff_id,
+                ).path,
             }
-            for item in preview.caregiver_resumes
+            for item in preview.caregiver_web_profiles
         ],
         "blockers": list(preview.blockers),
-        "resume_images": [
-            "data:image/png;base64," + b64encode(image).decode("ascii") for image in preview.resume_images
-        ],
         "send_allowed": preview.send_allowed,
     }
 

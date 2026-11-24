@@ -543,11 +543,25 @@ def test_save_historical_schedule_returns_the_conflict_reason(code, message):
     assert error["message"] == message
 
 
-def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
+@pytest.mark.parametrize("adjusted_final_day", [False, True])
+def test_historical_arrangement_preview_apply_and_replay_keep_one_generation(adjusted_final_day):
     facts = replace(_pending_arrangement_facts(),
                     restart_assignments=(_pending_arrangement_facts().restart_assignments[0],),
                     contracted_service_days=4)
     segment = ArrangementSegmentIntent(12, facts.current_dates)
+    if adjusted_final_day:
+        from decimal import Decimal
+        from domains.scheduling.service_date_adjustment import ServiceDay
+        from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentFacts
+
+        adjusted = (*tuple(ServiceDay(day, 12, None) for day in facts.current_dates[:-1]),
+                    ServiceDay(date(2026, 9, 12), 12, 4), ServiceDay(date(2026, 9, 13), 12, 4))
+        adjustment = ServiceDateAdjustmentFacts(
+            facts.case_no, facts.order_version, facts.scheduling_version, facts.current_version,
+            None, Decimal(str(facts.service_hours_per_day)), adjusted, ((12, "Staff"),), (), 4, (),
+        )
+        facts = replace(facts, first_schedule_basis_dates=facts.current_dates,
+                        current_dates=tuple(day.service_date for day in adjusted), date_adjustment=adjustment)
 
     class Repository:
         def __init__(self):
@@ -611,6 +625,8 @@ def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
     lifecycle = repository.lifecycle_commands[0]
     assert lifecycle.candidate.after_status is OrderLifecycleStatus.IN_SERVICE
     assert lifecycle.candidate.actual_end_date == facts.current_dates[-1]
+    if adjusted_final_day:
+        assert lifecycle.candidate.completion_instant == datetime(2026, 9, 13, 23, 59, 59, 999999, TAIPEI_TIME_ZONE)
     assert lifecycle.actual_start_date == date(2026, 9, 6)
     assert lifecycle.expected_order_version == 3
     assert lifecycle.resulting_order_version == 4

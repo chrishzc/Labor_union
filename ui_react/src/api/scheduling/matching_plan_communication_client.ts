@@ -105,15 +105,11 @@ const CustomerConfirmationPreviewSchema = z.strictObject({
     service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
     weekly_work_days: z.number().int().min(0).max(7), weekly_hours: z.number().nonnegative().multipleOf(0.5),
   })),
-  caregiver_resumes: z.array(z.strictObject({
+  caregiver_web_profiles: z.array(z.strictObject({
     staff_id: z.number().int().positive(),
     staff_name: z.string().min(1).max(100),
-    ready: z.boolean(),
-    filename: z.string().min(1).max(255).nullable(),
-    version: z.number().int().positive().nullable(),
-    blocker: z.string().min(1).nullable(),
+    admin_preview_url: z.string().regex(/^\/api\/v1\/admin\/staff-web-profile\/[1-9]\d*\/preview$/),
   })).min(1).max(4),
-  resume_images: z.array(z.string().startsWith('data:image/png;base64,')).max(4).optional(),
   blockers: z.array(z.string().min(1)),
   send_allowed: z.boolean(),
 }).superRefine((preview, context) => {
@@ -311,7 +307,7 @@ export const matchingPlanCommunicationClient = {
     caseNo: string,
     planId: number,
     expectedVersion: number,
-    options?: { signal?: AbortSignal; includeResumeImages?: boolean },
+    options?: { signal?: AbortSignal },
   ): Promise<CustomerConfirmationPreview> {
     const canonical = canonicalCaseNo(caseNo);
     const token = sessionClient.getToken();
@@ -321,7 +317,7 @@ export const matchingPlanCommunicationClient = {
     const decoded = decodePayload(
       CustomerConfirmationPreviewEnvelopeSchema,
       await transport.get(
-        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-confirmation/preview?expected_version=${expectedVersion}${options?.includeResumeImages ? '&include_resume_images=true' : ''}`,
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-confirmation/preview?expected_version=${expectedVersion}`,
         { token, signal: options?.signal },
       ),
     );

@@ -1,3 +1,4 @@
+import pytest
 from datetime import date
 
 from domains.orders.terms import OrderTerms, ServiceTimeTerms
@@ -94,3 +95,34 @@ def _terms():
         date(2026, 1, 1), 2, 8, MoneyNTD(1000),
         ServiceTimeTerms(None, None, None),
     )
+
+
+@pytest.mark.parametrize("rebuilt", [False, True])
+def test_cancellation_floor_fee_follows_source_assignment_instead_of_candidate_order(rebuilt):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from subsystems.payroll.terms_impact import _service_facts
+    from domains.payroll.calculation import build_case_payroll_candidate, PayrollTerms, rate_snapshot
+
+    assignments = tuple(AssignmentCandidate(
+        f"CASE-1:g2:a{sequence}", source_id, staff_id, sequence,
+        date(2026, 1, staff_id), date(2026, 1, staff_id),
+        (date(2026, 1, staff_id),), 8,
+    ) for sequence, source_id, staff_id in ((1, 20 if rebuilt else 10, 1), (2, 30 if rebuilt else 2, 2)))
+    scheduling = SchedulingGenerationCandidate("CASE-1", 2, 1, 2, (20, 30) if rebuilt else (2, 10), assignments, ())
+    source = replace(_source_facts(), source_terms=tuple(
+        SourceAssignmentPayrollTerms(
+            source_id, staff_id, "policy-v1", PayrollPolicyKind.CITIZEN,
+            financial_assignment_identity=f"assignment:{10 if staff_id == 1 else 2}" if rebuilt else None,
+        )
+        for source_id, staff_id in ((20 if rebuilt else 10, 1), (30 if rebuilt else 2, 2))
+    ))
+    impact = build_payroll_cancellation_impact(source, scheduling, replace(_terms(), floor_fee=MoneyNTD(1)), "tie")
+    preview = {item.staff_id: item.floor_fee_allocated.amount for item in impact.payroll.assignments}
+    assert preview == {1: 0, 2: 1}
+    formal_facts = tuple(replace(item, assignment_identity=f"assignment:{40 + item.staff_id}")
+                         for item in _service_facts(SimpleNamespace(scheduling=scheduling, source_terms=source.source_terms)))
+    formal = build_case_payroll_candidate(formal_facts, tuple(
+        rate_snapshot(item.assignment_identity, "policy-v1", PayrollPolicyKind.CITIZEN) for item in formal_facts
+    ), PayrollTerms(2, 8, MoneyNTD(1)))
+    assert {item.staff_id: item.floor_fee_allocated.amount for item in formal.assignments} == preview

@@ -44,7 +44,7 @@
     .field, .preference { display: block; min-width: 0; font-weight: 800; font-size: 18px; }
     .field-wide, .preference { grid-column: 1 / -1; }
     .preference .help { display: block; margin: 5px 0 0; font-weight: 400; font-size: 15px; }
-    input:not([type=checkbox]), textarea {
+    input:not([type=checkbox]), textarea, select {
       display: block;
       width: 100%;
       min-height: 52px;
@@ -59,7 +59,13 @@
       font-weight: 500;
     }
     textarea { min-height: 84px; resize: vertical; }
-    input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    input:focus-visible, textarea:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    #profile-photos h3, #profile-applications h2 { font-size: 1.1rem; margin: .8rem 0 .4rem; }
+    #photo-status:not(:empty) { margin-top: .75rem; }
+    .photo-draft { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: start; gap: .6rem; padding: .7rem 0; border-bottom: 1px solid var(--border); }
+    .photo-draft img { width: 100%; max-height: 10rem; object-fit: contain; border-radius: 8px; background: var(--soft); }
+    .photo-draft label { display: block; margin-bottom: .5rem; }
+    .photo-draft-action { color: var(--accent); border: 1px solid var(--border); border-radius: 10px; background: var(--paper); padding: .45rem .65rem; font: inherit; cursor: pointer; }
     .bank-choice {
       display: flex;
       align-items: center;
@@ -180,6 +186,21 @@
       </fieldset>
     </div>
     <div class="section"><fieldset><legend>接案偏好</legend><div id="preferences" class="field-grid"></div></fieldset></div>
+    <div class="section">
+      <fieldset id="profile-photos">
+        <legend>履歷網頁照片與證照</legend>
+        <div class="field-grid">
+          <label>模板項目<select id="photo-template"><option value="">請選擇項目</option></select></label>
+          <label>選擇照片<input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled></label>
+        </div>
+        <p class="help" id="photo-status" role="status"></p>
+        <div id="photo-drafts"></div>
+      </fieldset>
+      <div id="profile-applications" hidden>
+        <h2>我的申請紀錄</h2>
+        <ul></ul>
+      </div>
+    </div>
     <div class="submit-panel">
       <button id="send" type="submit" aria-describedby="submit-status">送出整張申請</button>
       <p id="submit-status" class="help" role="status"></p>
@@ -187,6 +208,7 @@
   </form>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="/static/staff_profile_web_photos.js"></script>
 <script>
 const profileLabels = {
   phone: "手機", tel: "市話", tel_ext: "分機", email: "Email", city: "縣市",
@@ -204,6 +226,18 @@ const submitStatus = document.getElementById("submit-status");
 const replacement = document.getElementById("replace-bank");
 const bankFields = document.getElementById("bank-fields");
 let identity, snapshot, previousSubmission;
+const photoForm = createProfilePhotoForm();
+const applicationStatuses = { pending: "待工會審核", approving: "工會處理中", approved: "已核准", rejected: "已退回", conflict: "資料已更新，請重新申請" };
+
+function showApplications(applications) {
+  const container = document.getElementById("profile-applications");
+  container.hidden = !applications.length;
+  container.querySelector("ul").replaceChildren(...applications.map(item => {
+    const entry = document.createElement("li");
+    entry.textContent = "申請 #" + item.id + "，" + (applicationStatuses[item.status] || "處理中");
+    return entry;
+  }));
+}
 
 function show(message, state = "notice") {
   status.textContent = message;
@@ -479,26 +513,31 @@ replacement.addEventListener("change", () => {
 });
 form.addEventListener("submit", async event => {
   event.preventDefault();
+  if (send.disabled) return;
   send.disabled = true;
+  form.inert = true;
   send.textContent = "正在送出…";
   submitStatus.textContent = "";
   submitStatus.removeAttribute("data-error");
   try {
     const proposed = changes();
+    const photos = await photoForm.upload(identity);
+    if (photos.length) proposed.web_contents = photos;
     const signature = JSON.stringify(proposed);
     if (previousSubmission?.signature !== signature) previousSubmission = { signature, id: crypto.randomUUID() };
     const result = await request("submit", { ...proposed, basis: snapshot.basis, submission_id: previousSubmission.id });
     form.reset();
+    photoForm.clear();
     previousSubmission = null;
     form.hidden = true;
-    const labels = { pending: "待工會審核", approving: "工會處理中", approved: "已核准", rejected: "已退回", conflict: "資料已更新，請重新申請" };
-    show("申請 #" + result.id + "，" + (labels[result.status] || "已送出"), "receipt");
+    show("申請 #" + result.id + "，" + (applicationStatuses[result.status] || "已送出"), "receipt");
     window.scrollTo(0, 0);
   } catch (error) {
     submitStatus.textContent = error.message || "送出失敗，請再試一次。";
     submitStatus.setAttribute("data-error", "");
   } finally {
     send.disabled = false;
+    form.inert = false;
     send.textContent = "送出整張申請";
   }
 });
@@ -518,6 +557,8 @@ async function init() {
     identity = token ? { line_id_token: token } : { flow_id: flow };
     snapshot = await request("query", {});
     render(snapshot);
+    photoForm.load(snapshot.web_profile);
+    showApplications(snapshot.applications ?? []);
     form.hidden = false;
     show("", "ready");
   } catch (error) { show(error.message || "無法載入資料，請重新開啟。", "error"); }

@@ -87,6 +87,7 @@ from api.routes import (
     line_mobile_admin,
     notification_tasks,
     staff_profile_change,
+    staff_web_profile,
     notification_task_actions,
     line_mobile_staff_leave_coordination,
     line_media_assets,
@@ -300,6 +301,7 @@ app.include_router(staff_leave_management.router)
 app.include_router(line_mobile_admin.router)
 app.include_router(notification_tasks.router)
 app.include_router(staff_profile_change.router)
+app.include_router(staff_web_profile.router)
 app.include_router(notification_task_actions.router)
 app.include_router(notification_task_actions.mobile_router)
 app.include_router(line_mobile_staff_leave_coordination.router)

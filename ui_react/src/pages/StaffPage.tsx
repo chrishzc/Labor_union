@@ -16,6 +16,9 @@ import {
 } from '../components/RosterTableLayout';
 import { StaffRegistryEditor } from '../components/StaffRegistryEditor';
 import { StaffProfileChangeReview } from '../components/StaffProfileChangeReview';
+import { StaffWebProfileManagement } from '../components/StaffWebProfileManagement';
+import { StaffWebFileManagement } from '../components/StaffWebFileManagement';
+import { sessionClient } from '../api/auth/session_client';
 import { StaffQualificationEditor } from '../components/StaffQualificationEditor';
 import {
   loadAllStaffDirectoryPages,
@@ -585,6 +588,7 @@ const StaffRosterPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [rosterLifecycle, setRosterLifecycle] = useState<'active' | 'retired'>('active');
+  const [showWebProfiles, setShowWebProfiles] = useState(() => staffHashQuery().get('tab') === 'web');
   const rosterTabsId = useId();
   const staffTableRef = useRef<HTMLTableElement>(null);
   const staffTableLayout = useRosterTableLayout({
@@ -1140,6 +1144,22 @@ const StaffRosterPage: React.FC = () => {
 
 
   const { requestLeave } = useUnsavedNavigation();
+  const rosterTabs = [
+    { id: 'active', label: '現役月嫂' },
+    { id: 'retired', label: '已退役月嫂' },
+    { id: 'web', label: '履歷網頁' },
+  ] as const;
+  const selectedRosterTab = showWebProfiles ? 'web' : rosterLifecycle;
+  function selectRosterTab(id: typeof selectedRosterTab, focus?: () => void) {
+    if (id === selectedRosterTab) return;
+    const select = () => {
+      setShowWebProfiles(id === 'web');
+      if (id !== 'web') setRosterLifecycle(id);
+      focus?.();
+    };
+    if (id === 'web' || showWebProfiles) requestLeave(select);
+    else select();
+  }
   const openStaffDetail = (staff: StaffDirectoryCardViewModel) => {
     if (interactionLocked) return;
     if (selectedStaffId !== staff.id) invalidateSlice();
@@ -1275,29 +1295,33 @@ const StaffRosterPage: React.FC = () => {
 
 
       <div className="staff-toolbar-card" data-surface-id="staff.toolbar">
-        <div className="staff-filter-pills staff-roster-tabs" role="tablist" aria-label="月嫂任職名冊">
-          {(['active', 'retired'] as const).map((state, index) => (
+        <div className="staff-filter-pills staff-roster-tabs" role="tablist" aria-label="月嫂名冊與履歷">
+          {rosterTabs.map(({ id, label }, index) => (
             <button
-              key={state}
-              id={`${rosterTabsId}-${state}`}
+              key={id}
+              id={`${rosterTabsId}-${id}`}
               type="button"
               role="tab"
-              aria-selected={rosterLifecycle === state}
-              aria-controls={`${rosterTabsId}-panel`}
-              tabIndex={rosterLifecycle === state ? 0 : -1}
-              className={`staff-filter-pill ${rosterLifecycle === state ? 'active' : ''}`}
+              aria-selected={selectedRosterTab === id}
+              aria-controls={`${rosterTabsId}-${id === 'web' ? 'web-panel' : 'panel'}`}
+              tabIndex={selectedRosterTab === id ? 0 : -1}
+              className={`staff-filter-pill ${selectedRosterTab === id ? 'active' : ''}`}
               disabled={interactionLocked}
-              onClick={() => setRosterLifecycle(state)}
+              onClick={() => selectRosterTab(id)}
               onKeyDown={(event) => {
                 if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
                 event.preventDefault();
-                const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
-                setRosterLifecycle(next === 0 ? 'active' : 'retired');
-                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? 2
+                  : (index + (event.key === 'ArrowLeft' ? 2 : 1)) % rosterTabs.length;
+                const target = rosterTabs[next];
+                if (!target) return;
+                const tab = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next];
+                selectRosterTab(target.id, () => tab?.focus());
               }}
-            >{state === 'active' ? '現役月嫂' : '已退役月嫂'}</button>
+            >{label}</button>
           ))}
         </div>
+        {!showWebProfiles && <>
         <div className="staff-search-input-row">
           <div className="staff-search-input-box">
             <span className="search-icon" aria-hidden="true">🔍</span>
@@ -1328,8 +1352,12 @@ const StaffRosterPage: React.FC = () => {
                 : `搜尋結果 ${filteredStaffItems.length} 位服務人員`
             : `目前已載入 ${directory.items.length} 位服務人員`}
         </span>
+        </>}
       </div>
 
+      {showWebProfiles ? <section id={`${rosterTabsId}-web-panel`} role="tabpanel" aria-labelledby={`${rosterTabsId}-web`}>
+        <StaffWebProfileManagement initialTab={staffHashQuery().get('view') === 'review' ? 'review' : 'templates'} />
+      </section> : <>
         <section data-surface-id="staff.directory" role="tabpanel" id={`${rosterTabsId}-panel`} aria-labelledby={`${rosterTabsId}-${rosterLifecycle}`}>
           {directory.status === 'loading' && (
             <div className="staff-directory-message" data-control-id="staff.directory.query" role="status">
@@ -1522,9 +1550,14 @@ const StaffRosterPage: React.FC = () => {
                 )}
 
                 <section data-surface-id="staff.qualification.preferences">
-                  {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} directEditing surfaceId="staff.qualification.case-preference-manual" onUpdated={() => setSliceRetryGeneration(value => value + 1)} renderQualifications={information => qualification.status === 'ready'
-                    ? <StaffQualificationEditor staffId={selectedStaffId} importedServiceInformation={information} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />
-                    : <section aria-label="專業資格與服務資料"><h3>專業資格與服務資料</h3>{information}</section>} />}
+                  {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} directEditing surfaceId="staff.qualification.case-preference-manual" onUpdated={() => setSliceRetryGeneration(value => value + 1)} renderQualifications={information => (
+                    <section aria-label="專業資格與服務資料">
+                      {qualification.status === 'ready'
+                        ? <StaffQualificationEditor staffId={selectedStaffId} importedServiceInformation={information} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />
+                        : <><h3>專業資格與服務資料</h3>{information}</>}
+                      <StaffWebFileManagement key={selectedStaffId} staffId={selectedStaffId} staffName={selectedStaff.displayName} canWrite={sessionClient.getUser()?.capabilities.includes('data_browser.write') === true} />
+                    </section>
+                  )} />}
                 </section>
 
                 {/* 6 大專業資格審核主檔 */}
@@ -1775,13 +1808,18 @@ const StaffRosterPage: React.FC = () => {
           </div>
         )}
       </Drawer>
+      </>}
     </div>
   );
 };
 
-function requestedProfileChange(): number | null {
+function staffHashQuery() {
   const query = window.location.hash.split('?')[1] ?? '';
-  const value = new URLSearchParams(query).get('profile_request');
+  return new URLSearchParams(query);
+}
+
+function requestedProfileChange(): number | null {
+  const value = staffHashQuery().get('profile_request');
   const id = Number(value);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
@@ -1793,7 +1831,8 @@ export const StaffPage: React.FC = () => {
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  return requestId === null ? <StaffRosterPage /> : <StaffProfileChangeReview key={requestId} requestId={requestId} />;
+  return requestId === null ? <StaffRosterPage /> : <StaffProfileChangeReview
+    key={requestId} requestId={requestId} returnToWeb={staffHashQuery().get('return') === 'web'} />;
 };
 
 export default StaffPage;

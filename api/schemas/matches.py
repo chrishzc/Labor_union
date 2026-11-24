@@ -145,13 +145,10 @@ class FormalPlanContactStateView(_ClosedModel):
     customer_profiles_manual_confirmation: ManualProfilesEvidenceView | None
 
 
-class CustomerConfirmationResumePreviewView(_ClosedModel):
+class CustomerConfirmationWebProfilePreviewView(_ClosedModel):
     staff_id: PositiveInt
     staff_name: str = Field(min_length=1, max_length=100)
-    ready: bool
-    filename: str | None = Field(default=None, min_length=1, max_length=255)
-    version: PositiveInt | None = None
-    blocker: str | None = Field(default=None, min_length=1)
+    admin_preview_url: str = Field(min_length=1)
 
 
 class CustomerConfirmationInformationPreviewView(_ClosedModel):
@@ -186,11 +183,10 @@ class CustomerConfirmationPreviewView(_ClosedModel):
     order_information_1: list[CustomerConfirmationInformationPreviewView]
     order_information_2: list[CustomerConfirmationInformationPreviewView]
     weekly_service_rows: list[CustomerConfirmationWeeklyServicePreviewView]
-    caregiver_resumes: list[CustomerConfirmationResumePreviewView] = Field(
+    caregiver_web_profiles: list[CustomerConfirmationWebProfilePreviewView] = Field(
         min_length=1,
         max_length=4,
     )
-    resume_images: list[str] = Field(default_factory=list, max_length=4)
     blockers: list[str]
     send_allowed: bool
 

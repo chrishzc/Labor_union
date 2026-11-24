@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
     [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package','database-backup','database-upgrade','database-restore','root-maintenance','root-maintenance-check')]
@@ -191,17 +191,17 @@ function Start-ManagedRuntime {
         if (-not $connector -and -not (Test-Path -LiteralPath $installedConnector)) { throw 'Install cloudflared first.' }
     }
     if (-not $Artifact) { $Artifact = New-ManagedArtifact }
+    $registrationEnabled = & $PythonPath -c "import os; from dotenv import load_dotenv; load_dotenv('.env'); print('1' if (os.getenv('REGISTRATION_REDIS_ADMIN_PASSWORD_FILE') or os.getenv('REGISTRATION_ADMIN_PASSWORD_FILE')) and (os.getenv('REGISTRATION_REDIS_INTAKE_PASSWORD_FILE') or os.getenv('REGISTRATION_INTAKE_PASSWORD_FILE')) else '0')"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read registration Redis configuration; no runtime was started.' }
+    if ($registrationEnabled -eq '1') {
+        & docker.exe compose --profile registration up -d --wait db redis registration-redis registration-intake registration-token-verifier
+    } else {
+        & docker.exe compose up -d --wait db redis
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'Database/Redis container startup failed; no runtime was started.' }
     # Database maintenance is a separate explicit action.
     & $PythonPath -m scripts.check_runtime_database
     if ($LASTEXITCODE -ne 0) { throw 'Database readiness failed; no runtime was started.' }
-    $sharedRegistrationRedis = & $PythonPath -c "import os; from dotenv import load_dotenv; load_dotenv('.env'); print('1' if os.getenv('REGISTRATION_USE_SHARED_REDIS_FOR_TEST') == '1' else '0')"
-    if ($LASTEXITCODE -ne 0) { throw 'Could not read registration Redis mode; no runtime was started.' }
-    if ($sharedRegistrationRedis -eq '1') {
-        & docker.exe compose -f docker-compose.yml -f docker-compose.registration-test.yml up -d redis registration-intake registration-token-verifier
-    } else {
-        & docker.exe compose up -d redis
-    }
-    if ($LASTEXITCODE -ne 0) { throw 'Redis startup failed; no runtime was started.' }
     $env:WINDOWS_REMOTE_ARTIFACT_DIR = $Artifact
     $runLabel = [guid]::NewGuid().ToString('N')
     $logPath = Join-Path $runtimeDirectory ("runtime-$runLabel.log")

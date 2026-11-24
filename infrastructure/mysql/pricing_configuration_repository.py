@@ -349,6 +349,56 @@ class MySqlPricingConfigurationRepository:
             if cursor.rowcount != 1:
                 raise PricingConflict("pricing_policy_stale")
 
+    def reporting_case_total_amount(self, case_no: str) -> int:
+        """Read customer pricing without the repricing writer's payroll prerequisites."""
+        from domains.client_finance.pricing_policy import calculate_case_total_amount
+        from infrastructure.mysql.order_terms_read_model import select_order
+        from subsystems.client_finance.pricing_configuration import case_total_amount
+
+        with self.connection.cursor() as cursor:
+            order = select_order(cursor, case_no, lock=False)
+            if str(order["status"]) not in {
+                "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+            }:
+                return case_total_amount(self.case(case_no))
+            cursor.execute("SELECT current_event_id FROM historical_service_day_projections WHERE case_no=%s", (case_no,))
+            projection = cursor.fetchone()
+            if projection is None:
+                # Preserve the original single-assignment baseline and its protections.
+                return case_total_amount(self.case(case_no))
+            cursor.execute(
+                "SELECT i.actual_service_days FROM historical_service_day_projections p "
+                "JOIN historical_service_day_items i ON i.event_id=p.current_event_id "
+                "WHERE p.case_no=%s", (case_no,),
+            )
+            items = tuple(cursor.fetchall())
+            if not items:
+                raise ValueError("case_pricing_service_facts_required")
+            days = sum(int(item["actual_service_days"]) for item in items)
+            if days <= 0 or any(int(item["actual_service_days"]) <= 0 for item in items):
+                raise ValueError("case_pricing_service_facts_required")
+            terms = load_case_pricing(cursor, order, lock=False)
+            if terms is None:
+                cursor.execute(
+                    "SELECT client_hourly_rate_ntd FROM client_payment_terms WHERE case_no=%s",
+                    (case_no,),
+                )
+                payment_terms = cursor.fetchone()
+                if payment_terms is None or payment_terms["client_hourly_rate_ntd"] is None:
+                    raise ValueError("historical_client_payment_terms_missing")
+                rate = int(payment_terms["client_hourly_rate_ntd"])
+                if rate <= 0:
+                    raise ValueError("historical_client_payment_terms_missing")
+                rule, cap = _legacy_rule_and_cap(str(order["client_identity_status"]))
+                rates = HourlyRates(rate, rate)
+                terms = CasePricingTerms(str(order["client_identity_status"]), rule, cap, rates, rates)
+            if (order["service_hours_per_day"] is None or order["floor_fee"] is None
+                    or order["service_days"] is None or int(order["service_days"]) <= 0):
+                raise ValueError("case_pricing_service_facts_required")
+            hours = Decimal(str(order["service_hours_per_day"])) * days
+            floor = prorate_historical_floor_fee(MoneyNTD(int(order["floor_fee"])), int(order["service_days"]), days)
+            return calculate_case_total_amount(terms, ((hours, False),), floor.amount)
+
     def case(self, case_no, *, lock=False):
         from infrastructure.mysql.order_terms_read_model import load_calculable_client_finance_facts, select_order
         with self.connection.cursor() as cursor:

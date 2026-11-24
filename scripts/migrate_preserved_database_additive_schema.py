@@ -394,8 +394,11 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_23_service_date_adjustments_v1.json",
     "labor_union_2026_11_24_staff_web_profile_v1.json",
     "labor_union_2026_11_24_staff_payable_projection_zero_v1.json",
+    "labor_union_2026_11_24_staff_web_file_management_v1.json",
 )
 _STAFF_WEB_PROFILE_ARTIFACT = "1083_staff_web_profile.sql"
+_STAFF_WEB_FILE_MANAGEMENT_ARTIFACT = "1085_staff_web_file_management.sql"
+_STAFF_WEB_ENTRY_TABLE = "staff_web_entries"
 _STAFF_PAYOUT_LEDGER_ARTIFACT = "114_staff_payout_ledger.sql"
 _STAFF_PAYABLE_ZERO_ARTIFACT = "1084_staff_payable_projection_zero.sql"
 _STAFF_PAYABLE_MONEY_CHECK = (
@@ -2906,6 +2909,8 @@ def _metadata_state_for_artifact(
         return _controlled_file_client_passbook_state(snapshot, descriptor)
     if artifact == _STAFF_WEB_PROFILE_ARTIFACT:
         return _staff_web_profile_schema_state(snapshot, descriptor)
+    if artifact == _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT:
+        return _staff_web_file_management_schema_state(snapshot, descriptor)
     if artifact == "1008_historical_order_adoption_noop_constraint.sql":
         return _historical_order_adoption_noop_constraint_state(
             snapshot,
@@ -6289,6 +6294,8 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         path = ROOT / "db/schema_parts" / part_name
     if path is None and part_name == "1075_controlled_file_client_passbook_cover.sql" and _staff_web_release_selected():
         path = ROOT / "db/schema_parts" / part_name
+    if path is None and part_name == _STAFF_WEB_PROFILE_ARTIFACT and _staff_web_file_management_selected():
+        path = ROOT / "db/schema_parts" / part_name
     if path is None and part_name == _STAFF_PAYOUT_LEDGER_ARTIFACT and any(
         item.name == _STAFF_PAYABLE_ZERO_ARTIFACT for item in SCHEMA_PARTS
     ):
@@ -6719,6 +6726,14 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         predecessor = _staff_payable_projection_predecessor_descriptor()
         table = _STAFF_PAYABLE_MONEY_CHECK[0]
         descriptor["parent_columns"][table] = predecessor["tables"][table]
+    if part_name == _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT:
+        descriptor = _canonical_artifact_descriptor(_STAFF_WEB_PROFILE_ARTIFACT)
+        _limit_descriptor_to_owned_tables(descriptor, frozenset({_STAFF_WEB_ENTRY_TABLE}))
+        columns = split_sql(sql)[0].split("ADD COLUMN ", 1)[1]
+        descriptor["tables"][_STAFF_WEB_ENTRY_TABLE].update(
+            _parse_column_definition(clause.removeprefix("ADD COLUMN "))
+            for clause in _split_top_level(columns)
+        )
     if part_name == "1047_scheduling_buffer_advisory.sql":
         predecessor = _canonical_artifact_descriptor("109_scheduling_generations.sql")
         tables = {"scheduling_buffer_days", "scheduling_effective_occupancy"}
@@ -7456,6 +7471,8 @@ def _release_descriptor_metadata_state(
         return _controlled_file_client_passbook_state(snapshot, canonical)
     if part_name == _STAFF_WEB_PROFILE_ARTIFACT:
         return _staff_web_profile_schema_state(snapshot, canonical)
+    if part_name == _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT:
+        return _staff_web_file_management_schema_state(snapshot, canonical)
     if part_name == "1032_matching_holiday_work_agreements.sql":
         return _matching_holiday_work_agreement_owner_state(
             snapshot,
@@ -7606,7 +7623,11 @@ def _passbook_release_selected() -> bool:
 
 
 def _staff_web_release_selected() -> bool:
-    return any(path.name == _STAFF_WEB_PROFILE_ARTIFACT for path in SCHEMA_PARTS)
+    return any(path.name == _STAFF_WEB_PROFILE_ARTIFACT for path in SCHEMA_PARTS) or _staff_web_file_management_selected()
+
+
+def _staff_web_file_management_selected() -> bool:
+    return any(path.name == _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT for path in SCHEMA_PARTS)
 
 
 def _staff_web_file_metadata():
@@ -7620,12 +7641,37 @@ def _staff_web_profile_schema_state(snapshot, descriptor):
     state = _artifact_metadata_state(snapshot, descriptor, _STAFF_WEB_PROFILE_ARTIFACT)
     if state in {"exact", "absent"}:
         return state
+    if _staff_web_file_management_selected():
+        successor = _canonical_artifact_descriptor(_STAFF_WEB_FILE_MANAGEMENT_ARTIFACT)
+        combined = deepcopy(descriptor)
+        combined["tables"][_STAFF_WEB_ENTRY_TABLE] = successor["tables"][_STAFF_WEB_ENTRY_TABLE]
+        if _artifact_metadata_state(snapshot, combined, _STAFF_WEB_PROFILE_ARTIFACT) == "exact":
+            return "exact"
     if any(row["table_name"] in descriptor["tables"] for row in snapshot["columns"]):
         return state
     predecessor = _canonical_artifact_descriptor("1075_controlled_file_client_passbook_cover.sql")
     if _artifact_metadata_state(snapshot, predecessor, "1075_controlled_file_client_passbook_cover.sql") == "exact":
         return "absent"
     return state
+
+
+def _staff_web_file_management_schema_state(snapshot, descriptor):
+    artifact = _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT
+    state = _artifact_metadata_state(snapshot, descriptor, artifact)
+    if state in {"exact", "absent"}:
+        return state
+    prior = _canonical_artifact_descriptor(_STAFF_WEB_PROFILE_ARTIFACT)
+    _limit_descriptor_to_owned_tables(prior, frozenset({_STAFF_WEB_ENTRY_TABLE}))
+    added = descriptor["tables"][_STAFF_WEB_ENTRY_TABLE]
+    baseline = prior["tables"][_STAFF_WEB_ENTRY_TABLE]
+    present = {row["column_name"] for row in snapshot["columns"] if row["table_name"] == _STAFF_WEB_ENTRY_TABLE}
+    applied = (set(added) - set(baseline)) & present
+    if len(applied) == len(added) - len(baseline):
+        return "drift"
+    baseline.update({name: added[name] for name in applied})
+    if _artifact_metadata_state(snapshot, prior, artifact) != "exact":
+        return "drift"
+    return "partial" if applied else "absent"
 
 
 def _controlled_file_client_passbook_state(

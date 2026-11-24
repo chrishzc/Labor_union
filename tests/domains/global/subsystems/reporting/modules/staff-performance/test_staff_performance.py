@@ -181,16 +181,16 @@ def test_adapter_reads_effective_work_days_without_writes():
 
 def test_case_amount_adapter_borrows_full_owner_pricing_facts(monkeypatch):
     from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
-    from subsystems.client_finance.pricing_configuration import CasePricingFacts, PricingServiceDay
+    from subsystems.client_finance.pricing_configuration import CasePricingFacts, PricingServiceDay, case_total_amount
     from infrastructure.mysql import staff_performance_query_repository as adapter
 
     class PricingRepository:
         def __init__(self, connection): pass
-        def case(self, case_no):
+        def reporting_case_total_amount(self, case_no):
             assert case_no == "A"
-            return CasePricingFacts("A", 1, (), CasePricingTerms("補助市民", IdentityRule.SOCIAL,
+            return case_total_amount(CasePricingFacts("A", 1, (), CasePricingTerms("補助市民", IdentityRule.SOCIAL,
                 Decimal(120), HourlyRates(350, 350), HourlyRates(300, 300)), "policy",
-                (PricingServiceDay(date(2026, 9, 30), Decimal(8)), PricingServiceDay(date(2026, 10, 1), Decimal(8))), 500)
+                (PricingServiceDay(date(2026, 9, 30), Decimal(8)), PricingServiceDay(date(2026, 10, 1), Decimal(8))), 500))
     monkeypatch.setattr(adapter, "MySqlPricingConfigurationRepository", PricingRepository)
     assert adapter.MySqlStaffPerformanceQueryRepository(object()).case_amounts(("A",)) == {"A": 6100}
 
@@ -420,7 +420,7 @@ def test_historical_hours_follow_rest_mode_and_confirmed_days_across_months(monk
         def __init__(self, connection):
             pass
 
-        def case(self, case_no):
+        def reporting_case_total_amount(self, case_no):
             if case_no == "P":
                 raise ValueError(missing_pricing_reason)
             return {"H": 12800, "S": 2000}[case_no]
@@ -430,7 +430,6 @@ def test_historical_hours_follow_rest_mode_and_confirmed_days_across_months(monk
             return Cursor()
 
     monkeypatch.setattr(adapter, "MySqlPricingConfigurationRepository", PricingRepository)
-    monkeypatch.setattr(adapter, "case_total_amount", lambda amount: amount)
     repository = adapter.MySqlStaffPerformanceQueryRepository(Connection())
     try:
         october = query(repository).query(2024, "month", 10)
@@ -462,3 +461,86 @@ def test_historical_hours_follow_rest_mode_and_confirmed_days_across_months(monk
     workbook = load_workbook(BytesIO(export_staff_performance(october)))
     assert workbook["服務案件"]["I7"].value == 24
     assert workbook["服務案件"]["L7"].value == 12800
+
+
+@pytest.mark.parametrize("missing", [None, "price", "volume", "items", "contracted_days_missing", "contracted_days_zero"])
+def test_historical_multiple_workers_use_adopted_customer_price_in_api_and_xlsx(monkeypatch, missing):
+    from infrastructure.mysql import pricing_configuration_repository as pricing
+    from infrastructure.mysql import order_terms_read_model
+    from infrastructure.mysql.staff_performance_query_repository import MySqlStaffPerformanceQueryRepository
+
+    database = sqlite3.connect(":memory:", check_same_thread=False)
+    database.row_factory = sqlite3.Row
+    database.executescript("""
+        CREATE TABLE historical_service_day_projections (case_no TEXT, current_event_id INT);
+        CREATE TABLE historical_service_day_items (event_id INT, assignment_id INT, actual_service_days INT);
+        CREATE TABLE client_payment_terms (case_no TEXT, client_hourly_rate_ntd INT);
+        INSERT INTO historical_service_day_projections VALUES ('H',1);
+        INSERT INTO historical_service_day_items VALUES (1,2,1),(1,10,1),(9,2,99);
+        INSERT INTO client_payment_terms VALUES ('H',400);
+    """)
+    if missing == "price":
+        database.execute("DELETE FROM client_payment_terms")
+    if missing == "volume":
+        database.execute("DELETE FROM historical_service_day_projections")
+    if missing == "items":
+        database.execute("DELETE FROM historical_service_day_items WHERE event_id=1")
+
+    class Cursor:
+        def __enter__(self):
+            self.cursor = database.cursor()
+            return self
+        def __exit__(self, *args): self.cursor.close()
+        def execute(self, sql, params=()):
+            assert sql.lstrip().startswith("SELECT")
+            self.cursor.execute(sql.replace("%s", "?"), params)
+        def fetchone(self): return self.cursor.fetchone()
+        def fetchall(self): return self.cursor.fetchall()
+
+    class Connection:
+        def cursor(self): return Cursor()
+
+    order = {"case_no": "H", "status": "歷史訂單－帳務完成", "service_days": 4,
+             "service_hours_per_day": 8, "floor_fee": 1000, "client_identity_status": "一般市民"}
+    if missing == "contracted_days_missing":
+        order["service_days"] = None
+    elif missing == "contracted_days_zero":
+        order["service_days"] = 0
+    monkeypatch.setattr(order_terms_read_model, "select_order", lambda *args, **kwargs: order)
+    monkeypatch.setattr(pricing, "load_case_pricing", lambda *args, **kwargs: None)
+    # The writer remains unavailable for multiple assignments, including absent formal volume.
+    def unique_assignment_required(*args, **kwargs):
+        raise ValueError("historical_pricing_unique_assignment_required")
+    monkeypatch.setattr(pricing.MySqlPricingConfigurationRepository, "case", unique_assignment_required)
+    facts = Facts()
+    facts.days = ()
+    facts.openings = {"H": PerformanceCaseOpening("H", date(2024, 10, 1), 1)}
+    facts.list_historical_assignments = lambda start, end: (
+        PerformanceHistoricalAssignment(1, "H", date(2024, 10, 1), date(2024, 10, 1), "週休二日", 8, 4, 1),
+        PerformanceHistoricalAssignment(2, "H", date(2024, 10, 2), date(2024, 10, 2), "週休二日", 8, 4, 1),
+    )
+    facts.case_amounts = MySqlStaffPerformanceQueryRepository(Connection()).case_amounts
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: object()
+    app.dependency_overrides[get_staff_performance_query] = lambda: query(facts)
+    expected = 6900 if missing is None else None
+    try:
+        with TestClient(app) as client:
+            url = "/api/v1/operations-reports/staff-performance"
+            params = {"year": 2024, "period": "month", "month": 10}
+            response = client.get(url, params=params)
+            assert response.status_code == 200
+            body = response.json()["data"]
+            assert body["totals"]["case_count"] == 1
+            assert body["totals"]["total_amount_ntd"] == expected
+            assert [(r["totals"]["case_count"], r["totals"]["total_amount_ntd"], r["totals"]["service_hours"])
+                    for r in body["rows"][:2]] == [(1, expected, 8), (0, 0, 8)]
+            exported = client.get(url + "/export", params=params)
+            assert exported.status_code == 200
+            workbook = load_workbook(BytesIO(exported.content))
+            details = list(workbook["服務案件"].values)
+            assert details[6][11] == ("待確認" if expected is None else expected)
+            assert details[7][11] == 0
+    finally:
+        database.close()

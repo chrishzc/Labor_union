@@ -9,6 +9,7 @@ import { orderMutationFlowStore } from '../../../../../../../adapters/orders/ord
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
+import { staffWebProfileClient } from '../../../../../../../api/staff/staff_web_profile_client';
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(), createSingleCaregiverPlan: vi.fn(), queryMatchingPlanReceipt: vi.fn(), queryContactState: vi.fn(),
@@ -43,6 +44,9 @@ vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () =>
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.getDetail, getAssignmentPlan: mocks.getAssignmentPlan, getOrderTerms: mocks.getTerms } }));
 
 const CASE = '115000285';
+const profilePreview = (staffId: number, staffName: string) => ({
+  staff_id: staffId, staff_name: staffName, admin_preview_url: `/api/v1/admin/staff-web-profile/${staffId}/preview`,
+});
 function pool() {
   return { pool_id: 9, case_no: CASE, candidates: [
     { id: 17, staff_id: 8892, staff_name: '月嫂甲', status: 'active', willingness: 'willing' },
@@ -128,6 +132,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     orderMutationFlowStore.clearAll();
     vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-1' } as never);
+    vi.spyOn(staffWebProfileClient, 'publishedProfile').mockResolvedValue({ name: '月嫂甲', groups: [] });
     exists = false; contact = contactState(); activeLockId = null;
     mocks.query.mockResolvedValue(pool());
     mocks.getDetail.mockResolvedValue({ case_no: CASE, order_status: '訂單成立' });
@@ -146,7 +151,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
       order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2',
         line_sections: [{ title: '飲食與照護需求', rows: [['飲食習慣', '清淡']] }] }],
       weekly_service_rows: [{ serial_number: 1, staff_name: '月嫂甲', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
-      caregiver_resumes: [{ staff_id: 8892, staff_name: '月嫂甲', ready: true, filename: 'resume-A.pdf', version: 3, blocker: null }],
+      caregiver_web_profiles: [profilePreview(8892, '月嫂甲')],
       blockers: [], send_allowed: true,
     }));
     mocks.createSingleCaregiverPlan.mockImplementation(async (command) => { exists = true; return plan(command); });
@@ -760,13 +765,21 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(mocks.replacementApply).toHaveBeenCalledTimes(1);
   });
 
-  it('依寄送順序預覽履歷圖片與三份案件資訊', async () => {
+  it('依寄送順序預覽兩位月嫂的個人網頁和三份案件資訊', async () => {
     contact.customer_profiles_status = null;
     const loadPreview = mocks.previewCustomerConfirmation.getMockImplementation()!;
     mocks.previewCustomerConfirmation.mockImplementation(async (...args) => ({
       ...await loadPreview(...args),
-      resume_images: ['data:image/png;base64,cGFnZTE=', 'data:image/png;base64,cGFnZTI='],
+      caregiver_web_profiles: [profilePreview(8892, '月嫂甲'), profilePreview(8893, '月嫂乙')],
     }));
+    vi.mocked(staffWebProfileClient.publishedProfile)
+      .mockResolvedValueOnce({ name: '月嫂甲', groups: [{
+        category: 'certificate', images: [{ item_name: '照護證照', image_entry: 11, image_version: 2 }],
+      }] })
+      .mockResolvedValueOnce({ name: '月嫂乙', groups: [] });
+    vi.spyOn(staffWebProfileClient, 'publishedImage').mockResolvedValue(new Blob(['photo'], { type: 'image/png' }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:staff-profile-test');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     await openExisting();
     const view = await screen.findByRole('button', { name: '查看客戶確認資訊' });
     await waitFor(() => expect(view).toBeEnabled());
@@ -774,10 +787,13 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     fireEvent.click(view);
     const info = screen.getByRole('region', { name: '客戶確認資訊' });
     const preview = within(info).getByRole('region', { name: '客戶確認資訊預覽' });
-    expect(await within(preview).findByRole('img', { name: '月嫂履歷 1' })).toHaveAttribute('src', 'data:image/png;base64,cGFnZTE=');
+    expect(await within(preview).findByRole('img', { name: '照護證照' })).toHaveAttribute('src', 'blob:staff-profile-test');
+    expect(within(preview).getByRole('heading', { name: '證照' })).toBeInTheDocument();
+    expect(within(preview).queryByRole('heading', { name: '照片' })).not.toBeInTheDocument();
     expect(within(preview).getByRole('button', { name: '上一頁' })).toBeDisabled();
     fireEvent.click(within(preview).getByRole('button', { name: '下一頁' }));
-    expect(within(preview).getByRole('img', { name: '月嫂履歷 2' })).toHaveAttribute('src', 'data:image/png;base64,cGFnZTI=');
+    expect(await within(preview).findByRole('heading', { name: '月嫂乙' })).toBeInTheDocument();
+    expect(revoke).toHaveBeenCalledWith('blob:staff-profile-test');
     fireEvent.click(within(preview).getByRole('button', { name: '下一頁' }));
     expect(within(preview).getByText('客戶付款約定')).toBeInTheDocument();
     expect(within(preview).getByText('NT$ 48,000')).toBeInTheDocument();
@@ -802,14 +818,14 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     contact.customer_profiles_status = 'sent';
     const preview = mocks.previewCustomerConfirmation.getMockImplementation()!;
     mocks.previewCustomerConfirmation.mockImplementation(async (...args) => ({
-      ...await preview(...args), resume_images: ['data:image/png;base64,cGFnZTE='],
+      ...await preview(...args),
       blockers: ['客戶尚未完成 LINE 綁定。'], send_allowed: false,
     }));
     await openExisting();
     expect(await screen.findByText('客戶尚未完成 LINE 綁定。')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看客戶確認資訊' }));
     const region = screen.getByRole('region', { name: '客戶確認資訊預覽' });
-    expect(await within(region).findByRole('img', { name: '月嫂履歷' })).toBeInTheDocument();
+    expect(await within(region).findByRole('heading', { name: '月嫂甲' })).toBeInTheDocument();
     fireEvent.click(within(region).getByRole('button', { name: '下一頁' }));
     expect(within(region).getByText('客戶付款約定')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新寄送確認資訊給客戶' })).toBeDisabled();
@@ -867,7 +883,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
   });
 
-  it('缺月嫂履歷時顯示原因並停用寄送', async () => {
+  it('尚未發布照片的月嫂網頁只顯示姓名，確認資訊可寄送', async () => {
     contact.customer_profiles_status = null;
     mocks.previewCustomerConfirmation.mockResolvedValue({
       case_no: CASE, plan_id: 51, expected_version: 4,
@@ -878,19 +894,19 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
       order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2',
         line_sections: [{ title: '飲食與照護需求', rows: [['飲食習慣', '清淡']] }] }],
       weekly_service_rows: [{ serial_number: 1, staff_name: '月嫂甲', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
-      caregiver_resumes: [{
-        staff_id: 8892, staff_name: '月嫂甲', ready: false, filename: null, version: null,
-        blocker: '月嫂 月嫂甲 未附履歷 PDF，請先上傳。',
-      }],
-      blockers: ['月嫂 月嫂甲 未附履歷 PDF，請先上傳。'],
-      send_allowed: false,
+      caregiver_web_profiles: [profilePreview(8892, '月嫂甲')],
+      blockers: [],
+      send_allowed: true,
     });
 
     await openExisting();
 
-    expect(await screen.findByText(/未附履歷 PDF/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '查看客戶確認資訊' }));
+    const region = screen.getByRole('region', { name: '客戶確認資訊預覽' });
+    expect(await within(region).findByRole('heading', { name: '月嫂甲' })).toBeInTheDocument();
+    expect(within(region).queryByRole('img')).not.toBeInTheDocument();
     const send = screen.getByRole('button', { name: '寄送確認資訊給客戶' });
-    expect(send).toBeDisabled();
+    expect(send).toBeEnabled();
     expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
   });
 });

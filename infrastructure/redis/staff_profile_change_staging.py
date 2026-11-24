@@ -23,6 +23,9 @@ redis.call('SET', ARGV[1] .. id, ARGV[2], 'EX', ARGV[3])
 redis.call('SET', KEYS[1], id, 'EX', ARGV[3])
 redis.call('ZADD', KEYS[3], id, id)
 redis.call('ZADD', KEYS[4], tonumber(ARGV[4]) + tonumber(ARGV[3]), id)
+redis.call('ZADD', KEYS[5], id, id)
+redis.call('ZREMRANGEBYRANK', KEYS[5], 0, -101)
+redis.call('EXPIRE', KEYS[5], ARGV[3])
 return id
 """
 
@@ -31,6 +34,14 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local item = cjson.decode(raw)
 local action = ARGV[1]
+if action == 'update_web' then
+  if item.status ~= 'pending' or item.version ~= tonumber(ARGV[2]) then return -1 end
+  item.content = ARGV[7]
+  item.review = ARGV[8]
+  item.version = item.version + 1
+  redis.call('SET', KEYS[1], cjson.encode(item), 'KEEPTTL')
+  return 1
+end
 if action == 'claim' then
   if item.status == 'approved' or item.status == 'approving' then return 1 end
   if item.status ~= 'pending' or item.version ~= tonumber(ARGV[2]) then return -1 end
@@ -88,12 +99,14 @@ class StaffProfileChangeStaging:
         item = {
             "staff_id": staff_id, "status": "pending", "version": 1,
             "digest": digest,
+            "has_web_contents": bool(content.get("web_contents")),
             "content": json.dumps(content, ensure_ascii=False),
             "review": json.dumps(review, ensure_ascii=False),
         }
         application_id = self._call(
-            "eval", _SUBMIT, 4, f"{PREFIX}submission:{staff_id}:{submission_id}",
+            "eval", _SUBMIT, 5, f"{PREFIX}submission:{staff_id}:{submission_id}",
             f"{PREFIX}counter", f"{PREFIX}pending", f"{PREFIX}deadlines",
+            f"{PREFIX}staff:{staff_id}",
             f"{PREFIX}item:", json.dumps(item, ensure_ascii=False), RETENTION_SECONDS, time(),
         )
         saved = self.get(application_id, include_content=False)
@@ -135,10 +148,28 @@ class StaffProfileChangeStaging:
                 items.append({"id": application_id, "staff_id": item["staff_id"], "version": item["version"]})
         return items, int(ids[-1]) if len(ids) == limit else None
 
-    def decide(self, application_id, action, *, version=0, actor="", operation_id=""):
+    def for_staff(self, staff_id):
+        items = []
+        for raw_id in self._call("zrevrange", f"{PREFIX}staff:{staff_id}", 0, 99):
+            try:
+                item = self.get(int(raw_id), include_content=False)
+            except LookupError:
+                continue
+            if item["staff_id"] == staff_id:
+                items.append(item)
+        return items
+
+    def update_web(self, application_id, version, content, review):
+        return self.decide(
+            application_id, "update_web", version=version,
+            content=json.dumps(content, ensure_ascii=False), review=json.dumps(review, ensure_ascii=False),
+        )
+
+    def decide(self, application_id, action, *, version=0, actor="", operation_id="", content="", review=""):
         result = self._call(
             "eval", _DECIDE, 3, f"{PREFIX}item:{application_id}", f"{PREFIX}pending", f"{PREFIX}deadlines",
             action, version, actor, operation_id or uuid4().hex, application_id, RETENTION_SECONDS,
+            content, review,
         )
         if not result:
             raise LookupError("staff_profile_request_not_found")

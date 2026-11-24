@@ -1,12 +1,13 @@
 """Regression coverage for issue #277 stage-5 customer recommendation routing."""
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.routes import candidate_contact_pool, matches
+from api.routes import candidate_contact_pool, matches, staff_web_profile
 from api.schemas.candidate_contact_pool import CandidateWeeklyServicePreviewView
 
 
@@ -166,16 +167,14 @@ def test_stage5_customer_profiles_payload_reaches_route_without_request_validati
     assert command.note == "請查收正式推薦月嫂履歷。"
 
 
-@pytest.mark.parametrize("include_resume_images", [False, True])
-def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(monkeypatch, include_resume_images):
+def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(monkeypatch):
     from subsystems.orders.order_information import CandidateInformationSection
-    from subsystems.scheduling.matching_notification_contracts import CustomerConfirmationInformationPreview
-
-    requested_images = include_resume_images
+    from subsystems.scheduling.matching_notification_contracts import (
+        CustomerConfirmationInformationPreview, CustomerConfirmationWebProfilePreview,
+    )
 
     class Notifications:
-        def preview_customer_confirmation(self, actor, plan, *, include_resume_images):
-            assert include_resume_images is requested_images
+        def preview_customer_confirmation(self, actor, plan):
             assert actor.actor_id == "admin:7"
             assert plan.case_no == "CASE-001"
             assert plan.plan_id == 51
@@ -197,15 +196,7 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
                     (CandidateInformationSection("飲食與照護需求", (("飲食習慣", "清淡"),)),),
                 ),),
                 weekly_service_rows=(SimpleNamespace(serial_number=1, staff_id=12, staff_name="王小美", week_start_date="2026-09-14", week_end_date="2026-09-20", service_hours_per_day=8, weekly_work_days=5, weekly_hours=40),),
-                caregiver_resumes=(SimpleNamespace(
-                    staff_id=12,
-                    staff_name="王小美",
-                    ready=True,
-                    filename="王小美履歷.pdf",
-                    version=2,
-                    blocker=None,
-                ),),
-                resume_images=(b"page",) if include_resume_images else (),
+                caregiver_web_profiles=(CustomerConfirmationWebProfilePreview(12, "王小美"),),
                 blockers=(),
                 send_allowed=True,
             )
@@ -220,18 +211,27 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
     )
     monkeypatch.setattr(matches, "matching_notifications", Notifications())
 
+    @contextmanager
+    def web_application():
+        def customer_page(staff_id):
+            assert staff_id == 12
+            return {"name": "王小美", "groups": []}
+
+        yield SimpleNamespace(customer_page=customer_page)
+
+    monkeypatch.setattr(staff_web_profile, "staff_web_profile_application", web_application)
     app = FastAPI()
     app.include_router(matches.router)
+    app.include_router(staff_web_profile.router)
     app.dependency_overrides[matches.require_line_matching_reader] = lambda: principal
     client = TestClient(app)
 
     response = client.get(
         "/api/v1/orders/CASE-001/matching-plans/51/customer-confirmation/preview",
-        params={"expected_version": 4, "include_resume_images": include_resume_images},
+        params={"expected_version": 4},
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers.get("cache-control") == ("private, no-store" if include_resume_images else None)
     assert response.json()["data"] == {
         "case_no": "CASE-001",
         "plan_id": 51,
@@ -247,18 +247,18 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
         "order_information_2": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－2",
             "line_sections": [{"title": "飲食與照護需求", "rows": [["飲食習慣", "清淡"]]}]}],
         "weekly_service_rows": [{"serial_number": 1, "staff_id": 12, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": 8, "weekly_work_days": 5, "weekly_hours": 40}],
-        "caregiver_resumes": [{
+        "caregiver_web_profiles": [{
             "staff_id": 12,
             "staff_name": "王小美",
-            "ready": True,
-            "filename": "王小美履歷.pdf",
-            "version": 2,
-            "blocker": None,
+            "admin_preview_url": "/api/v1/admin/staff-web-profile/12/preview",
         }],
-        "resume_images": ["data:image/png;base64,cGFnZQ=="] if include_resume_images else [],
         "blockers": [],
         "send_allowed": True,
     }
+    preview_url = response.json()["data"]["caregiver_web_profiles"][0]["admin_preview_url"]
+    profile = client.get(preview_url)
+    assert profile.status_code == 200
+    assert profile.json()["data"] == {"name": "王小美", "groups": []}
 
 
 def test_stage5_willing_candidate_payload_reaches_matching_plan_route(monkeypatch):

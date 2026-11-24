@@ -33,7 +33,7 @@ def _intent(*, id_number: str | None) -> ProvisionalRegistrationIntent:
         zip_code=None,
         id_number=id_number,
         liff_config_revision=None,
-        survey_details={"特殊計費:胎數": "單胞胎"},
+        survey_details={"代購食材": "自行準備", "特殊計費:胎數": "單胞胎"},
         passbook_image_id="pbk_test_001",
     )
 
@@ -69,7 +69,7 @@ def _non_citizen_intent(**changes):
         city="新竹縣", birth_date="1990-01-01", service_start_date="2026-11-01",
         service_time="08:30-16:30 (8小時)", residence_type="公寓", delivery_type="自然產",
         notes="無", line_id=None, service_type="連續服務", baby_info="單胞胎",
-        survey_details={"特殊計費:胎數": "單胞胎", "服務時間內是否有其他寶寶": "無", "是否需要下廚": "需要下廚",
+        survey_details={"代購食材": "自行準備", "特殊計費:胎數": "單胞胎", "服務時間內是否有其他寶寶": "無", "是否需要下廚": "需要下廚",
                         "補助款退款:銀行代號+分行代號": "0000000", "銀行帳號": "000000000000"},
     )
     values.update(changes)
@@ -389,3 +389,24 @@ def test_failure_after_client_insert_rolls_back_entire_approval():
     assert connection.clients == connection.beclass == []
     assert connection.record["client_id"] is None and connection.record["application_version"] == 1
     assert connection.rollbacks == 1 and connection.commits == 0
+
+
+@pytest.mark.parametrize("non_citizen", [False, True])
+@pytest.mark.parametrize("answer", ["需月嫂代購(實報實銷)", "自行準備"])
+def test_ingredient_purchase_is_preserved_for_both_liff_forms(non_citizen, answer):
+    intent = _non_citizen_intent() if non_citizen else _intent(id_number=None)
+    candidate = build_provisional_registration_candidate(
+        replace(intent, survey_details={**intent.survey_details, "代購食材": answer})
+    )
+    assert candidate.beclass_payload["survey_details"]["代購食材"] == answer
+
+
+@pytest.mark.parametrize("non_citizen", [False, True])
+@pytest.mark.parametrize("answer", [None, "", " ", "其他", True, ["自行準備"]])
+def test_ingredient_purchase_rejects_missing_and_invalid_answers(non_citizen, answer):
+    intent = _non_citizen_intent() if non_citizen else _intent(id_number=None)
+    survey = {**intent.survey_details, "代購食材": answer}
+    if answer is None:
+        survey.pop("代購食材")
+    with pytest.raises(ProvisionalRegistrationDomainError, match="代購食材"):
+        build_provisional_registration_candidate(replace(intent, survey_details=survey))

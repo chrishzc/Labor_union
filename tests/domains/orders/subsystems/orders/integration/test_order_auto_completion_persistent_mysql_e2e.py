@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 import os
 from uuid import uuid4
 
@@ -35,6 +35,105 @@ def test_auto_completion_enforces_time_and_version_then_replays_the_receipt():
         assert _snapshot(connection, case_no) == after
     finally:
         connection.close()
+
+
+@pytest.mark.parametrize("operation", ["merge", "split"])
+def test_adjusted_hours_are_discovered_and_completed_only_at_day_end(operation):
+    from infrastructure.mysql.order_auto_completion_job_repository import MySqlDueOrderAutoCompletionRepository
+    from subsystems.orders.auto_completion_workflow import AutoCompletionWorkflowError
+
+    case_no = f"OAC-{uuid4().hex[:16]}"
+    _seed_in_service_completion_roots(case_no)
+    service, connection = _service()
+    last_day = "2026-08-04" if operation == "merge" else "2026-08-05"
+    try:
+        _adjust_service_dates(connection, case_no, operation)
+
+        early_at = f"{last_day}T23:59:59.999998+08:00"
+        due_at = f"{last_day}T23:59:59.999999+08:00"
+        reader = MySqlDueOrderAutoCompletionRepository(connection)
+        assert _discovered_case(reader, case_no, early_at) is None
+        before = _snapshot(connection, case_no)
+        with pytest.raises(AutoCompletionWorkflowError) as error:
+            service.apply(_request(case_no, 1, "early-adjusted", early_at))
+        assert error.value.error.code == "auto_completion_time_not_reached"
+        assert _snapshot(connection, case_no) == before
+
+        due = _discovered_case(reader, case_no, due_at)
+        assert due is not None
+        assert due.lifecycle_version == 1
+        assert due.completion_instant == datetime.fromisoformat(due_at)
+        request = _request(case_no, 1, "complete-adjusted", due_at)
+        receipt = service.apply(request)
+        assert receipt.completion_instant == datetime.fromisoformat(due_at)
+        assert service.apply(request) == receipt
+        _assert_completed(connection, case_no, expected_order_version=2)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT SUM(event.after_amount_ntd) AS salary FROM staff_obligations obligation "
+                "JOIN staff_obligation_events event ON event.id=obligation.current_event_id "
+                "WHERE obligation.case_no=%s AND obligation.obligation_kind='service_pay' "
+                "AND obligation.status<>'cancelled'",
+                (case_no,),
+            )
+            assert cursor.fetchone()["salary"] == 2400
+        assert _discovered_case(reader, case_no, due_at) is None
+    finally:
+        connection.close()
+
+
+def _adjust_service_dates(connection, case_no: str, operation: str) -> None:
+    from domains.scheduling.service_date_adjustment import AdjustmentTarget
+    from infrastructure.mysql.service_date_adjustment_repository import MySqlServiceDateAdjustmentRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentIntent, ServiceDateAdjustmentWorkflow
+
+    if operation == "merge":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET service_days=2,service_hours_per_day=4,service_start_time='13:00:00',"
+                "actual_end_date='2026-08-05' "
+                "WHERE case_no=%s", (case_no,),
+            )
+            cursor.execute(
+                "UPDATE case_staff_assignments SET assigned_end_date='2026-08-05' WHERE case_no=%s",
+                (case_no,),
+            )
+            cursor.execute(
+                "INSERT INTO staff_schedule "
+                "(case_no,staff_id,assignment_id,generation_id,work_date,is_work_day,is_double_pay,effective_marker) "
+                "SELECT case_no,staff_id,assignment_id,generation_id,'2026-08-05',1,0,1 "
+                "FROM staff_schedule WHERE case_no=%s", (case_no,),
+            )
+        connection.commit()
+    workflow = ServiceDateAdjustmentWorkflow(
+        MySqlServiceDateAdjustmentRepository(connection), lambda: MySqlUnitOfWork(connection),
+    )
+    facts = workflow.query(case_no)
+    staff_id = facts.days[0].staff_id
+    assert staff_id is not None
+    targets = (date(2026, 8, 4),) if operation == "merge" else (date(2026, 8, 4), date(2026, 8, 5))
+    intent = ServiceDateAdjustmentIntent(
+        tuple(day.service_date for day in facts.days),
+        tuple(AdjustmentTarget(day, staff_id) for day in targets),
+    )
+    preview = workflow.preview(case_no, intent)
+    workflow.apply(
+        case_no, intent, versions=facts.versions, preview_fingerprint=preview.fingerprint,
+        key=f"adjust-service-dates:{case_no}", actor="lu-test-order-auto-completion",
+    )
+
+
+def _discovered_case(reader, case_no: str, evaluation_at: str):
+    after_case_no = None
+    while page := reader.find_due_orders(datetime.fromisoformat(evaluation_at), after_case_no, 200):
+        for due in page:
+            if due.case_no == case_no:
+                return due
+        if page[-1].case_no > case_no:
+            return None
+        after_case_no = page[-1].case_no
+    return None
 
 
 def _service():
@@ -206,8 +305,8 @@ def _snapshot(connection, case_no: str) -> tuple[int, int, int, int]:
     return tuple(counts)
 
 
-def _assert_completed(connection, case_no: str) -> None:
+def _assert_completed(connection, case_no: str, *, expected_order_version: int = 1) -> None:
     with connection.cursor() as cursor:
         cursor.execute("SELECT status,lifecycle_version FROM orders WHERE case_no=%s", (case_no,))
-        assert cursor.fetchone() == {"status": "訂單完成", "lifecycle_version": 1}
+        assert cursor.fetchone() == {"status": "訂單完成", "lifecycle_version": expected_order_version}
     assert _snapshot(connection, case_no) == (1, 1, 1, 1)

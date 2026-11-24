@@ -110,6 +110,7 @@ class ClientRegistryProfileView(_StrictModel):
 class ClientBeClassValuesView(_StrictModel):
     id_number: str | None = None
     holiday_double_pay: Literal["是", "否"] | None = None
+    ingredient_purchase: Literal["需月嫂代購(實報實銷)", "自行準備"] | None = None
     refund_account_status: Literal["complete", "incomplete"] | None = None
     birth_date: str | None = None
     refund_bank_code: str | None = None
@@ -227,6 +228,7 @@ class ClientProfileChangeSet(_StrictModel):
 class BeClassChangeSet(_StrictModel):
     id_number: str | None = None
     holiday_double_pay: Literal["是", "否"] | None = None
+    ingredient_purchase: Literal["需月嫂代購(實報實銷)", "自行準備"] | None = None
     refund_bank_code: str | None = None
     refund_account_no: str | None = None
     name: str | None = None

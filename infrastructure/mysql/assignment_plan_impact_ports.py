@@ -94,11 +94,22 @@ class MySqlOrdersAssignmentImpactPort:
         scheduling,
         client_finance,
     ):
+        adjusted = ()
+        if not facts.assignment_plan.effective_assignments or facts.assignment_plan.office_schedule:
+            from infrastructure.mysql.service_date_adjustment_repository import load_first_schedule_dates
+
+            with self._connection.cursor() as cursor:
+                _, adjusted = load_first_schedule_dates(cursor, scheduling.case_no, lock=False)
+        effective_end = max((day.service_date for day in adjusted), default=None)
         return build_orders_assignment_impact(
             facts,
             scheduling,
             client_finance,
             self._clock.now(),
+            effective_service_end=effective_end,
+            coordinated_final_day=any(
+                day.service_date == effective_end and day.hours_override is not None for day in adjusted
+            ),
         )
 
     def persist_assignment_plan(

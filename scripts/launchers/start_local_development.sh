@@ -59,8 +59,8 @@ if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   "$PY" -m scripts.launcher_preflight --profile artifact-runtime
 fi
 
+docker compose up -d --wait db redis
 "$PY" -m scripts.check_runtime_database
-docker compose up -d redis
 
 set -m
 OWNED_PIDS=()

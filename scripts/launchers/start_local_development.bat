@@ -49,22 +49,22 @@ if not exist .venv\Scripts\python.exe (
     pause
     exit /b 1
 )
-echo [Step 2] Checking configured MySQL connection and schema, read-only...
+echo [Step 2] Launching Docker Compose MySQL and Redis...
+docker compose up -d --wait db redis
+set "DOCKER_EXIT=!ERRORLEVEL!"
+if not "!DOCKER_EXIT!"=="0" (
+    echo [Error] Failed to start MySQL or Redis through Docker Compose.
+    pause
+    exit /b !DOCKER_EXIT!
+)
+
+echo [Step 3] Checking configured MySQL connection and schema, read-only...
 "%PY%" -m scripts.check_runtime_database
 set "READINESS_EXIT=!ERRORLEVEL!"
 if !READINESS_EXIT! neq 0 (
     echo [Error] MySQL readiness failed. Check DB_* settings and provision the target schema separately.
     pause
     exit /b !READINESS_EXIT!
-)
-
-echo [Step 3] Launching Docker Compose Redis...
-docker compose up -d redis
-set "DOCKER_EXIT=!ERRORLEVEL!"
-if not "!DOCKER_EXIT!"=="0" (
-    echo [Error] Failed to start Redis through Docker Compose.
-    pause
-    exit /b !DOCKER_EXIT!
 )
 
 echo ==========================================

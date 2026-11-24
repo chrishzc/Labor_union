@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from domains.staff.case_preference_manual import RELATION_OPTIONS
+from domains.staff.web_profile import WebProfilePhoto
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.scheduling.staff_matching_preference_workflow import (
@@ -21,6 +22,7 @@ from subsystems.staff.case_preference_manual_workflow import (
 )
 from subsystems.staff.profile_workflow import StaffProfileMutationWorkflow
 from subsystems.staff.qualification_editing_workflow import StaffQualificationEditingWorkflow
+from subsystems.staff.web_profile import StaffWebProfile, decode_web_photo, encode_web_photo
 
 
 CONTACT_FIELDS = frozenset({
@@ -53,6 +55,7 @@ class StaffProfileChange:
     relations: SnapshotChange | None = None
     transportation: SnapshotChange | None = None
     matching: VersionedChange | None = None
+    web_contents: tuple[WebProfilePhoto, ...] = ()
 
 
 class StaffProfileChangeApproval:
@@ -64,6 +67,7 @@ class StaffProfileChangeApproval:
         relations: StaffCasePreferenceManualWorkflow,
         qualifications: StaffQualificationEditingWorkflow,
         matching: StaffMatchingPreferenceWorkflow,
+        web_profile: StaffWebProfile | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._profile = profile
@@ -71,6 +75,7 @@ class StaffProfileChangeApproval:
         self._relations = relations
         self._qualifications = qualifications
         self._matching = matching
+        self.web_profile = web_profile
 
     def form(self, staff_id: int) -> dict[str, Any]:
         profile = self._profile.query(staff_id)
@@ -79,7 +84,7 @@ class StaffProfileChangeApproval:
         qualification = self._qualifications.query(staff_id)
         matching = self._matching.query_profile(staff_id)
         primary = _primary(bank.accounts)
-        return {
+        result = {
             "profile": {key: profile.values.get(key) for key in CONTACT_FIELDS},
             "bank": None if primary is None else {
                 "bank_code": primary.bank_code, "branch_code": primary.branch_code,
@@ -97,6 +102,9 @@ class StaffProfileChangeApproval:
                 "matching": matching.version,
             },
         }
+        if self.web_profile is not None:
+            result["web_profile"] = self.web_profile.self_service(staff_id)
+        return result
 
     def prepare(self, staff_id: int, proposed, basis):
         sections = {}
@@ -160,9 +168,16 @@ class StaffProfileChangeApproval:
                     dict(preview.after), ExpectedVersion(preview.version), preview.fingerprint,
                 )
                 review["matching"] = _diff(preview.before, preview.after, edits)
-        if not sections:
+        prepared = {key: asdict(change) for key, change in sections.items()}
+        if proposed.get("web_contents"):
+            if self.web_profile is None:
+                raise ValueError("staff_web_unavailable")
+            photos = self.web_profile.prepare(staff_id, tuple(map(decode_web_photo, proposed["web_contents"])))
+            prepared["web_contents"] = [encode_web_photo(photo) for photo in photos]
+            review["web_contents"] = prepared["web_contents"]
+        if not prepared:
             raise ValueError("staff_profile_change_empty")
-        return {key: asdict(change) for key, change in sections.items()}, review
+        return prepared, review
 
     def apply(
         self, change: StaffProfileChange, operation_id: UUID, actor: ActorContext, reason: str
@@ -171,7 +186,7 @@ class StaffProfileChangeApproval:
         profile, bank, relations, transportation, matching = (
             change.profile, change.bank, change.relations, change.transportation, change.matching
         )
-        if all(section is None for section in (profile, bank, relations, transportation, matching)):
+        if not change.web_contents and all(section is None for section in (profile, bank, relations, transportation, matching)):
             raise ValueError("staff_profile_change_empty")
         if profile and not profile.proposed.keys() <= CONTACT_FIELDS:
             raise ValueError("staff_profile_change_fields_invalid")
@@ -183,6 +198,10 @@ class StaffProfileChangeApproval:
         operation = f"staff-profile-change:{operation_id}"
         correlation = CorrelationId(operation)
         with self._unit_of_work_factory() as unit_of_work:
+            if change.web_contents:
+                if self.web_profile is None:
+                    raise ValueError("staff_web_unavailable")
+                self.web_profile.apply_in_current_uow(change.staff_id, change.web_contents, operation_id, actor)
             if profile:
                 self._profile.apply_in_current_uow(
                     change.staff_id, profile.proposed, profile.expected_version, profile.preview,
@@ -220,6 +239,9 @@ class StaffProfileChangeApproval:
 def restore_staff_profile_change(staff_id: int, content: Mapping[str, Any]) -> StaffProfileChange:
     sections = {}
     for key, saved in content.items():
+        if key == "web_contents":
+            sections[key] = tuple(map(decode_web_photo, saved))
+            continue
         preview = PreviewFingerprint(saved["preview"]["value"])
         if key in {"relations", "transportation"}:
             sections[key] = SnapshotChange(

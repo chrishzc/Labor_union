@@ -38,7 +38,7 @@
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
   - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。
   - `ui_react/src/api/scheduling/candidate_contact_pool_client.ts` — weekly GET 讀保存日期；同一路徑 POST Preview 接受當次日期，經 Orders Preview 驗證後零寫入投影每週時數。
-  - `api/routes/matches.py` — 正式推薦包讀取受控履歷 PDF，經共用 LINE 圖片服務逐頁轉圖，與確認卡同一次寄送。客戶履歷下載入口回 410。
+  - `api/routes/matches.py` — 正式推薦包加入各月嫂的授權個人網頁連結，與三張案件資訊圖及確認動作組成同一則 LINE Flex。客戶履歷下載入口回 410。
   - `subsystems/line/candidate_contact_postback_application.py` — 將兩種候選意願交給 recipient-bound owner adapter，在原 UoW 提交意願與固定回覆紀錄後，由 Webhook 立即 Reply。按 webhook identity 冪等，失敗不補 Push。
   - `subsystems/scheduling/matching_notification_application.py`、`subsystems/line/matching_postback_application.py` — 客戶接受推薦依 `line-event:{event_id}` 先確認收件，背景從 Inbox 處理決策；舊卡片 `contact_requested` 只在 Webhook Reply 提供 LINE 官方帳號聯絡指引。新版寄送停用前包互動。
   - `subsystems/line/candidate_contact_coordination_worker.py` — 取消尚未送出的退役協調、群組與重新詢問工作，並提供 24 小時未回覆的唯讀提醒；R-04 資格沿用既有 case gate。
@@ -52,7 +52,7 @@
   - `infrastructure/mysql/historical_pending_deposit_matching_repository.py` — 借用 caller transaction 寫入可由 active Matching Query 讀取的正式 plan／segment roots。
   - `infrastructure/mysql/segmented_availability_repository.py` — fresh-read Client-owned 地區／`clients.service_type`、Staff-owned `staff_regions`／`staff_weekly_rest`，供兩項提示；不再查詢料理、時數或數字偏好，保留原 facts 與正式檔期資格。
   - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；24 小時只作內部提醒，本人仍可用新事件更正意願，current projection 採每位候選最新回覆，本人或其他候選已願意不阻擋回覆；仍由人員決定推薦人選。詢問期間變更後原卡失效。
-  - `infrastructure/mysql/matching_notification_repository.py` — current Stage 5 confirmation package 的 plan/履歷/order-information/proposed-weekly preflight projection，以及 active plan／最新決定／實際送達／雙方簽回衍生的 typed 客戶聯絡、簽約與 7 天提醒待辦。
+  - `infrastructure/mysql/matching_notification_repository.py` — 客戶確認包的推薦月嫂、訂單資訊與每週服務說明投影。另提供客戶互動紀錄，以及由目前方案、最新決定、實際送達與雙方簽回衍生的客戶聯絡、簽約及 7 天提醒待辦。
     - 同案 active 候選的詢問期間涵蓋區段時，原 willing／unwilling 供無正式回覆區段唯讀使用；已有正式回覆優先，不新增同意或送達事件。
   - `infrastructure/mysql/matching_recommendation_repository.py` — 候選月嫂與占用日期的 read adapter；LINE 收件人只採 canonical bound staff identity。
 - entrypoints:
@@ -62,12 +62,13 @@
   - `ui_react/src/api/scheduling/matching_candidate_workflow_client.ts`、`ui_react/src/components/OrderCandidateQueryPanel.tsx` — 待辦工作台初步候選查詢走預計期間入口；多月嫂正式查詢仍走原入口。
   - `ui_react/src/components/CandidateAvailabilityNotice.tsx` — 新增候選與詢問意願卡共用預計期間的逐位檔期提醒。詢問卡透過既有候選查詢讀取原因及日期。
   - `ui_react/src/components/OrderCandidateContactStatusPanel.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — 客戶名冊接任續辦重用既有操作；可回報草稿／pending command 給外層關閉保護。候選保存與意願異動後正式推薦刷新 current 候選，推薦不等於正式指派。
+  - `ui_react/src/components/StaffWebProfilePreview.tsx` — 正式推薦透過 `caregiver_web_profiles.admin_preview_url` 查看已發布的姓名與圖片，沿用三份案件資訊；不再讀取履歷 PDF 圖片欄位。
   - `ui_react/src/components/OrderRecommendationReplacementPanel.tsx` — 推薦頁統一換人入口；無正式指派借用原 Release／Cancel／Create writer，每步原鍵與回條保留；已有指派重用 RPRE，已服務轉介代班。單一換人原因，不捏造 evidence。
   - `api/routes/matching_coordination.py`
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
-  - `api/routes/matches.py`、`api/schemas/matches.py` — Stage 5 customer confirmation 唯讀預覽回傳客戶版訂單資訊分組欄位及履歷就緒狀態，並提供 matching-plan create immutable receipt Query。
+  - `api/routes/matches.py`、`api/schemas/matches.py` — 客戶確認資訊預覽回傳訂單資訊分組欄位、每週服務說明與個人網頁的推薦對象。正式媒合方案建立後可回查原收據。
   - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/api/scheduling/order_information_sections_schema.ts` — 正式媒合 transport 與兩種預覽共用欄位驗證。
   - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — 已退休 agreement 的保留資料 schema；不再有 current writer 或精算 readback consumer。
   - `db/schema_parts/222_matching_plan_create_receipts.sql` — fresh-bootstrap immutable receipt root for formal matching-plan create commands; preserve upgrade uses byte-equivalent migration-only part `1039`.

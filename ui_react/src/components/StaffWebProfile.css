@@ -1,0 +1,29 @@
+.staff-web-management { min-width: 0; }
+.staff-web-panel { margin-top: 1rem; }
+.staff-web-table-wrap { overflow-x: auto; margin-top: 1rem; }
+.staff-web-table { width: 100%; border-collapse: collapse; text-align: left; }
+.staff-web-table :is(th, td) { border-bottom: 1px solid var(--border-color, #e3e0de); padding: .6rem .75rem; }
+.staff-web-fields { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; border: 0; margin: 0; padding: 0; }
+.staff-web-fields legend { font-weight: 700; margin-bottom: .75rem; }
+.staff-web-fields .staff-op-field { max-width: 100%; }
+.staff-web-fields input[type="number"] { max-width: 10rem; }
+.staff-web-checkbox { display: flex; align-items: center; gap: .4rem; }
+.staff-web-review-list { list-style: none; padding: 0; }
+.staff-web-review-list li { display: flex; flex-wrap: wrap; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid var(--border-color, #e3e0de); }
+.staff-web-preview { min-width: 0; }
+.staff-web-preview h3 { margin: 0; }
+.staff-web-preview section { margin-top: 1rem; }
+.staff-web-slider { display: flex; gap: .75rem; min-width: 0; overflow-x: auto; scroll-snap-type: x proximity; overscroll-behavior-inline: contain; }
+.staff-web-slider figure { flex: 0 0 min(80%, 15rem); margin: 0; min-width: 0; scroll-snap-align: start; }
+.staff-web-slider img, .staff-web-image-message { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--surface-muted, #f8f5f2); border-radius: .5rem; }
+.staff-web-image-message { margin: 0; display: grid; place-items: center; }
+.staff-web-slider figcaption { margin-top: .25rem; overflow-wrap: anywhere; }
+.staff-web-review-photo { border-top: 1px solid var(--border-color, #e3e0de); margin-top: 1rem; padding-top: .75rem; }
+.staff-web-review-photo h4 { margin: 0 0 .35rem; }
+.staff-web-crop-image { position: relative; display: inline-block; vertical-align: top; max-width: 100%; line-height: 0; margin: .75rem 0; }
+.staff-web-crop-image img { display: block; max-width: 100%; max-height: 24rem; width: auto; height: auto; image-orientation: from-image; }
+.staff-web-crop-image[data-selecting="true"] { touch-action: none; cursor: crosshair; overflow: hidden; }
+.staff-web-crop-overlay { position: absolute; border: 2px solid white; box-shadow: 0 0 0 1px #222, 0 0 0 80rem #0006; pointer-events: none; box-sizing: border-box; }
+.staff-web-crop-fields { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; padding: .5rem; border: 1px solid var(--border-color, #e3e0de); }
+.staff-web-crop-fields label { display: grid; }
+.staff-web-crop-fields input { width: 6rem; }

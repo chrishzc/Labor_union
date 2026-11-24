@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -52,7 +51,7 @@ def _mysql_reason(error):
     reasons = {
         1044: "帳號沒有目標資料庫的存取權限",
         1045: "MySQL 拒絕登入，請確認帳號、密碼及允許連線的來源",
-        1049: "目標資料庫不存在，請先在 NAS 建立 union_db",
+        1049: "目標資料庫不存在，請先建立 union_db",
         1007: "目標資料庫已被其他程序建立，已停止，不會覆蓋或繼續初始化",
         1050: "資料表已存在，初始化已停止，不會覆蓋",
         1064: "MySQL 無法解析這條指令，請確認伺服器版本相容性",
@@ -212,7 +211,7 @@ def load_configuration(path: Path = ROOT / ".env") -> dict:
     if values.get("APP_ENV", "").strip().lower() != "development":
         raise InitializationBlocked(".env must set APP_ENV=development")
     if values["DB_DATABASE"] != "union_db":
-        raise InitializationBlocked("NAS initialization only accepts DB_DATABASE=union_db")
+        raise InitializationBlocked("Single-host initialization only accepts DB_DATABASE=union_db")
     # Refuse a different runtime target rather than initialize a database the API
     # would not use. Values are never included in the diagnostic.
     effective_values = {"DB_PORT": "3306", "DB_SSL_MODE": "disabled",
@@ -222,12 +221,8 @@ def load_configuration(path: Path = ROOT / ".env") -> dict:
             if os.environ[key] != value:
                 raise InitializationBlocked(f"Process {key} conflicts with .env; clear the override")
     host = values["DB_HOST"].strip()
-    try:
-        local = ipaddress.ip_address(host.strip("[]")).is_loopback
-    except ValueError:
-        local = host.casefold().rstrip(".") == "localhost"
-    if not host or local or host in {"0.0.0.0", "::"}:
-        raise InitializationBlocked("DB_HOST must identify the NAS, not a local server")
+    if not host or host in {"0.0.0.0", "::"}:
+        raise InitializationBlocked("DB_HOST must identify the target MySQL server")
     port = int(values.get("DB_PORT") or "3306")
     if not 1 <= port <= 65535:
         raise InitializationBlocked("DB_PORT must be between 1 and 65535")

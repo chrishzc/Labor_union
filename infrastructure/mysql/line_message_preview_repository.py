@@ -110,6 +110,7 @@ class MySqlLineMessagePreviewReader:
         if kind == "card-customer-confirmation":
             from dataclasses import asdict
             from subsystems.line.table_image_contracts import information_document, weekly_document
+            from subsystems.line.message_preview_samples import STAFF_WEB_PREVIEW_URL
             plan = self._one(
                 "SELECT p.id FROM caregiver_matching_plans p JOIN caregiver_matching_plan_segments s ON s.plan_id=p.id "
                 "WHERE p.case_no=%s AND p.is_active=1 AND s.staff_id=%s ORDER BY p.id DESC LIMIT 1", (case_no, staff_id))
@@ -118,7 +119,10 @@ class MySqlLineMessagePreviewReader:
             projection = repository.customer_confirmation_preview(case_no, int(plan["id"]))
             if projection["blockers"]:
                 return None
-            profiles = repository.customer_profile_facts(int(plan["id"]))
+            profiles = tuple(
+                {"id": profile["id"], "name": profile["name"], "staff_web_url": STAFF_WEB_PREVIEW_URL}
+                for profile in repository.customer_profile_facts(int(plan["id"]))
+            )
             documents = (information_document('訂單資訊－1｜客戶費用', case_no, projection['order_information_1'], info_type=1),
                 information_document('訂單資訊－2', case_no, projection['order_information_2'], info_type=2),
                 weekly_document(case_no, projection['weekly_service_rows']))

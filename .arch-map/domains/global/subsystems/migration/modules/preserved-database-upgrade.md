@@ -12,9 +12,8 @@
 
 ## Implementation
 - `db/schema_parts/1084_staff_payable_projection_zero.sql` 由 `db/migration_releases/labor_union_2026_11_24_staff_payable_projection_zero_v1.json` 及同名 descriptors 登錄。Fresh 與保留資料升級共用有效應付可為 0 元的金額 CHECK。驗證舊、新 CHECK 時同時核對既有投影表結構與狀態 CHECK。升級不改寫出款、核銷或既有投影列。Contract 位於 `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_staff_payable_projection_zero_schema.py`。
-- 本機日常入口 `scripts/update_local_database.py:apply_additive_update`：按發行版重建唯讀計畫，依序交給 `local_additive_prepare_backup` 與 `local_additive_apply`；分階段耗時在 runner 收據，30 秒 DDL 上限不是整趟耗時。需回填或不支援直連時不自動切換，另依保留資料副本流程。NAS 部署已取消；以下具 NAS／DSM 名稱的實作與測試標示仍存在的相容路徑，不列為現行交付步驟。
-- Schema predecessor `db/schema_parts/1081_order_established_unserved_status.sql` is a shared fresh/preserve artifact. The release manifest `db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.json` and its descriptors register the artifact.
 - `db/schema_parts/1082_service_date_adjustments.sql` — 逐日時數、事前人員及復原回執的共用 fresh／preserve artifact。
+- Schema predecessor `db/schema_parts/1081_order_established_unserved_status.sql` is a shared fresh/preserve artifact. The release manifest `db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.json` and its descriptors register the artifact.
 - LINE 六個月寄送明細清理 guard：`db/schema_parts/1079_line_delivery_retention_guards.sql`，`db/migration_releases/labor_union_2026_11_18_line_delivery_retention_v1.json` 及對應 descriptors。fresh／preserve 同 artifact；保留原 registry-delete 分支，追加精確 receipt、合法終態、無租約及 DB 臺灣六個月 cutoff 上限。完整 guard normalization、fresh assembly及 NAS compact 沿原生成入口。
 - `db/schema_parts/1076_staff_availability_optional_reason.sql` 由 `db/migration_releases/labor_union_2026_11_13_staff_availability_optional_reason_v1.json` 與同名 descriptors 登錄，供新庫初始化與保留資料升級共用。不可服務期間原因可留空，建立者仍必填。驗證回條為 `validation/receipts/PROV-STAFF-AVAILABILITY-OPTIONAL-REASON-local-additive-qualification-20261113.json`。
 - The client passbook cover release uses `db/migration_releases/labor_union_2026_11_13_controlled_file_client_passbook_cover_v1.json` and its descriptors. Shared fresh/preserve artifact `db/schema_parts/1075_controlled_file_client_passbook_cover.sql` brings both controlled-file tables into the existing client passbook contract and preserves their rows and version references. Qualification is recorded in `validation/receipts/PROV-CONTROLLED-FILE-CLIENT-PASSBOOK-local-additive-qualification-20261113.json`.
@@ -81,7 +80,6 @@
 - entrypoints:
   - `scripts/launchers/update_local_database.bat`
   - `scripts/launchers/update_local_database.sh`
-  - `deployment/nas/upgrade-database.sh` and `scripts/update_nas_database.py` — legacy DSM manual update adapter, not a current deployment route; `--update` runs prepare → verified switch → same-project activation under one lock. Advanced prepare/switch modes remain available. The stopped operational volume is never mounted; a checksum-verified cold backup is copied into a new volume, then the existing localhost/development updater runs only in its isolated helper namespace. Before switching, the adapter records the configuration's before/after hashes. Switching preserves the original volume, database name, credentials and all non-image deployment env bytes. On failure, the adapter keeps both the original operational volume and the backup volume without automatically deleting or overwriting either. See [NAS maintenance specification §4](../../../../../requirements/10A_NAS_Fresh初始化與維護復原規格.md#4-dsm-冷備份副本受控升級upgrade-databasesh--update_nas_databasepy) and `deployment/nas/DATABASE-UPGRADE.md`.
 - config:
   - `db/schema_assembly/labor_union_fresh_table_retirements_v1.json` — current 逐表決策；既有表／資料不刪除。
   - `db/schema_parts/230_client_hcm_email.sql` — fresh nullable HCM email；BeClass email 獨立保存。
@@ -226,7 +224,6 @@ flowchart TD
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_windows_maintenance.py` — explicit target、備份完整性、同名復原、升級與帳號保護失敗、逐階段接續、清理接續、原 credential、authenticated schedule 與 stale conflict、三支 Windows 批次。
 - integration: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_windows_maintenance_mysql.py` — opt-in uniquely owned MySQL 容器、full canonical source、native SQL 備份與同名復原、重複復原不累積庫／B／匯出物、鄰庫與原 credential 保留。
 - UI integration: `ui_react/src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/database_backup.test.tsx` — shell navigation and schedule UI cross the migration transport boundary; uses the existing shell integration root.
-- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_database_upgrade.py` — cold-backup identity/integrity, operational-source exclusion, helper network isolation and bounded configuration switching.
 
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_line_group_invitation_url_schema.py` — additive 私有網址欄位、release／fresh／descriptor 一致與 drift 拒絕。
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_nas_registration_approval_schema.py` — canonical registry、四欄 descriptor、absent／exact／partial／drift。

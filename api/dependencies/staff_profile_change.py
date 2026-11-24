@@ -2,6 +2,8 @@
 from contextlib import contextmanager
 from functools import lru_cache
 
+from api.dependencies.staff_web_profile import build_staff_web_profile
+
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_bank_account_repository import MySqlStaffBankAccountRepository
 from infrastructure.mysql.staff_case_preference_manual_repository import MySqlStaffCasePreferenceManualRepository
@@ -34,6 +36,7 @@ def staff_profile_change_application():
             StaffCasePreferenceManualWorkflow(MySqlStaffCasePreferenceManualRepository(connection), uow),
             StaffQualificationEditingWorkflow(MySqlStaffQualificationEditingRepository(connection), uow),
             StaffMatchingPreferenceWorkflow(MySqlStaffMatchingPreferenceRepository(connection), uow),
+            build_staff_web_profile(connection),
         ), MySqlStaffRetirementRepository(connection)
     finally:
         connection.close()
