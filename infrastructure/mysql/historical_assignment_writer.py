@@ -50,5 +50,23 @@ class MySqlHistoricalAssignmentWriter(SchedulingHistoricalAssignmentPort):
                 identifiers.append(int(cursor.lastrowid))
         return tuple(identifiers)
 
+    def retire_adopted_assignments(
+        self, case_no: str, assignment_ids: tuple[int, ...],
+    ) -> None:
+        """Retire the locked effective rows while retaining their adoption links."""
+        if not assignment_ids:
+            return
+        placeholders = ",".join("%s" for _ in assignment_ids)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE case_staff_assignments SET status='cancelled' "
+                "WHERE case_no=%s AND generation_id IS NULL "
+                "AND status IN ('planned','active','completed') "
+                f"AND id IN ({placeholders})",
+                (case_no, *assignment_ids),
+            )
+            if cursor.rowcount != len(assignment_ids):
+                raise RuntimeError("historical_unserved_assignment_conflict")
+
 
 __all__ = ["MySqlHistoricalAssignmentWriter"]

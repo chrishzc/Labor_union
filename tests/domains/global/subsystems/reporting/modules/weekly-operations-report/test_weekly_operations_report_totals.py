@@ -11,7 +11,7 @@ import pytest
 from openpyxl import load_workbook
 from pydantic import ValidationError
 
-from api.schemas.operations_reports import WeeklyReportCaseTotalsView
+from api.schemas.operations_reports import WeeklyReportCaseRowCancellationView, WeeklyReportCaseTotalsView
 from subsystems.reporting.weekly_operations_report_export import export_weekly_operations_report
 from subsystems.reporting.weekly_operations_report_query import (
     MISSING_ORDER_STATUS, ORDER_STATUS_LABELS,
@@ -27,6 +27,7 @@ def _case(day: str, serial: int, **changes) -> WeeklyCaseFact:
         district="東區", order_status="訂單成立", service_days=20, service_hours_per_day=8,
         planned_start_date=date(2026, 10, 1), planned_end_date=date(2026, 10, 28),
         seq_num=serial,
+        has_establishment_evidence=True,
     )
     return replace(fact, **changes)
 
@@ -76,7 +77,7 @@ def _cross_month_facts():
         _case("2026-08-31", 3),
         _case("2026-09-01", 4),
         _case("2026-09-06", 5),
-        _case("2026-09-07", 6, order_status="洽談中"),
+        _case("2026-09-07", 6, order_status="洽談中", has_establishment_evidence=False),
         _case("2026-09-14", 7),
     ], {
         "2026-01-05": (7, 9),
@@ -335,15 +336,53 @@ def test_case_outcomes_are_exclusive_while_raw_lifecycle_is_retained():
             assert total.cancelled_count == 0
 
 
+def test_established_case_count_uses_owner_evidence_and_reclassifies_historical_correction_once():
+    day = "2026-09-07"
+    facts = _Facts([
+        _case(day, 1, order_status="訂單取消", has_establishment_evidence=False, service_days=None),
+        _case(day, 2, order_status="訂單取消", cancel_reason="原取消紀錄"),
+        _case(day, 3, order_status="服務中"),
+        _case(day, 4, order_status="訂單完成"),
+    ])
+    service = WeeklyOperationsReportQuery(facts, lambda: datetime(2026, 9, 23))
+    before = service.query(date(2026, 9, 7), date(2026, 9, 13))
+    assert (before.summary.application_count, before.summary.order_established_count, before.summary.cancelled_count) == (4, 2, 2)
+    facts.cases[1] = replace(facts.cases[1], order_status="成立後未服務", cancel_reason="已核對成立且未服務")
+    after = service.query(before.start_date, before.end_date)
+    stats = service.query_case_statistics(2026, month=9)
+    for total in (after.summary, after.monthly_subtotals[0], after.annual_totals[0], stats.summary):
+        assert (total.application_count, total.order_established_count, total.cancelled_count) == (4, 3, 1)
+    assert (after.case_rows[1].order_status, after.case_rows[1].service_status, after.case_rows[1].service_days) == ("成立後未服務", "成立後未服務", 0)
+    candidate = {**asdict(after.case_rows[1]), "data_quality_codes": list(after.case_rows[1].data_quality_codes)}
+    assert WeeklyReportCaseRowCancellationView.model_validate(candidate).service_days == 0
+    with pytest.raises(ValidationError, match="zero service days"):
+        WeeklyReportCaseRowCancellationView.model_validate({**candidate, "order_status": "訂單取消"})
+    assert after.case_rows[0].service_days is None
+    assert after.annual_totals[0].order_status_counts["訂單成立"] == 1
+    assert "成立後未服務" not in after.annual_totals[0].order_status_counts
+    assert after.service_rows == before.service_rows
+    assert service.query(before.start_date, before.end_date).summary == after.summary
+    sheet = _workbook(after).worksheets[0]
+    corrected_row = next(row for row in sheet.values if row[0] == 2)
+    assert (corrected_row[14], corrected_row[16], corrected_row[18], corrected_row[24]) == (1, None, 0, "已核對成立且未服務")
+    assert sheet.max_column == 26
+
+
+def test_current_established_status_without_formal_evidence_does_not_count():
+    report = _query(_Facts([_case("2026-09-07", 1, has_establishment_evidence=False)]))
+    assert report.summary.order_established_count == 0
+    assert report.case_rows[0].order_status == "訂單成立"
+
+
 def test_weekly_view_excel_and_workbench_share_exclusive_case_counts():
     day = "2026-09-07"
     facts = _Facts([
         _case(day, 1, identity_status="一般市民", hcm_review_status="符合", order_status="服務中"),
-        _case(day, 2, identity_status="補助市民", hcm_review_status="符合", order_status="洽談中"),
+        _case(day, 2, identity_status="補助市民", hcm_review_status="符合", order_status="洽談中", has_establishment_evidence=False),
         _case(day, 3, hcm_review_status="符合", order_status="訂單取消"),
         _case(day, 4, hcm_review_status="不符合", order_status="歷史訂單－服務完成"),
         _case(day, 5, hcm_review_status="不符合", order_status="洽談中"),
-        _case(day, 6, hcm_review_status=None, order_status="待補件"),
+        _case(day, 6, hcm_review_status=None, order_status="訂單完成", has_establishment_evidence=True),
         _case(day, 7, identity_status="非市民", case_category="subsidy", hcm_review_status="不符合"),
     ])
     query = WeeklyOperationsReportQuery(facts, lambda: datetime(2026, 9, 23))
@@ -355,15 +394,17 @@ def test_weekly_view_excel_and_workbench_share_exclusive_case_counts():
         "indigenous_eligible_count", "indigenous_ineligible_count",
         "order_established_count", "negotiating_count", "cancelled_count", "review_rejected_count",
     )
-    expected = (7, 2, 3, 1, 0, 0, 0, 1, 1, 1, 3)
+    expected = (7, 2, 3, 1, 0, 0, 0, 2, 1, 1, 3)
     september, = [total for total in report.monthly_subtotals if total.month == 9]
     weekly_total = WeeklyReportCaseTotalsView.model_validate(asdict(september))
     assert tuple(getattr(weekly_total, field) for field in fields) == expected
     assert tuple(getattr(statistics.summary, field) for field in fields) == expected
     sheet = _workbook(report).worksheets[0]
+    assert sheet.max_column == 26
     for row in (4, sheet.max_row):
         assert tuple(sheet.cell(row, column).value for column in range(8, 19)) == expected
-    assert report.case_rows[5].review_result == "pending"
+    completed = report.case_rows[5]
+    assert (completed.review_result, completed.order_status, completed.order_established) == ("pending", "訂單完成", 1)
     assert all(
         row.order_established + row.negotiating + row.cancelled + row.review_rejected <= 1
         for row in report.case_rows

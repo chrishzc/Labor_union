@@ -423,6 +423,8 @@ def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
 
 
 def _date_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
+    if _lifecycle_status(row) is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+        return _unavailable_stage(5, "date_confirmation", "服務日期與排班結果", "Orders / Scheduling", "established_unserved")
     version_id = row["confirmed_version_id"]
     source = _source("Orders / Scheduling", f"confirmed-service-date-version:{version_id}" if version_id is not None else None, _optional_int(row, "confirmed_version"))
     if version_id is None:
@@ -431,6 +433,8 @@ def _date_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
 
 
 def _service_stage(row: Mapping[str, object], case_no: str, evaluated_at: datetime) -> StageProjection:
+    if _lifecycle_status(row) is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+        return _unavailable_stage(6, "active_service", "正式服務履約", "Scheduling / Orders", "established_unserved")
     count = _nonnegative_int(row, "assignment_count")
     version = _optional_int(row, "scheduling_version")
     source = _source("Scheduling / Orders", f"scheduling-aggregate:{case_no}" if version is not None else None, version)
@@ -457,9 +461,11 @@ def _service_stage(row: Mapping[str, object], case_no: str, evaluated_at: dateti
 
 
 def _settlement_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
-    service = _settlement_part("service_completion", "Orders", row["service_completion_identity"], 1 if row["service_completion_identity"] is not None else None, _optional_datetime(row, "service_completed_at"), None)
-    client = _obligation_part("client_settlement", "Client Finance", row, "client_obligation_count", "client_open_count", "finance_version", "client_updated_at")
-    staff = _obligation_part("staff_payout", "Staff Payables", row, "staff_obligation_count", "staff_open_count", "staff_payables_version", "staff_updated_at")
+    established_unserved = _lifecycle_status(row) is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    completion_identity = None if established_unserved else row["service_completion_identity"]
+    service = _settlement_part("service_completion", "Orders", completion_identity, 1 if completion_identity is not None else None, _optional_datetime(row, "service_completed_at"), "established_unserved" if established_unserved else None)
+    client = _obligation_part("client_settlement", "Client Finance", row, "client_obligation_count", "client_open_count", "finance_version", "client_updated_at", empty_is_settled=established_unserved)
+    staff = _obligation_part("staff_payout", "Staff Payables", row, "staff_obligation_count", "staff_open_count", "staff_payables_version", "staff_updated_at", empty_is_settled=established_unserved)
     parts = (service, client, staff)
     statuses = {part.status for part in parts}
     if statuses == {"completed"}:
@@ -485,15 +491,15 @@ def _settlement_stage(row: Mapping[str, object], case_no: str) -> StageProjectio
     return _stage(7, "settlement_payout", "完工結案與請款", "Orders / Client Finance / Staff Payables", status, _source("Cross-domain read coordinator", f"order-settlement:{case_no}", _nonnegative_int(row, "order_version")), _latest(row, "service_completed_at", "client_updated_at", "staff_updated_at"), blockers=blockers, settlement=parts)
 
 
-def _obligation_part(code: str, owner: str, row: Mapping[str, object], count_field: str, open_field: str, version_field: str, at_field: str) -> SettlementProjection:
+def _obligation_part(code: str, owner: str, row: Mapping[str, object], count_field: str, open_field: str, version_field: str, at_field: str, *, empty_is_settled: bool) -> SettlementProjection:
     count = _nonnegative_int(row, count_field)
     open_count = _nonnegative_int(row, open_field)
     if open_count > count:
         raise OrderStageProjectionContractError("obligation counts are inconsistent")
-    if not count:
+    if not count and not empty_is_settled:
         return SettlementProjection(code, "unavailable", _source(owner, None, _optional_int(row, version_field)), None, "obligation_projection_missing")  # type: ignore[arg-type]
     status: StageStatus = "blocked" if open_count else "completed"
-    return SettlementProjection(code, status, _source(owner, f"{code}-obligations", _optional_int(row, version_field)), _optional_datetime(row, at_field), None)  # type: ignore[arg-type]
+    return SettlementProjection(code, status, _source(owner, f"{code}-obligations" if count else None, _optional_int(row, version_field)), _optional_datetime(row, at_field), None)  # type: ignore[arg-type]
 
 
 def _settlement_part(code: str, owner: str, identity: object, version: int | None, at: datetime | None, reason: str | None) -> SettlementProjection:
@@ -805,7 +811,7 @@ def _current_step(
     steps: tuple[SopStepProjection, ...],
     replacement_resume_step: int | None,
 ) -> int | None:
-    if lifecycle_status is OrderLifecycleStatus.CANCELLED:
+    if lifecycle_status in {OrderLifecycleStatus.CANCELLED, OrderLifecycleStatus.ESTABLISHED_UNSERVED}:
         return None
     fixed_ordinal = {
         OrderLifecycleStatus.PENDING_COMPLETION: 1,

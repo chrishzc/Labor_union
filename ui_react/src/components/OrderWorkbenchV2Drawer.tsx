@@ -183,7 +183,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [replacementRequest, setReplacementRequest] = useState(0);
   const [serviceConfirmationState, setServiceConfirmationState] = useState({ dirty: false, busy: false });
   const [depositBusy, setDepositBusy] = useState(false);
-  const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
+  const [operation, setOperation] = useState<'cancellation' | 'historical-unserved' | 'reopen' | 'actual-start' | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
   const [editingCompletedDates, setEditingCompletedDates] = useState(false);
   const [attributionOpenOverride, setAttributionOpenOverride] = useState<boolean | null>(null);
@@ -193,7 +193,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   }, [caseNo]);
   const operationDialogRef = useRef<HTMLDialogElement>(null);
   const headerActionRef = useRef<HTMLButtonElement>(null);
-  const caseOperation = operation === 'cancellation';
+  const caseOperation = operation === 'cancellation' || operation === 'historical-unserved';
   useEffect(() => {
     if (!caseOperation) return;
     const dialog = operationDialogRef.current!;
@@ -369,6 +369,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     ? historicalCurrentOwnerStage(timeline.data)
     : null;
   const terminalStatus = timeline.status === 'ready' && isCancellationTerminalStatus(timeline.data.lifecycle_status);
+  const establishedUnserved = timeline.status === 'ready' && timeline.data.lifecycle_status === '成立後未服務';
+  const pendingTerminationSettlement = establishedUnserved
+    ? timeline.data.core_stages.filter(stage => ['client_settlement', 'staff_payout'].includes(stage.code) && stage.status !== 'completed')
+    : [];
   const completedService = timeline.status === 'ready' && timeline.data.lifecycle_status === '訂單完成';
   const showCompletion = timeline.status === 'ready' && ['訂單完成', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(timeline.data.lifecycle_status);
   const completionStage = timeline.status === 'ready' ? timeline.data.core_stages.find(stage => stage.code === 'service_completion') : undefined;
@@ -514,6 +518,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             })}>以此案資料建立非市民新案</button>
             {timeline.status === 'ready' && currentBranch !== 'cancelled' && !terminalStatus &&
               <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
+            {timeline.status === 'ready' && (currentBranch === 'historical' || currentBranch === 'cancelled') &&
+              <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('historical-unserved')}>更正歷史零服務</button>}
           </div>
         </div>
         <p className="order-case-purpose">依目前進度接續工作；需要的訂單與服務資料會顯示在各辦理事項中。</p>
@@ -529,7 +535,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             <span><small>客戶</small>{clientName}</span>
             <span><small>約定服務開始日</small>{plannedStart}</span>
             <span><small>實際開始</small>{actualStart}</span>
-            <span><small>服務量</small>{serviceVolume}</span>
+            <span><small>{establishedUnserved ? '實際服務量' : '服務量'}</small>{establishedUnserved ? '0 日 · 0 小時' : serviceVolume}</span>
             <span><small>服務月嫂</small>{assignedStaff}</span>
             {branchType === 'historical' && historicalEvidence.status === 'ready' && <span><small>歷史匯入期間</small>{evidencePeriod(historicalEvidence.data)}</span>}
           </>,
@@ -541,7 +547,18 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       />
       {factsRefreshing && <p role="status" className="order-case-read-status">正在更新案件資料…</p>}
       {timeline.status === 'error' && <div role="alert" className="order-v2-drawer-error">案件進度暫時無法取得，請稍後重新整理。</div>}
-      <div className="order-case-workspace">
+      {establishedUnserved ? <section className="order-v2-drawer-section" aria-label="零服務終止帳務">
+        <h2>零服務終止帳務</h2>
+        {pendingTerminationSettlement.length === 0 ? <p>客戶與月嫂款項均無待辦。</p> :
+          <div className="order-case-action-row">
+            {pendingTerminationSettlement.map(stage => <a key={stage.code}
+              aria-disabled={navigationLocked || factsRefreshing || undefined}
+              onClick={event => { if (navigationLocked || factsRefreshing) event.preventDefault(); }}
+              href={`#finance?tab=case-accounting&case_no=${encodeURIComponent(caseNo)}&from=workbench&focus=${stage.code}`}>
+              {stage.code === 'client_settlement' ? '辦理客戶退款或補收' : '辦理月嫂款項更正與結算'} →
+            </a>)}
+          </div>}
+      </section> : <div className="order-case-workspace">
         <aside className="order-case-stepper" aria-label="案件辦理事項">
           <h2>辦理事項</h2><p>依目前進度開啟工作，也可切換其他事項。</p>
           <ol>
@@ -756,16 +773,16 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           {currentBranch === 'historical' && currentHistoricalOwner && <section className="order-v2-drawer-section"><h2>歷史案件目前進度</h2><p>{currentHistoricalOwner.label}：{coreStageSubstatusLabel(currentHistoricalOwner.substatus_code)}</p></section>}
           {historicalRestart.message && <p role={historicalRestart.status === 'error' ? 'alert' : 'status'}>{historicalRestart.message}</p>}
         </div>
-      </div>
+      </div>}
       <dialog ref={operationDialogRef} className="order-case-operation-dialog" aria-labelledby="order-case-operation-title" onCancel={(event) => {
         event.preventDefault();
         if (!operationBusyRef.current && !leavePending) requestLeave(() => setOperation(null));
       }}>
-        <header className="order-case-dialog-heading"><h2 id="order-case-operation-title">{currentBranch === 'cancelled' ? '補登取消服務事實' : '取消訂單'}</h2>
+        <header className="order-case-dialog-heading"><h2 id="order-case-operation-title">{operation === 'historical-unserved' ? '更正歷史零服務' : currentBranch === 'cancelled' ? '補登取消服務事實' : '取消訂單'}</h2>
           <button type="button" disabled={operationBusy} onClick={() => requestLeave(() => setOperation(null))}>返回案件處理</button>
         </header>
         {operationBusy && <p role="status">操作結果或正式回讀尚未確認，請先完成確認再返回案件。</p>}
-        {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
+        {caseOperation && <OrderCancellationPanel key={`${caseNo}:${operation}`} caseNo={caseNo} historicalUnservedCorrection={operation === 'historical-unserved'} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
       </dialog>
     </div>
   );

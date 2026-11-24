@@ -109,7 +109,7 @@ class HistoricalOrderAbsenceCancellation:
             raise ValueError("historical_order_absence_case_no_invalid")
         if not isinstance(self.before_status, OrderLifecycleStatus):
             raise TypeError("historical_order_absence_status_invalid")
-        if self.before_status is OrderLifecycleStatus.CANCELLED:
+        if self.before_status in (OrderLifecycleStatus.CANCELLED, OrderLifecycleStatus.ESTABLISHED_UNSERVED):
             raise ValueError("historical_order_absence_already_cancelled")
         if (
             isinstance(self.expected_version, bool)
@@ -738,6 +738,8 @@ def _historical_issue_fields(issue_code: str) -> tuple[str, ...]:
         return ("客戶姓名",)
     if issue_code == "historical_status_invalid":
         return ("訂單狀態",)
+    if issue_code == "historical_order_confirmed_zero_service_conflict":
+        return ("訂單狀態", "開始日期", "結束日期")
     if issue_code.startswith(("historical_order_source_schedule_", "historical_service_time_")):
         return ("服務時段",)
     if "staff" in issue_code:

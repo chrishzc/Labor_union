@@ -22,8 +22,16 @@ from domains.orders.cancellation import (
     ConfirmedServiceDay,
     build_cancellation_candidate,
 )
-from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
+from domains.orders.lifecycle import (
+    OrderEstablishmentEvidence, OrderLifecycleRootFacts, OrderLifecycleStatus,
+    zero_service_terminal_status,
+)
 from domains.orders.terms import OrderTerms
+from domains.orders.historical_unserved_correction import (
+    HistoricalUnservedCorrectionIntent, HistoricalUnservedEvidence,
+    historical_unserved_blockers, historical_unserved_review_codes,
+)
+from subsystems.orders.historical_unserved_correction import build_historical_unserved_payroll_impact
 from shared_kernel.clock import BusinessClock
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -60,6 +68,7 @@ class CancellationWorkflowFacts:
     historical_cancellation_origin: bool = False
     net_cash_received: MoneyNTD | None = None
     initial_client_payment_terms: ClientPaymentTermsRootFacts | None = None
+    historical_unserved_evidence: HistoricalUnservedEvidence | None = None
 
     def __post_init__(self) -> None:
         if len({item.case_no for item in (self.order, self.scheduling, self.client_finance, self.payroll, self.lifecycle) if item is not None}) != 1:
@@ -76,6 +85,7 @@ class CancellationLifecycleImpact:
     actual_end_date: date | None
     cancellation_effective: bool
     fingerprint: PreviewFingerprint
+    establishment_evidence: OrderEstablishmentEvidence = OrderEstablishmentEvidence()
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +100,11 @@ class OrderCancellationPreview:
     payroll_version: int | None
     fingerprint: PreviewFingerprint
     initial_client_payment_terms: ClientPaymentTermsRootFacts | None = None
+    historical_correction: HistoricalUnservedCorrectionIntent | None = None
+    classification_only: bool = False
+    existing_cancellation_control_event_id: int | None = None
+    scheduling_generation: int | None = None
+    standalone_assignment_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +122,7 @@ class OrderCancellationApplyRequest:
     correlation_id: CorrelationId
     fee_ntd: int = 0
     fee_reason: str = ""
+    historical_correction: HistoricalUnservedCorrectionIntent | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
@@ -164,9 +180,14 @@ class CancellationReceiptPersistenceCommand:
 
 
 class CancellationWorkflowRepository(Protocol):
-    def load_for_preview(self, case_no: str, requested_staff_ids: tuple[int, ...]) -> CancellationWorkflowFacts: ...
+    def load_for_preview(
+        self, case_no: str, requested_staff_ids: tuple[int, ...], *, allow_missing_payroll_rates: bool = False,
+    ) -> CancellationWorkflowFacts: ...
     def preflight_impacted_staff_ids(self, case_no: str, requested_staff_ids: tuple[int, ...]) -> tuple[int, ...]: ...
-    def load_for_apply(self, case_no: str, preflight_staff_ids: tuple[int, ...]) -> CancellationWorkflowFacts: ...
+    def load_for_apply(
+        self, case_no: str, preflight_staff_ids: tuple[int, ...], requested_staff_ids: tuple[int, ...],
+        *, allow_missing_payroll_rates: bool = False,
+    ) -> CancellationWorkflowFacts: ...
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool) -> StoredCancellationReceipt | None: ...
     def claim_command(self, request: OrderCancellationApplyRequest, command_fingerprint: PreviewFingerprint) -> CommandClaimState: ...
     def append_cancellation_event(self, request: OrderCancellationApplyRequest, preview: OrderCancellationPreview) -> int: ...
@@ -175,6 +196,7 @@ class CancellationWorkflowRepository(Protocol):
     def persist_client_finance_impact(self, command: ClientFinanceImpactPersistenceCommand) -> None: ...
     def initialize_cancellation_client_finance(self, request: OrderCancellationApplyRequest, terms: ClientPaymentTermsRootFacts, event_id: int) -> None: ...
     def persist_payroll_impact(self, command: PayrollImpactPersistenceCommand) -> None: ...
+    def retire_historical_unserved_assignments(self, case_no: str, assignment_ids: tuple[int, ...]) -> None: ...
     def activate_cancellation_control(self, request: OrderCancellationApplyRequest, cancellation_event_id: int) -> int: ...
     def persist_cancellation_lifecycle(self, request: OrderCancellationApplyRequest, preview: OrderCancellationPreview, cancellation_control_event_id: int) -> int: ...
     def update_cancelled_order(self, command: CancellationOrderPersistenceCommand) -> None: ...
@@ -197,17 +219,19 @@ class OrderCancellationWorkflow:
     def cancellation_date(self) -> date:
         return self._clock.today()
 
-    def preview(self, case_no: str, confirmed_service_days: tuple[ConfirmedServiceDay, ...], fee_ntd: int = 0, fee_reason: str = "") -> OrderCancellationPreview:
+    def preview(self, case_no: str, confirmed_service_days: tuple[ConfirmedServiceDay, ...], fee_ntd: int = 0, fee_reason: str = "", historical_correction: HistoricalUnservedCorrectionIntent | None = None) -> OrderCancellationPreview:
         _validate_fee(fee_ntd, fee_reason)
         facts = self._repository.load_for_preview(
-            case_no, _confirmed_staff_ids(confirmed_service_days)
+            case_no, _confirmed_staff_ids(confirmed_service_days),
+            allow_missing_payroll_rates=historical_correction is not None and not confirmed_service_days and fee_ntd == 0,
         )
         _ensure_cancellation_allowed(
             facts,
             confirmed_service_days,
-            CorrelationId(f"order-cancellation-preview:{case_no}"),
+            CorrelationId(f"order-cancellation-preview:{case_no}"), historical_correction,
+            fee_ntd=fee_ntd,
         )
-        return self._build_preview(facts, confirmed_service_days, fee_ntd, fee_reason)
+        return self._build_preview(facts, confirmed_service_days, fee_ntd, fee_reason, historical_correction)
 
     def apply(self, request: OrderCancellationApplyRequest) -> OrderCancellationReceipt:
         command_fingerprint = _command_fingerprint(request)
@@ -219,7 +243,15 @@ class OrderCancellationWorkflow:
             if replay is not None:
                 return replay
             _raise_if_claim_incomplete(request, claim_state)
-            facts = self._repository.load_for_apply(request.case_no, preflight_staff_ids)
+            facts = self._repository.load_for_apply(
+                request.case_no, preflight_staff_ids,
+                _confirmed_staff_ids(request.confirmed_service_days),
+                allow_missing_payroll_rates=(
+                    request.historical_correction is not None
+                    and not request.confirmed_service_days
+                    and request.fee_ntd == 0
+                ),
+            )
             preview = self._fresh_preview(request, facts, preflight_staff_ids)
             receipt = _build_receipt(preview)
             self._persist(request, preview, command_fingerprint, receipt)
@@ -241,10 +273,11 @@ class OrderCancellationWorkflow:
         _validate_locked_staff_set(request, facts, preflight_staff_ids)
         _validate_expected_versions(request, facts)
         _ensure_cancellation_allowed(
-            facts, request.confirmed_service_days, request.correlation_id
+            facts, request.confirmed_service_days, request.correlation_id, request.historical_correction,
+            fee_ntd=request.fee_ntd,
         )
         try:
-            preview = self._build_preview(facts, request.confirmed_service_days, request.fee_ntd, request.fee_reason)
+            preview = self._build_preview(facts, request.confirmed_service_days, request.fee_ntd, request.fee_reason, request.historical_correction)
         except CancellationCandidateError as error:
             raise _candidate_workflow_error(request, error) from error
         if preview.fingerprint != request.preview_fingerprint:
@@ -252,8 +285,14 @@ class OrderCancellationWorkflow:
         _raise_if_impacts_blocked(request, preview)
         return preview
 
-    def _build_preview(self, facts: CancellationWorkflowFacts, confirmed_service_days: tuple[ConfirmedServiceDay, ...], fee_ntd: int, fee_reason: str) -> OrderCancellationPreview:
+    def _build_preview(self, facts: CancellationWorkflowFacts, confirmed_service_days: tuple[ConfirmedServiceDay, ...], fee_ntd: int, fee_reason: str, historical_correction: HistoricalUnservedCorrectionIntent | None = None) -> OrderCancellationPreview:
+        evidence = facts.historical_unserved_evidence if historical_correction else None
+        prior = evidence.prior_settlement if evidence is not None else None
+        if prior is not None:
+            fee_ntd, fee_reason = prior.fee_ntd, prior.fee_reason
         effective_order = _effective_order_facts(facts, confirmed_service_days)
+        if historical_correction:
+            effective_order = replace(effective_order, actual_start_date=None, service_started=False, service_data_locked=False)
         initial_terms = facts.initial_client_payment_terms if fee_ntd and facts.client_finance is None else None
         if fee_ntd and facts.client_finance is None and initial_terms is None:
             raise CancellationWorkflowError(TypedError(
@@ -264,19 +303,44 @@ class OrderCancellationWorkflow:
             ))
         try:
             candidate = build_cancellation_candidate(effective_order, facts.scheduling, self.cancellation_date, confirmed_service_days)
-            finance, payroll = _build_impacts(facts, candidate, fee_ntd, fee_reason, initial_terms)
+            finance, payroll = _build_impacts(
+                facts, candidate, fee_ntd, fee_reason, initial_terms, historical_correction, prior,
+            )
+            classification_only = bool(
+                historical_correction and prior and prior.official_service_day_count == 0
+                and prior.service_due_ntd == 0
+                and (prior.finance_receipt_id is not None or facts.client_finance is None)
+                and not facts.scheduling.assignments
+                and not evidence.standalone_assignment_ids
+                and (finance is None or not (
+                    finance.actions or finance.blockers or finance.subsidy_return_plan
+                    or finance.cancellation_cash_difference_requires_review
+                ))
+                and (payroll is None or not (payroll.actions or payroll.blockers or payroll.frozen_settlements))
+            )
+            if classification_only:
+                finance = payroll = None
         except ValueError as error:
             if str(error) != "payroll_rate_policy_not_found":
                 raise
             raise CancellationCandidateError(CancellationBlocker.PAYROLL_RATE_POLICY_NOT_FOUND) from error
-        return _preview(facts, candidate, finance, payroll, _build_lifecycle_impact(facts, candidate), initial_terms)
+        return _preview(
+            facts, candidate, finance, payroll, _build_lifecycle_impact(facts, candidate, historical_correction), initial_terms,
+            historical_correction, classification_only,
+            prior.cancellation_control_event_id if classification_only else None,
+        )
 
     def _persist(self, request: OrderCancellationApplyRequest, preview: OrderCancellationPreview, command_fingerprint: PreviewFingerprint, receipt: OrderCancellationReceipt) -> None:
         event_id = self._repository.append_cancellation_event(request, preview)
         self._repository.cancel_waiting_deposit_lock(request, event_id)
-        scheduling = (self._repository.replace_scheduling_generation(_scheduling_command(request, preview, command_fingerprint)) if preview.candidate.scheduling is not None else None)
+        scheduling = (self._repository.replace_scheduling_generation(_scheduling_command(request, preview, command_fingerprint)) if preview.candidate.scheduling is not None and not preview.classification_only else None)
         _persist_finance_and_payroll(self._repository, request, preview, event_id, scheduling)
-        control_event_id = self._repository.activate_cancellation_control(request, event_id)
+        if preview.standalone_assignment_ids:
+            self._repository.retire_historical_unserved_assignments(request.case_no, preview.standalone_assignment_ids)
+        control_event_id = (
+            preview.existing_cancellation_control_event_id if preview.classification_only
+            else self._repository.activate_cancellation_control(request, event_id)
+        )
         lifecycle_event_id = self._repository.persist_cancellation_lifecycle(request, preview, control_event_id)
         self._repository.update_cancelled_order(CancellationOrderPersistenceCommand(request.case_no, preview.order_version, receipt.order_version, preview.candidate.actual_start_date, receipt.actual_end_date, receipt.lifecycle_status, request.actor, request.reason, request.idempotency_key))
         self._repository.save_receipt(CancellationReceiptPersistenceCommand(request.idempotency_key, StoredCancellationReceipt(command_fingerprint, receipt), event_id, scheduling.scheduling_receipt_id if scheduling else None, control_event_id, lifecycle_event_id, request.correlation_id))
@@ -302,15 +366,46 @@ def _ensure_cancellation_allowed(
     facts: CancellationWorkflowFacts,
     confirmed_service_days: tuple[ConfirmedServiceDay, ...],
     correlation_id: CorrelationId,
+    historical_correction: HistoricalUnservedCorrectionIntent | None = None,
+    *,
+    fee_ntd: int = 0,
 ) -> None:
+    if historical_correction is not None:
+        blockers = historical_unserved_blockers(facts.historical_unserved_evidence, facts.lifecycle.current_status)
+        if confirmed_service_days or fee_ntd:
+            raise CancellationWorkflowError(TypedError(
+                ErrorCategory.VALIDATION, "historical_unserved_correction_has_service_or_fee",
+                "更正為成立後未服務時，請確認 0 天服務，並沿用原違約金。", correlation_id,
+            ))
+        if blockers:
+            status_ineligible = blockers == ("historical_unserved_status_ineligible",)
+            raise CancellationWorkflowError(TypedError(
+                ErrorCategory.DOMAIN_BLOCKED if status_ineligible else ErrorCategory.CONFLICT,
+                blockers[0],
+                "目前訂單狀態不適用這項更正。" if status_ineligible else "既有帳務資料不一致，無法安全套用更正。",
+                correlation_id, domain_blockers=tuple(sorted(set(blockers))),
+            ))
+        return
+    if facts.lifecycle.current_status is OrderLifecycleStatus.COMPLETED or (confirmed_service_days and len(confirmed_service_days) == facts.order.contracted_service_days):
+        raise CancellationWorkflowError(TypedError(
+            ErrorCategory.DOMAIN_BLOCKED, "order_cancellation_after_full_service",
+            "全部服務已完成，不能取消訂單。", correlation_id,
+            domain_blockers=("order_cancellation_after_full_service",),
+        ))
     historical_recovery = (
         facts.historical_cancellation_origin
         and not facts.order.service_started
         and bool(confirmed_service_days)
         and facts.lifecycle.current_status is OrderLifecycleStatus.CANCELLED
     )
+    if confirmed_service_days and not historical_recovery:
+        raise CancellationWorkflowError(TypedError(
+            ErrorCategory.DOMAIN_BLOCKED, "order_cancellation_has_actual_service",
+            "已有實際服務，請使用訂單條款修改確認保留天數及完整班表。",
+            correlation_id, domain_blockers=("order_cancellation_has_actual_service",),
+        ))
     if (
-        facts.lifecycle.current_status is OrderLifecycleStatus.CANCELLED
+        facts.lifecycle.current_status in {OrderLifecycleStatus.CANCELLED, OrderLifecycleStatus.ESTABLISHED_UNSERVED}
         or facts.lifecycle.cancellation_effective
     ) and not historical_recovery:
         raise CancellationWorkflowError(
@@ -323,10 +418,10 @@ def _ensure_cancellation_allowed(
         )
 
 
-def _build_impacts(facts, candidate, fee_ntd, fee_reason, initial_terms):
+def _build_impacts(facts, candidate, fee_ntd, fee_reason, initial_terms, historical_correction=None, prior=None):
     if candidate.official_service_day_count and (facts.client_finance is None or facts.payroll is None):
         raise ValueError("cancellation_financial_roots_inconsistent")
-    if candidate.scheduling is None and facts.payroll is not None:
+    if candidate.scheduling is None and facts.payroll is not None and historical_correction is None:
         raise ValueError("cancellation_scheduling_facts_inconsistent")
     change_identity = f"cancellation:{candidate.fingerprint.value}"
     finance_source = facts.client_finance
@@ -342,8 +437,16 @@ def _build_impacts(facts, candidate, fee_ntd, fee_reason, initial_terms):
         finance_source, facts.order_terms, candidate.scheduling, change_identity,
         net_cash_received=facts.net_cash_received, fee=MoneyNTD(fee_ntd),
         fee_reason=fee_reason, processed_on=candidate.cancellation_date,
+        prior_balance=prior.client_balance if prior else None,
+        confirmed_zero_service=historical_correction is not None,
     ) if finance_source is not None else None
-    payroll = build_payroll_cancellation_impact(facts.payroll, candidate.scheduling, facts.order_terms, change_identity) if facts.payroll is not None else None
+    payroll = None
+    if facts.payroll is not None:
+        payroll = (
+            build_historical_unserved_payroll_impact(facts.payroll, facts.order_terms, change_identity)
+            if historical_correction is not None
+            else build_payroll_cancellation_impact(facts.payroll, candidate.scheduling, facts.order_terms, change_identity)
+        )
     return finance, payroll
 
 
@@ -351,19 +454,56 @@ def _confirmed_staff_ids(confirmed_service_days):
     return tuple(sorted({item.staff_id for item in confirmed_service_days}))
 
 
-def _build_lifecycle_impact(facts, candidate):
-    payload = {"case_no": facts.order.case_no, "before_status": facts.lifecycle.current_status.value, "after_status": OrderLifecycleStatus.CANCELLED.value, "actual_start_date": candidate.actual_start_date.isoformat() if candidate.actual_start_date else None, "actual_end_date": candidate.actual_end_date.isoformat() if candidate.actual_end_date else None, "cancellation_fingerprint": candidate.fingerprint.value}
-    return CancellationLifecycleImpact(facts.order.case_no, facts.lifecycle.current_status, OrderLifecycleStatus.CANCELLED, candidate.actual_end_date, True, fingerprint_payload(payload))
+def _build_lifecycle_impact(facts, candidate, historical_correction=None):
+    evidence = (facts.historical_unserved_evidence.establishment if facts.historical_unserved_evidence else facts.lifecycle.establishment_evidence) or OrderEstablishmentEvidence(
+        current_owner_status=facts.lifecycle.current_status,
+    )
+    if historical_correction:
+        after_status = historical_correction.resulting_status
+    elif candidate.official_service_day_count == 0:
+        after_status = zero_service_terminal_status(evidence)
+    else:
+        after_status = OrderLifecycleStatus.CANCELLED
+    payload = {
+        "case_no": facts.order.case_no,
+        "before_status": facts.lifecycle.current_status.value,
+        "after_status": after_status.value,
+        "actual_start_date": candidate.actual_start_date.isoformat() if candidate.actual_start_date else None,
+        "actual_end_date": candidate.actual_end_date.isoformat() if candidate.actual_end_date else None,
+        "cancellation_fingerprint": candidate.fingerprint.value,
+        "establishment_evidence": {
+            "lifecycle_event_ids": evidence.lifecycle_event_ids,
+            "historical_adoption_ids": evidence.historical_adoption_ids,
+            "current_owner_status": evidence.current_owner_status.value if evidence.current_owner_status else None,
+        },
+    }
+    return CancellationLifecycleImpact(
+        facts.order.case_no, facts.lifecycle.current_status, after_status,
+        candidate.actual_end_date, True, fingerprint_payload(payload), evidence,
+    )
 
 
-def _preview(facts, candidate, finance, payroll, lifecycle, initial_terms):
+def _preview(facts, candidate, finance, payroll, lifecycle, initial_terms, historical_correction=None, classification_only=False, existing_control_id=None):
     payload = {"cancellation": candidate.fingerprint.value, "client_finance": finance.fingerprint.value if finance else None, "payroll": payroll.fingerprint.value if payroll else None, "lifecycle": lifecycle.fingerprint.value, "client_finance_version": facts.client_finance.account_version if facts.client_finance else None, "payroll_version": facts.payroll.payroll_version if facts.payroll else None}
+    evidence = facts.historical_unserved_evidence if historical_correction else None
+    assignment_ids = evidence.standalone_assignment_ids if evidence else ()
+    if historical_correction:
+        payload["historical_correction"] = {
+            "reason": historical_correction.reason, "evidence_source": historical_correction.evidence_source,
+            "confirmed_actual_service_day_count": historical_correction.confirmed_actual_service_day_count,
+            "classification_only": classification_only,
+            "existing_cancellation_control_event_id": existing_control_id,
+            "standalone_assignment_ids": assignment_ids,
+            "standalone_staff_ids": evidence.standalone_staff_ids if evidence else (),
+            "review_codes": historical_unserved_review_codes(evidence) if evidence else (),
+            "actual_service_evidence": evidence.actual_service_evidence if evidence else (),
+        }
     if initial_terms:
         payload["initial_client_payment_terms"] = [
             initial_terms.policy_version, initial_terms.client_hourly_rate.amount, initial_terms.deposit_service_days,
             initial_terms.deposit_due_date.isoformat(), initial_terms.first_payment_due_date.isoformat(),
         ]
-    return OrderCancellationPreview(candidate, finance, payroll, lifecycle, facts.order.order_version, facts.scheduling.aggregate_version, facts.client_finance.account_version if facts.client_finance else None, facts.payroll.payroll_version if facts.payroll else None, fingerprint_payload(payload), initial_terms)
+    return OrderCancellationPreview(candidate, finance, payroll, lifecycle, facts.order.order_version, facts.scheduling.aggregate_version, facts.client_finance.account_version if facts.client_finance else None, facts.payroll.payroll_version if facts.payroll else None, fingerprint_payload(payload), initial_terms, historical_correction, classification_only, existing_control_id, facts.scheduling.generation_number, assignment_ids)
 
 
 def _scheduling_command(request, preview, command_fingerprint):
@@ -384,12 +524,12 @@ def _persist_client_finance(repository, request, preview, event_id):
 
 
 def _persist_payroll(repository, request, preview, event_id, scheduling):
-    repository.persist_payroll_impact(PayrollImpactPersistenceCommand(preview.payroll_impact, scheduling.assignment_resolution, request.idempotency_key, request.actor, request.reason, request.correlation_id, event_id))
+    repository.persist_payroll_impact(PayrollImpactPersistenceCommand(preview.payroll_impact, scheduling.assignment_resolution if scheduling else None, request.idempotency_key, request.actor, request.reason, request.correlation_id, event_id, reuse_existing_assignments=scheduling is None))
 
 
 def _build_receipt(preview):
-    scheduling = preview.candidate.scheduling
-    return OrderCancellationReceipt(preview.candidate.case_no, preview.order_version + 1, scheduling.resulting_aggregate_version if scheduling else None, scheduling.generation_number if scheduling else None, preview.client_finance_impact.resulting_account_version if preview.client_finance_impact else None, preview.payroll_impact.resulting_payroll_version if preview.payroll_impact else None, OrderLifecycleStatus.CANCELLED, preview.candidate.actual_end_date, preview.candidate.official_service_day_count, preview.candidate.official_service_hours, scheduling.cancelled_assignment_ids if scheduling else (), tuple(item.candidate_key for item in scheduling.assignments) if scheduling else (), preview.fingerprint)
+    scheduling = preview.candidate.scheduling if not preview.classification_only else None
+    return OrderCancellationReceipt(preview.candidate.case_no, preview.order_version + 1, scheduling.resulting_aggregate_version if scheduling else preview.scheduling_version, scheduling.generation_number if scheduling else preview.scheduling_generation, preview.client_finance_impact.resulting_account_version if preview.client_finance_impact else preview.client_finance_version, preview.payroll_impact.resulting_payroll_version if preview.payroll_impact else preview.payroll_version, preview.lifecycle_impact.after_status, preview.candidate.actual_end_date, preview.candidate.official_service_day_count, preview.candidate.official_service_hours, tuple(sorted(set((scheduling.cancelled_assignment_ids if scheduling else ()) + preview.standalone_assignment_ids))), tuple(item.candidate_key for item in scheduling.assignments) if scheduling else (), preview.fingerprint)
 
 
 def _validate_expected_versions(request, facts):
@@ -405,6 +545,8 @@ def _version_comparisons(request, facts):
 def _validate_locked_staff_set(request, facts, preflight_staff_ids):
     current = {item.staff_id for item in facts.scheduling.assignments}
     requested = {item.staff_id for item in request.confirmed_service_days}
+    if request.historical_correction and facts.historical_unserved_evidence:
+        current.update(facts.historical_unserved_evidence.standalone_staff_ids)
     if current.union(requested).issubset(set(preflight_staff_ids)):
         return
     raise _workflow_error(request, ErrorCategory.CONFLICT, "cancellation_lock_set_stale", "The impacted caregiver set expanded after preflight.")
@@ -428,6 +570,11 @@ def _raise_if_claim_incomplete(request, claim_state):
 
 def _command_fingerprint(request):
     payload = _command_payload(request)
+    if request.historical_correction:
+        payload["historical_correction"] = {
+            "reason": request.historical_correction.reason,
+            "evidence_source": request.historical_correction.evidence_source,
+        }
     if request.fee_ntd:
         payload.update(fee_ntd=request.fee_ntd, fee_reason=request.fee_reason)
     return fingerprint_payload(payload)

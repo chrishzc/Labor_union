@@ -171,6 +171,137 @@ describe('Beta 取消與歷史取消服務補登', () => {
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
+  it('有正式服務時開啟原服務條件入口，保留取消未執行', async () => {
+    mocks.preview.mockRejectedValue(new ApiHttpError(409, 'order_cancellation_has_actual_service', '案件有實際服務'));
+    render(<OrderCancellationPanel caseNo={CASE} />); await open(); await requestPreview();
+    expect(await screen.findByRole('link', { name: '前往修改服務條件與完整班表' }))
+      .toHaveAttribute('href', `#clients?case=${CASE}&from=workbench`);
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false, undefined])('歷史資料缺漏或待核對仍可由人員確認，預覽後套用並讀回成立後未服務（現金差額待核對標記 %s）', async (requiresReview) => {
+    facts = { ...facts, lifecycle_status: '訂單取消', historical_unserved_correction: {
+      blockers: [], review_codes: ['historical_unserved_not_historical', 'historical_unserved_establishment_evidence_missing',
+        'historical_unserved_actual_service_evidence', 'historical_unserved_cash_evidence_requires_review'],
+      establishment_lifecycle_event_ids: [], establishment_adoption_receipt_ids: [],
+      establishment_owner_status: null, historical_adoption_receipt_ids: [], historical_absence_event_ids: [],
+      actual_service_evidence: ['confirmed_service_days'], actual_start_date: null, actual_end_date: null, prior_fee_ntd: 1000,
+      prior_fee_reason: '歷史費用', net_cash_received_ntd: null, prior_cancellation_event_id: 4,
+      client_obligations: [], payroll_obligations: [],
+    } };
+    const calculated = preview();
+    mocks.preview.mockResolvedValue({
+      ...calculated,
+      lifecycle_impact: { ...calculated.lifecycle_impact, after_status: '成立後未服務' },
+      historical_unserved_correction: {
+        classification_only: false, retired_adopted_assignment_ids: [], payroll_recoveries: [],
+        ...(requiresReview === undefined ? {} : { client_cash_difference_requires_review: requiresReview }),
+      },
+    });
+    mocks.apply.mockImplementation(async () => {
+      facts = { ...facts, lifecycle_status: '成立後未服務', order_version: 3, scheduling_version: 4, client_finance_version: 5, payroll_version: 6, historical_unserved_correction: null };
+      return { ...receipt(), lifecycle_status: '成立後未服務' };
+    });
+    const onObserved = vi.fn();
+    render(<OrderCancellationPanel caseNo={CASE} historicalUnservedCorrection onObserved={onObserved} />);
+    await screen.findByText('訂單取消', { selector: 'strong' });
+    const check = screen.getByRole('button', { name: '預覽零服務更正' });
+    expect(check).toBeDisabled();
+    expect(screen.getByText('系統沒有正式成立紀錄。')).toBeVisible();
+    expect(screen.getByText('服務證據：confirmed_service_days')).toBeVisible();
+    expect(screen.getByText('收付款項待核對。更正後請確認對帳明細配對。')).toBeVisible();
+    expect(screen.getByLabelText('更正原因（選填）')).toHaveValue('');
+    expect(screen.getByLabelText('證據來源（選填）')).toHaveValue('');
+    fireEvent.click(screen.getByRole('checkbox', { name: '我確認將本案更正為成立後未服務' }));
+    expect(check).toBeEnabled();
+    const correction = { reason: '', evidence_source: '', confirmed_actual_service_day_count: 0 };
+    await act(async () => { fireEvent.click(check); });
+    expect(mocks.preview).toHaveBeenCalledWith(CASE, [], expect.any(AbortSignal), { historical_unserved_correction: correction });
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(screen.getByText(/正式服務：0 日／0 小時/)).toBeVisible();
+    expect(screen.getByText('應退款 NT$ 1000')).toBeVisible();
+    const notice = screen.queryByText(/退款／補收金額為待核對目標/);
+    if (requiresReview) {
+      expect(notice).toBeVisible();
+      expect(notice).toHaveTextContent('套用後會保留未能辨識的舊差額，暫緩新增退款以避免重複退款。請由對帳人員確認明細配對。');
+    } else {
+      expect(notice).not.toBeInTheDocument();
+    }
+    const confirm = screen.getByRole('button', { name: '確認更正為成立後未服務' });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await screen.findByText('本案已完成更正，無須再次操作。');
+    expect(mocks.apply).toHaveBeenCalledWith(CASE, expect.objectContaining({ historical_unserved_correction: correction }), expect.anything());
+    expect(onObserved).toHaveBeenCalledTimes(1);
+  });
+
+  it('歷史更正有技術阻擋時顯示原因且禁止預覽', async () => {
+    facts = { ...facts, lifecycle_status: '訂單取消', historical_unserved_correction: {
+      blockers: ['historical_unserved_status_ineligible'], review_codes: [],
+      establishment_lifecycle_event_ids: [], establishment_adoption_receipt_ids: [],
+      establishment_owner_status: null, historical_adoption_receipt_ids: [], historical_absence_event_ids: [],
+      actual_service_evidence: [], actual_start_date: null, actual_end_date: null, prior_fee_ntd: 0,
+      prior_fee_reason: '', net_cash_received_ntd: null, prior_cancellation_event_id: null,
+      client_obligations: [], payroll_obligations: [],
+    } };
+    render(<OrderCancellationPanel caseNo={CASE} historicalUnservedCorrection />);
+    await screen.findByText('訂單取消', { selector: 'strong' });
+    expect(screen.getByRole('alert')).toHaveTextContent('案件目前的狀態無法執行這項更正。');
+    expect(screen.queryByRole('button', { name: '預覽零服務更正' })).not.toBeInTheDocument();
+    expect(mocks.preview).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: '沒有更正明細', blockers: null },
+    { name: '已有更正明細', blockers: ['historical_unserved_status_ineligible'] },
+    { name: '另有帳務阻擋', blockers: ['historical_unserved_status_ineligible', 'historical_unserved_cash_ledger_invalid'] },
+  ])('重新開啟已完成更正的案件時顯示唯讀結果（$name）', async ({ blockers }) => {
+    facts = {
+      ...facts,
+      lifecycle_status: '成立後未服務',
+      historical_unserved_correction: blockers === null ? null : {
+        blockers,
+        review_codes: ['historical_unserved_cash_evidence_requires_review'],
+        establishment_lifecycle_event_ids: [12345], establishment_adoption_receipt_ids: [],
+        establishment_owner_status: null, historical_adoption_receipt_ids: [], historical_absence_event_ids: [],
+        actual_service_evidence: [], actual_start_date: null, actual_end_date: null, prior_fee_ntd: 0,
+        prior_fee_reason: '', net_cash_received_ntd: 1000, prior_cancellation_event_id: null,
+        client_obligations: [
+          { obligation_identity: 'deposit-1', payment_stage: 'deposit', contracted_ntd: 1000, settled_ntd: 1000 },
+          { obligation_identity: 'first-1', payment_stage: 'first', contracted_ntd: 8000, settled_ntd: 0 },
+        ],
+        payroll_obligations: [],
+      },
+    };
+    const onObserved = vi.fn();
+    render(<OrderCancellationPanel caseNo={CASE} historicalUnservedCorrection onObserved={onObserved} />);
+
+    expect(await screen.findByText('本案已完成更正，無須再次操作。')).toHaveAttribute('role', 'status');
+    expect(screen.getByText('成立後未服務', { selector: 'strong' })).toBeVisible();
+    expect(screen.getByRole('link', { name: '查看本案帳務' })).toHaveAttribute('href', `#finance?tab=case-accounting&case_no=${CASE}&from=workbench`);
+    expect(screen.getByRole('link', { name: '以此案資料建立非市民新案' })).toHaveAttribute('href', `#clients?tab=applications&source_case=${CASE}`);
+    expect(screen.queryByText('案件目前的狀態無法執行這項更正。')).not.toBeInTheDocument();
+    if (blockers?.includes('historical_unserved_cash_ledger_invalid')) {
+      expect(screen.getByRole('alert')).toHaveTextContent('本案收付款紀錄有誤，請先核對帳務。');
+    } else {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    }
+    if (blockers !== null) {
+      expect(screen.getByRole('heading', { name: '定金' })).toBeVisible();
+      expect(screen.getByRole('heading', { name: '第一期款' })).toBeVisible();
+      expect(screen.getByText('收付款項待核對。更正後請確認對帳明細配對。')).toBeVisible();
+      const summary = screen.getByText('來源紀錄編號');
+      expect(summary.closest('details')).not.toHaveAttribute('open');
+      expect(screen.getByText('12345')).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '預覽零服務更正' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認更正為成立後未服務' })).not.toBeInTheDocument();
+    expect(mocks.preview).not.toHaveBeenCalled();
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(onObserved).not.toHaveBeenCalled();
+  });
+
   it('Apply 409 使預覽失效，不能用舊版本重送', async () => {
     mocks.apply.mockRejectedValue(new ApiHttpError(409, 'stale_preview', '版本已變更'));
     render(<OrderCancellationPanel caseNo={CASE} />); await open(); await confirmPreview(); await apply();

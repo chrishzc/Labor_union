@@ -154,6 +154,7 @@ export interface ActualStartFlowState {
 export interface CancellationCommand {
   caseNo: string;
   payload: OrderCancellationApplyPayload;
+  expectedLifecycleStatus: OrderCancellationReceipt['lifecycle_status'];
   idempotencyKey: string;
   actor: string;
 }

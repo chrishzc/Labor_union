@@ -30,6 +30,7 @@ from infrastructure.mysql.nas_mutations import ensure_nas_procedures
 from infrastructure.mysql.order_intake_terms_bootstrap_repository import MySqlOrderIntakeTermsBootstrapRepository
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
 from infrastructure.mysql.case_manual_supplement_repository import MySqlCaseManualSupplementRepository
+from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
@@ -751,8 +752,10 @@ def test_started_service_change_relocks_and_rebuilds_from_actual_start(monkeypat
         with connection.cursor() as cursor:
             cursor.execute("SELECT obligation_identity FROM client_obligations WHERE case_no=%s AND status='open' AND obligation_type='deposit'", (_CASE_NO,))
             deposit = cursor.fetchone()["obligation_identity"]
-            cursor.execute("SELECT obligation_identity FROM staff_obligations WHERE case_no=%s AND assignment_id=%s", (_CASE_NO, assignment_id))
-            payroll = cursor.fetchone()["obligation_identity"]
+            cursor.execute("SELECT obligation_identity,amount_due_ntd FROM staff_obligations WHERE case_no=%s AND assignment_id=%s", (_CASE_NO, assignment_id))
+            original_payroll = cursor.fetchone()
+            payroll = original_payroll["obligation_identity"]
+            assert original_payroll["amount_due_ntd"] == 36_000
         supplement = CaseManualSupplementService(MySqlCaseManualSupplementRepository(connection))
         for direction, obligation in (("client_receipt", deposit), ("staff_salary", payroll)):
             with MySqlUnitOfWork(connection) as unit:
@@ -808,7 +811,14 @@ def test_started_service_change_relocks_and_rebuilds_from_actual_start(monkeypat
             assert preview["scheduling"]["assignments"][0]["service_dates"] == dates
             assert sum(stage["amount"]["amount"] for stage in preview["client_finance_impact"]["stage_plans"]) == 80_000
             assert preview["payroll_impact"]["payroll"]["total_payable"]["amount"] == 60_000
-            assert any(action["amount"]["amount"] == 59_000 for action in preview["payroll_impact"]["actions"])
+            adjustment, = preview["payroll_impact"]["actions"]
+            assert adjustment["amount"]["amount"] == 24_000
+            assert adjustment["source_obligation_identity"] == payroll
+            settlement, = preview["payroll_impact"]["frozen_settlements"]
+            assert settlement["previous_entitlement"]["amount"] == 36_000
+            assert settlement["revised_entitlement"]["amount"] == 60_000
+            assert settlement["paid_net_amount"]["amount"] == 1_000
+            assert settlement["recovery_increase"]["amount"] == 0
             stale = _apply(client, {**before, "order_version": before["order_version"] + 1}, preview,
                            terms, "started-terms-stale", **replacement)
             assert stale.status_code == 409
@@ -833,6 +843,13 @@ def test_started_service_change_relocks_and_rebuilds_from_actual_start(monkeypat
                 for table in tables:
                     cursor.execute(f"SELECT * FROM {table} ORDER BY id")
                     assert cursor.fetchall() == cash_before[table]
+                cursor.execute("SELECT amount_due_ntd FROM staff_obligations WHERE obligation_identity=%s", (payroll,))
+                assert cursor.fetchone()["amount_due_ntd"] == 36_000
+            staff_items, _ = query_case_staff_accounting(read_connection, _CASE_NO)
+            payables = [item for item in staff_items if item.direction == "payable" and item.summary_included]
+            assert sum(item.expected_ntd for item in payables) == 60_000
+            assert sum(item.actual_ntd for item in payables) == 1_000
+            assert sum(item.remaining_ntd for item in payables) == 59_000
         assert after["service_quantity_lock_reason"] == "service_started"
         assert after["actual_start_date"] == before["actual_start_date"]
         assert after["terms"] == terms

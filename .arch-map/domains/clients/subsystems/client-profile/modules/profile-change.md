@@ -31,6 +31,7 @@
   - 案件詳情以 `source_case` 導向 Case Import 的手動非市民新案表單，沿既有 typed 詳情 Query 帶入資料；不由名冊建立案件或修改來源案。
   - 具 Orders 管理權限者從已取消案件詳情進入 `ui_react/src/components/OrderControlledReopenPanel.tsx`，沿用原 Preview／Apply 並回讀詳情、變更歷程與清單。
   - 名冊案件詳情提供既有 Orders 取消權限的「取消訂單」入口，組合相同正式取消面板與回讀，永久刪除仍由原 root-only 面板承接。
+  - 訂單狀態為「訂單取消」且具備既有 Orders 取消權限時，案件詳情顯示「更正歷史零服務」，在同一抽屜使用 Orders 正式更正面板並回讀名冊資料。
 - `ui_react/src/components/ClientRegistryDetailEditor.tsx` — 單一客戶清單 Drawer 直接組合主檔、報名、照護、Orders Terms 與唯讀帳務；各區 Preview／Apply、異步結果 guard、草稿保持及 mutation／回讀關閉鎖。報名／照護共用 BeClass version，保存後舊預覽失效。樓層費金額由既有 Orders Terms writer 保存。
   - 身分證字號在客戶主檔區塊維護，三節假日雙薪意願在 BeClass 區塊維護。兩欄沿 Case Import 問卷、有效修正及 BeClass version 保存。主檔組合保存依 owner 分別回讀，保留部分成功結果與未完成草稿。
   - 姓名、電話、Email、縣市與地址只在客戶主檔提供修改入口；主檔空白才採用唯一 BeClass 有效值，查閱不寫入或製造草稿。按儲存才將採用補值及實際變更交 Client Profile writer，原 BeClass 來源與專屬欄位保留，不雙寫。

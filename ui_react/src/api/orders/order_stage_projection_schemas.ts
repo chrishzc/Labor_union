@@ -7,13 +7,14 @@ import { z } from 'zod';
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const DateTimeSchema = z.string().min(1);
 const StageStatusSchema = z.enum(['not_started', 'in_progress', 'blocked', 'completed', 'unavailable']);
-const OrderLifecycleStatusSchema = z.enum([
+export const OrderLifecycleStatusSchema = z.enum([
   '待補件',
   '洽談中',
   '訂單成立',
   '服務中',
   '訂單完成',
   '訂單取消',
+  '成立後未服務',
   '歷史訂單－未服務',
   '歷史訂單－服務中',
   '歷史訂單－服務完成',
@@ -135,7 +136,7 @@ export const OrderOperationalTimelineSchema = z.strictObject({
       message: '目前階段必須對應 server-owned SOP 步驟',
     });
   }
-  if (timeline.lifecycle_status === '訂單取消' && timeline.current_stage_code !== null) {
+  if (['訂單取消', '成立後未服務'].includes(timeline.lifecycle_status) && timeline.current_stage_code !== null) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['current_stage_code'],

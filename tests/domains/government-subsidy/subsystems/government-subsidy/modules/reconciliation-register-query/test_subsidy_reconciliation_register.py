@@ -103,6 +103,19 @@ def _order_row(**overrides):
     return row
 
 
+def test_established_unserved_is_zero_without_registered_volume_or_missing_rate_fallback():
+    source = _order_row(
+        order_status="成立後未服務", service_days=30,
+        historical_actual_service_hours=240, official_service_days=10,
+        payroll_hourly_rate_ntd=None,
+    )
+    assert register.project_receivable_estimate(source) == register.SubsidyReceivableEstimate(0, None)
+    assert register.project_receivable_estimate({"order_status": "成立後未服務"}) == register.SubsidyReceivableEstimate(0, None)
+    assert register._service_volume(source, Decimal(8), Decimal(30)) == (Decimal(0), 0)
+    assert register._to_register_row(source) is None
+    assert "成立後未服務" not in register.ESTABLISHED_ORDER_STATUSES
+
+
 def test_quarterly_register_includes_established_orders_without_claim_batch():
     connection = FakeConnection([
         _order_row(
@@ -240,6 +253,29 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
         "一般市民",
         "補助市民",
     )
+
+
+def test_operations_report_annual_rows_exclude_cancelled_orders_before_subsidy_calculation():
+    connection = FakeConnection([
+        _order_row(case_no="115000001", order_status="訂單成立"),
+        _order_row(
+            case_no="115000002",
+            order_status="訂單取消",
+            payroll_hourly_rate_ntd=None,
+        ),
+        _order_row(
+            case_no="115000003",
+            order_status="訂單取消",
+            official_service_days=5,
+        ),
+    ])
+
+    result = register.build_operations_report_annual_subsidy_rows(2026, lambda: connection)
+
+    assert [row["市府訂單號碼"] for row in result["general_citizen_rows"]] == ["115000001"]
+    assert result["general_citizen_rows"][0]["補助款金額"] == Decimal("12000")
+    assert result["subsidized_citizen_rows"] == []
+    assert result["indigenous_citizen_rows"] == []
 
 
 def test_operations_report_reconciliation_period_uses_service_end_quarter():

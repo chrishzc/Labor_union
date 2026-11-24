@@ -1,0 +1,233 @@
+.historical-unserved-correction,
+.historical-unserved-correction .historical-unserved-evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.historical-unserved-correction {
+  padding: clamp(12px, 2vw, 24px);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius-lg);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.historical-unserved-correction :is(h4, h5, h6, p, dl, dd) {
+  margin: 0;
+}
+
+.historical-unserved-correction .historical-unserved-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.historical-unserved-correction h4 {
+  font-size: 1.2rem;
+  line-height: 1.4;
+}
+
+.historical-unserved-correction .historical-unserved-header p {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: .84rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.historical-unserved-correction .historical-unserved-header strong {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.historical-unserved-correction .historical-unserved-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: var(--space-3);
+}
+
+.historical-unserved-correction .historical-unserved-card {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius-md);
+  background: var(--md-sys-color-surface-container);
+}
+
+.historical-unserved-correction :is(h5, h6, summary) {
+  font-size: .95rem;
+  font-weight: 650;
+}
+
+.historical-unserved-correction summary {
+  cursor: pointer;
+}
+
+.historical-unserved-correction .historical-unserved-card dl {
+  display: flex;
+  gap: var(--space-2) var(--space-5);
+  flex-wrap: wrap;
+}
+
+.historical-unserved-correction .historical-unserved-card dl.historical-unserved-settlement {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.historical-unserved-correction .historical-unserved-card :is(h5, h6, summary) + :is(dl, ul),
+.historical-unserved-correction .historical-unserved-card dl + p {
+  margin-top: var(--space-2);
+}
+
+.historical-unserved-correction .historical-unserved-card :is(dt, dl + p) {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: .84rem;
+}
+
+.historical-unserved-correction .historical-unserved-card dd {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.historical-unserved-correction dl.historical-unserved-records {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+}
+
+.historical-unserved-correction .historical-unserved-obligations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: var(--space-2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.historical-unserved-correction .historical-unserved-obligations li {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--md-sys-color-surface);
+}
+
+.historical-unserved-correction :is(.historical-unserved-success, .historical-unserved-review, [role='alert']) {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+.historical-unserved-correction .historical-unserved-success {
+  border-inline-start: 3px solid var(--md-sys-color-success);
+  background: var(--md-sys-color-success-container);
+  font-weight: 650;
+}
+
+.historical-unserved-correction .historical-unserved-review {
+  border-inline-start: 3px solid var(--md-sys-color-warning);
+  background: var(--md-sys-color-warning-container);
+  font-size: .9rem;
+}
+
+.historical-unserved-correction .historical-unserved-review ul {
+  margin: var(--space-1) 0 0;
+  padding-inline-start: var(--space-5);
+}
+
+.historical-unserved-correction p[role='alert'] {
+  margin: 0;
+  border-inline-start: 3px solid var(--md-sys-color-error);
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-surface);
+}
+
+.historical-unserved-correction .historical-unserved-form {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.historical-unserved-correction .historical-unserved-form label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.historical-unserved-correction .historical-unserved-form :is(textarea, input:not([type='checkbox'])) {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.historical-unserved-correction .historical-unserved-form textarea {
+  resize: vertical;
+}
+
+.historical-unserved-correction .historical-unserved-form label:has(input[type='checkbox']) {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+}
+
+.historical-unserved-correction .historical-unserved-preview {
+  justify-self: start;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--md-sys-color-primary);
+  border-radius: var(--radius-md);
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  font: inherit;
+}
+
+.historical-unserved-correction .historical-unserved-preview:hover:not(:disabled) {
+  border-color: var(--md-sys-color-primary-hover);
+  background: var(--md-sys-color-primary-hover);
+}
+
+.historical-unserved-correction .historical-unserved-preview:disabled {
+  border-color: var(--md-sys-color-outline);
+  background: var(--md-sys-color-disabled-container);
+  color: var(--md-sys-color-disabled);
+  cursor: not-allowed;
+}
+
+.historical-unserved-correction .historical-unserved-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.historical-unserved-correction .historical-unserved-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: var(--radius-md);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-primary-hover);
+  font-size: .84rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.historical-unserved-correction .historical-unserved-actions a:hover:not([aria-disabled='true']) {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary-container);
+}
+
+.historical-unserved-correction .historical-unserved-actions a[aria-disabled='true'] {
+  color: var(--md-sys-color-disabled);
+  cursor: not-allowed;
+}
+
+.historical-unserved-correction :is(a, button, input, textarea, summary):focus-visible {
+  outline: 2px solid var(--md-sys-color-focus);
+  outline-offset: 3px;
+}

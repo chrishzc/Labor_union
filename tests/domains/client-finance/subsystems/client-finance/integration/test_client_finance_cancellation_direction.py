@@ -20,6 +20,7 @@ from domains.client_finance.obligation_planning import (
     ClientFinanceTermsFacts,
     ClientPaymentTerms,
     ExistingClientStageObligation,
+    build_client_finance_cancellation_impact,
     build_client_finance_rate_correction_candidate,
     build_client_finance_terms_candidate,
     build_client_finance_terms_impact,
@@ -98,6 +99,32 @@ def test_paid_second_stage_refund_preserves_its_source_due_date(original_due):
     assert action.after_due_date == original_due
 
 
+def test_cancellation_settlement_applies_cash_to_rendered_service_before_fee():
+    case_no = "CASE-SERVED"
+    service_day = date(2026, 8, 1)
+    assignment = AssignmentCandidate(
+        f"{case_no}:g2:a1", 1, 7, 1, service_day, service_day, (service_day,), 8,
+    )
+    scheduling = SchedulingGenerationCandidate(case_no, 2, 1, 2, (1,), (assignment,), ())
+    terms = OrderTerms(service_day, 2, 8, MoneyNTD(0), ServiceTimeTerms(None, None, None))
+    source = ClientFinanceTermsSourceFacts(
+        case_no, 5,
+        ClientPaymentTerms(0, MoneyNTD(500), date(2026, 7, 1), service_day, None),
+        (), (),
+    )
+    impact = build_client_finance_cancellation_impact(
+        source, terms, scheduling, "historical-cancellation:served",
+        net_cash_received=MoneyNTD(6000), fee=MoneyNTD(2500),
+        fee_reason="approved fee", processed_on=service_day,
+    )
+    summary = impact.cancellation_settlement
+    assert (summary.service_due_ntd, summary.net_received_ntd, summary.fee_received_ntd) == (4000, 6000, 2000)
+    assert (summary.refund_due_ntd, summary.additional_charge_due_ntd) == (0, 500)
+    adjustment, = impact.actions
+    assert adjustment.action is ClientObligationActionKind.CREATE_ADJUSTMENT
+    assert adjustment.direction_amount_ntd == 500
+
+
 def test_rate_correction_before_matching_advances_version_without_obligations():
     candidate = build_client_finance_rate_correction_candidate(
         _rate_correction_facts(0), "beclass-rate-correction:9",
@@ -132,11 +159,38 @@ def test_rate_correction_does_not_bypass_missing_dates_for_existing_obligations(
         build_client_finance_rate_correction_candidate(facts, "beclass-rate-correction:9")
 
 
-def test_rate_correction_keeps_actual_deposit_overflow_validation():
-    with pytest.raises(ValueError, match="deposit service days exceed official service days"):
-        build_client_finance_rate_correction_candidate(
-            _rate_correction_facts(3), "beclass-rate-correction:9",
-        )
+def test_rate_correction_limits_deposit_to_existing_formal_service_dates():
+    facts = _rate_correction_facts(3)
+    candidate = build_client_finance_rate_correction_candidate(
+        facts, "beclass-rate-correction:9",
+    )
+    assert [len(stage.service_dates) for stage in candidate.stage_plans] == [3, 0, 0]
+    assert [stage.amount.amount for stage in candidate.stage_plans] == [11800, 0, 0]
+    assert candidate.payment_terms.deposit_service_days == facts.payment_terms.deposit_service_days == 5
+
+
+@pytest.mark.parametrize("paid", [False, True])
+def test_shortened_service_keeps_original_terms_and_cash_with_owner_difference(paid):
+    original = _rate_correction_facts(5)
+    original_plan = build_client_finance_terms_candidate(original, "before-early-end")
+    deposit = original_plan.stage_plans[0]
+    recorded = ExistingClientStageObligation(
+        "original-deposit", PaymentStage.DEPOSIT, deposit.amount,
+        deposit.amount if paid else MoneyNTD(0), deposit.due_date, paid,
+    )
+    shorter = replace(original, charge_days=original.charge_days[:2], existing_obligations=(recorded,))
+    candidate = build_client_finance_terms_candidate(shorter, "early-end")
+    assert [stage.amount.amount for stage in candidate.stage_plans] == [8200, 0, 0]
+    assert candidate.payment_terms.deposit_service_days == 5
+    assert shorter.payment_terms == original.payment_terms
+    assert recorded.contracted_amount == MoneyNTD(19000)
+    assert recorded.net_settled_amount == (MoneyNTD(19000) if paid else MoneyNTD(0))
+    action = candidate.actions[0]
+    assert action.action is (ClientObligationActionKind.CREATE_REFUND if paid else ClientObligationActionKind.REPLACE_OPEN)
+    assert action.direction_amount_ntd == (10800 if paid else 0)
+    from domains.client_finance.obligation_planning import confirmed_zero_payment_stages
+    current = replace(shorter, existing_obligations=())
+    assert confirmed_zero_payment_stages(current) == {PaymentStage.FIRST, PaymentStage.SECOND}
 
 
 def test_full_subsidy_terms_do_not_create_client_service_principal() -> None:
@@ -402,6 +456,89 @@ class _PaymentTermsCursor(_Cursor):
         if 'FROM client_payment_terms ' in self.statements[-1][0]:
             return self.terms
         return super().fetchone()
+
+
+@pytest.mark.parametrize("before_status", ["歷史訂單－服務完成", "訂單取消", "訂單成立"])
+def test_cancellation_defers_government_sync_until_orders_saves_terminal_facts(monkeypatch, before_status):
+    from unittest.mock import Mock
+    from domains.orders.lifecycle import OrderLifecycleStatus
+    import infrastructure.mysql.client_finance_terms_writer as finance_writer
+    import infrastructure.mysql.government_period_difference_repository as government_writer
+    from infrastructure.mysql.order_cancellation_repository import MySqlOrderCancellationRepository
+    from subsystems.orders.cancellation_workflow import CancellationOrderPersistenceCommand
+
+    calls = []
+    order = {"status": before_status}
+
+    class TerminalCursor(_Cursor):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, parameters):
+            super().execute(statement, parameters)
+            if statement.startswith("UPDATE orders SET"):
+                order["status"] = parameters[2]
+                calls.append("orders_terminal")
+
+    cursor = TerminalCursor()
+    connection = SimpleNamespace(cursor=lambda: cursor, commit=Mock())
+    cursor.connection = connection
+    monkeypatch.setattr(finance_writer, "_persist_payment_terms", lambda *_args: False)
+    monkeypatch.setattr(finance_writer, "_advance_account_version", lambda *_args: calls.append("finance_account"))
+    monkeypatch.setattr(finance_writer, "_save_cancellation_settlement", lambda *_args: calls.append("finance_receipt"))
+    monkeypatch.setattr(finance_writer, "_append_outbox", lambda *_args: calls.append("finance_outbox"))
+
+    def synchronize_government(_cursor, case_no, key, actor, reason):
+        assert (case_no, key, actor, reason) == ("CASE-TERMINAL", "terminal-sync", "admin", "confirmed zero service")
+        assert order["status"] == OrderLifecycleStatus.ESTABLISHED_UNSERVED.value
+        calls.append("government_final")
+
+    monkeypatch.setattr(government_writer, "synchronize_government_case_amount", synchronize_government)
+    candidate = SimpleNamespace(
+        case_no="CASE-TERMINAL", stage_plans=(), payment_terms=None, actions=(),
+        cancellation_settlement=object(), subsidy_return_plan=None,
+    )
+    command = ClientFinanceImpactPersistenceCommand(
+        candidate, IdempotencyKey("terminal-sync"), ActorContext("admin"),
+        "confirmed zero service", CorrelationId("terminal-sync"), "orders_cancellation", 9,
+    )
+
+    finance_writer.persist_client_finance_terms_impact(cursor, command)
+    assert calls == ["finance_account", "finance_receipt", "finance_outbox"]
+    assert order["status"] == before_status
+
+    MySqlOrderCancellationRepository(connection).update_cancelled_order(CancellationOrderPersistenceCommand(
+        command.candidate.case_no, 1, 2, None, None,
+        OrderLifecycleStatus.ESTABLISHED_UNSERVED, command.actor, command.reason, command.idempotency_key,
+    ))
+
+    assert calls == ["finance_account", "finance_receipt", "finance_outbox", "orders_terminal", "government_final"]
+    connection.commit.assert_not_called()
+
+
+def test_non_cancellation_terms_keep_government_sync_after_finance_persistence(monkeypatch):
+    import infrastructure.mysql.client_finance_terms_writer as finance_writer
+    import infrastructure.mysql.government_period_difference_repository as government_writer
+
+    calls = []
+    monkeypatch.setattr(finance_writer, "_persist_payment_terms", lambda *_args: True)
+    monkeypatch.setattr(finance_writer, "_advance_account_version", lambda *_args: calls.append("finance_account"))
+    monkeypatch.setattr(finance_writer, "_append_outbox", lambda *_args: calls.append("finance_outbox"))
+    monkeypatch.setattr(government_writer, "synchronize_government_case_amount", lambda *_args: calls.append("government_terms"))
+    candidate = SimpleNamespace(
+        case_no="CASE-TERMS", stage_plans=(), payment_terms=None, actions=(), subsidy_return_plan=None,
+    )
+    command = ClientFinanceImpactPersistenceCommand(
+        candidate, IdempotencyKey("terms-sync"), ActorContext("admin"),
+        "service terms corrected", CorrelationId("terms-sync"), "orders_terms", 9,
+    )
+
+    finance_writer.persist_client_finance_terms_impact(_Cursor(), command)
+
+    assert calls == ["finance_account", "finance_outbox", "government_terms"]
 
 
 @pytest.mark.parametrize("days,saved_due,expected,writes", [

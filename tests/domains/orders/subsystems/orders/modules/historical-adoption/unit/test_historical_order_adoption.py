@@ -30,6 +30,7 @@ from infrastructure.mysql.historical_assignment_writer import (
     MySqlHistoricalAssignmentWriter,
 )
 from subsystems.orders.historical_adoption_workflow import (
+    HistoricalOrderAdoptionReceipt,
     HistoricalOrderAdoptionRequest,
     HistoricalOrderAdoptionWorkflow,
     HistoricalPairingResolution,
@@ -429,6 +430,62 @@ def test_same_status_and_dates_do_not_repeat_order_lifecycle_version():
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
     assert candidate.mutates_order is False
     assert candidate.resulting_version == current.lifecycle_version
+
+
+@pytest.mark.parametrize("source_status", (0, 1))
+def test_reimport_preserves_confirmed_zero_service_and_records_conflict(tmp_path, source_status):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", date(2026, 8, 1), date(2026, 8, 10), source_status, "月嫂甲"],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class CorrectedRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            return _current(OrderLifecycleStatus.ESTABLISHED_UNSERVED)
+
+        def persist(self, request, preview, assignment_ids):
+            assert assignment_ids == ()
+            assert preview.after_status == OrderLifecycleStatus.ESTABLISHED_UNSERVED.value
+            assert preview.date_patch == ()
+            assert preview.resulting_version == preview.expected_version
+            self.persist_count += 1
+            return HistoricalOrderAdoptionReceipt(
+                preview.outcome, preview.case_no, preview.resulting_version,
+                0, "review-reference", False, preview.fingerprint,
+            )
+
+    class NoSchedulingWrites:
+        def append_completed_assignments(self, case_no, assignments):
+            pytest.fail("conflicting workbook rows must not create assignments")
+
+    repository = CorrectedRepository(row)
+    workflow = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork, NoSchedulingWrites())
+    preview = workflow.preview(row)
+    receipt = workflow.apply(HistoricalOrderAdoptionRequest(
+        row, preview.fingerprint, "historical-order-row:confirmed-zero-service",
+        "test-operator", "historical workbook", "historical-reimport", workbook_import=True,
+    ))
+
+    assert receipt.outcome is HistoricalOrderOutcome.REVIEW_REQUIRED
+    assert "historical_order_confirmed_zero_service_conflict" in preview.issue_codes
+    assert repository.staff_resolution_count == 0
+    assert repository.persist_count == 1
+
+
+def test_clean_cancelled_source_does_not_overwrite_confirmed_zero_service():
+    current = _current(OrderLifecycleStatus.ESTABLISHED_UNSERVED)
+    candidate = build_historical_order_candidate(
+        current,
+        HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.CANCELLED, None, None),
+        _BUSINESS_DATE,
+    )
+
+    assert candidate.outcome is HistoricalOrderOutcome.UNMATCHED_CASE
+    assert candidate.after_status is current.status
+    assert not candidate.mutates_order
+    assert candidate.issue_codes == ()
 
 
 def test_repository_skips_lifecycle_write_for_unchanged_adoption_preview():

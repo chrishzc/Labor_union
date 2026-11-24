@@ -13,11 +13,11 @@ const descriptions:Record<string,string>={loss:'這次金額記為損失；原�
 type Owner='client'|'payroll'|'staff';
 type Target={identity:string;label:string;options:string[];version:number;remaining:number;effective?:number;computed?:number};
 
-export function AccountingDifferencePanel({caseNo,onChanged,refreshVersion=0}:{caseNo:string;onChanged:()=>void;refreshVersion?:number}){
+export function AccountingDifferencePanel({caseNo,onChanged,refreshVersion=0,initialOwner='client'}:{caseNo:string;onChanged:()=>void;refreshVersion?:number;initialOwner?:Owner}){
   const [client,setClient]=useState<ClientDifferenceView|null>(null);
   const [payroll,setPayroll]=useState<PayrollAmountView|null>(null);
   const [staff,setStaff]=useState<StaffRecoveryView|null>(null);
-  const [owner,setOwner]=useState<Owner>('client');
+  const [owner,setOwner]=useState<Owner>(initialOwner);
   const [identity,setIdentity]=useState('');const [action,setAction]=useState('');const [amount,setAmount]=useState('');const [reason,setReason]=useState('');
   const [confirmed,setConfirmed]=useState(false);const [busy,setBusy]=useState(false);const [unknown,setUnknown]=useState(false);
   const [error,setError]=useState('');const [message,setMessage]=useState('');const [revision,setRevision]=useState(0);

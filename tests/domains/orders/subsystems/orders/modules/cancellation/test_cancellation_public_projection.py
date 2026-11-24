@@ -69,3 +69,17 @@ def test_cancellation_still_rejects_reducing_locked_full_service():
     scheduling = CancellationSchedulingFacts('CASE-1', 1, 1, ())
     with pytest.raises(CancellationCandidateError, match='service_data_locked'):
         build_cancellation_candidate(order, scheduling, date(2026, 10, 25), ())
+
+
+@pytest.mark.parametrize("status,events,adoptions,expected", [
+    ("訂單取消", (), (), "訂單取消"),
+    ("洽談中", (), (), "訂單取消"),
+    ("訂單成立", (), (), "成立後未服務"),
+    ("訂單取消", (31,), (), "成立後未服務"),
+    ("訂單取消", (), (7,), "成立後未服務"),
+])
+def test_zero_service_terminal_result_requires_owner_establishment_evidence(status, events, adoptions, expected):
+    from domains.orders.lifecycle import OrderEstablishmentEvidence, OrderLifecycleStatus, zero_service_terminal_status
+
+    evidence = OrderEstablishmentEvidence(events, adoptions, OrderLifecycleStatus(status))
+    assert zero_service_terminal_status(evidence).value == expected

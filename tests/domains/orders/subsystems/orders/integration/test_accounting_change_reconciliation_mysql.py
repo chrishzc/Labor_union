@@ -13,7 +13,11 @@ import pymysql
 import pytest
 
 _fixture = runpy.run_path(str(Path(__file__).with_name('test_order_terms_empty_service_time_disposable_mysql.py')))
-_seed, _seed_effective_assignment, _CASE_NO = (_fixture[name] for name in ('_seed', '_seed_effective_assignment', '_CASE_NO'))
+# The shared Terms fixture accepts arbitrary IDs. This bank acceptance must use
+# a canonical imported case number so the real virtual-account resolver can bind it.
+_CASE_NO = '115000337'
+_seed, _seed_effective_assignment = (_fixture[name] for name in ('_seed', '_seed_effective_assignment'))
+_seed.__globals__['_CASE_NO'] = _CASE_NO
 from infrastructure.mysql import mysql_adapter
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -32,6 +36,9 @@ from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.money import MoneyNTD
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
+from scripts.check_runtime_database import ReadOnlyRuntimeConfig
+from scripts.migrate_preserved_database_additive_schema import ROOT, local_additive_target_state
+from shared_kernel.migration_release import load_migration_release_manifest
 
 pytestmark = pytest.mark.skipif(os.getenv('ACCOUNTING_SYNC_MYSQL') != '1', reason='opt-in localhost acceptance')
 
@@ -47,6 +54,15 @@ def connection():
     connection = pymysql.connect(**{**config, 'database': name, 'charset':'utf8mb4',
                                     'cursorclass':pymysql.cursors.DictCursor, 'autocommit':False})
     try:
+        artifact = '1081_order_established_unserved_status.sql'
+        release = load_migration_release_manifest(
+            ROOT / 'db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.json', ROOT,
+        )
+        schema_state = local_additive_target_state(
+            ReadOnlyRuntimeConfig({**config, 'database': name}), name, artifact,
+            release.owned_object_descriptors(ROOT)[artifact],
+        )
+        assert schema_state['state'] == 'exact', 'The real feature schema must match the strict 1081 descriptor.'
         from infrastructure.mysql.nas_mutations import ensure_nas_procedures
         ensure_nas_procedures(connection)
         _seed(connection)
@@ -218,11 +234,8 @@ def test_case_pricing_recalculates_terms_and_reconciles_waiting_original_source(
 
 
 @pytest.mark.parametrize('paid', (0, 1000))
-def test_early_service_end_replaces_bank_candidates_and_receives_original_source(connection, paid):
-    from domains.orders.cancellation import ConfirmedServiceDay
-    from infrastructure.mysql.order_cancellation_repository import MySqlOrderCancellationRepository
-    from subsystems.orders.cancellation_workflow import OrderCancellationWorkflow, OrderCancellationApplyRequest
-    change_fee(connection, 1000, 'terms-before-cancellation')
+def test_early_service_end_replaces_bank_candidates_and_receives_original_source(connection, paid, monkeypatch):
+    change_fee(connection, 1000, 'terms-before-early-end')
     original = receipt_application(connection).query(_CASE_NO)['obligations']
     if paid:
         staff_items, _ = query_case_staff_accounting(connection, _CASE_NO)
@@ -234,46 +247,208 @@ def test_early_service_end_replaces_bank_candidates_and_receives_original_source
                     '合成原收付款', 'early-original-' + direction, 'synthetic-accounting', settlement_mode='partial')
                 unit.commit()
     original_cash = cash_snapshot(connection)
-    waiting = bank_source(connection, 6800-paid, [item['obligation_identity'] for item in original])
+    waiting = bank_source(connection, 7400-paid, [item['obligation_identity'] for item in original])
+    client_before_early_end = receipt_application(connection).query(_CASE_NO)
+    assert sum(item['amount_due_ntd'] for item in client_before_early_end['obligations']) > 7400-paid
     with connection.cursor() as cursor:
-        cursor.execute("UPDATE orders SET status='服務中',actual_start_date='2026-10-01' WHERE case_no=%s", (_CASE_NO,))
-        cursor.execute('SELECT staff_id FROM case_staff_assignments WHERE case_no=%s', (_CASE_NO,))
-        staff_id = cursor.fetchone()['staff_id']
+        cursor.execute("UPDATE orders SET status='服務中',actual_start_date='2026-10-01',"
+                       "service_start_time='09:00:00',service_end_time='17:00:00',service_end_day_offset=0 "
+                       "WHERE case_no=%s", (_CASE_NO,))
+        cursor.execute('SELECT id FROM case_staff_assignments WHERE case_no=%s', (_CASE_NO,))
+        assignment_id = cursor.fetchone()['id']
     connection.commit()
-    workflow = OrderCancellationWorkflow(MySqlOrderCancellationRepository(connection), lambda: MySqlUnitOfWork(connection),
+    workflow = OrderTermsWorkflow(MySqlOrderTermsRepository(connection), lambda: MySqlUnitOfWork(connection),
         FixedBusinessClock(datetime(2026,10,3,12,tzinfo=TAIPEI_TIME_ZONE)))
-    days = (ConfirmedServiceDay(date(2026,10,1),staff_id),ConfirmedServiceDay(date(2026,10,2),staff_id))
-    preview = workflow.preview(_CASE_NO, days)
-    request = OrderCancellationApplyRequest(_CASE_NO, days, ExpectedVersion(preview.order_version),
+    before = MySqlOrderTermsRepository(connection).load_for_query(_CASE_NO)
+    proposed = replace(before.registry.order.terms, service_days=2)
+    days = (date(2026,10,1), date(2026,10,2))
+    replacement = dict(replacement_service_dates=days, replacement_allocations=((assignment_id, 2),),
+                       replacement_assignment_dates=((assignment_id, days),), allow_started_service_change=True)
+    preview = workflow.preview(_CASE_NO, proposed, **replacement)
+    assert MySqlOrderTermsRepository(connection).load_for_query(_CASE_NO) == before
+    request = OrderTermsApplyRequest(_CASE_NO, proposed, ExpectedVersion(preview.order_version),
         ExpectedVersion(preview.scheduling_version), ExpectedVersion(preview.client_finance_version),
         ExpectedVersion(preview.payroll_version),preview.fingerprint,IdempotencyKey('early-end'),
-        ActorContext('synthetic-accounting'),'確認實際提前結束',CorrelationId('early-end'))
+        ActorContext('synthetic-accounting'),'確認實際提前結束',CorrelationId('early-end'), **replacement)
     if paid:
-        class FailingRepository(MySqlOrderCancellationRepository):
+        class FailingRepository(MySqlOrderTermsRepository):
             def persist_payroll_impact(self, command):
                 super().persist_payroll_impact(command)
-                raise RuntimeError('synthetic cancellation payroll rollback')
-        failure = OrderCancellationWorkflow(FailingRepository(connection), lambda: MySqlUnitOfWork(connection),
+                raise RuntimeError('synthetic early-end payroll rollback')
+        failure = OrderTermsWorkflow(FailingRepository(connection), lambda: MySqlUnitOfWork(connection),
             FixedBusinessClock(datetime(2026,10,3,12,tzinfo=TAIPEI_TIME_ZONE)))
-        with pytest.raises(RuntimeError, match='synthetic cancellation payroll rollback'):
+        with pytest.raises(RuntimeError, match='synthetic early-end payroll rollback'):
             failure.apply(request)
         assert cash_snapshot(connection) == original_cash
+        assert MySqlOrderTermsRepository(connection).load_for_query(_CASE_NO) == before
         items, _ = query_case_staff_accounting(connection, _CASE_NO)
         assert sum(item.expected_ntd for item in items if item.direction=='payable' and item.summary_included) == 13000
     receipt = workflow.apply(request)
     assert workflow.apply(request) == receipt
     assert cash_snapshot(connection) == original_cash
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT status,service_days,actual_end_date FROM orders WHERE case_no=%s', (_CASE_NO,))
+        assert cursor.fetchone() == {'status':'服務中', 'service_days':2, 'actual_end_date':date(2026,10,2)}
+        cursor.execute('SELECT COUNT(*) AS count FROM order_cancellation_events WHERE case_no=%s', (_CASE_NO,))
+        assert cursor.fetchone()['count'] == 0
+    terms_payroll, _ = query_case_staff_accounting(connection, _CASE_NO)
+    assert sum(item.expected_ntd for item in terms_payroll
+               if item.direction == 'payable' and item.summary_included) == 5800, _early_end_diagnostic(connection)
+    _finish_yesterdays_service_via_durable_worker(connection, monkeypatch)
+    _assert_early_end_core_stages(connection, client_settled=False)
     items, _ = query_case_staff_accounting(connection, _CASE_NO)
     payables = [item for item in items if item.direction=='payable' and item.summary_included]
-    assert sum(item.expected_ntd for item in payables) == 5200
+    assert sum(item.expected_ntd for item in payables) == 5800, _early_end_diagnostic(connection)
     assert sum(item.actual_ntd for item in payables) == paid
-    assert sum(item.remaining_ntd for item in payables) == 5200-paid
+    assert sum(item.remaining_ntd for item in payables) == 5800-paid
     target = bank_candidate(connection, waiting)['reconciliation_target']
     assert target is not None
-    assert target['obligation_identities'] != [item['obligation_identity'] for item in original]
+    current_client = receipt_application(connection).query(_CASE_NO)
+    assert receipt.client_finance_version is not None
+    assert receipt.client_finance_version > client_before_early_end['account_version']
+    assert current_client['account_version'] >= receipt.client_finance_version
+    assert target['case_no'] == _CASE_NO
+    assert set(target['obligation_identities']) == {
+        item['obligation_identity'] for item in current_client['obligations']
+    }
+    assert sum(item['amount_due_ntd'] for item in current_client['obligations']) == 7400-paid
+    # REPLACE_OPEN may retain the obligation identity. Its current balance and
+    # owner version, rather than an ID change, establish a fresh bank candidate.
+    selection = ReconciliationSelection(_CASE_NO, None, (str(waiting),), tuple(target['obligation_identities']))
+    current_preview = receipt_application(connection).preview(selection)
+    assert current_preview.account_version == current_client['account_version']
+    assert current_preview.candidate.status.value == 'exact'
+    assert current_preview.candidate.bank_total.amount == 7400-paid
+    assert current_preview.candidate.obligation_total.amount == 7400-paid
+    assert current_preview.candidate.overage_amount.amount == 0
     receive(connection, waiting, target['obligation_identities'], 'early-end-receipt')
     assert bank_candidate(connection, waiting)['status'] == 'posted'
+    _assert_early_end_core_stages(connection, client_settled=True)
+    _assert_early_end_monthly_payable(connection)
     after_cash = cash_snapshot(connection)
     assert all(row in after_cash[table] for table, rows in original_cash.items() for row in rows)
     assert after_cash['staff_payout_events'] == original_cash['staff_payout_events']
     assert after_cash['staff_payout_obligation_links'] == original_cash['staff_payout_obligation_links']
+
+
+def _finish_yesterdays_service_via_durable_worker(connection, monkeypatch):
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from infrastructure.mysql.background_job_repository import BackgroundJobRepository
+    from infrastructure.mysql.order_auto_completion_job_repository import MySqlDueOrderAutoCompletionRepository
+    from subsystems.jobs.command_application import DurableJobCommandApplication
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
+    from subsystems.orders.auto_completion_job_dispatch import AutoCompletionJobDispatcher
+
+    config = mysql_adapter._database_config_from_environment()
+    database = connection.db.decode() if isinstance(connection.db, bytes) else connection.db
+    assert database.startswith('lu_test_accounting_sync_')
+
+    def isolated_connection():
+        return pymysql.connect(**{**config, 'database':database, 'cursorclass':pymysql.cursors.DictCursor,
+                                  'charset':'utf8mb4', 'autocommit':False})
+
+    repository = BackgroundJobRepository(connection)
+    dispatcher = AutoCompletionJobDispatcher(MySqlDueOrderAutoCompletionRepository(connection),
+        DurableJobCommandApplication(repository, connection))
+    today = datetime(2026,10,3,12,tzinfo=TAIPEI_TIME_ZONE)
+    before_completion = _early_end_diagnostic(connection)
+    dispatch = dispatcher.dispatch_due_orders(today)
+    assert dispatch.scanned_count == dispatch.enqueued_count == 1
+    with monkeypatch.context() as patch:
+        patch.setattr(mysql_adapter, 'get_connection', isolated_connection)
+        worker = DurableJobWorker(repository, connection, default_job_handlers(), 'early-end-catchup', retry_delay_seconds=0)
+        assert worker.recover_and_run_once() is True
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT status,error_payload,receipt_payload FROM background_jobs')
+        job_results = cursor.fetchall()
+        diagnostic = {
+            'before_completion': before_completion,
+            'after_completion': _early_end_diagnostic(connection),
+            'jobs': job_results,
+        }
+        cursor.execute('SELECT status,actual_end_date FROM orders WHERE case_no=%s', (_CASE_NO,))
+        assert cursor.fetchone() == {'status':'訂單完成', 'actual_end_date':date(2026,10,2)}, diagnostic
+        cursor.execute('SELECT status FROM background_jobs')
+        assert [row['status'] for row in cursor.fetchall()] == ['succeeded'], diagnostic
+        cursor.execute('SELECT COUNT(*) AS count FROM order_auto_completion_apply_receipts WHERE case_no=%s', (_CASE_NO,))
+        assert cursor.fetchone()['count'] == 1
+    assert dispatcher.dispatch_due_orders(today).scanned_count == 0
+
+
+def _early_end_diagnostic(connection):
+    """Read only synthetic owner facts so a failed durable command remains diagnosable."""
+    from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository
+
+    state = {}
+    with connection.cursor() as cursor:
+        cursor.execute(
+            'SELECT status,lifecycle_version,service_days,actual_start_date,actual_end_date,staff_payment_due_date '
+            'FROM orders WHERE case_no=%s', (_CASE_NO,),
+        )
+        state['order'] = cursor.fetchone()
+        cursor.execute(
+            'SELECT o.obligation_identity,o.assignment_id,o.payroll_version,o.direction,o.status,'
+            'o.amount_due_ntd,o.source_obligation_identity,p.net_paid_ntd,p.status AS payout_status,'
+            'c.effective_ntd,c.settlement_base_ntd '
+            'FROM staff_obligations o '
+            'LEFT JOIN staff_payable_projections p ON p.obligation_identity=o.obligation_identity '
+            'LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+            'WHERE o.case_no=%s ORDER BY o.obligation_identity', (_CASE_NO,),
+        )
+        state['staff_obligations'] = cursor.fetchall()
+        cursor.execute(
+            'SELECT id,staff_id,generation_id,status FROM case_staff_assignments '
+            'WHERE case_no=%s ORDER BY id', (_CASE_NO,),
+        )
+        state['assignments'] = cursor.fetchall()
+    try:
+        state['rebuild_facts'] = repr(MySqlPayrollRebuildRepository(connection).load(_CASE_NO, for_update=False))
+    except (ValueError, TypeError, RuntimeError) as error:
+        state['rebuild_facts_error'] = f'{type(error).__name__}: {error}'
+    return json.loads(json.dumps(state, default=str))
+
+
+def _assert_early_end_core_stages(connection, *, client_settled):
+    from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository
+    from subsystems.orders.core_stage_projection_query import project_core_stage_timeline
+    from subsystems.orders.stage_projection_query import OrderStageProjectionQueryService, StageProjectionQuery
+
+    page = OrderStageProjectionQueryService(MySqlOrdersStageProjectionRepository(connection),
+        FixedBusinessClock(datetime(2026,10,3,12,tzinfo=TAIPEI_TIME_ZONE))).query(StageProjectionQuery(20))
+    timeline = project_core_stage_timeline(next(item for item in page.items if item.case_no == _CASE_NO))
+    stages = {stage.code: stage for stage in timeline.core_stages}
+    assert timeline.lifecycle_status.value == '訂單完成'
+    assert stages['service_completion'].status == 'completed'
+    assert (stages['client_settlement'].status == 'completed') is client_settled
+    assert stages['staff_payout'].status != 'completed'
+    assert timeline.current_core_stage_code == ('staff_payout' if client_settled else 'client_settlement')
+
+
+def _assert_early_end_monthly_payable(connection):
+    """The completed case remains available in its official staff payment month."""
+    from domains.payroll.monthly_aggregation import MonthlyPayrollDirection
+    from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository
+
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT staff_payment_due_date FROM orders WHERE case_no=%s', (_CASE_NO,))
+        due_date = cursor.fetchone()['staff_payment_due_date']
+        cursor.execute(
+            "SELECT DISTINCT staff_id FROM staff_obligations WHERE case_no=%s "
+            "AND direction='payable_to_staff' AND status='open' ORDER BY staff_id",
+            (_CASE_NO,),
+        )
+        staff_ids = tuple(row['staff_id'] for row in cursor.fetchall())
+    assert isinstance(due_date, date), _early_end_diagnostic(connection)
+    assert len(staff_ids) == 1, _early_end_diagnostic(connection)
+    summary = MySqlPayrollRebuildRepository(connection).query_staff_month(
+        staff_ids[0], due_date.year, due_date.month,
+    )
+    case_payables = tuple(
+        item for item in summary.obligations
+        if item.case_no == _CASE_NO and item.direction is MonthlyPayrollDirection.PAYABLE_TO_STAFF
+    )
+    assert sum(item.amount_due.amount for item in case_payables) == 5800, {
+        'staff_payment_due_date': str(due_date),
+        'monthly_summary': repr(summary),
+        'owner_facts': _early_end_diagnostic(connection),
+    }

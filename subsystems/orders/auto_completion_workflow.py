@@ -154,7 +154,7 @@ class AutoCompleteOrderService:
             blockers = facts.transition_blockers['auto_complete']
             if status in {'訂單完成', '歷史訂單－服務完成'}:
                 state = 'completed'
-            elif status == '訂單取消':
+            elif status in {'訂單取消', '成立後未服務'}:
                 state = 'cancelled'
             elif facts.completion_instant is None:
                 state = 'awaiting_schedule'

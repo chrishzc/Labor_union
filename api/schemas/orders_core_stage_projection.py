@@ -36,7 +36,7 @@ CoreStageCodeView = Literal[
 CoreStageSubstatusCodeView = CoreStageSubstatusCode
 HistoricalLifecycleFacetView = HistoricalLifecycleFacet
 OrderLifecycleStatusView = Literal[
-    "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
+    "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消", "成立後未服務",
     "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
 ]
 

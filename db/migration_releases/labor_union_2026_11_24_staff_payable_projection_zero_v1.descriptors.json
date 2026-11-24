@@ -1,0 +1,73 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-payable-projection-zero-2026-11-24-v1",
+  "descriptors": {
+    "1084_staff_payable_projection_zero.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "staff_payable_projections.chk_staff_payable_projection_money": "and(atom(obligation_amount_ntd>=0),atom(net_paid_ntd>=0),atom(balance_ntd=obligation_amount_ntd-net_paid_ntd))"
+      },
+      "triggers": [],
+      "parent_columns": {
+        "staff_payable_projections": {
+          "obligation_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "obligation_amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "net_paid_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "balance_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "status": {
+            "column_type": "enum('payable','partially_paid','completed','recovery_required','anomaly')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "aggregate_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "current_event_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "updated_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated on update current_timestamp"
+          }
+        }
+      }
+    }
+  }
+}

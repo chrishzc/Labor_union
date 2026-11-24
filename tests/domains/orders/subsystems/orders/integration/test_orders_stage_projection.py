@@ -11,9 +11,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from api.schemas.orders_core_stage_projection import OrderCoreStageTimelinePageView
 from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository, _PAGE_SQL
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+from subsystems.orders.core_stage_filter_query import CoreStageProjectionFilterQuery, query_core_stage_page
 from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, OrderStageProjectionQueryService, StageProjectionQuery, _current_step
 
 
@@ -154,6 +156,39 @@ class _Repository:
     def fetch_page(self, *, after_case_no: str | None, page_size: int, lifecycle_scope: OrderLifecycleScope):
         del after_case_no, page_size, lifecycle_scope
         return self.rows
+
+
+@pytest.mark.parametrize("client_open,staff_open,expected_scope", [
+    (1, 1, "in_progress"),
+    (0, 1, "in_progress"),
+    (1, 0, "in_progress"),
+    (0, 0, "completed"),
+])
+def test_established_unserved_routing_uses_both_settlement_owners(client_open, staff_open, expected_scope) -> None:
+    row = _row()
+    row.update(
+        lifecycle_status=OrderLifecycleStatus.ESTABLISHED_UNSERVED.value,
+        service_completion_identity="superseded-service-completion",
+        client_obligation_count=client_open,
+        client_open_count=client_open,
+        staff_obligation_count=staff_open,
+        staff_open_count=staff_open,
+    )
+    service = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK)
+    for scope in ("in_progress", "completed", "cancelled"):
+        page = query_core_stage_page(service, CoreStageProjectionFilterQuery(page_size=50, workbench_scope=scope))
+        if scope != expected_scope:
+            assert page.items == ()
+            continue
+        item, = page.items
+        assert OrderCoreStageTimelinePageView.model_validate(page, from_attributes=True).items[0].lifecycle_status == "成立後未服務"
+        assert item.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+        assert item.current_core_stage_code is None
+        assert item.core_stages[9].available_read_actions == ()
+        completion, client, staff = item.core_stages[10:]
+        assert completion.status == "unavailable"
+        assert client.status == ("blocked" if client_open else "completed")
+        assert staff.status == ("blocked" if staff_open else "completed")
 
 
 def test_projection_keeps_seven_stages_eleven_steps_and_three_settlement_owners() -> None:

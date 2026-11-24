@@ -1,0 +1,340 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-web-profile-2026-11-24-v1",
+  "descriptors": {
+    "1083_staff_web_profile.sql": {
+      "tables": {
+        "staff_web_template_items": {
+          "id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": "1",
+            "extra": ""
+          },
+          "name": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "category": {
+            "column_type": "enum('photo','certificate','other')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "display_order": {
+            "column_type": "int unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reminder_enabled": {
+            "column_type": "tinyint(1)",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          },
+          "reminder_months": {
+            "column_type": "smallint unsigned",
+            "is_nullable": "NO",
+            "column_default": "1",
+            "extra": ""
+          },
+          "reminder_days": {
+            "column_type": "smallint unsigned",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          },
+          "updated_by": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "updated_at": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp(6)",
+            "extra": "default_generated on update current_timestamp(6)"
+          }
+        },
+        "staff_web_entries": {
+          "id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "template_item_id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "published_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "staff_web_publications": {
+          "entry_id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "original_file_id": {
+            "column_type": "varchar(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "crop_file_id": {
+            "column_type": "varchar(64)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "expiry_date": {
+            "column_type": "date",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "approved_by": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "published_at": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp(6)",
+            "extra": "default_generated"
+          }
+        },
+        "staff_web_approval_receipts": {
+          "operation_id": {
+            "column_type": "char(36)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "publication_results": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp(6)",
+            "extra": "default_generated"
+          }
+        }
+      },
+      "indexes": {
+        "staff_web_template_items.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "staff_web_entries.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "staff_web_entries.idx_staff_web_entry_staff": {
+          "non_unique": 1,
+          "columns": [
+            "staff_id",
+            "template_item_id",
+            "id"
+          ]
+        },
+        "staff_web_publications.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "entry_id",
+            "version"
+          ]
+        },
+        "staff_web_publications.uq_staff_web_original": {
+          "non_unique": 0,
+          "columns": [
+            "original_file_id"
+          ]
+        },
+        "staff_web_publications.uq_staff_web_crop": {
+          "non_unique": 0,
+          "columns": [
+            "crop_file_id"
+          ]
+        },
+        "staff_web_publications.idx_staff_web_publication_expiry": {
+          "non_unique": 1,
+          "columns": [
+            "expiry_date",
+            "entry_id",
+            "version"
+          ]
+        },
+        "staff_web_approval_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "operation_id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "staff_web_entries.fk_staff_web_entry_staff": {
+          "columns": [
+            "staff_id"
+          ],
+          "referenced_table": "staff",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_web_entries.fk_staff_web_entry_template": {
+          "columns": [
+            "template_item_id"
+          ],
+          "referenced_table": "staff_web_template_items",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_web_publications.fk_staff_web_publication_entry": {
+          "columns": [
+            "entry_id"
+          ],
+          "referenced_table": "staff_web_entries",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_web_publications.fk_staff_web_publication_original": {
+          "columns": [
+            "original_file_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "opaque_object_id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_web_publications.fk_staff_web_publication_crop": {
+          "columns": [
+            "crop_file_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "opaque_object_id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_web_approval_receipts.fk_staff_web_receipt_staff": {
+          "columns": [
+            "staff_id"
+          ],
+          "referenced_table": "staff",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_objects.fk_controlled_file_object_supersedes": {
+          "columns": [
+            "supersedes_object_id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "supersedes_version_number"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "version_number"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "staff_web_template_items.chk_staff_web_template_reminder": "or(atom(category='other'),atom(reminder_enabled=false))",
+        "controlled_file_staging_objects.chk_controlled_file_staging_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purposein('unsigned_contract','final_signed_contract'))),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam','staff_profile_photo'))),and(atom(owner_type='clients'),atom(purpose='client_passbook_cover')),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))",
+        "controlled_file_objects.chk_controlled_file_object_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purposein('unsigned_contract','final_signed_contract'))),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam','staff_profile_photo'))),and(atom(owner_type='clients'),atom(purpose='client_passbook_cover')),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))"
+      },
+      "triggers": [],
+      "parent_columns": {
+        "controlled_file_staging_objects": {
+          "purpose": {
+            "column_type": "enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background','staff_profile_photo')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        },
+        "controlled_file_objects": {
+          "purpose": {
+            "column_type": "enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background','staff_profile_photo')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        }
+      }
+    }
+  }
+}

@@ -221,7 +221,7 @@ def _overlay(
     timeline: OrderOperationalTimeline,
     facts: HistoricalStageBaselineFacts | None,
 ) -> OrderOperationalTimeline:
-    if facts is None:
+    if facts is None or timeline.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
         return timeline
     if timeline.lifecycle_status is OrderLifecycleStatus.CANCELLED:
         if facts.selected_step is None and facts.lifecycle_status is OrderLifecycleStatus.CANCELLED:

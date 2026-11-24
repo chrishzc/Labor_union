@@ -392,6 +392,14 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_20_registry_case_deletion_signing_v1.json",
     "labor_union_2026_11_23_order_established_unserved_v1.json",
     "labor_union_2026_11_23_service_date_adjustments_v1.json",
+    "labor_union_2026_11_24_staff_web_profile_v1.json",
+    "labor_union_2026_11_24_staff_payable_projection_zero_v1.json",
+)
+_STAFF_WEB_PROFILE_ARTIFACT = "1083_staff_web_profile.sql"
+_STAFF_PAYOUT_LEDGER_ARTIFACT = "114_staff_payout_ledger.sql"
+_STAFF_PAYABLE_ZERO_ARTIFACT = "1084_staff_payable_projection_zero.sql"
+_STAFF_PAYABLE_MONEY_CHECK = (
+    "staff_payable_projections", "chk_staff_payable_projection_money",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2896,6 +2904,8 @@ def _metadata_state_for_artifact(
         )
     if artifact == "1075_controlled_file_client_passbook_cover.sql":
         return _controlled_file_client_passbook_state(snapshot, descriptor)
+    if artifact == _STAFF_WEB_PROFILE_ARTIFACT:
+        return _staff_web_profile_schema_state(snapshot, descriptor)
     if artifact == "1008_historical_order_adoption_noop_constraint.sql":
         return _historical_order_adoption_noop_constraint_state(
             snapshot,
@@ -2908,6 +2918,8 @@ def _metadata_state_for_artifact(
         )
     if artifact == "1046_client_zero_obligation_establishment.sql":
         return _client_zero_obligation_establishment_state(snapshot, descriptor)
+    if artifact == _STAFF_PAYABLE_ZERO_ARTIFACT:
+        return _staff_payable_projection_zero_state(snapshot, descriptor)
     if artifact == "1047_scheduling_buffer_advisory.sql":
         return _scheduling_buffer_advisory_state(snapshot, descriptor)
     if artifact == "1068_scheduling_shift_occupancy_indexes.sql":
@@ -4216,6 +4228,16 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
+        if normalized.startswith("alter table staff_payable_projections "):
+            sql = (ROOT / "db/schema_parts" / _STAFF_PAYABLE_ZERO_ARTIFACT).read_text(
+                encoding="utf-8",
+            )
+            canonical = re.sub(r"\s+", " ", split_sql(sql)[0].strip()).casefold()
+            if normalized == canonical:
+                return "staff_payable_projection_check_widen"
+            raise LocalAdditiveBlocked(
+                "unpublished staff payable projection ALTER", code="forbidden_sql_effect",
+            )
         unserved_part = ROOT / "db/schema_parts/1081_order_established_unserved_status.sql"
         if normalized.rstrip(";") in {
             re.sub(r"\s+", " ", sql.strip()).casefold().rstrip(";")
@@ -4226,6 +4248,7 @@ def _local_classify_statement(statement: str) -> str:
             for artifact in (
                 "1075_controlled_file_client_passbook_cover.sql",
                 "1005_contract_external_signing_successor.sql",
+                _STAFF_WEB_PROFILE_ARTIFACT,
             ):
                 path = ROOT / "db/schema_parts" / artifact
                 if normalized in {
@@ -6262,7 +6285,13 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
     if path is None and part_name in {
         "1004_controlled_file_storage_foundation.sql",
         "1005_contract_external_signing_successor.sql",
-    } and _passbook_release_selected():
+    } and (_passbook_release_selected() or _staff_web_release_selected()):
+        path = ROOT / "db/schema_parts" / part_name
+    if path is None and part_name == "1075_controlled_file_client_passbook_cover.sql" and _staff_web_release_selected():
+        path = ROOT / "db/schema_parts" / part_name
+    if path is None and part_name == _STAFF_PAYOUT_LEDGER_ARTIFACT and any(
+        item.name == _STAFF_PAYABLE_ZERO_ARTIFACT for item in SCHEMA_PARTS
+    ):
         path = ROOT / "db/schema_parts" / part_name
     if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
@@ -6684,6 +6713,12 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["checks"][(
             "client_obligation_events", "chk_client_obligation_event_amount",
         )] = _normalize_sql_contract(clause)
+    if part_name == _STAFF_PAYABLE_ZERO_ARTIFACT:
+        clause, _ = _extract_parenthesized(sql, sql.index("CHECK (") + 6)
+        descriptor["checks"][_STAFF_PAYABLE_MONEY_CHECK] = _normalize_sql_contract(clause)
+        predecessor = _staff_payable_projection_predecessor_descriptor()
+        table = _STAFF_PAYABLE_MONEY_CHECK[0]
+        descriptor["parent_columns"][table] = predecessor["tables"][table]
     if part_name == "1047_scheduling_buffer_advisory.sql":
         predecessor = _canonical_artifact_descriptor("109_scheduling_generations.sql")
         tables = {"scheduling_buffer_days", "scheduling_effective_occupancy"}
@@ -6723,7 +6758,7 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "'訂單完成','訂單取消','歷史訂單－未服務','歷史訂單－服務中',"
                 "'歷史訂單－服務完成','歷史訂單－帳務完成')"
             )
-    if part_name == "1075_controlled_file_client_passbook_cover.sql":
+    if part_name in {"1075_controlled_file_client_passbook_cover.sql", _STAFF_WEB_PROFILE_ARTIFACT}:
         for statement in split_sql(sql):
             match = re.match(r"ALTER TABLE (\w+)\s+MODIFY COLUMN (.+)", statement, re.S)
             if not match:
@@ -7310,6 +7345,8 @@ def _release_descriptor_metadata_state(
     parent_tables = set(canonical.get("parent_columns", {}))
 
     def released_projection(kind: str) -> dict[Any, Any]:
+        if part_name == _STAFF_PAYABLE_ZERO_ARTIFACT:
+            return canonical[kind]
         released_contracts = released.get(kind, {})
         return {
             key: value
@@ -7373,6 +7410,8 @@ def _release_descriptor_metadata_state(
         "1074_historical_open_order_terms_receipt_status.sql",
         "1075_controlled_file_client_passbook_cover.sql",
         "1076_staff_availability_optional_reason.sql",
+        _STAFF_WEB_PROFILE_ARTIFACT,
+        _STAFF_PAYABLE_ZERO_ARTIFACT,
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -7415,6 +7454,8 @@ def _release_descriptor_metadata_state(
         )
     if part_name == "1075_controlled_file_client_passbook_cover.sql":
         return _controlled_file_client_passbook_state(snapshot, canonical)
+    if part_name == _STAFF_WEB_PROFILE_ARTIFACT:
+        return _staff_web_profile_schema_state(snapshot, canonical)
     if part_name == "1032_matching_holiday_work_agreements.sql":
         return _matching_holiday_work_agreement_owner_state(
             snapshot,
@@ -7433,6 +7474,8 @@ def _release_descriptor_metadata_state(
         )
     if part_name == "1046_client_zero_obligation_establishment.sql":
         return _client_zero_obligation_establishment_state(snapshot, canonical)
+    if part_name == _STAFF_PAYABLE_ZERO_ARTIFACT:
+        return _staff_payable_projection_zero_state(snapshot, canonical)
     if part_name == "1047_scheduling_buffer_advisory.sql":
         return _scheduling_buffer_advisory_state(snapshot, canonical)
     if part_name == "1068_scheduling_shift_occupancy_indexes.sql":
@@ -7542,14 +7585,47 @@ def _controlled_file_storage_foundation_state(
     for table, columns in passbook["parent_columns"].items():
         canonical["tables"][table].update(columns)
     canonical["checks"].update(passbook["checks"])
-    return _artifact_metadata_state(
+    state = _artifact_metadata_state(
         snapshot, canonical, "1004_controlled_file_storage_foundation.sql",
         defer_missing_triggers=defer_missing_triggers,
     )
+    if state == "drift" and _staff_web_release_selected():
+        columns, checks = _staff_web_file_metadata()
+        for table, contract in columns.items():
+            canonical["tables"][table].update(contract)
+        canonical["checks"].update(checks)
+        state = _artifact_metadata_state(
+            snapshot, canonical, "1004_controlled_file_storage_foundation.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+    return state
 
 
 def _passbook_release_selected() -> bool:
     return any(path.name == "1075_controlled_file_client_passbook_cover.sql" for path in SCHEMA_PARTS)
+
+
+def _staff_web_release_selected() -> bool:
+    return any(path.name == _STAFF_WEB_PROFILE_ARTIFACT for path in SCHEMA_PARTS)
+
+
+def _staff_web_file_metadata():
+    descriptor = _canonical_artifact_descriptor(_STAFF_WEB_PROFILE_ARTIFACT)
+    parent_columns = descriptor["parent_columns"]
+    checks = {key: value for key, value in descriptor["checks"].items() if key[0] in parent_columns}
+    return parent_columns, checks
+
+
+def _staff_web_profile_schema_state(snapshot, descriptor):
+    state = _artifact_metadata_state(snapshot, descriptor, _STAFF_WEB_PROFILE_ARTIFACT)
+    if state in {"exact", "absent"}:
+        return state
+    if any(row["table_name"] in descriptor["tables"] for row in snapshot["columns"]):
+        return state
+    predecessor = _canonical_artifact_descriptor("1075_controlled_file_client_passbook_cover.sql")
+    if _artifact_metadata_state(snapshot, predecessor, "1075_controlled_file_client_passbook_cover.sql") == "exact":
+        return "absent"
+    return state
 
 
 def _controlled_file_client_passbook_state(
@@ -7559,6 +7635,14 @@ def _controlled_file_client_passbook_state(
     state = _artifact_metadata_state(snapshot, descriptor, artifact)
     if state in {"exact", "absent"}:
         return state
+    if _staff_web_release_selected():
+        columns, checks = _staff_web_file_metadata()
+        successor = deepcopy(descriptor)
+        for table, contract in columns.items():
+            successor["parent_columns"][table].update(contract)
+        successor["checks"].update(checks)
+        if _artifact_metadata_state(snapshot, successor, artifact) == "exact":
+            return "exact"
     foundation = _canonical_artifact_descriptor("1004_controlled_file_storage_foundation.sql")
     signing = _canonical_artifact_descriptor("1005_contract_external_signing_successor.sql")
     predecessor = deepcopy(descriptor)
@@ -7690,6 +7774,61 @@ def _client_zero_obligation_establishment_state(
     if actual == _normalize_check_contract(_normalize_sql_contract(predecessor_clause)):
         return "absent"
     return "drift"
+
+
+def _staff_payable_projection_predecessor_descriptor() -> dict[str, Any]:
+    table = _STAFF_PAYABLE_MONEY_CHECK[0]
+    predecessor = _canonical_artifact_descriptor(_STAFF_PAYOUT_LEDGER_ARTIFACT)
+    _limit_descriptor_to_owned_tables(predecessor, frozenset({table}))
+    # 168 replaced the status column and CHECK from 114 and retained its money CHECK.
+    status_sql = (
+        ROOT / "db/schema_parts/168_staff_payout_difference_recovery.sql"
+    ).read_text(encoding="utf-8")
+    modify_status, _, add_status_check, *_ = split_sql(status_sql)
+    name, column = _parse_column_definition(modify_status.split("MODIFY COLUMN ", 1)[1])
+    predecessor["tables"][table][name] = column
+    clause, _ = _extract_parenthesized(
+        add_status_check, add_status_check.index("CHECK (") + 6,
+    )
+    predecessor["checks"][(table, "chk_staff_payable_projection_status")] = (
+        _normalize_sql_contract(clause)
+    )
+    return predecessor
+
+
+def _staff_payable_projection_zero_state(
+    snapshot: Mapping[str, Any], descriptor: Mapping[str, Any],
+) -> str:
+    key = _STAFF_PAYABLE_MONEY_CHECK
+    table = key[0]
+    matches = [
+        row for row in snapshot.get("constraints", ())
+        if (row["table_name"], row["constraint_name"]) == key
+    ]
+    if not matches:
+        # Older sources may still need the original table creation from 114.
+        table_present = any(row["table_name"] == table for row in snapshot["columns"])
+        return "drift" if table_present else "absent"
+    if len(matches) != 1 or matches[0].get("constraint_type") != "CHECK" or (
+        matches[0].get("enforced") != "YES"
+    ):
+        return "drift"
+    raw_clause = matches[0].get("check_clause")
+    create_sql = snapshot.get("show_create_tables", {}).get(table)
+    if create_sql:
+        raw_clause = _show_create_check_clauses(create_sql).get(key, raw_clause)
+    actual = _normalize_check_contract(raw_clause)
+    predecessor = _staff_payable_projection_predecessor_descriptor()
+    if actual == _normalize_check_contract(descriptor["checks"][key]):
+        predecessor["checks"][key] = descriptor["checks"][key]
+        state = "exact"
+    elif actual == _normalize_check_contract(predecessor["checks"][key]):
+        state = "absent"
+    else:
+        return "drift"
+    if _artifact_metadata_state(snapshot, predecessor, _STAFF_PAYABLE_ZERO_ARTIFACT) != "exact":
+        return "drift"
+    return state
 
 
 def _contract_external_signing_final_pdf_constraint_state(
@@ -7879,6 +8018,13 @@ def _contract_external_signing_successor_state(
             passbook_signing["parent_columns"].update(passbook["parent_columns"])
             passbook_signing["checks"].update(passbook["checks"])
             contracts.append(passbook_signing)
+            if _staff_web_release_selected():
+                columns, checks = _staff_web_file_metadata()
+                staff_web_signing = deepcopy(passbook_signing)
+                for table, contract in columns.items():
+                    staff_web_signing["parent_columns"][table].update(contract)
+                staff_web_signing["checks"].update(checks)
+                contracts.append(staff_web_signing)
         final_pdf = _canonical_artifact_descriptor(
             "1034_contract_external_signing_final_pdf_completion.sql"
         )
@@ -8594,6 +8740,11 @@ def _allowed_later_artifact_checks(
     part_name: str,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
+    if part_name == _STAFF_PAYOUT_LEDGER_ARTIFACT and any(
+        path.name == _STAFF_PAYABLE_ZERO_ARTIFACT for path in SCHEMA_PARTS
+    ):
+        successor = _canonical_artifact_descriptor(_STAFF_PAYABLE_ZERO_ARTIFACT)
+        return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name in {"1013_order_lifecycle_pending_status_constraint.sql", "215_historical_service_accounting.sql", "1028_historical_service_accounting.sql"} and any(path.name == "1081_order_established_unserved_status.sql" for path in SCHEMA_PARTS):
         successor = _canonical_artifact_descriptor("1081_order_established_unserved_status.sql")
         return {key: (clause,) for key, clause in successor["checks"].items()}

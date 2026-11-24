@@ -115,7 +115,7 @@ def _load_deposit_ledger(cursor: Any, case_no: str) -> tuple[bool, str | None, d
 
 
 def _control_facts(rows: list[Mapping[str, Any]], *, current_status: str, actual_start_date: date | None, deposit_reconciled: bool, settlement_identity: str | None, settlement_date: date | None) -> tuple[bool, str | None, bool, dict[str, list[str]]]:
-    cancellation, reason, reconfirmed = current_status == "訂單取消", None, False
+    cancellation, reason, reconfirmed = current_status in {"訂單取消", "成立後未服務"}, None, False
     blockers: dict[str, list[str]] = {"enter_service": [], "auto_complete": []}
     for row in rows:
         control_type, state = row.get("control_type"), row.get("state")

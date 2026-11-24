@@ -59,8 +59,8 @@ class HistoricalOrderWorkbookImportRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT case_no,status,lifecycle_version FROM orders "
-                "WHERE status<>%s ORDER BY case_no" + lock_suffix,
-                (OrderLifecycleStatus.CANCELLED.value,),
+                "WHERE status NOT IN (%s,%s) ORDER BY case_no" + lock_suffix,
+                (OrderLifecycleStatus.CANCELLED.value, OrderLifecycleStatus.ESTABLISHED_UNSERVED.value),
             )
             rows = tuple(cursor.fetchall() or ())
         return tuple(

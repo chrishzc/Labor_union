@@ -54,10 +54,12 @@ def apply_amount_controls(cursor,lines):
 def recorded_case_amount_control(connection,cursor,line):
     """A moved case can still be corrected from its original frozen period."""
     from subsystems.government_subsidy.reconciliation_register_query import _select_established_cases,project_receivable_estimate
-    cursor.execute('SELECT COALESCE(actual_end_date,end_date) end_date FROM orders WHERE case_no=%s',(line.case_no,))
+    cursor.execute('SELECT status,COALESCE(actual_end_date,end_date) end_date FROM orders WHERE case_no=%s',(line.case_no,))
     row=cursor.fetchone();end=row['end_date'] if row else None
     computed=None
-    if end:
+    if row and row['status']=='成立後未服務':
+        computed=project_receivable_estimate({'order_status':row['status']}).amount_ntd
+    elif end:
         period=SubsidyPeriod('month',end.year,end.month)
         source=next((s for s in _select_established_cases(connection,period.start,period.end) if s['case_no']==line.case_no),None)
         if source:computed=project_receivable_estimate(source).amount_ntd
@@ -195,14 +197,21 @@ def synchronize_government_case_amount(cursor,case_no,key,actor,reason):
     if not control and not frozen:
         return
     from subsystems.government_subsidy.reconciliation_register_query import _select_established_cases,project_receivable_estimate
-    cursor.execute('SELECT COALESCE(actual_end_date,end_date) end_date FROM orders WHERE case_no=%s',(case_no,))
-    end=cursor.fetchone()['end_date']
-    if end is None:
-        return
-    period=SubsidyPeriod('month',end.year,end.month)
-    sources=_select_established_cases(cursor.connection,period.start,period.end,lock=False)
-    amounts={s['case_no']:project_receivable_estimate(s).amount_ntd for s in sources}
-    computed=amounts.get(case_no)
+    cursor.execute('SELECT status,COALESCE(actual_end_date,end_date) end_date FROM orders WHERE case_no=%s',(case_no,))
+    order=cursor.fetchone()
+    end=order['end_date']
+    zero_service=order['status']=='成立後未服務'
+    if zero_service:
+        # The Orders terminal fact is sufficient even after actual dates are cleared.
+        # It must not enter claim membership merely to correct an existing amount.
+        computed=project_receivable_estimate({'order_status':order['status']}).amount_ntd
+    else:
+        if end is None:
+            return
+        period=SubsidyPeriod('month',end.year,end.month)
+        sources=_select_established_cases(cursor.connection,period.start,period.end,lock=False)
+        amounts={s['case_no']:project_receivable_estimate(s).amount_ntd for s in sources}
+        computed=amounts.get(case_no)
     if computed is None:
         return
     before=int(control['effective_ntd']) if control else int(frozen[0]['amount_ntd'])
@@ -210,7 +219,8 @@ def synchronize_government_case_amount(cursor,case_no,key,actor,reason):
     after=before if mode=='manual' else computed
     if control and int(control['computed_ntd'])==computed and before==after:
         return
-    year=int(frozen[0]['period_year']) if frozen else end.year
+    year=(int(frozen[0]['period_year']) if frozen else
+          int(control['period_year']) if zero_service else end.year)
     cursor.execute('INSERT IGNORE INTO government_subsidy_period_years(period_year) VALUES(%s)',(year,))
     cursor.execute('SELECT aggregate_version FROM government_subsidy_period_years WHERE period_year=%s FOR UPDATE',(year,));cursor.fetchone()
     cursor.execute('INSERT INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) VALUES(%s,%s,%s,%s,%s) '

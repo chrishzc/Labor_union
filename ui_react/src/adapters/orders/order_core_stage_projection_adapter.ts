@@ -208,8 +208,8 @@ function validateQueryResult(
   if (query.workbench_scope !== undefined) {
     // Validate the server contract; never move or filter mismatched rows locally.
     const allowedStatuses = {
-      in_progress: ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '歷史訂單－未服務', '歷史訂單－服務中'],
-      completed: ['訂單完成', '歷史訂單－服務完成', '歷史訂單－帳務完成'],
+      in_progress: ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '成立後未服務', '歷史訂單－未服務', '歷史訂單－服務中'],
+      completed: ['訂單完成', '成立後未服務', '歷史訂單－服務完成', '歷史訂單－帳務完成'],
       cancelled: ['訂單取消'],
     }[query.workbench_scope];
     if (page.items.some((item) => !allowedStatuses.includes(item.lifecycle_status))) {
@@ -222,6 +222,11 @@ function validateQueryResult(
     ));
     if (normalCompletedMismatch) {
       throw new OrderCoreStageProjectionAdapterError('已完工案件必須依客戶與月嫂結算是否完成分類。');
+    }
+    if (page.items.some((item) => item.lifecycle_status === '成立後未服務' &&
+      (stageByCode(item, 'client_settlement')?.status === 'completed' &&
+        stageByCode(item, 'staff_payout')?.status === 'completed') !== (query.workbench_scope === 'completed'))) {
+      throw new OrderCoreStageProjectionAdapterError('成立後未服務案件必須依客戶與月嫂結算是否完成分類。');
     }
   }
   if (query.branch_type !== undefined) {

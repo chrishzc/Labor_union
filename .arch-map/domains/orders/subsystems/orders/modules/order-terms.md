@@ -32,6 +32,26 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 
 進件完成 Apply，及洽談中補齊最後一項完整服務條件的 intake Apply，在既有 Orders outer UoW 透過 typed initializer 委派 canonical Case Architecture Bootstrap。待補件的分段保存與歷史修補不初始化；重播原 receipt 不追加初始化。既有 roots 不覆寫，partial roots 拒絕並 rollback，初始付款條款／薪資政策與 Orders receipt 同交易保存，同交易由 Finance writer 自動同步客戶應付，不建立實際收付款或正式排班。
 
+<a id="terms-early-finish-design"></a>
+
+## 提前結束的既有路徑與驗證入口 ^terms-early-finish-design
+
+- 沿用 `OrderTermsMutationPanel` 與 `terms_workflow` 的解鎖、完整替代班表及 Query／Preview／Apply；一般取消的非零服務拒絕結果由面板導向此入口。Domain 契約見 [Orders 提前結束](../../../../../requirements/01_Orders_Domain.md#order-early-finish)，服務完成仍由唯一完工 service 產生「訂單完成」。
+- Application 在同一 outer UoW 委派 Scheduling 的完整 replacement 與 Client Finance／Payroll impact，保存一致的訂單天數、有效服務日及實際結束日；保留原收付紀錄，失敗不得只留下部分縮短班表。
+- Client Finance 的 `obligation_planning._split_charge_days` 依原付款條款取前 N 個正式服務日，實際服務縮短時只使用存在的日期，保留原 N 與收付事實；完全沒有正式服務日期仍不得產生服務費義務。零額期款也由同一 owner 分段結果判定。
+- Payroll 對已有付款歷史的義務沿既有凍結應付差額處理，保留原根、付款與來源分期，不把尚欠金額再疊加原應付。月度查詢沿 `staff_payable_correction_sql` 的有效應付投影，缺義務日期時只承接已正式形成的 Orders 付款日；有效應付歸零或來源分期合計不等於有效應付時，不列入月度可付款項，並保留既有確認與付款阻擋。
+- Terms lifecycle impact 只更新根事實與版本，沒有辦理完工的權限。提交後由 [既有完工流程](lifecycle-authoritative-facts.md#completion-catchup-design)處理；背景命令讀最新版本，不能因先前已排入的舊版命令而漏掉新班表。
+- `test_accounting_change_reconciliation_mysql.py` 以「今日修改、昨日最後服務日」對應 `ORDER-EARLY-END-01`、`ORDER-CATCHUP-01/02`，核對 Terms 正式保存、原收付保留、失敗回滾、到期發現、durable handler 完工及第 11～13 步讀回。版本衝突及不一致服務量仍沿原 Terms／Scheduling focused tests；source mapping 與實際執行結果分開判定。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: terms-early-finish-design
+  target: '.arch-map/requirements/01_Orders_Domain.md#^order-early-finish'
+- kind: depends_on
+  source: terms-early-finish-design
+  target: '.arch-map/domains/orders/subsystems/orders/modules/lifecycle-authoritative-facts.md#^completion-catchup-design'
+```
+
 ## Implementation
 - primary:
   - `domains/orders/terms.py`
@@ -64,8 +84,8 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - `.arch-map/requirements/02_Assignments_Scheduling_Domain.md` — Scheduling generation ownership。
 
 ## Verification
+- integration_root: `tests/domains/orders/subsystems/orders/integration/test_accounting_change_reconciliation_mysql.py` — opt-in localhost：完整替代班表後的帳務候選、結案樓層費、原收付款不變、失敗回滾／重送、連續更正、個案計價、提前結束後原流水核銷及昨日到期完工／結算讀回。
 - integration_root: `tests/domains/orders/subsystems/orders/integration/test_historical_accounting_scenarios_mysql.py` — 歷史採納既有收付、樓層費、補助時數／費率、原流水核銷、重送、stale 與回滾。
-- integration_root: `tests/domains/orders/subsystems/orders/integration/test_accounting_change_reconciliation_mysql.py` — opt-in localhost：結案樓層費、原收付款不變、失敗回滾／重送、連續更正、個案計價及提前結束後原流水核銷。
 - layout_status: `custom_current`
 - test_root: `tests/test_order_terms_preassignment_correction.py`
 - test_root: `tests/domains/orders/subsystems/orders/modules/order-terms/`

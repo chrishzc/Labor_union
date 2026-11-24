@@ -25,13 +25,14 @@ from subsystems.reporting.weekly_report_metrics_service import (
 SCHEMA_VERSION = "operations-report.v3"
 SOURCE_REVISION = "operations_report_query_v9"
 TIMEZONE = "Asia/Taipei"
-_HISTORICAL_STATUS_GROUPS = {
+_STATUS_COUNT_GROUPS = {
+    OrderLifecycleStatus.ESTABLISHED_UNSERVED.value: OrderLifecycleStatus.ESTABLISHED.value,
     OrderLifecycleStatus.HISTORICAL_UNSERVED.value: OrderLifecycleStatus.ESTABLISHED.value,
     OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value: OrderLifecycleStatus.IN_SERVICE.value,
     OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value: OrderLifecycleStatus.COMPLETED.value,
     OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED.value: OrderLifecycleStatus.COMPLETED.value,
 }
-ORDER_STATUS_LABELS = tuple(status.value for status in OrderLifecycleStatus if status.value not in _HISTORICAL_STATUS_GROUPS)
+ORDER_STATUS_LABELS = tuple(status.value for status in OrderLifecycleStatus if status.value not in _STATUS_COUNT_GROUPS)
 MISSING_ORDER_STATUS = "無訂單／狀態缺值"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
@@ -60,6 +61,7 @@ class WeeklyCaseFact:
     seq_num: int | None = None
     case_category: str | None = None
     cancel_reason: str | None = None
+    has_establishment_evidence: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,7 +328,7 @@ def _service_status(order_status: str | None) -> str:
 
 def reporting_order_status(order_status: str | None) -> str:
     """只合併報表分類，保留 Orders 原始生命週期根事實。"""
-    return _HISTORICAL_STATUS_GROUPS.get(order_status, order_status) or MISSING_ORDER_STATUS
+    return _STATUS_COUNT_GROUPS.get(order_status, order_status) or MISSING_ORDER_STATUS
 
 
 def _order_status_counts(rows: tuple[WeeklyCaseRow, ...]) -> dict[str, int]:
@@ -531,7 +533,8 @@ class WeeklyOperationsReportQuery:
             quality_codes.append("case_no_missing")
         if fact.order_status is None:
             quality_codes.append("order_missing")
-        if fact.service_days is None:
+        established_unserved = fact.order_status == OrderLifecycleStatus.ESTABLISHED_UNSERVED
+        if fact.service_days is None and not established_unserved:
             quality_codes.append("service_days_missing")
         if fact.service_hours_per_day is None:
             quality_codes.append("service_hours_per_day_missing")
@@ -563,9 +566,12 @@ class WeeklyOperationsReportQuery:
         app_date = fact.created_at.date() if fact.created_at is not None else None
 
         order_status = reporting_order_status(fact.order_status)
-        status = order_status
-        if is_rejected:
-            status = "審核不符合"
+        status = "審核不符合" if is_rejected else order_status
+        counts_as_established = (
+            not is_rejected
+            and status != OrderLifecycleStatus.CANCELLED
+            and fact.has_establishment_evidence
+        )
 
         week_start_date = monday_of(app_date) if app_date else None
         week_end_date = sunday_of(app_date) if app_date else None
@@ -580,7 +586,7 @@ class WeeklyOperationsReportQuery:
             identity_status=fact.identity_status,
             review_result=review_result,
             order_status=fact.order_status,
-            service_days=_positive_or_none(fact.service_days),
+            service_days=0 if established_unserved else _positive_or_none(fact.service_days),
             service_hours_per_day=_positive_or_none(fact.service_hours_per_day),
             planned_start_date=fact.planned_start_date,
             planned_end_date=fact.planned_end_date,
@@ -598,13 +604,13 @@ class WeeklyOperationsReportQuery:
             subsidized_ineligible=0,
             indigenous_eligible=int(review_result == "indigenous_eligible"),
             indigenous_ineligible=ind_inelig,
-            order_established=int(status in {"訂單成立", "服務中", "訂單完成"}),
-            negotiating=int(status == "洽談中"),
+            order_established=int(counts_as_established),
+            negotiating=int(status == OrderLifecycleStatus.DISCUSSION and not counts_as_established),
             cancelled=int(status == "訂單取消"),
             review_rejected=int(is_rejected),
             service_status=serv_status,
             notes="",
-            cancel_reason=fact.cancel_reason if order_status == "訂單取消" else None,
+            cancel_reason=fact.cancel_reason if established_unserved or order_status == OrderLifecycleStatus.CANCELLED else None,
         )
 
     @staticmethod

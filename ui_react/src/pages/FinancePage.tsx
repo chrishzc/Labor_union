@@ -100,6 +100,7 @@ export const FinancePage: React.FC = () => {
       overdue: params.get('view') === 'overdue',
       caseNo: (params.get('case_no') ?? '').slice(0, 50),
       fromWorkbench: params.get('from') === 'workbench',
+      settlementFocus: params.get('focus'),
       subTab: params.get('subtab') === 'all' ? ('all' as const) : ('ongoing' as const),
       receiptNotice: Boolean(params.get('receipt_stage') || params.get('settlement_identity') || params.get('tab') === 'receipt-notices'),
     };
@@ -516,6 +517,9 @@ export const FinancePage: React.FC = () => {
             embedded
             initialCase={caseDrawer}
             initialNoticeStage={caseNotice}
+            settlementFocus={caseDrawer === entry.caseNo &&
+              (entry.settlementFocus === 'client_settlement' || entry.settlementFocus === 'staff_payout')
+              ? entry.settlementFocus : undefined}
             onPayableReview={payableReview ? undefined : setPayableReview}
             reviewObligation={payableReview && (payableReview.balance_ntd ?? 0) > 0 ? payableReview.obligation_identity ?? undefined : undefined}
             bankReconciliation={bankReview ? { row: bankReview, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy } : undefined}

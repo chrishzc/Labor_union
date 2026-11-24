@@ -1005,3 +1005,65 @@ def test_descriptor_runtime_rejects_shared_source_candidate_principal(
         runner.build_descriptor_runtime(
             source_path, candidate_path, "union_db", "rehearsal_candidate"
         )
+
+
+@pytest.mark.parametrize("shape,expected", [
+    ("predecessor", "absent"), ("successor", "exact"),
+    ("mixed", "partial"), ("drift", "drift"),
+    ("engine_rendered", "exact"), ("unknown_show_check", "drift"),
+    ("unenforced_check", "drift"), ("reordered_enum", "drift"),
+    ("wrong_default", "drift"), ("wrong_nullability", "drift"),
+    ("missing_check", "partial"), ("descriptor_spacing", "exact"),
+])
+def test_unserved_status_upgrade_recognizes_only_published_shapes(shape, expected):
+    from copy import deepcopy
+
+    artifact = "1081_order_established_unserved_status.sql"
+    descriptor = runner._canonical_artifact_descriptor(artifact)
+    snapshot = {"columns": [], "constraints": [], "show_create_tables": {}}
+    for table, contracts in descriptor["parent_columns"].items():
+        for name, contract in contracts.items():
+            value = deepcopy(contract)
+            if shape in {"predecessor", "mixed", "drift"}:
+                value["column_type"] = value["column_type"].replace(",'成立後未服務'", "")
+            if shape == "drift" and table == "orders":
+                value["column_type"] = "varchar(100)"
+            if table == "orders":
+                if shape == "reordered_enum":
+                    value["column_type"] = value["column_type"].replace(
+                        "'待補件','洽談中'", "'洽談中','待補件'"
+                    )
+                elif shape == "wrong_default":
+                    value["column_default"] = "成立後未服務"
+                elif shape == "wrong_nullability":
+                    value["is_nullable"] = "YES"
+            value.update(table_name=table, column_name=name)
+            snapshot["columns"].append(value)
+    for (table, name), contract in descriptor["checks"].items():
+        if shape in {"predecessor", "drift"}:
+            contract = contract.replace(",'成立後未服務'", "")
+        snapshot["constraints"].append({
+            "table_name": table, "constraint_name": name, "constraint_type": "CHECK",
+            "enforced": "NO" if shape == "unenforced_check" else "YES",
+            "check_clause": contract,
+        })
+    if shape in {"engine_rendered", "unknown_show_check"}:
+        values = descriptor["parent_columns"]["orders"]["status"]["column_type"][5:-1]
+        definitions = []
+        for row in snapshot["constraints"]:
+            row["check_clause"] = row["check_clause"].encode("unicode_escape").decode("ascii")
+            column = "before_status" if row["constraint_name"].endswith("before_status") else "after_status"
+            clause = f"`{column}` IN ({values})"
+            if shape == "unknown_show_check":
+                clause = clause.replace("成立後未服務", "未發布狀態")
+            definitions.append(f"CONSTRAINT `{row['constraint_name']}` CHECK ({clause})")
+        snapshot["show_create_tables"]["order_lifecycle_state_events"] = (
+            "CREATE TABLE `order_lifecycle_state_events` (" + ",".join(definitions) + ")"
+        )
+    if shape == "missing_check":
+        snapshot["constraints"].pop()
+    if shape == "descriptor_spacing":
+        for columns in descriptor["parent_columns"].values():
+            for contract in columns.values():
+                contract["column_type"] = contract["column_type"].replace(",", ", ")
+    assert runner._metadata_state_for_artifact(snapshot, descriptor, artifact, defer_missing_triggers=False) == expected

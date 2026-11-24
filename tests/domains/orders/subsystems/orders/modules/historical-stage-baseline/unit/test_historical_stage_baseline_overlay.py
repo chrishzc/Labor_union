@@ -441,6 +441,39 @@ def test_current_cancellation_is_not_resurrected_by_old_historical_baseline() ->
     assert result.current_step_ordinal is None
 
 
+@pytest.mark.parametrize(
+    ("historical_status", "selected_step"),
+    [
+        (OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, 11),
+        (OrderLifecycleStatus.CANCELLED, None),
+    ],
+)
+def test_current_established_unserved_preserves_projection_with_old_historical_facts(
+    historical_status: OrderLifecycleStatus, selected_step: int | None
+) -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1", 111, historical_status, None, selected_step=selected_step
+    )
+    original = _timeline(lifecycle_status=OrderLifecycleStatus.ESTABLISHED_UNSERVED)
+    pending_refund = SettlementProjection(
+        "client_settlement",
+        "blocked",
+        SourceLineage("Client Finance", "client-settlement:1", 2),
+        None,
+        None,
+    )
+    original = replace(
+        original,
+        stages=original.stages[:-1]
+        + (replace(original.stages[-1], settlement=(pending_refund,)),),
+        sop_steps=original.sop_steps[:-1] + (_step(11),),
+    )
+
+    result = _query(facts, original)
+
+    assert result == original
+
+
 def test_historical_cancel_has_no_active_operational_stage() -> None:
     facts = HistoricalStageBaselineFacts(
         "CASE-1", 104, OrderLifecycleStatus.CANCELLED, None

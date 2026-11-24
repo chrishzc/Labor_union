@@ -9,6 +9,7 @@ import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport, type RequestOptions } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
+import { OrderLifecycleStatusSchema } from './order_stage_projection_schemas';
 
 const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const ServiceDaySchema = z.strictObject({
@@ -172,20 +173,62 @@ const PayrollImpactSchema = z.strictObject({
 });
 const LifecycleImpactSchema = z.strictObject({
   case_no: z.string().min(1),
-  before_status: z.string().min(1),
-  after_status: z.string().min(1),
+  before_status: OrderLifecycleStatusSchema,
+  after_status: z.enum(['訂單取消', '成立後未服務']),
   actual_end_date: DateOnlySchema.nullable(),
   cancellation_effective: z.boolean(),
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  establishment_evidence: z.strictObject({
+    lifecycle_event_ids: z.array(z.number().int().positive()),
+    historical_adoption_ids: z.array(z.number().int().positive()),
+    current_owner_status: OrderLifecycleStatusSchema.nullable(),
+  }).optional(),
 });
 const CaregiverOptionSchema = z.strictObject({
   staff_id: z.number().int().positive(),
   display_name: z.string().min(1),
 });
+const HistoricalUnservedCorrectionSchema = z.strictObject({
+  reason: z.string().trim().max(500),
+  evidence_source: z.string().trim().max(191),
+  confirmed_actual_service_day_count: z.literal(0),
+});
+const EvidenceIds = z.array(z.number().int().positive());
+const HistoricalUnservedCorrectionQuerySchema = z.strictObject({
+  blockers: z.array(z.string()),
+  review_codes: z.array(z.string()).optional(),
+  establishment_lifecycle_event_ids: EvidenceIds,
+  establishment_adoption_receipt_ids: EvidenceIds,
+  establishment_owner_status: OrderLifecycleStatusSchema.nullable(),
+  historical_adoption_receipt_ids: EvidenceIds,
+  historical_absence_event_ids: EvidenceIds,
+  adopted_assignment_ids: EvidenceIds.optional(),
+  actual_service_evidence: z.array(z.string()),
+  actual_start_date: DateOnlySchema.nullable(),
+  actual_end_date: DateOnlySchema.nullable(),
+  prior_fee_ntd: exactNtd,
+  prior_fee_reason: z.string(),
+  net_cash_received_ntd: exactNtd.nullable(),
+  prior_cancellation_event_id: z.number().int().positive().nullable(),
+  client_obligations: z.array(z.strictObject({
+    obligation_identity: z.string().min(1),
+    payment_stage: z.string().min(1),
+    contracted_ntd: exactNtd,
+    settled_ntd: exactNtd,
+  })),
+  payroll_obligations: z.array(z.strictObject({
+    obligation_identity: z.string().min(1),
+    obligation_kind: z.string().min(1),
+    staff_id: z.number().int().positive(),
+    contracted_ntd: exactNtd,
+    outstanding_ntd: exactNtd,
+    paid_ntd: exactNtd,
+  })),
+});
 
 export const OrderCancellationQuerySchema = z.strictObject({
   case_no: z.string().min(1),
-  lifecycle_status: z.string().min(1),
+  lifecycle_status: OrderLifecycleStatusSchema,
   actual_start_date: DateOnlySchema.nullable(),
   contracted_service_days: z.number().int().positive(),
   service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),
@@ -199,6 +242,7 @@ export const OrderCancellationQuerySchema = z.strictObject({
   payroll_version: z.number().int().nonnegative().nullable(),
   confirmed_service_days: z.array(ServiceDaySchema),
   caregiver_options: z.array(CaregiverOptionSchema),
+  historical_unserved_correction: HistoricalUnservedCorrectionQuerySchema.nullable().optional(),
 });
 
 export const OrderCancellationPreviewSchema = z.strictObject({
@@ -217,6 +261,17 @@ export const OrderCancellationPreviewSchema = z.strictObject({
   client_finance_impact: ClientFinanceImpactSchema.nullable(),
   payroll_impact: PayrollImpactSchema.nullable(),
   lifecycle_impact: LifecycleImpactSchema,
+  historical_unserved_correction: z.strictObject({
+    classification_only: z.boolean(),
+    client_cash_difference_requires_review: z.boolean().optional(),
+    retired_adopted_assignment_ids: EvidenceIds,
+    payroll_recoveries: z.array(z.strictObject({
+      obligation_identity: z.string().min(1),
+      staff_id: z.number().int().positive(),
+      paid_ntd: exactNtd,
+      recovery_increase_ntd: exactNtd,
+    })),
+  }).nullable().optional(),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 
@@ -227,7 +282,7 @@ export const OrderCancellationReceiptSchema = z.strictObject({
   scheduling_generation: z.number().int().nonnegative().nullable(),
   client_finance_version: z.number().int().nonnegative().nullable(),
   payroll_version: z.number().int().nonnegative().nullable(),
-  lifecycle_status: z.string().min(1),
+  lifecycle_status: z.enum(['訂單取消', '成立後未服務']),
   actual_end_date: DateOnlySchema.nullable(),
   official_service_day_count: z.number().int().nonnegative(),
   official_service_hours: z.number().nonnegative().multipleOf(0.5),
@@ -246,6 +301,7 @@ export const OrderCancellationApplyPayloadSchema = z.strictObject({
   reason: z.string().trim().max(500),
   fee_ntd: z.string().regex(/^[0-9]+$/).optional(),
   fee_reason: z.string().trim().max(500).optional(),
+  historical_unserved_correction: HistoricalUnservedCorrectionSchema.optional(),
 });
 
 const envelope = <T>(schema: z.ZodType<T>) => z.strictObject({
@@ -260,6 +316,9 @@ export type OrderCancellationPreview = z.infer<typeof OrderCancellationPreviewSc
 export type OrderCancellationReceipt = z.infer<typeof OrderCancellationReceiptSchema>;
 export type OrderCancellationApplyPayload = z.infer<typeof OrderCancellationApplyPayloadSchema>;
 export type ServiceDay = z.infer<typeof ServiceDaySchema>;
+export type HistoricalUnservedCorrection = z.infer<typeof HistoricalUnservedCorrectionSchema>;
+type CancellationPreviewOptions = { fee_ntd: string; fee_reason: string }
+  | { historical_unserved_correction: HistoricalUnservedCorrection };
 
 interface ApplyOptions {
   idempotencyKey: string;
@@ -292,10 +351,10 @@ export const orderCancellationClient = {
     if (result.case_no !== caseNo) throw new Error('訂單取消案件識別不一致。');
     return adaptCancellationQueryForWorkbench(result);
   },
-  async preview(caseNo: string, confirmedServiceDays: ServiceDay[], signal?: AbortSignal, fee?: { fee_ntd: string; fee_reason: string }): Promise<OrderCancellationPreview> {
+  async preview(caseNo: string, confirmedServiceDays: ServiceDay[], signal?: AbortSignal, change?: CancellationPreviewOptions): Promise<OrderCancellationPreview> {
     const raw = await transport.post(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/cancellation/preview`,
-      { confirmed_service_days: confirmedServiceDays, ...fee },
+      { confirmed_service_days: confirmedServiceDays, ...change },
       options(signal, { 'X-Correlation-ID': `orders-cancellation-preview-${caseNo}-${Date.now()}` }),
     );
     return decode(OrderCancellationPreviewSchema, raw);

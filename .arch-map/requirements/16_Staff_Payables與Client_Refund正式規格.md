@@ -43,6 +43,7 @@
 
 ### 2.4 超額付款與追償（`staff_overpayment_recovery`）
 
+- 更正將有效應付降為 0 元時，應付投影仍以原義務身分計算差額 `有效應付 − 淨實付`。淨實付大於 0 時，負差額列為 `anomaly`，按原出款來源建立獨立追償。淨實付為 0 時顯示 `completed`。原義務、出款及核銷保留。
 - 銀行實付大於選定 `remaining` 時，`ApplyStaffPayoutDifference(mode=overpayment)` 寫入全額 payout event、將原義務清零（`completed`），並以差額建立獨立 `staff_overpayment_recovery`（`recovery_required` 異常，不進 AP 清冊，嚴禁自動從他案或未來薪資扣抵）。
 - **追償狀態機**：`open／partially_recovered` ──(canonical 退回入款，`remaining > 0`)──> `partially_recovered`；(`remaining == 0`)──> `recovered`；(`staff_payables.recovery.adjust` authorized adjustment)──> `adjusted`。
 - Preview intent 綁定 `bank_total < remaining_total`（`underpayment`）或 `bank_total > remaining_total`（`overpayment`），金額相等改走一般 payout；永豐唯一對應月嫂主帳戶之退回入款保留待人工配對至開立中的追償。

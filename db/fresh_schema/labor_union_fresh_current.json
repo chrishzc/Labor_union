@@ -1,15 +1,15 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-service-date-adjustments-v1",
+  "release_id": "labor-union-validation-schema-staff-payable-projection-zero-v1",
   "source_bindings": {
-    "assembly_sha256": "f89ffaf641e3e14e9916c37f85b8f8dc88d1b3d00f1929950e0cde43af424e10",
-    "validation_manifest_sha256": "f199a2d0e51bfdd96de4017a97db9565806eaf9057c878d91cd16726b23a25cc",
+    "assembly_sha256": "cd43d260f174518b2ec7a14dfc35ca4df078084f7bf5286ffe7c2048cff9ad76",
+    "validation_manifest_sha256": "644e4897b3200c98a6da9e02d3790e728e2adab4a777267f804b19d255e22642",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
-  "sql_sha256": "f88899474233eb43a6820c277bdabf13c812d16e4f192e94565a400dfc5b883e",
+  "sql_sha256": "a44fcbcfd9b3fdcee63960d7805d531aae51ae5cc52bfed6935a4cc493cfd465",
   "objects": {
-    "tables": 401,
+    "tables": 405,
     "views": 2,
     "triggers": 389
   },
@@ -55,6 +55,6 @@
     "staff_leave_requests",
     "staff_matching_preference_migration_reviews"
   ],
-  "statement_count": 804,
+  "statement_count": 808,
   "system_seed_policy": "canonical_synthetic_source_only"
 }

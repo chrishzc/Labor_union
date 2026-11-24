@@ -27,10 +27,41 @@ class OrderLifecycleStatus(StrEnum):
     IN_SERVICE = "服務中"
     COMPLETED = "訂單完成"
     CANCELLED = "訂單取消"
+    ESTABLISHED_UNSERVED = "成立後未服務"
     HISTORICAL_UNSERVED = "歷史訂單－未服務"
     HISTORICAL_IN_SERVICE = "歷史訂單－服務中"
     HISTORICAL_SERVICE_COMPLETED = "歷史訂單－服務完成"
     HISTORICAL_ACCOUNTING_COMPLETED = "歷史訂單－帳務完成"
+
+
+@dataclass(frozen=True, slots=True)
+class OrderEstablishmentEvidence:
+    lifecycle_event_ids: tuple[int, ...] = ()
+    historical_adoption_ids: tuple[int, ...] = ()
+    current_owner_status: OrderLifecycleStatus | None = None
+
+    def __post_init__(self) -> None:
+        for values in (self.lifecycle_event_ids, self.historical_adoption_ids):
+            if not isinstance(values, tuple) or any(type(value) is not int or value < 1 for value in values):
+                raise ValueError("order_establishment_evidence_invalid")
+            if values != tuple(sorted(set(values))):
+                raise ValueError("order_establishment_evidence_invalid")
+        if self.current_owner_status is not None and not isinstance(self.current_owner_status, OrderLifecycleStatus):
+            raise TypeError("establishment current owner status must be typed")
+
+    @property
+    def established(self) -> bool:
+        return bool(self.lifecycle_event_ids or self.historical_adoption_ids) or self.current_owner_status in {
+            OrderLifecycleStatus.ESTABLISHED,
+            OrderLifecycleStatus.IN_SERVICE,
+            OrderLifecycleStatus.COMPLETED,
+        }
+
+
+def zero_service_terminal_status(evidence: OrderEstablishmentEvidence) -> OrderLifecycleStatus:
+    if not isinstance(evidence, OrderEstablishmentEvidence):
+        raise TypeError("zero-service termination requires establishment evidence")
+    return OrderLifecycleStatus.ESTABLISHED_UNSERVED if evidence.established else OrderLifecycleStatus.CANCELLED
 
 
 class OrderLifecycleScope(StrEnum):
@@ -93,6 +124,7 @@ class OrderLifecycleRootFacts:
     service_data_locked: bool
     historical_precision_restarted: bool = False
     deposit_gate_override_active: bool = False
+    establishment_evidence: OrderEstablishmentEvidence | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -274,6 +306,8 @@ def _lifecycle_status(
     completion_reached,
     evaluation_at,
 ):
+    if root_facts.current_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+        return root_facts.current_status
     if root_facts.current_status in {
         OrderLifecycleStatus.HISTORICAL_UNSERVED,
         OrderLifecycleStatus.HISTORICAL_IN_SERVICE,

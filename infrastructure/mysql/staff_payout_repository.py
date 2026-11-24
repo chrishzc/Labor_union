@@ -1209,10 +1209,10 @@ def _validate_projection_rows(rows, expected_status, difference_mode) -> None:
 def _projection_status(row) -> StaffPayableStatus:
     obligation = int(row["obligation_amount_ntd"])
     net_paid = int(row["net_paid_ntd"])
-    if net_paid == 0:
-        return StaffPayableStatus.PAYABLE
     if net_paid == obligation:
         return StaffPayableStatus.COMPLETED
+    if net_paid == 0:
+        return StaffPayableStatus.PAYABLE
     if net_paid > obligation:
         return StaffPayableStatus.ANOMALY
     return StaffPayableStatus.PARTIALLY_PAID

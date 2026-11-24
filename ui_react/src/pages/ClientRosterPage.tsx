@@ -109,7 +109,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [exportError, setExportError] = useState<string | null>(null);
   const [editState, setEditState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [deletionBusy, setDeletionBusy] = useState(false);
-  const [orderOperation, setOrderOperation] = useState<'cancel' | 'reopen' | null>(null);
+  const [orderOperation, setOrderOperation] = useState<'cancel' | 'reopen' | 'historical-unserved' | null>(null);
   const [orderOperationBusy, setOrderOperationBusy] = useState(false);
   const [orderRefreshing, setOrderRefreshing] = useState(false);
   const [reopenObserved, setReopenObserved] = useState(false);
@@ -117,7 +117,12 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const canManageOrder = sessionClient.getUser()?.capabilities.includes('system.administration') === true;
   const [linkedOrderStatus, setLinkedOrderStatus] = useState<{ caseNo: string; status: string } | null>(null);
   const listedOrder = page?.items.find(item => item.case_no === selectedCaseNo);
-  const selectedOrderStatus = listedOrder?.order_status ?? (linkedOrderStatus?.caseNo === selectedCaseNo ? linkedOrderStatus?.status : undefined);
+  const selectedOrderStatus = listedOrder
+    ? listedOrder.order_status
+    : linkedOrderStatus?.caseNo === selectedCaseNo ? linkedOrderStatus.status : undefined;
+  const canCorrectHistoricalUnserved = canManageOrder && detail?.case_no === selectedCaseNo
+    && selectedOrderStatus === '訂單取消' && !orderRefreshError;
+  const canCancel = canManageOrder && detail?.case_no === selectedCaseNo && !isCancellationTerminalStatus(selectedOrderStatus);
   const canReopen = canManageOrder && selectedOrderStatus === '訂單取消' && !reopenObserved;
   const orderBusy = orderOperationBusy || orderRefreshing;
   useEffect(() => {
@@ -330,6 +335,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const refreshAfterOrderOperation = async () => {
     setOrderRefreshError(false);
     setOrderRefreshing(true);
+    if (orderOperation === 'historical-unserved') setLinkedOrderStatus(null);
     const request = detailRequest.current + 1;
     try { await refreshDetail(); }
     catch { if (detailRequest.current === request) setOrderRefreshError(true); }
@@ -439,6 +445,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           ? <OrderControlledReopenPanel key={selectedCaseNo} caseNo={selectedCaseNo} startDisabled={reopenObserved}
               onObserved={() => { setReopenObserved(true); void refreshAfterOrderOperation(); }} onBusyChange={setOrderOperationBusy} />
           : <OrderCancellationPanel key={selectedCaseNo} caseNo={selectedCaseNo} allowHistoricalRepair={false}
+              historicalUnservedCorrection={orderOperation === 'historical-unserved'}
               onObserved={() => void refreshAfterOrderOperation()} onBusyChange={setOrderOperationBusy} />}
       </> : <>
       {canManageOrder && detail?.case_no === selectedCaseNo && <div className="registry-return-row">
@@ -446,7 +453,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           window.location.hash = `#clients?tab=applications&source_case=${encodeURIComponent(detail.case_no)}`;
         })}>以此案資料建立非市民新案</button>
       </div>}
-      {(onReturnToCase || (canManageOrder && detail && (canReopen || !isCancellationTerminalStatus(selectedOrderStatus)))) && selectedCaseNo && <div className="registry-return-row">
+      {(onReturnToCase || canCorrectHistoricalUnserved || canReopen || canCancel) && selectedCaseNo && <div className="registry-return-row">
       {onReturnToCase && <button type="button" disabled={editState.busy || deletionBusy} onClick={() => {
         if (editState.busy || deletionBusy) return;
         requestLeave(() => onReturnToCase(selectedCaseNo));
@@ -454,7 +461,10 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       {canReopen && detail?.case_no === selectedCaseNo &&
         <button type="button" disabled={editState.busy || deletionBusy}
           onClick={() => requestLeave(() => setOrderOperation('reopen'))}>重開訂單</button>}
-      {canManageOrder && detail?.case_no === selectedCaseNo && !isCancellationTerminalStatus(selectedOrderStatus) &&
+      {canCorrectHistoricalUnserved &&
+        <button type="button" disabled={editState.busy || deletionBusy || orderBusy}
+          onClick={() => requestLeave(() => setOrderOperation('historical-unserved'))}>更正歷史零服務</button>}
+      {canCancel &&
         <button type="button" className="order-v2-danger" disabled={editState.busy || deletionBusy}
           onClick={() => requestLeave(() => { setReopenObserved(false); setOrderOperation('cancel'); })}>取消訂單</button>}
       </div>}

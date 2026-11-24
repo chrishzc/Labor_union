@@ -212,7 +212,11 @@ class PayrollTermsImpactCandidate:
 def build_payroll_terms_impact_candidate(facts: PayrollTermsImpactFacts, change_identity: str) -> PayrollTermsImpactCandidate:
     require_canonical_text(change_identity, "change identity", _IDENTITY_MAXIMUM_LENGTH)
     payroll, rates = _calculate_payroll(facts)
-    if _has_handover_corrections(facts):
+    if _has_handover_corrections(facts) or any(
+        item.payout_history_exists for item in facts.existing_obligations
+    ):
+        # A paid root already represents its full legal entitlement. Correct
+        # that entitlement; appending the unpaid remainder would bill it twice.
         return _handover_candidate(facts, payroll, rates, change_identity)
     return _candidate(facts, payroll, rates, _build_actions(facts, payroll, change_identity))
 
@@ -319,24 +323,31 @@ class HistoricalPayrollAllocation:
     assignments: tuple[HistoricalPayrollAssignment, ...]
 
 
-def build_historical_payroll_attribution_impact(source, allocation, payroll, rates, terms, change_identity):
+def build_historical_payroll_attribution_impact(
+    source, allocation, payroll, rates, terms, change_identity, *, confirmed_zero_service=False,
+):
+    if confirmed_zero_service and (allocation.assignments or payroll.assignments or payroll.total_payable.amount):
+        raise ValueError("historical_unserved_confirmation_required")
     facts = PayrollTermsImpactFacts(
         source.case_no, source.payroll_version, allocation, terms, source.source_terms,
         source.existing_obligations, source.staff_payment_due_date,
     )
-    return _handover_candidate(facts, payroll, rates, change_identity)
+    return _handover_candidate(
+        facts, payroll, rates, change_identity, confirmed_zero_service=confirmed_zero_service,
+    )
 
 
 def _has_handover_corrections(facts):
     return any(item.obligation_identity.startswith("staff-handover:") for item in facts.existing_obligations)
 
 
-def _handover_candidate(facts, payroll, rates, change_identity, *, funding_staff=frozenset(), settlement_amounts=None):
+def _handover_candidate(facts, payroll, rates, change_identity, *, funding_staff=frozenset(),
+                        settlement_amounts=None, confirmed_zero_service=False):
     if any(item.paid_net_amount.amount > 0 and not item.payout_history_exists for item in facts.existing_obligations):
         raise ValueError("handover_paid_history_review_required")
     if any(item.total_payable.amount < 0 for item in payroll.assignments):
         raise ValueError("handover_adjustment_review_required")
-    if any(item.historically_settled for item in facts.existing_obligations):
+    if not confirmed_zero_service and any(item.historically_settled for item in facts.existing_obligations):
         raise ValueError("handover_historical_payment_review_required")
     roots = _service_obligations_by_source(facts)
     by_source = {item.source_assignment_id: item for item in facts.source_terms}

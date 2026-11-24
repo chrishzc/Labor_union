@@ -55,6 +55,12 @@ def report_source():
                 id INTEGER PRIMARY KEY, category TEXT, identity_status TEXT, hcm_review_status TEXT
             );
             CREATE TABLE orders (case_no TEXT PRIMARY KEY, client_id INTEGER, status TEXT);
+            CREATE TABLE order_lifecycle_state_events (
+                id INTEGER PRIMARY KEY, case_no TEXT, before_status TEXT, after_status TEXT, trigger_event TEXT
+            );
+            CREATE TABLE historical_order_adoption_receipts (
+                case_no TEXT, lifecycle_event_id INTEGER, outcome TEXT
+            );
             CREATE TABLE provisional_client_registrations (id INTEGER PRIMARY KEY, approved_at_utc TEXT);
             CREATE TABLE provisional_registration_case_issue_events (
                 registration_id INTEGER UNIQUE, case_no TEXT UNIQUE, client_id INTEGER
@@ -72,6 +78,9 @@ def report_source():
                 ('A116002', 3, '待補件'), ('A116003', 4, '洽談中'),
                 ('A116004', 5, '服務中'), ('115000001', 6, '洽談中'),
                 ('115000002', 7, '訂單取消'), ('A116005', 8, '洽談中');
+            INSERT INTO order_lifecycle_state_events VALUES
+                (101, 'A116001', '洽談中', '訂單成立', 'order_establishment'),
+                (105, 'A116004', '訂單成立', '服務中', 'service_start');
             INSERT INTO provisional_client_registrations VALUES
                 (10, '2026-12-31 16:00:00'), (11, NULL), (12, NULL);
             INSERT INTO provisional_registration_case_issue_events VALUES
@@ -111,4 +120,39 @@ def test_formal_liff_and_manual_cases_share_one_taipei_calendar(report_source):
     assert january_totals.summary.application_count == january_totals.annual_application_count == 2
     assert january_totals.summary.order_status_counts["訂單成立"] == 1
     assert january_totals.summary.order_status_counts["服務中"] == 1
+    assert january_totals.summary.order_established_count == 2
     assert report.query_case_statistics(2027, month=2, case_category="non_citizen").summary.application_count == 0
+
+
+@pytest.mark.parametrize("status", ["訂單成立", "服務中", "訂單完成", "成立後未服務"])
+@pytest.mark.parametrize("has_evidence", [False, True])
+def test_non_citizen_establishment_count_requires_owner_evidence(report_source, status, has_evidence):
+    db = report_source._connection.connection
+    db.execute("UPDATE orders SET status=? WHERE case_no='A116001'", (status,))
+    if not has_evidence:
+        db.execute("DELETE FROM order_lifecycle_state_events WHERE case_no='A116001'")
+    facts = report_source.list_non_citizen_case_statistics_facts(date(2027, 1, 1), date(2027, 1, 1))
+    assert next(fact for fact in facts if fact.client_id == 1).has_establishment_evidence is has_evidence
+    report = WeeklyOperationsReportQuery(report_source, lambda: datetime(2027, 1, 1))
+    summary = report.query_case_statistics(2027, month=1, case_category="non_citizen").summary
+    # The other case has genuine service-start evidence. Current status alone
+    # cannot add this case to the established count or change the period total.
+    assert summary.application_count == 2
+    assert summary.order_established_count == 1 + int(has_evidence)
+    assert sum(summary.order_status_counts.values()) == 2
+
+
+def test_non_citizen_adopted_establishment_survives_zero_service_classification(report_source):
+    db = report_source._connection.connection
+    db.execute("UPDATE orders SET status='成立後未服務' WHERE case_no='A116001'")
+    db.execute("DELETE FROM order_lifecycle_state_events WHERE case_no='A116001'")
+    db.execute("INSERT INTO order_lifecycle_state_events VALUES (201, 'A116001', NULL, '歷史訂單－未服務', 'historical_order_adoption')")
+    report = WeeklyOperationsReportQuery(report_source, lambda: datetime(2027, 1, 1))
+    before = report.query_case_statistics(2027, month=1, case_category="non_citizen").summary
+    assert before.application_count == 2
+    assert before.order_established_count == 1
+    db.execute("INSERT INTO historical_order_adoption_receipts VALUES ('A116001', 201, 'adopted')")
+    after = report.query_case_statistics(2027, month=1, case_category="non_citizen").summary
+    assert after.application_count == 2
+    assert after.order_established_count == 2
+    assert after.order_status_counts == before.order_status_counts

@@ -6,6 +6,7 @@ import { CancellationSettlementAccounting } from './CancellationSettlementAccoun
 import { OrderCancellationPanel } from './OrderCancellationPanel';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
+import { AccountingDifferencePanel } from './AccountingDifferencePanel';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
 import { ClientRefundReturnReconciliationPanel } from './ClientRefundReturnReconciliationPanel';
@@ -538,7 +539,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
   </section>;
 }
 
-export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation,onPayableReview,reviewObligation}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void};onPayableReview?:(item:HistoricalPayableAuditItem)=>void;reviewObligation?:string}){
+export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation,onPayableReview,reviewObligation,settlementFocus}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void};onPayableReview?:(item:HistoricalPayableAuditItem)=>void;reviewObligation?:string;settlementFocus?:'client_settlement'|'staff_payout'}){
  const {requestLeave}=useUnsavedNavigation();
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;pricing?:CasePricing;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[paramsDrawerOpen,setParamsDrawerOpen]=useState(false);
@@ -577,6 +578,11 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  useEffect(()=>{const controller=new AbortController();setState(old=>old.caseNo===initialCase?{...old,loading:true,error:undefined}:{caseNo:initialCase,loading:true});if(!initialCase)return()=>controller.abort();void Promise.allSettled([financeAccountingClient.query(initialCase,controller.signal),ordersQueryClient.getOrderDetail(initialCase,{signal:controller.signal}),paymentOverdueReminderClient.case(initialCase,controller.signal),clientRegistryClient.query(initialCase,controller.signal,true),caseVirtualAccountClient.query(initialCase,controller.signal),accountingPricingClient.queryCase(initialCase)]).then(([accounting,order,notices,registry,accountView,pricing])=>{if(controller.signal.aborted)return;if(accounting.status==='rejected'){const status=accounting.reason instanceof ApiHttpError?accounting.reason.status:0;setState({caseNo:initialCase,error:status===404?'找不到此案件，請確認案件編號。':status===401?'登入已失效，請重新登入後查詢。':status===403?'目前沒有查閱帳務的權限。':'帳務資料暫時無法取得，請稍後重新查詢。'});return;}setState({caseNo:initialCase,data:accounting.value,order:order.status==='fulfilled'?order.value:undefined,notices:notices.status==='fulfilled'?notices.value:undefined,registry:registry.status==='fulfilled'?registry.value:undefined,accountView:accountView.status==='fulfilled'?accountView.value:undefined,pricing:pricing.status==='fulfilled'?pricing.value:undefined,noticeError:notices.status==='rejected',loading:false});});return()=>controller.abort();},[initialCase,revision]);
  useLayoutEffect(()=>{if(view!==null){section.current?.querySelector<HTMLElement>('.finance-case-subview h3')?.focus();return;}if(view===null&&returnFocus.current){const body=section.current?.closest('.drawer-body');if(body)body.scrollTop=returnScroll.current;const trigger=returnFocus.current;const target=trigger.isConnected?trigger:section.current?.querySelector('summary');target?.focus({preventScroll:true});returnFocus.current=null;}},[view,!!state.data]);
  useEffect(()=>{if(state.caseNo===initialCase&&state.data)onIdentity?.(initialCase,state.data.client_name);},[initialCase,state.caseNo,state.data,onIdentity]);
+ const caseLoaded = state.caseNo === initialCase && state.data !== undefined;
+ useLayoutEffect(() => {
+   if (!settlementFocus || !caseLoaded) return;
+   section.current?.querySelector<HTMLElement>(`[data-settlement-focus="${settlementFocus}"]`)?.focus();
+ }, [caseLoaded, initialCase, settlementFocus]);
  function refresh(){setRevision(v=>v+1);onChanged?.();}
  function open(next:Stage|'plan'){returnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;returnScroll.current=section.current?.closest('.drawer-body')?.scrollTop??0;requestLeave(()=>setView(next));}
  function back(){requestLeave(()=>setView(null));}
@@ -588,11 +594,13 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const staff=data?[...new Set(data.staff_items.filter(row=>row.direction==='payable').map(row=>row.party))].join('、'):'';
  const staffItems=data?.staff_items.filter(row=>row.direction==='payable')??[];
  const pricingTotal=state.pricing?.case_no===initialCase ? state.pricing.impact.staff_total_amount : null;
- const caseTotal=data?.staff_receivable_ntd??pricingTotal;
  const staffTransactions=data?.transactions.filter(row=>row.kind==='payout'||staffItems.some(s=>s.identity===row.item_identity))??[];
  const staffPayableTotal=staffItems.reduce((sum,item)=>sum+item.expected_ntd,0);
  const staffPaidTotal=staffItems.reduce((sum,item)=>sum+item.actual_ntd,0);
  const staffRemainingTotal=staffItems.reduce((sum,item)=>sum+(item.remaining_ntd??Math.max(0,item.expected_ntd-item.actual_ntd)),0);
+ const isEstablishedUnserved=state.order?.order_status==='成立後未服務';
+ const caseTotal=data?.staff_receivable_ntd??(isEstablishedUnserved?staffPayableTotal:pricingTotal);
+ const noUnservedStaffPayable=isEstablishedUnserved&&staffItems.length===0&&caseTotal===0;
 
  const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
  const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];
@@ -667,12 +675,17 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
    </div>
  )}
  <CancellationSettlementAccounting key={revision} data={data} />
+ {settlementFocus && <div data-settlement-focus={settlementFocus} tabIndex={-1}>
+   <AccountingDifferencePanel key={`${initialCase}:${settlementFocus}`} caseNo={initialCase}
+     initialOwner={settlementFocus === 'client_settlement' ? 'client' : data.staff_items.some(item => item.direction === 'receivable' && !item.settled) ? 'staff' : 'payroll'}
+     refreshVersion={revision} onChanged={refresh} />
+ </div>}
  <AccountingParametersCard
    caseNo={initialCase}
    pricing={state.pricing}
    multiBirthCount={multiBirthCount}
    customerAmountNtd={data.customer_amount_ntd ?? data.receivable_ntd}
-   staffAmountNtd={data.staff_receivable_ntd}
+   staffAmountNtd={isEstablishedUnserved?caseTotal:data.staff_receivable_ntd}
    onOpenEdit={() => setParamsDrawerOpen(true)}
  />
  <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(caseTotal)}</dd></div></dl>
@@ -784,12 +797,12 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     </div>
     <div className="finance-staff-summary-card">
       <small>已核銷金額（含內扣手續費）</small>
-      <strong>{money(staffItems.length ? staffPaidTotal : null)}</strong>
+      <strong>{noUnservedStaffPayable?'無目前應付明細':money(staffItems.length ? staffPaidTotal : null)}</strong>
     </div>
     <div className="finance-staff-summary-card">
       <small>尚待出款</small>
       <strong className={staffItems.length > 0 && staffRemainingTotal === 0 ? 'finance-paid' : ''}>
-        {staffItems.length === 0 ? '待確認' : staffRemainingTotal === 0 ? '已付齊' : money(staffRemainingTotal)}
+        {noUnservedStaffPayable ? '不需出款' : staffItems.length === 0 ? '待確認' : staffRemainingTotal === 0 ? '已付齊' : money(staffRemainingTotal)}
       </strong>
     </div>
   </div>
@@ -913,7 +926,9 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           <tr>
             <td colSpan={8} className="finance-state">
               <div className="finance-empty-payroll-container" style={{ padding: '12px 8px', textAlign: 'center' }}>
-                {isPreliminary ? (
+                {noUnservedStaffPayable ? (
+                  <p>本案成立後未服務，沒有月嫂應付明細。</p>
+                ) : isPreliminary ? (
                   <p>案件處於洽談中／尚未簽約排班，尚未產生月嫂應付明細。</p>
                 ) : isMissingBasis ? (
                   <div>

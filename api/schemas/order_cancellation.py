@@ -7,6 +7,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from api.schemas.base import ExactNtd
+from api.schemas.historical_unserved_correction import (
+    HistoricalUnservedCorrectionPreviewView,
+    HistoricalUnservedCorrectionQueryView,
+)
+from domains.orders.lifecycle import OrderLifecycleStatus
 
 
 class CancellationServiceDayView(BaseModel):
@@ -119,12 +124,13 @@ class OrderCancellationQueryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     case_no: str
-    lifecycle_status: str
+    lifecycle_status: OrderLifecycleStatus
     actual_start_date: date | None
     contracted_service_days: int = Field(gt=0)
     service_hours_per_day: float = Field(gt=0, le=24, multiple_of=0.5)
     service_started: bool
     historical_mid_service_confirmation_available: bool
+    historical_unserved_correction: HistoricalUnservedCorrectionQueryView | None = None
     service_data_locked: bool
     order_version: int = Field(ge=0)
     scheduling_version: int | None = Field(ge=0)
@@ -154,6 +160,7 @@ class OrderCancellationPreviewView(BaseModel):
     payroll_impact: CancellationPayrollImpactView | None
     lifecycle_impact: dict[str, Any]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    historical_unserved_correction: HistoricalUnservedCorrectionPreviewView | None = None
 
 
 class OrderCancellationReceiptView(BaseModel):
@@ -165,7 +172,7 @@ class OrderCancellationReceiptView(BaseModel):
     scheduling_generation: int | None = Field(ge=0)
     client_finance_version: int | None = Field(ge=0)
     payroll_version: int | None = Field(ge=0)
-    lifecycle_status: str
+    lifecycle_status: OrderLifecycleStatus
     actual_end_date: date | None
     official_service_day_count: int = Field(ge=0)
     official_service_hours: float = Field(ge=0, multiple_of=0.5)

@@ -1,4 +1,5 @@
 """Borrow existing owner writers inside the caller's transaction; never commit or send."""
+from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.client_finance.obligation_planning import (
     ClientObligationActionKind, build_client_finance_terms_candidate,
 )
@@ -12,8 +13,12 @@ from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceComma
 def synchronize_client_charges(cursor, case_no, *, actor, key, correlation_id, source_family, source_id):
     order = select_order(cursor, case_no, lock=True)
     from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
-    synchronize_government_case_amount(cursor,case_no,key.value,actor.actor_id,'案件資料更新後重新計算政府補助')
-    if str(order["status"]).startswith("歷史") or str(order["status"]) in ("訂單取消", "訂單完成"):
+    if str(order['status']) != OrderLifecycleStatus.ESTABLISHED_UNSERVED.value:
+        synchronize_government_case_amount(cursor,case_no,key.value,actor.actor_id,'案件資料更新後重新計算政府補助')
+    if str(order["status"]).startswith("歷史") or str(order["status"]) in (
+        OrderLifecycleStatus.CANCELLED.value, OrderLifecycleStatus.COMPLETED.value,
+        OrderLifecycleStatus.ESTABLISHED_UNSERVED.value,
+    ):
         # Historical/terminal amounts require their actual-service owner writer.
         cursor.execute("SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s FOR UPDATE", (case_no,))
         account = cursor.fetchone()
@@ -41,7 +46,10 @@ def synchronize_client_charges(cursor, case_no, *, actor, key, correlation_id, s
 def synchronize_terminal_subsidy_return(cursor, case_no, *, actor, key, correlation_id,
                                        source_family, source_id, advance_version=True):
     order = select_order(cursor, case_no, lock=True)
-    if str(order['status']) not in ('訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'):
+    if str(order['status']) not in (
+        '訂單完成', '訂單取消', OrderLifecycleStatus.ESTABLISHED_UNSERVED.value,
+        '歷史訂單－服務完成', '歷史訂單－帳務完成',
+    ):
         return
     from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState, query_subsidy_payable_handoff
     from infrastructure.mysql.subsidy_confirmation_repository import preview_manual_subsidy_plan, persist_confirmed_refund

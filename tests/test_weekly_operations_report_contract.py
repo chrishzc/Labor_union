@@ -63,7 +63,8 @@ class _CaseStatisticsFacts:
             ("2027-01-01", "一般市民", "符合", "服務中"),
         ]
         self.rows = [replace(seed, client_id=index, case_no=f"115000{index:03d}", created_at=datetime.fromisoformat(day),
-                             identity_status=identity, hcm_review_status=review_status, order_status=status)
+                             identity_status=identity, hcm_review_status=review_status, order_status=status,
+                             has_establishment_evidence=index in {1, 2, 3, 4, 5, 6, 7, 13, 14})
                      for index, (day, identity, review_status, status) in enumerate(entries, start=1)]
         self.reads = []
 
@@ -209,6 +210,7 @@ class _Facts:
             WeeklyCaseFact(
                 7, "115000007", datetime(2026, 8, 20, 9), "王小美", "一般市民", "符合",
                 "東區", "服務中", 20, 8, date(2026, 8, 10), date(2026, 9, 4),
+                has_establishment_evidence=True,
             ),
             WeeklyCaseFact(
                 8, "115000008", datetime(2026, 8, 24, 10), "林大華", None, "不符合",
@@ -562,6 +564,7 @@ def test_historical_unserved_is_an_established_order_waiting_for_service():
     row = WeeklyOperationsReportQuery._case_row(WeeklyCaseFact(
         9, "115000009", datetime(2026, 8, 24, 9), "歷史客戶", "一般市民", None,
         "香山", "歷史訂單－未服務", 20, 8, date(2026, 9, 1), date(2026, 9, 20),
+        has_establishment_evidence=True,
     ))
 
     assert row.order_established == 1

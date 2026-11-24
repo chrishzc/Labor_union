@@ -72,6 +72,28 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('成立後未服務只有兩側帳務待辦入口，沒有服務辦理事項', async () => {
+    const timeline = page();
+    const item = timeline.items[0]!;
+    mocks.core.mockResolvedValue({
+      ...timeline,
+      items: [{ ...item, lifecycle_status: '成立後未服務', current_core_stage_code: null, core_stages: [
+        { code: 'client_settlement', status: 'blocked', blockers: [], warnings: [] },
+        { code: 'staff_payout', status: 'blocked', blockers: [], warnings: [] },
+      ] }],
+    });
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    expect(await screen.findByText('成立後未服務')).toBeVisible();
+    expect(screen.getByRole('link', { name: /辦理客戶退款或補收/ }))
+      .toHaveAttribute('href', `#finance?tab=case-accounting&case_no=${CASE}&from=workbench&focus=client_settlement`);
+    expect(screen.getByRole('link', { name: /辦理月嫂款項更正與結算/ }))
+      .toHaveAttribute('href', `#finance?tab=case-accounting&case_no=${CASE}&from=workbench&focus=staff_payout`);
+    expect(screen.queryByRole('complementary', { name: '案件辦理事項' })).not.toBeInTheDocument();
+    expect(screen.queryByText('日期操作入口')).not.toBeInTheDocument();
+    expect(screen.queryByText('排班操作入口')).not.toBeInTheDocument();
+    expect(screen.queryByText('正常完工操作入口')).not.toBeInTheDocument();
+  });
+
   it('待辦看板返回請求不卸載結果未明的操作，也不在解鎖後自動跳走', async () => {
     const onClose = vi.fn();
     const props = { caseNo: CASE, branchType: 'normal' as const, onClose };

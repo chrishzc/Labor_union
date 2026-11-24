@@ -165,6 +165,56 @@ describe('精簡案件抽屜',()=>{
    pricing.mockRestore();
   }
  });
+ it.each([null,0])('成立後未服務且正式月嫂總額為 %s 時，不以原登記計價回復薪資',async(accountingTotal)=>{
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({
+   ...facts(),staff_receivable_ntd:accountingTotal,staff_items:[],payable_ntd:null,paid_ntd:null,
+  });
+  vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({
+   case_no:caseNo,order_status:'成立後未服務',staff_id:null,service_days:5,service_hours_per_day:8,
+  } as never);
+  const pricing=vi.spyOn(accountingPricingClient,'queryCase').mockResolvedValueOnce({
+   case_no:caseNo,revision:0,source:'legacy',
+   terms:{identity_name:'一般市民',rule:'citizen',subsidy_hours:40,client:{covered:300,excess:300},payroll:{covered:300,excess:300}},
+   impact:{covered_hours:40,excess_hours:0,client_amount:12000,staff_covered_amount:12000,
+    staff_excess_amount:0,staff_total_amount:12000,subsidy_amount:12000,subsidy_return_amount:0},
+  });
+  try {
+   wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+   const summary=within(await screen.findByLabelText('案件精簡摘要'));
+   expect(summary.getByText('NT$ 0',{exact:true})).toBeVisible();
+   expect(screen.getByLabelText('帳務計價依據與核心參數')).toHaveTextContent('月嫂基準應付 NT$ 0');
+   const staffSummary=within(screen.getByLabelText('月嫂薪資匯總'));
+   expect(staffSummary.getByText('NT$ 0',{exact:true})).toBeVisible();
+   expect(staffSummary.getByText('無目前應付明細',{exact:true})).toBeVisible();
+   expect(staffSummary.getByText('不需出款',{exact:true})).toBeVisible();
+   expect(staffSummary.queryByText('待確認',{exact:true})).not.toBeInTheDocument();
+   expect(screen.getByText('本案成立後未服務，沒有月嫂應付明細。')).toBeVisible();
+   expect(screen.queryByText(/缺少計薪依據/)).not.toBeInTheDocument();
+   expect(screen.queryByRole('button',{name:'更新帳務計算'})).not.toBeInTheDocument();
+  } finally {
+   pricing.mockRestore();
+  }
+ });
+ it.each([null,1000])('成立後未服務仍保留正式月嫂應付明細與已核銷金額，總額 %s',async(accountingTotal)=>{
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({
+   ...facts(),staff_receivable_ntd:accountingTotal,
+   staff_items:[{...facts().staff_items[0],expected_ntd:1000,actual_ntd:200,remaining_ntd:800,has_payment:true}],
+  });
+  vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,order_status:'成立後未服務'} as never);
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  const summary=within(await screen.findByLabelText('案件精簡摘要'));
+  expect(summary.getByText('NT$ 1,000',{exact:true})).toBeVisible();
+  expect(screen.getByLabelText('帳務計價依據與核心參數')).toHaveTextContent('月嫂基準應付 NT$ 1,000');
+  const staffSummary=within(screen.getByLabelText('月嫂薪資匯總'));
+  expect(staffSummary.getByText('應付月嫂總額',{exact:true})).toBeVisible();
+  expect(staffSummary.getByText('NT$ 1,000',{exact:true})).toBeVisible();
+  expect(staffSummary.getByText('NT$ 200',{exact:true})).toBeVisible();
+  expect(staffSummary.getByText('NT$ 800',{exact:true})).toBeVisible();
+  const staffDetails=within(screen.getByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'}));
+  expect(staffDetails.getByText('合成月嫂',{exact:true})).toBeVisible();
+  expect(staffDetails.getByText('待付 NT$ 800',{exact:true})).toBeVisible();
+  expect(screen.queryByText('本案成立後未服務，沒有月嫂應付明細。')).not.toBeInTheDocument();
+ });
  it('committed changes replace stale bank candidates and previews before reconciling the same original row',async()=>{
   let version=1,identity='first';
   const data=()=>({...facts(),client_items:[{...facts().client_items[1],identity,expected_ntd:1000,actual_ntd:0,remaining_ntd:1000,version:`${version}:1:0`}]});
@@ -366,6 +416,7 @@ describe('精簡案件抽屜',()=>{
     const preview=vi.spyOn(orderCancellationClient,'preview').mockResolvedValue({
      ...factsBefore,cancellation_date:'2026-10-11',actual_end_date:'2026-10-10',official_service_day_count:1,
      official_service_hours:8,scheduling:null,client_finance_impact:null,payroll_impact:null,
+     historical_unserved_correction:null,
      lifecycle_impact:{case_no:caseNo,before_status:factsBefore.lifecycle_status,after_status:'訂單取消',
       actual_end_date:'2026-10-10',cancellation_effective:true,fingerprint},preview_fingerprint:fingerprint,
     });
@@ -600,6 +651,7 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
     } : cancellationQuery);
     const previewSpy = vi.spyOn(orderCancellationClient, 'preview').mockResolvedValue({
       ...cancellationQuery,
+      historical_unserved_correction: null,
       cancellation_date: '2026-10-11',
       actual_end_date: '2026-10-10',
       official_service_day_count: 1,

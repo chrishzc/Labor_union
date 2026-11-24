@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.case_category_query import CASE_CATEGORY_SQL
+from infrastructure.mysql.order_establishment_read_model import establishment_event_exists_sql
 from subsystems.government_subsidy import reconciliation_register_query
 from subsystems.reporting.weekly_operations_report_query import (
     SubsidyFact,
@@ -43,7 +44,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
 
     def list_non_citizen_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT client_id,identity_status,order_status,created_local "
+            cursor.execute("SELECT client_id,identity_status,order_status,created_local,has_establishment_evidence "
                            + _NON_CITIZEN_CASES_FROM_SQL
                            + " WHERE created_local >= %s AND created_local < %s ORDER BY created_local,client_id",
                            (datetime.combine(start_date, datetime.min.time()),
@@ -54,6 +55,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             applicant_name=None, identity_status=_optional_text(row.get("identity_status")), hcm_review_status=None,
             district=None, order_status=_optional_text(row.get("order_status")), service_days=None,
             service_hours_per_day=None, planned_start_date=None, planned_end_date=None, case_category="non_citizen",
+            has_establishment_evidence=bool(row["has_establishment_evidence"]),
         ) for row in rows]
 
     def list_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
@@ -69,6 +71,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             district=None, order_status=_optional_text(row.get("order_status")),
             service_days=None, service_hours_per_day=None, planned_start_date=None, planned_end_date=None,
             case_category=row.get("case_category"),
+            has_establishment_evidence=bool(row["has_establishment_evidence"]),
         ) for row in rows]
 
     def list_case_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
@@ -92,6 +95,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 seq_num=_optional_int(row.get("seq_num")),
                 case_category=row.get("case_category"),
                 cancel_reason=_optional_text(row.get("cancel_reason")),
+                has_establishment_evidence=bool(row["has_establishment_evidence"]),
             )
             for row in rows
         ]
@@ -251,6 +255,7 @@ _REPORT_CASE_CATEGORY_SQL = (
 # Taipei timestamp used to allocate the case number in the same transaction.
 _NON_CITIZEN_CASES_FROM_SQL = f"""FROM (
     SELECT c.id AS client_id,c.identity_status,o.status AS order_status,
+           {establishment_event_exists_sql("o.case_no")} AS has_establishment_evidence,
            CASE WHEN e.registration_id IS NOT NULL
                 THEN DATE_ADD(r.approved_at_utc,INTERVAL 8 HOUR)
                 ELSE CAST(REPLACE(JSON_UNQUOTE(JSON_EXTRACT(m.source_snapshot,'$.client_attributes.created_at')),'T',' ') AS DATETIME(6))
@@ -268,7 +273,19 @@ SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created
        c.name AS applicant_name,c.identity_status,c.hcm_review_status,c.city,c.address,
        {_REPORT_CASE_CATEGORY_SQL} AS case_category,o.status AS order_status,o.service_days,o.service_hours_per_day,
        o.start_date AS planned_start_date,o.end_date AS planned_end_date,
-       COALESCE(cancellation.reason,o.cancel_reason) AS cancel_reason
+       {establishment_event_exists_sql("o.case_no")} AS has_establishment_evidence,
+       CASE
+         WHEN o.status = '成立後未服務' THEN COALESCE(
+           (SELECT JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.historical_unserved_correction.reason'))
+              FROM order_lifecycle_state_events e
+             WHERE e.case_no=o.case_no AND e.trigger_event='order_cancellation_applied'
+               AND e.after_status='成立後未服務'
+               AND JSON_CONTAINS_PATH(e.facts_snapshot,'one','$.historical_unserved_correction.reason')
+             ORDER BY e.id DESC LIMIT 1),
+           cancellation.reason
+         )
+         WHEN o.status = '訂單取消' THEN COALESCE(cancellation.reason,o.cancel_reason)
+       END AS cancel_reason
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
 LEFT JOIN order_lifecycle_control_state cancellation_state
@@ -287,7 +304,8 @@ ORDER BY c.created_at,c.id
 _CASE_STATISTICS_FACTS_SQL = f"""
 SELECT c.id AS client_id,c.created_at AS application_created_at,c.identity_status,
        c.hcm_review_status,
-       {_REPORT_CASE_CATEGORY_SQL} AS case_category,o.status AS order_status
+       {_REPORT_CASE_CATEGORY_SQL} AS case_category,o.status AS order_status,
+       {establishment_event_exists_sql("o.case_no")} AS has_establishment_evidence
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
 WHERE {_REPORT_CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s

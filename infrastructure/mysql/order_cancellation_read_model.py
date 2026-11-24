@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from infrastructure.mysql.order_establishment_read_model import load_order_establishment_evidence
 from typing import Any, TypedDict
 
 from domains.orders.cancellation import (
@@ -10,6 +11,8 @@ from domains.orders.cancellation import (
     CancellationOrderFacts,
     CancellationSchedulingFacts,
 )
+from domains.orders.historical_unserved_correction import is_historical_unserved_correctable
+from domains.orders.lifecycle import OrderLifecycleStatus
 from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
 from subsystems.orders.cancellation_workflow import CancellationWorkflowFacts
 from shared_kernel.money import MoneyNTD
@@ -82,6 +85,8 @@ def load_cancellation_preview_facts(
     cursor: Any,
     case_no: str,
     requested_staff_ids: tuple[int, ...],
+    *,
+    allow_missing_payroll_rates: bool = False,
 ) -> CancellationWorkflowFacts:
     _require_canonical_staff_ids(requested_staff_ids)
     order_row = select_order(cursor, case_no, lock=False)
@@ -99,6 +104,7 @@ def load_cancellation_preview_facts(
         aggregate_row,
         lock=False,
         historical_origin=historical_origin,
+        allow_missing_payroll_rates=allow_missing_payroll_rates,
     )
 
 
@@ -106,14 +112,19 @@ def load_cancellation_locked_facts(
     cursor: Any,
     case_no: str,
     preflight_staff_ids: tuple[int, ...],
+    requested_staff_ids: tuple[int, ...],
+    *,
+    allow_missing_payroll_rates: bool = False,
 ) -> CancellationWorkflowFacts:
     _require_canonical_staff_ids(preflight_staff_ids)
+    _require_canonical_staff_ids(requested_staff_ids)
     order_row = select_order(cursor, case_no, lock=True)
     aggregate_row = _select_cancellation_aggregate(cursor, case_no, lock=True)
     historical_origin = _historical_cancellation_origin(cursor, case_no)
     _lock_staff(
         cursor,
         preflight_staff_ids,
+        requested_staff_ids=requested_staff_ids,
         case_no=case_no,
         historical_origin=historical_origin,
     )
@@ -123,6 +134,7 @@ def load_cancellation_locked_facts(
         aggregate_row,
         lock=True,
         historical_origin=historical_origin,
+        allow_missing_payroll_rates=allow_missing_payroll_rates,
     )
 
 
@@ -132,8 +144,10 @@ def cancellation_preflight_staff_ids(
     requested_staff_ids: tuple[int, ...],
 ) -> tuple[int, ...]:
     _require_canonical_staff_ids(requested_staff_ids)
+    from infrastructure.mysql.historical_unserved_correction_read_model import preflight_historical_unserved_staff_ids
     current_ids = preflight_staff_ids(cursor, case_no)
-    return tuple(sorted(set(current_ids).union(requested_staff_ids)))
+    historical_ids = preflight_historical_unserved_staff_ids(cursor, case_no)
+    return tuple(sorted(set(current_ids).union(requested_staff_ids, historical_ids)))
 
 
 def _assemble_cancellation_facts(
@@ -143,6 +157,7 @@ def _assemble_cancellation_facts(
     *,
     lock,
     historical_origin=None,
+    allow_missing_payroll_rates: bool = False,
 ):
     case_no = str(order_row["case_no"])
     if aggregate_row is None:
@@ -154,15 +169,36 @@ def _assemble_cancellation_facts(
     if lock:
         _select_schedules(cursor, generation, lock)
     assignments = _load_cancellation_assignments(cursor, aggregate_row, lock=lock) if aggregate_row else ()
-    finance_present, payroll_present = _validate_cancellation_owner_presence(cursor, case_no, lock)
+    from infrastructure.mysql.historical_unserved_correction_read_model import load_historical_unserved_evidence
+    historical_unserved_evidence = load_historical_unserved_evidence(
+        cursor, case_no, order_row["status"], lock=lock,
+        actual_start_date=order_row.get("actual_start_date"), actual_end_date=order_row["actual_end_date"],
+    )
+    if allow_missing_payroll_rates:
+        status = OrderLifecycleStatus(order_row["status"])
+        allow_missing_payroll_rates = (
+            status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+            or is_historical_unserved_correctable(status)
+        )
+    finance_present, payroll_present = _validate_cancellation_owner_presence(
+        cursor, case_no, lock, allow_missing_payroll_rates=allow_missing_payroll_rates,
+    )
     if assignments and not (finance_present and payroll_present):
         raise ValueError("cancellation_financial_roots_inconsistent")
-    if aggregate_row is None and payroll_present:
+    if aggregate_row is None and payroll_present and historical_unserved_evidence is None:
         raise ValueError("cancellation_scheduling_facts_inconsistent")
     finance = _load_client_finance(cursor, order_row, lock) if finance_present else None
     net_cash_received = MoneyNTD(query_case_net_cash(cursor, case_no)) if finance is not None else None
-    payroll = _load_payroll(cursor, order_row, assignment_rows, lock) if payroll_present else None
-    lifecycle = _load_lifecycle(cursor, order_row, lock)
+    payroll = _load_payroll(
+        cursor, order_row, assignment_rows, lock,
+        allow_missing_payroll_rates=allow_missing_payroll_rates,
+    ) if payroll_present else None
+    lifecycle = replace(
+        _load_lifecycle(cursor, order_row, lock),
+        establishment_evidence=load_order_establishment_evidence(
+            cursor, case_no, order_row["status"], lock=lock,
+        ),
+    )
     order = _order_facts(order_row)
     if lock and generation is not None:
         _lock_dated_occupancy(cursor, generation)
@@ -184,6 +220,7 @@ def _assemble_cancellation_facts(
         ),
         finance, payroll, lifecycle, historical_origin, net_cash_received,
         _initial_cancellation_client_terms(cursor, order_row, lock) if finance is None and not assignments else None,
+        historical_unserved_evidence,
     )
 
 
@@ -219,8 +256,8 @@ def _select_cancellation_aggregate(cursor, case_no, *, lock):
     return row
 
 
-def _validate_cancellation_owner_presence(cursor, case_no, lock):
-    """Absence is legal; partial roots or orphan financial history are not."""
+def _validate_cancellation_owner_presence(cursor, case_no, lock, *, allow_missing_payroll_rates: bool = False):
+    """Preserve owner integrity when a historical zero-service read lacks rates."""
     def exists(table, column="case_no"):
         cursor.execute(f"SELECT {column} FROM {table} WHERE case_no=%s" + _lock_clause(lock), (case_no,))
         return cursor.fetchone() is not None
@@ -231,7 +268,8 @@ def _validate_cancellation_owner_presence(cursor, case_no, lock):
     if not finance and any(exists(table) for table in ("client_obligations", "client_obligation_events", "client_ledger_entries")):
         raise ValueError("invalid_client_finance_facts")
     payroll = exists("payroll_case_accounts")
-    if payroll != exists("case_payroll_rate_policy_snapshots"):
+    payroll_policy = exists("case_payroll_rate_policy_snapshots")
+    if (payroll_policy and not payroll) or (payroll and not payroll_policy and not allow_missing_payroll_rates):
         raise ValueError("invalid_payroll_facts")
     if not payroll and any(exists(table) for table in ("staff_obligations", "staff_obligation_events")):
         raise ValueError("invalid_payroll_facts")
@@ -299,9 +337,14 @@ def _lock_staff(
     cursor,
     staff_ids,
     *,
+    requested_staff_ids,
     case_no=None,
     historical_origin=False,
 ) -> None:
+    # Old assignments still need occupancy locks when zero-service termination removes them.
+    # Only staff explicitly receiving confirmed service days require current eligibility.
+    if not set(requested_staff_ids).issubset(staff_ids):
+        raise ValueError("requested staff must be included in impacted staff locks")
     if not staff_ids:
         return
     locked_ids = tuple(lock_staff_occupancy_mutex(cursor, list(staff_ids)))
@@ -312,7 +355,7 @@ def _lock_staff(
     _require_selectable_staff(
         cursor,
         case_no,
-        staff_ids,
+        requested_staff_ids,
         historical_origin=historical_origin,
     )
 

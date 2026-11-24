@@ -111,7 +111,8 @@ function assertWeeklyView(view: WeeklyOperationsReportData, startDate: string, e
       && Math.abs(row.weekly_hours - (row.weekly_work_days * row.service_hours_per_day)) > 0.000001) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '服務工時 aggregate 不一致。');
     }
-    if ((row.weekly_hours === null) !== (row.service_hours_per_day === null)) {
+    // A week with different daily hours has a total but no single daily value.
+    if (row.weekly_hours === null && row.service_hours_per_day !== null) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '服務工時缺值狀態不一致。');
     }
   }

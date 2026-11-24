@@ -9,7 +9,8 @@ from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerat
 from shared_kernel.money import MoneyNTD
 from subsystems.payroll.terms_impact import (
     ExistingStaffObligationTermsFact, PayrollTermsSourceFacts, SourceAssignmentPayrollTerms,
-    StaffObligationDirection, StaffObligationKind, build_payroll_cancellation_impact,
+    StaffObligationDirection, StaffObligationKind, PayrollTermsActionKind,
+    build_payroll_cancellation_impact, build_payroll_terms_impact,
 )
 
 
@@ -39,3 +40,38 @@ def test_cancellation_updates_paid_entitlement_without_a_second_payable(paid):
     assert settlement.paid_net_amount == MoneyNTD(paid)
     assert settlement.recovery_increase == MoneyNTD(max(0, paid-5800))
     assert action.due_date == due
+
+
+@pytest.mark.parametrize('paid', (0, 1000, 8000))
+def test_terms_shortening_preserves_paid_root_and_corrects_entitlement_once(paid):
+    start, end = date(2026, 10, 1), date(2026, 10, 2)
+    root = ExistingStaffObligationTermsFact(
+        'original-paid', 1, 7, StaffObligationKind.SERVICE_PAY,
+        StaffObligationDirection.PAYABLE_TO_STAFF, MoneyNTD(13000),
+        MoneyNTD(13000-paid), MoneyNTD(paid), True, None,
+    )
+    facts = PayrollTermsSourceFacts(
+        'TERMS', 2,
+        (SourceAssignmentPayrollTerms(1, 7, 'frozen-rate', PayrollPolicyKind.CITIZEN,
+                                      hourly_rate=MoneyNTD(300)),),
+        (root,), None,
+    )
+    assignment = AssignmentCandidate('TERMS:g2:a1', 1, 7, 1, start, end, (start, end), 16)
+    scheduling = SchedulingGenerationCandidate('TERMS', 2, 1, 2, (1,), (assignment,), ())
+    terms = OrderTerms(start, 2, 8, MoneyNTD(1000), ServiceTimeTerms(None, None, None))
+
+    candidate = build_payroll_terms_impact(facts, scheduling, terms, 'terms-early-end')
+
+    action, = candidate.actions
+    assert action.action is PayrollTermsActionKind.APPEND_FROZEN_DIFFERENCE
+    assert action.source_obligation_identity == root.obligation_identity
+    assert action.direction is StaffObligationDirection.RECEIVABLE_FROM_STAFF
+    assert action.amount == MoneyNTD(7200)
+    settlement, = candidate.frozen_settlements
+    assert settlement.previous_entitlement == MoneyNTD(13000)
+    assert settlement.revised_entitlement == MoneyNTD(5800)
+    assert settlement.paid_net_amount == MoneyNTD(paid)
+    assert settlement.recovery_increase == MoneyNTD(max(0, paid-5800))
+    assert root.contractual_amount == MoneyNTD(13000)
+    assert root.paid_net_amount == MoneyNTD(paid)
+    assert action.due_date is None

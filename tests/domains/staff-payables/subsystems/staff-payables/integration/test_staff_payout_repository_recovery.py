@@ -25,6 +25,7 @@ from infrastructure.mysql.staff_payout_repository import (
     _load_selected_bank_rows,
     _load_bank_accounts,
     _outgoing_bank_fact,
+    _upsert_projection,
     _verify_taishin_memo_recipients,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -48,6 +49,33 @@ class _Cursor:
 
     def execute(self, statement, params=()) -> None:
         self.calls.append((statement, tuple(params)))
+
+
+@pytest.mark.parametrize(
+    "obligation,net_paid,balance,status",
+    [
+        (0, 0, 0, StaffPayableStatus.COMPLETED),
+        (0, 300, -300, StaffPayableStatus.ANOMALY),
+        (1000, 0, 1000, StaffPayableStatus.PAYABLE),
+        (1000, 300, 700, StaffPayableStatus.PARTIALLY_PAID),
+        (1000, 1000, 0, StaffPayableStatus.COMPLETED),
+    ],
+)
+def test_payable_projection_persists_balance_and_status(obligation, net_paid, balance, status):
+    cursor = _Cursor()
+    _upsert_projection(
+        cursor,
+        {
+            "obligation_identity": "obligation:1",
+            "staff_id": 7,
+            "obligation_amount_ntd": obligation,
+            "net_paid_ntd": net_paid,
+            "current_event_id": 12,
+        },
+        version=3,
+    )
+    (_, params), = cursor.calls
+    assert params[2:6] == (obligation, net_paid, balance, status.value)
 
 
 @pytest.mark.parametrize('lock', [False, True])

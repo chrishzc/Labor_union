@@ -2370,7 +2370,7 @@ CREATE TABLE `controlled_file_objects` (
   `owner_type` enum('contract_signing','scheduling','orders','staff','clients','line_integration') COLLATE utf8mb4_unicode_ci NOT NULL,
   `subject_reference` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `object_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background','staff_profile_photo') COLLATE utf8mb4_unicode_ci NOT NULL,
   `logical_folder` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `filename` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `storage_locator` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2396,7 +2396,7 @@ CREATE TABLE `controlled_file_objects` (
   CONSTRAINT `chk_controlled_file_object_chain` CHECK ((((`supersedes_object_id` is null) and (`supersedes_version_number` is null) and (`version_number` = 1)) or ((`supersedes_object_id` is not null) and (`supersedes_version_number` is not null) and (`version_number` = (`supersedes_version_number` + 1))))),
   CONSTRAINT `chk_controlled_file_object_digest` CHECK (regexp_like(`content_sha256`,_utf8mb4'^[0-9a-f]{64}$')),
   CONSTRAINT `chk_controlled_file_object_identity` CHECK ((regexp_like(`opaque_object_id`,_utf8mb4'^cf_[0-9a-f]{32}$') and (char_length(trim(`subject_reference`)) > 0) and (char_length(trim(`object_key`)) > 0) and (char_length(trim(`purpose`)) > 0) and (char_length(trim(`filename`)) > 0) and (char_length(trim(`storage_locator`)) > 0) and (char_length(trim(`content_type`)) > 0) and (char_length(trim(`created_by_actor`)) > 0) and (`size_bytes` > 0) and (`version_number` > 0))),
-  CONSTRAINT `chk_controlled_file_object_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam'))) or ((`owner_type` = _utf8mb4'clients') and (`purpose` = _utf8mb4'client_passbook_cover')) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background'))))
+  CONSTRAINT `chk_controlled_file_object_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam',_utf8mb4'staff_profile_photo'))) or ((`owner_type` = _utf8mb4'clients') and (`purpose` = _utf8mb4'client_passbook_cover')) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background'))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `controlled_file_reconciliation_events` (
@@ -2449,7 +2449,7 @@ CREATE TABLE `controlled_file_staging_objects` (
   `owner_type` enum('contract_signing','scheduling','orders','staff','clients','line_integration') COLLATE utf8mb4_unicode_ci NOT NULL,
   `subject_reference` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `object_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background','staff_profile_photo') COLLATE utf8mb4_unicode_ci NOT NULL,
   `logical_folder` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `original_filename` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `content_type` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2472,7 +2472,7 @@ CREATE TABLE `controlled_file_staging_objects` (
   KEY `idx_controlled_file_staging_cleanup` (`staging_state`,`expires_at_utc`,`id`),
   CONSTRAINT `chk_controlled_file_staging_digest` CHECK ((regexp_like(`content_sha256`,_utf8mb4'^[0-9a-f]{64}$') and regexp_like(`command_fingerprint`,_utf8mb4'^[0-9a-f]{64}$'))),
   CONSTRAINT `chk_controlled_file_staging_identity` CHECK ((regexp_like(`staging_id`,_utf8mb4'^cfs_[0-9a-f]{32}$') and (char_length(trim(`storage_locator`)) > 0) and (char_length(trim(`subject_reference`)) > 0) and (char_length(trim(`object_key`)) > 0) and (char_length(trim(`purpose`)) > 0) and (char_length(trim(`original_filename`)) > 0) and (char_length(trim(`content_type`)) > 0) and regexp_like(`idempotency_key`,_utf8mb4'^[a-z0-9][a-z0-9._:-]{0,190}$') and (char_length(trim(`created_by_actor`)) > 0) and (`size_bytes` > 0) and (`expires_at_utc` > `created_at_utc`))),
-  CONSTRAINT `chk_controlled_file_staging_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam'))) or ((`owner_type` = _utf8mb4'clients') and (`purpose` = _utf8mb4'client_passbook_cover')) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background')))),
+  CONSTRAINT `chk_controlled_file_staging_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam',_utf8mb4'staff_profile_photo'))) or ((`owner_type` = _utf8mb4'clients') and (`purpose` = _utf8mb4'client_passbook_cover')) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background')))),
   CONSTRAINT `chk_controlled_file_staging_state` CHECK ((((`staging_state` = _utf8mb4'applied') and (`applied_at_utc` is not null) and (`cleaned_at_utc` is null)) or ((`staging_state` = _utf8mb4'cleaned') and (`applied_at_utc` is null) and (`cleaned_at_utc` is not null)) or ((`staging_state` in (_utf8mb4'staged',_utf8mb4'quarantined')) and (`applied_at_utc` is null) and (`cleaned_at_utc` is null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -7960,7 +7960,7 @@ CREATE TABLE `staff_payable_projections` (
   CONSTRAINT `fk_staff_payable_projection_event` FOREIGN KEY (`current_event_id`) REFERENCES `staff_payout_events` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_staff_payable_projection_obligation` FOREIGN KEY (`obligation_identity`) REFERENCES `staff_obligations` (`obligation_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_staff_payable_projection_staff` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_staff_payable_projection_money` CHECK (((`obligation_amount_ntd` > 0) and (`net_paid_ntd` >= 0) and (`balance_ntd` = (`obligation_amount_ntd` - `net_paid_ntd`)))),
+  CONSTRAINT `chk_staff_payable_projection_money` CHECK (((`obligation_amount_ntd` >= 0) and (`net_paid_ntd` >= 0) and (`balance_ntd` = (`obligation_amount_ntd` - `net_paid_ntd`)))),
   CONSTRAINT `chk_staff_payable_projection_status` CHECK ((((`status` = _utf8mb4'payable') and (`net_paid_ntd` = 0) and (`balance_ntd` = `obligation_amount_ntd`)) or ((`status` = _utf8mb4'partially_paid') and (`net_paid_ntd` > 0) and (`balance_ntd` > 0)) or ((`status` = _utf8mb4'completed') and (`net_paid_ntd` = `obligation_amount_ntd`) and (`balance_ntd` = 0)) or ((`status` = _utf8mb4'recovery_required') and (`net_paid_ntd` = `obligation_amount_ntd`) and (`balance_ntd` = 0)) or ((`status` = _utf8mb4'anomaly') and (`balance_ntd` < 0))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -8272,6 +8272,60 @@ CREATE TABLE `staff_transportation` (
   `vehicle_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '交通工具 (機車/轎車)',
   PRIMARY KEY (`staff_id`,`vehicle_type`),
   CONSTRAINT `staff_transportation_ibfk_1` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `staff_web_approval_receipts` (
+  `operation_id` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `staff_id` int NOT NULL,
+  `publication_results` json NOT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`operation_id`),
+  KEY `fk_staff_web_receipt_staff` (`staff_id`),
+  CONSTRAINT `fk_staff_web_receipt_staff` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `staff_web_entries` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `staff_id` int NOT NULL,
+  `template_item_id` bigint unsigned NOT NULL,
+  `published_version` bigint unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_staff_web_entry_staff` (`staff_id`,`template_item_id`,`id`),
+  KEY `fk_staff_web_entry_template` (`template_item_id`),
+  CONSTRAINT `fk_staff_web_entry_staff` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_staff_web_entry_template` FOREIGN KEY (`template_item_id`) REFERENCES `staff_web_template_items` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `staff_web_publications` (
+  `entry_id` bigint unsigned NOT NULL,
+  `version` bigint unsigned NOT NULL,
+  `original_file_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `crop_file_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `expiry_date` date DEFAULT NULL,
+  `approved_by` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `published_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`entry_id`,`version`),
+  UNIQUE KEY `uq_staff_web_original` (`original_file_id`),
+  UNIQUE KEY `uq_staff_web_crop` (`crop_file_id`),
+  KEY `idx_staff_web_publication_expiry` (`expiry_date`,`entry_id`,`version`),
+  CONSTRAINT `fk_staff_web_publication_crop` FOREIGN KEY (`crop_file_id`) REFERENCES `controlled_file_objects` (`opaque_object_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_staff_web_publication_entry` FOREIGN KEY (`entry_id`) REFERENCES `staff_web_entries` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_staff_web_publication_original` FOREIGN KEY (`original_file_id`) REFERENCES `controlled_file_objects` (`opaque_object_id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `staff_web_template_items` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `version` bigint unsigned NOT NULL DEFAULT '1',
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category` enum('photo','certificate','other') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `display_order` int unsigned NOT NULL,
+  `reminder_enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `reminder_months` smallint unsigned NOT NULL DEFAULT '1',
+  `reminder_days` smallint unsigned NOT NULL DEFAULT '0',
+  `updated_by` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_staff_web_template_reminder` CHECK (((`category` = _utf8mb4'other') or (`reminder_enabled` = false)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `staff_weekly_rest` (

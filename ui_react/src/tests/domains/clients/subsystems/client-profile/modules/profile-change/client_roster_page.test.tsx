@@ -6,12 +6,14 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
 import { importFieldIssueHref, loadCurrentImportFieldIssuesForCases, type ImportFieldIssue } from '../../../../../../../api/case_import/import_field_issues';
-import { orderCancellationClient } from '../../../../../../../api/orders/order_cancellation_client';
+import { orderCancellationClient, type OrderCancellationQuery } from '../../../../../../../api/orders/order_cancellation_client';
+import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { orderTermsMutationClient, type OrderTermsQuery } from '../../../../../../../api/orders/order_terms_mutation_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
+const linkedOrderQuery = vi.hoisted(() => vi.fn());
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
   getAssignmentPlan: vi.fn().mockResolvedValue({ case_no: 'CASE-001', assignments: [] }),
-  getOrderDetail: vi.fn().mockResolvedValue({ case_no: 'CASE-001', order_status: '訂單取消' }),
+  getOrderDetail: linkedOrderQuery,
 } }));
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), filterOptions: vi.fn(), downloadOrderAccounting: vi.fn(), downloadCaseInspection: vi.fn() }));
@@ -57,6 +59,7 @@ describe('ClientRosterPage', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    linkedOrderQuery.mockReset().mockResolvedValue({ case_no: item.case_no, order_status: '訂單取消' });
     termsQuery = vi.spyOn(orderTermsMutationClient, 'query').mockResolvedValue(orderTerms);
     mocks.list.mockReset();
     mocks.query.mockReset();
@@ -185,6 +188,123 @@ describe('ClientRosterPage', () => {
       const panel = await screen.findByRole('region', { name: '案件 CASE-001 重開取消案件' });
       expect(within(panel).getByRole('button', { name: '重開訂單' })).toBeVisible();
       expect(screen.queryByRole('button', { name: '取消訂單' })).not.toBeInTheDocument();
+    } finally {
+      user.mockRestore();
+    }
+  });
+
+  it.each([true, false])('更正歷史零服務後回讀並更新案件詳情，是否在本頁：%s', async (listed) => {
+    orderMutationFlowStore.clearAll();
+    const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({
+      id: 7, username: 'operator', display_name: '測試人員', role: 'system_admin',
+      is_root: false, access_control_version: 1, capabilities: ['system.administration'],
+    });
+    const facts: OrderCancellationQuery = {
+      case_no: item.case_no, lifecycle_status: '訂單取消', actual_start_date: null, contracted_service_days: 26,
+      service_hours_per_day: 8, service_started: false, historical_mid_service_confirmation_available: false,
+      service_data_locked: false, order_version: 1, scheduling_version: null, scheduling_generation: null,
+      client_finance_version: null, payroll_version: null, confirmed_service_days: [], caregiver_options: [],
+      historical_unserved_correction: {
+        blockers: [], review_codes: ['historical_unserved_not_historical', 'historical_unserved_establishment_evidence_missing'],
+        establishment_lifecycle_event_ids: [], establishment_adoption_receipt_ids: [],
+        establishment_owner_status: null, historical_adoption_receipt_ids: [], historical_absence_event_ids: [],
+        actual_service_evidence: [], actual_start_date: null, actual_end_date: null, prior_fee_ntd: 0,
+        prior_fee_reason: '', net_cash_received_ntd: 0, prior_cancellation_event_id: 3,
+        client_obligations: [], payroll_obligations: [],
+      },
+    };
+    const fingerprint = 'c'.repeat(64);
+    const query = vi.spyOn(orderCancellationClient, 'query').mockResolvedValueOnce(facts).mockResolvedValue({
+      ...facts, lifecycle_status: '成立後未服務', order_version: 2, historical_unserved_correction: null,
+    });
+    const preview = vi.spyOn(orderCancellationClient, 'preview').mockResolvedValue({
+      cancellation_date: '2026-10-01', actual_start_date: null, actual_end_date: null, confirmed_service_days: [],
+      official_service_day_count: 0, official_service_hours: 0, order_version: 1, scheduling_version: null,
+      scheduling_generation: null, client_finance_version: null, payroll_version: null,
+      scheduling: null, client_finance_impact: null, payroll_impact: null,
+      lifecycle_impact: { case_no: item.case_no, before_status: '訂單取消', after_status: '成立後未服務',
+        actual_end_date: null, cancellation_effective: true, fingerprint },
+      preview_fingerprint: fingerprint,
+    });
+    const apply = vi.spyOn(orderCancellationClient, 'apply').mockResolvedValue({
+      case_no: item.case_no, lifecycle_status: '成立後未服務', order_version: 2, scheduling_version: null,
+      scheduling_generation: null, client_finance_version: null, payroll_version: null, actual_end_date: null,
+      official_service_day_count: 0, official_service_hours: 0, cancelled_assignment_ids: [],
+      created_assignment_keys: [], preview_fingerprint: fingerprint,
+    });
+    const page = { items: listed ? [{ ...item, order_status: '訂單取消' }] : [], next_cursor: null, next_offset: null };
+    mocks.list.mockResolvedValue(page);
+    try {
+      render(<ClientRosterPage initialCaseNo={listed ? undefined : item.case_no} />);
+      const rosterRow = listed ? await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }) : null;
+      if (rosterRow) fireEvent.click(rosterRow);
+      const dialog = await screen.findByRole('dialog', { name: '案件 CASE-001 詳細資料' });
+      const drawer = within(dialog);
+      fireEvent.click(await drawer.findByRole('button', { name: '更正歷史零服務' }));
+      expect(query).toHaveBeenCalledWith(item.case_no, expect.any(AbortSignal));
+      expect(drawer.getByRole('heading', { name: '歷史零服務更正' })).toBeVisible();
+      const previewButton = await drawer.findByRole('button', { name: '預覽零服務更正' });
+      expect(previewButton).toBeDisabled();
+      fireEvent.click(drawer.getByRole('checkbox', { name: '我確認將本案更正為成立後未服務' }));
+      expect(previewButton).toBeEnabled();
+      fireEvent.click(previewButton);
+      expect(preview).toHaveBeenCalledWith(item.case_no, [], expect.any(AbortSignal), {
+        historical_unserved_correction: { reason: '', evidence_source: '', confirmed_actual_service_day_count: 0 },
+      });
+      expect(apply).not.toHaveBeenCalled();
+      const detail = await mocks.query();
+      mocks.query.mockResolvedValue({ ...detail });
+      mocks.list.mockResolvedValue({ ...page, items: listed ? [{ ...item, order_status: '成立後未服務' }] : [] });
+      linkedOrderQuery.mockResolvedValue({ case_no: item.case_no, order_status: '成立後未服務' });
+      const confirmButton = await drawer.findByRole('button', { name: '確認更正為成立後未服務' });
+      const orderReadsBeforeApply = linkedOrderQuery.mock.calls.length;
+      fireEvent.click(confirmButton);
+      await drawer.findByText('本案已完成更正，無須再次操作。');
+      expect(query).toHaveBeenCalledTimes(2);
+      const returnButton = drawer.getByRole('button', { name: '返回案件詳細資料' });
+      await waitFor(() => expect(returnButton).toBeEnabled());
+      expect(mocks.list).toHaveBeenCalledTimes(2);
+      if (rosterRow) {
+        expect(within(rosterRow).getByText('成立後未服務')).toBeVisible();
+      } else {
+        await waitFor(() => expect(linkedOrderQuery.mock.calls.slice(orderReadsBeforeApply)).toContainEqual([
+          item.case_no, { signal: expect.any(AbortSignal) },
+        ]));
+      }
+      fireEvent.click(returnButton);
+      expect(await drawer.findByLabelText('CASE-001 案件資料編輯')).toBeVisible();
+      await waitFor(() => {
+        expect(drawer.queryByRole('button', { name: '更正歷史零服務' })).not.toBeInTheDocument();
+        expect(drawer.queryByRole('button', { name: '取消訂單' })).not.toBeInTheDocument();
+      });
+      expect(drawer.queryByRole('heading', { name: '歷史零服務更正' })).not.toBeInTheDocument();
+    } finally {
+      orderMutationFlowStore.clearAll();
+      apply.mockRestore();
+      preview.mockRestore();
+      query.mockRestore();
+      user.mockRestore();
+    }
+  });
+
+  it.each([
+    { status: '洽談中', canManage: true },
+    { status: '歷史訂單－服務中', canManage: true },
+    { status: '成立後未服務', canManage: true },
+    { status: null, canManage: true },
+    { status: '訂單取消', canManage: false },
+  ])('狀態 $status 且管理權限為 $canManage 時隱藏歷史更正', async ({ status, canManage }) => {
+    const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({
+      id: 7, username: 'operator', display_name: '測試人員', role: 'system_admin', is_root: false,
+      access_control_version: 1, capabilities: canManage ? ['system.administration'] : [],
+    });
+    mocks.list.mockResolvedValue({ items: [{ ...item, order_status: status }], next_cursor: null, next_offset: null });
+    try {
+      render(<ClientRosterPage />);
+      fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
+      const drawer = within(await screen.findByRole('dialog', { name: '案件 CASE-001 詳細資料' }));
+      expect(await drawer.findByLabelText('CASE-001 案件資料編輯')).toBeVisible();
+      expect(drawer.queryByRole('button', { name: '更正歷史零服務' })).not.toBeInTheDocument();
     } finally {
       user.mockRestore();
     }

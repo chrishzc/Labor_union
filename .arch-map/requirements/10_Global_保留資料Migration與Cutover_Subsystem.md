@@ -94,6 +94,10 @@
 - **LINE 案件群組歷程刪除保護**。`labor_union_2026_11_15_line_order_group_history_delete_v1.json`（`1078_line_order_group_history_delete_guards.sql`）精確更新兩個群組事件刪除 trigger，保留既有案件刪除條件，並允許有同案、尚未完成的群組歷程刪除命令且目前無群組綁定時逐案刪除。升級本身不刪除任何既有資料。新建與保留資料升級採相同 trigger 契約。
 - **案件永久刪除支援已簽約案件**。`labor_union_2026_11_20_registry_case_deletion_signing_v1.json`（`1080_registry_case_deletion_signing_guards.sql`）移除 trigger 的簽回狀態判斷。更新包含 `1060` 的案件歷程 guard 及 `1078`、`1079` 後續覆蓋版本，保留 pending claim、資料歸屬、LINE 群組歷程及保留期清理條件。Fresh 與保留資料升級使用相同定義。升級只更新 schema，切換後須載入同版本 NAS 固定程序。
 
+- **成立後未服務狀態**。`labor_union_2026_11_23_order_established_unserved_v1.json` 以 `1081_order_established_unserved_status.sql` 在 Orders、Terms 收據與取消收據的狀態 enum 尾端追加「成立後未服務」，並擴充 lifecycle event 的 before／after 檢查限制。此版本只有 schema widening，不回填案件、不重做取消、收付款或 payroll。Fresh assembly 與保留資料升級使用同一 artifact；執行仍須通過上述七道門，正式切換前保留候選與來源回復證據。
+
+- **月嫂有效應付 0 元投影**。`labor_union_2026_11_24_staff_payable_projection_zero_v1.json` 以 `1084_staff_payable_projection_zero.sql` 替換同名金額 CHECK。有效應付允許 0 元，淨實付仍須為非負，差額仍須等於有效應付減淨實付。升級保留狀態 CHECK、付款資料與所有既有列。Fresh 與保留資料升級使用同一 artifact。精確舊 CHECK 待升級，精確新 CHECK 重跑零寫入。已存在的應付投影表若缺少金額 CHECK、未啟用或定義不符，停止升級。產生有效應付 0 元列後，應保留新版 CHECK 及資料並向前修復。
+
 ### 6.1 本機開發 DB 受控驗收（§9.1）
 
 - 僅限 `APP_ENV=development`（或等價 validation profile）與 `localhost` 之 `union_db` 或 `lu_test_*`；每次執行前必回讀 environment、host、database 與 credential class（目標不符 fail closed）。

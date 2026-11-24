@@ -79,6 +79,12 @@ def build_historical_order_candidate(
     if not isinstance(business_date, date):
         raise TypeError("historical order business date must be a date")
     issues = set(source.issue_codes)
+    if current.status is OrderLifecycleStatus.ESTABLISHED_UNSERVED and (
+        source.asserted_status is not HistoricalOrderSourceStatus.CANCELLED
+        or source.actual_start_date is not None
+        or source.actual_end_date is not None
+    ):
+        issues.add("historical_order_confirmed_zero_service_conflict")
     outcome = _outcome(current.status, source.asserted_status, issues)
     result = _result(current, source, outcome, business_date)
     date_patch = _date_patch(current, source, outcome, result)
@@ -115,7 +121,12 @@ def build_historical_order_candidate(
 
 
 def _outcome(current_status, asserted_status, issues):
-    del current_status
+    if current_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+        return (
+            HistoricalOrderOutcome.REVIEW_REQUIRED
+            if "historical_order_confirmed_zero_service_conflict" in issues
+            else HistoricalOrderOutcome.UNMATCHED_CASE
+        )
     if asserted_status is None:
         return HistoricalOrderOutcome.UNMATCHED_CASE
     if asserted_status is HistoricalOrderSourceStatus.CANCELLED:

@@ -47,8 +47,11 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
     if cancellation:
         _save_cancellation_settlement(cursor, command, cancellation)
     _append_outbox(cursor, command)
-    from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
-    synchronize_government_case_amount(cursor,command.candidate.case_no,command.idempotency_key.value,command.actor.actor_id,command.reason)
+    if cancellation is None:
+        from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
+        synchronize_government_case_amount(cursor,command.candidate.case_no,command.idempotency_key.value,command.actor.actor_id,command.reason)
+    # Cancellation borrows this writer before Orders saves its terminal facts.
+    # The Orders writer synchronizes Government once those final facts exist.
 
 
 def _save_cancellation_settlement(cursor, command, settlement):
@@ -58,10 +61,9 @@ def _save_cancellation_settlement(cursor, command, settlement):
     cursor.execute("SELECT COALESCE(MAX(id),0) AS entry_id FROM client_ledger_entries WHERE case_no=%s",
                    (command.candidate.case_no,))
     snapshot["cash_entry_id"] = int(cursor.fetchone()["entry_id"])
-    snapshot["obligation_identity"] = next((
-        action.obligation_identity for action in command.candidate.actions
-        if action.action in (ClientObligationActionKind.CREATE_ADJUSTMENT, ClientObligationActionKind.CREATE_REFUND)
-    ), None)
+    snapshot["obligation_identity"] = command.candidate.cancellation_obligation_identity
+    if command.candidate.cancellation_cash_difference_requires_review:
+        snapshot["cash_difference_requires_review"] = True
     cursor.execute(
         "INSERT INTO client_finance_apply_receipts "
         "(idempotency_key,command_fingerprint,preview_fingerprint,case_no,resulting_account_version,result_snapshot) "
@@ -279,7 +281,7 @@ def _obligation_type(action):
 
 
 def _direction(action):
-    if action.action is ClientObligationActionKind.CREATE_REFUND:
+    if action.action is ClientObligationActionKind.CREATE_REFUND or action.payment_stage is PaymentStage.REFUND:
         return "payable_to_client"
     return "receivable_from_client"
 
@@ -327,8 +329,13 @@ def _insert_projection(cursor, command, action, event_id):
 def _update_projection(cursor, command, action, event_id):
     # Remaining projections exclude actual money already allocated. A source
     # change following a partial receipt must never charge the paid part twice.
-    from infrastructure.mysql.client_difference_repository import _cash, _noncash
-    remaining = max(0, action.after_amount.amount - _cash(cursor, action.obligation_identity) - _noncash(cursor, action.obligation_identity))
+    if action.payment_stage in {PaymentStage.REFUND, PaymentStage.ADJUSTMENT} and command.candidate.cancellation_settlement:
+        # A historical cancellation balance was planned from its locked current
+        # projection. Its unconsumed amount excludes already paired cash.
+        remaining = action.obligation_amount.amount
+    else:
+        from infrastructure.mysql.client_difference_repository import _cash, _noncash
+        remaining = max(0, action.after_amount.amount - _cash(cursor, action.obligation_identity) - _noncash(cursor, action.obligation_identity))
     status = "cancelled" if action.after_amount.is_zero else "open" if remaining else "settled"
     cursor.execute(
         _PROJECTION_UPDATE_SQL,

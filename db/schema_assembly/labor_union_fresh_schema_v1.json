@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "7a0a734b67e205a8a447ce2f8161581c0c59c0bb233dbae08a5b630f9ada9edf",
+  "active_artifacts_sha256": "1c14f5f016a1e8b7f071c25831ac1e05eb9d915da53b6f18626445370ccddea9",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -211,7 +211,9 @@
     "db/schema_parts/1079_line_delivery_retention_guards.sql",
     "db/schema_parts/1080_registry_case_deletion_signing_guards.sql",
     "db/schema_parts/1081_order_established_unserved_status.sql",
-    "db/schema_parts/1082_service_date_adjustments.sql"
+    "db/schema_parts/1082_service_date_adjustments.sql",
+    "db/schema_parts/1083_staff_web_profile.sql",
+    "db/schema_parts/1084_staff_payable_projection_zero.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",

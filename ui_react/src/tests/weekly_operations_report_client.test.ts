@@ -127,7 +127,45 @@ describe('weekly operations report clients', () => {
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('GET');
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer weekly-report-token');
     expect(report.case_rows).toHaveLength(2);
+    expect(report.service_rows[0]?.service_hours_per_day).toBe(8);
     expect(report.service_rows[0]?.weekly_hours).toBe(40);
+  });
+
+  it.each([
+    { weeklyHours: 39, message: '服務工時 aggregate 不一致' },
+    { weeklyHours: null, message: '服務工時缺值狀態不一致' },
+  ])('每日時數為 8 時拒絕週工時 $weeklyHours', async ({ weeklyHours, message }) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
+      ...WEEKLY_OPERATIONS_RESPONSE,
+      data: {
+        ...WEEKLY_OPERATIONS_REPORT,
+        service_rows: [{
+          ...WEEKLY_OPERATIONS_REPORT.service_rows[0],
+          weekly_hours: weeklyHours,
+        }],
+      },
+    }));
+
+    await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toMatchObject({
+      code: 'WEEKLY_REPORT_AGGREGATE_MISMATCH',
+      message: expect.stringContaining(message),
+    });
+  });
+
+  it('服務時數與週工時皆缺值時保留原有資料品質代碼', async () => {
+    const serviceRow = {
+      ...WEEKLY_OPERATIONS_REPORT.service_rows[0],
+      service_hours_per_day: null,
+      weekly_hours: null,
+      data_quality_codes: ['service_hours_per_day_missing'],
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
+      ...WEEKLY_OPERATIONS_RESPONSE,
+      data: { ...WEEKLY_OPERATIONS_REPORT, service_rows: [serviceRow] },
+    }));
+
+    const report = await weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26');
+    expect(report.service_rows).toEqual([serviceRow]);
   });
 
   it('無效日期範圍於 network 前 fail closed', async () => {

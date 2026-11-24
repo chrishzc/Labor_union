@@ -50,10 +50,11 @@ class MySqlOrderCancellationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def load_for_preview(self, case_no, requested_staff_ids):
+    def load_for_preview(self, case_no, requested_staff_ids, *, allow_missing_payroll_rates: bool = False):
         with self._connection.cursor() as cursor:
             return load_cancellation_preview_facts(
-                cursor, case_no, requested_staff_ids
+                cursor, case_no, requested_staff_ids,
+                allow_missing_payroll_rates=allow_missing_payroll_rates,
             )
 
     def list_caregiver_options(self, case_no):
@@ -66,10 +67,11 @@ class MySqlOrderCancellationRepository:
                 cursor, case_no, requested_staff_ids
             )
 
-    def load_for_apply(self, case_no, preflight_staff_ids):
+    def load_for_apply(self, case_no, preflight_staff_ids, requested_staff_ids, *, allow_missing_payroll_rates: bool = False):
         with self._connection.cursor() as cursor:
             return load_cancellation_locked_facts(
-                cursor, case_no, preflight_staff_ids
+                cursor, case_no, preflight_staff_ids, requested_staff_ids,
+                allow_missing_payroll_rates=allow_missing_payroll_rates,
             )
 
     def find_receipt(self, key, *, for_update):
@@ -128,6 +130,10 @@ class MySqlOrderCancellationRepository:
                 _child_identity(request, "initial-client-terms"), request.actor.actor_id, request.reason,
             )
 
+    def retire_historical_unserved_assignments(self, case_no, assignment_ids):
+        from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
+        MySqlHistoricalAssignmentWriter(self._connection).retire_adopted_assignments(case_no, assignment_ids)
+
     def persist_payroll_impact(self, command):
         with self._connection.cursor() as cursor:
             persist_payroll_terms_impact(cursor, command)
@@ -162,9 +168,12 @@ class MySqlOrderCancellationRepository:
         cancellation_control_event_id,
     ):
         with self._connection.cursor() as cursor:
-            _require_control_event(
-                cursor, request, cancellation_control_event_id
-            )
+            if preview.classification_only:
+                _require_prior_cancellation_control_event(
+                    cursor, request, preview, cancellation_control_event_id,
+                )
+            else:
+                _require_control_event(cursor, request, cancellation_control_event_id)
             event_id = _insert_lifecycle_event(cursor, request, preview)
             _append_lifecycle_outbox(cursor, request, preview, event_id)
             return event_id
@@ -287,6 +296,35 @@ def _require_control_event(cursor, request, event_id) -> None:
         raise RuntimeError("cancellation_control_event_not_found")
 
 
+
+def _require_prior_cancellation_control_event(cursor, request, preview, event_id) -> None:
+    """Reuse only the locked, active control backed by the prior zero-service receipt."""
+    if (
+        request.historical_correction is None
+        or preview.historical_correction != request.historical_correction
+        or event_id != preview.existing_cancellation_control_event_id
+        or type(event_id) is not int
+        or event_id <= 0
+    ):
+        raise RuntimeError("historical_cancellation_control_reference_invalid")
+    cursor.execute(
+        "SELECT e.id FROM order_lifecycle_control_events e "
+        "JOIN order_lifecycle_control_state s ON s.case_no=e.case_no "
+        "AND s.control_type=e.control_type AND s.control_key=e.control_key "
+        "AND s.current_event_id=e.id AND s.state='active' "
+        "JOIN order_cancellation_apply_receipts r ON r.case_no=e.case_no "
+        "AND r.cancellation_control_event_id=e.id AND r.idempotency_key=e.idempotency_key "
+        "JOIN order_cancellation_events c ON c.id=r.cancellation_event_id "
+        "AND c.case_no=e.case_no AND c.idempotency_key=e.idempotency_key "
+        "AND c.official_service_day_count=0 "
+        "WHERE e.id=%s AND e.case_no=%s AND e.control_type='cancellation' "
+        "AND e.control_key='order_cancelled' AND e.action='activate' FOR UPDATE",
+        (event_id, request.case_no),
+    )
+    if cursor.fetchone() is None:
+        raise RuntimeError("cancellation_control_event_not_found")
+
+
 def _insert_lifecycle_event(cursor, request, preview):
     source_subject = _line_user_id(cursor, request.case_no)
     cursor.execute(
@@ -299,7 +337,7 @@ def _insert_lifecycle_event(cursor, request, preview):
 def _lifecycle_values(request, preview, source_subject):
     impact = preview.lifecycle_impact
     facts = _lifecycle_facts(request, preview)
-    if impact.after_status is OrderLifecycleStatus.CANCELLED:
+    if impact.after_status in {OrderLifecycleStatus.CANCELLED, OrderLifecycleStatus.ESTABLISHED_UNSERVED}:
         facts.update(_terminal_closure_fields(request, preview, None, source_subject))
     return (
         request.case_no,
@@ -322,6 +360,22 @@ def _lifecycle_facts(request, preview):
         "cancellation": True,
         "cancellation_event_fingerprint": candidate.fingerprint.value,
         "cancellation_reason": request.reason,
+        "historical_unserved_correction": (
+            {"reason": request.historical_correction.reason, "evidence_source": request.historical_correction.evidence_source,
+             "confirmed_established": True,
+             "confirmed_actual_service_day_count": request.historical_correction.confirmed_actual_service_day_count,
+             "classification_only": preview.classification_only,
+             "standalone_assignment_ids": preview.standalone_assignment_ids}
+            if request.historical_correction else None
+        ),
+        "establishment_evidence": {
+            "lifecycle_event_ids": preview.lifecycle_impact.establishment_evidence.lifecycle_event_ids,
+            "historical_adoption_ids": preview.lifecycle_impact.establishment_evidence.historical_adoption_ids,
+            "current_owner_status": (
+                preview.lifecycle_impact.establishment_evidence.current_owner_status.value
+                if preview.lifecycle_impact.establishment_evidence.current_owner_status else None
+            ),
+        },
         "official_service_day_count": candidate.official_service_day_count,
         "official_service_hours": candidate.official_service_hours,
     }
@@ -339,7 +393,7 @@ def _append_lifecycle_outbox(cursor, request, preview, event_id):
         "correlation_id": request.correlation_id.value,
         "resulting_order_version": preview.order_version + 1,
     }
-    if preview.lifecycle_impact.after_status is OrderLifecycleStatus.CANCELLED:
+    if preview.lifecycle_impact.after_status in {OrderLifecycleStatus.CANCELLED, OrderLifecycleStatus.ESTABLISHED_UNSERVED}:
         payload.update(
             _terminal_closure_fields(
                 request, preview, event_id, _line_user_id(cursor, request.case_no)
@@ -480,7 +534,11 @@ def _receipt_payload(receipt):
 def _validate_receipt_columns(row, receipt) -> None:
     if (receipt.scheduling_version is None) != (receipt.scheduling_generation is None):
         raise ValueError("order_cancellation_receipt_integrity_violation")
-    if receipt.scheduling_version is None and (receipt.cancelled_assignment_ids or receipt.created_assignment_keys):
+    if receipt.scheduling_version is None and (
+        receipt.created_assignment_keys or (
+            receipt.cancelled_assignment_ids and receipt.lifecycle_status is not OrderLifecycleStatus.ESTABLISHED_UNSERVED
+        )
+    ):
         raise ValueError("order_cancellation_receipt_integrity_violation")
     if receipt.official_service_day_count and any(value is None for value in (receipt.scheduling_version, receipt.client_finance_version, receipt.payroll_version)):
         raise ValueError("order_cancellation_receipt_integrity_violation")

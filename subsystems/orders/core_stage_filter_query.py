@@ -45,8 +45,8 @@ CoreStageSubstatusCode = Literal[
 ]
 WorkbenchScope = Literal["in_progress", "completed", "cancelled"]
 _WORKBENCH_STATUSES: Mapping[WorkbenchScope, frozenset[OrderLifecycleStatus]] = {
-    "in_progress": frozenset({OrderLifecycleStatus.PENDING_COMPLETION, OrderLifecycleStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE, OrderLifecycleStatus.COMPLETED, OrderLifecycleStatus.HISTORICAL_UNSERVED, OrderLifecycleStatus.HISTORICAL_IN_SERVICE}),
-    "completed": frozenset({OrderLifecycleStatus.COMPLETED, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED}),
+    "in_progress": frozenset({OrderLifecycleStatus.PENDING_COMPLETION, OrderLifecycleStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE, OrderLifecycleStatus.COMPLETED, OrderLifecycleStatus.ESTABLISHED_UNSERVED, OrderLifecycleStatus.HISTORICAL_UNSERVED, OrderLifecycleStatus.HISTORICAL_IN_SERVICE}),
+    "completed": frozenset({OrderLifecycleStatus.COMPLETED, OrderLifecycleStatus.ESTABLISHED_UNSERVED, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED}),
     "cancelled": frozenset({OrderLifecycleStatus.CANCELLED}),
 }
 
@@ -304,6 +304,9 @@ def _matches_common_filters(
 
 
 def _matches_workbench_scope(item: OrderCoreStageTimeline, scope: WorkbenchScope) -> bool:
+    if item.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+        settled = all(stage.status == "completed" for stage in item.core_stages if stage.code in {"client_settlement", "staff_payout"})
+        return scope == ("completed" if settled else "in_progress")
     if item.lifecycle_status is OrderLifecycleStatus.COMPLETED:
         settlement_pending = item.current_core_stage_code in {"client_settlement", "staff_payout"}
         return settlement_pending if scope == "in_progress" else not settlement_pending if scope == "completed" else False

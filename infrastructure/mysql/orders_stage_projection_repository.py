@@ -109,11 +109,15 @@ SELECT o.case_no,
        o.service_end_day_offset,
        CONCAT('orders-auto-completion-receipt:', completion_fact.receipt_id) AS service_completion_identity,
        UNIX_TIMESTAMP(completion_fact.completed_at) AS service_completed_at,
-       COALESCE(client_fact.client_obligation_count, 0) AS client_obligation_count,
-       COALESCE(client_fact.client_open_count, 0) AS client_open_count,
+       COALESCE(client_fact.client_obligation_count, 0)
+           + COALESCE(client_recovery.open_count, 0) AS client_obligation_count,
+       COALESCE(client_fact.client_open_count, 0)
+           + COALESCE(client_recovery.open_count, 0) AS client_open_count,
        UNIX_TIMESTAMP(client_fact.client_updated_at) AS client_updated_at,
-       COALESCE(staff_fact.staff_obligation_count, 0) AS staff_obligation_count,
-       COALESCE(staff_fact.staff_open_count, 0) AS staff_open_count,
+       COALESCE(staff_fact.staff_obligation_count, 0)
+           + COALESCE(staff_recovery.open_count, 0) AS staff_obligation_count,
+       COALESCE(staff_fact.staff_open_count, 0)
+           + COALESCE(staff_recovery.open_count, 0) AS staff_open_count,
        staff_fact.staff_payables_version,
        UNIX_TIMESTAMP(staff_fact.staff_updated_at) AS staff_updated_at
   FROM orders o FORCE INDEX (PRIMARY)
@@ -420,6 +424,12 @@ SELECT o.case_no,
          FROM client_obligations GROUP BY case_no
   ) client_fact ON client_fact.case_no = o.case_no
   LEFT JOIN (
+       SELECT case_no, COUNT(*) AS open_count
+         FROM client_over_refund_recoveries
+        WHERE status IN ('open','partially_recovered') AND amount_due_ntd > 0
+        GROUP BY case_no
+  ) client_recovery ON client_recovery.case_no = o.case_no AND o.status = '成立後未服務'
+  LEFT JOIN (
        SELECT obligation.case_no,
               COUNT(*) AS staff_obligation_count,
               SUM(COALESCE(projection.status, 'payable') <> 'completed') AS staff_open_count,
@@ -435,6 +445,14 @@ SELECT o.case_no,
           AND obligation.amount_due_ntd > 0
         GROUP BY obligation.case_no
   ) staff_fact ON staff_fact.case_no = o.case_no
+  LEFT JOIN (
+       SELECT obligation.case_no, COUNT(DISTINCT recovery.recovery_identity) AS open_count
+         FROM staff_overpayment_recoveries recovery
+         JOIN staff_obligations obligation
+           ON JSON_CONTAINS(recovery.source_obligation_identities, JSON_QUOTE(obligation.obligation_identity))
+        WHERE recovery.remaining_amount_ntd > 0
+        GROUP BY obligation.case_no
+  ) staff_recovery ON staff_recovery.case_no = o.case_no AND o.status = '成立後未服務'
  WHERE o.case_no > %s
    AND (%s = 'all' OR o.status NOT IN (%s, %s))
  ORDER BY o.case_no

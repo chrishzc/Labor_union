@@ -1,6 +1,7 @@
 """Automatic payable eligibility follows source facts, never a manual posting stage."""
 from dataclasses import replace
 from datetime import date, timedelta
+import pytest
 
 from domains.client_finance.obligation_planning import (
     ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms, ExistingClientStageObligation,
@@ -26,6 +27,30 @@ def test_service_terms_automatically_determine_subsidy_return():
         completed_on=date(2026,9,30),existing_return_count=0)
     assert plan.amount==MoneyNTD(12000)
     assert plan.obligation_identity=='client-subsidy-return:AUTO-1:terminal'
+
+
+def test_zero_service_terminated_sync_preserves_account_without_recreating_registered_charges(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import infrastructure.mysql.automatic_client_accounting as writer
+    import infrastructure.mysql.government_period_difference_repository as government
+    from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+
+    cursor = SimpleNamespace(execute=Mock(), fetchone=lambda: {"aggregate_version": 7})
+    monkeypatch.setattr(writer, "select_order", lambda *_args, **_kwargs: {
+        "case_no": "AUTO-1", "status": "成立後未服務", "service_days": 30,
+    })
+    load_normal_terms = Mock(side_effect=AssertionError("must not recalculate registered services"))
+    synchronize_government = Mock(side_effect=AssertionError("zero-service must not create subsidy"))
+    monkeypatch.setattr(writer, "load_calculable_client_finance_facts", load_normal_terms)
+    monkeypatch.setattr(government, "synchronize_government_case_amount", synchronize_government)
+    assert writer.synchronize_client_charges(
+        cursor, "AUTO-1", actor=ActorContext("test:zero-service"), key=IdempotencyKey("zero-service-sync"),
+        correlation_id=CorrelationId("zero-service-sync"), source_family="case-update", source_id=1,
+    ) == 7
+    load_normal_terms.assert_not_called()
+    synchronize_government.assert_not_called()
+    assert cursor.execute.call_count == 1
 
 
 def test_calculation_does_not_wait_for_collection_or_a_manual_creation_stage():
@@ -143,7 +168,8 @@ def test_full_subsidy_keeps_formed_dates_and_blocks_automatic_conversion_of_paid
     assert all(item.net_settled_amount == item.contracted_amount for item in source.existing_obligations)
 
 
-def test_manual_handoff_writer_waits_for_formal_end_and_never_rewrites_an_existing_payable(monkeypatch):
+@pytest.mark.parametrize('terminal_status', ['訂單完成', '成立後未服務'])
+def test_manual_handoff_writer_waits_for_formal_end_and_never_rewrites_an_existing_payable(monkeypatch, terminal_status):
     from types import SimpleNamespace
     from unittest.mock import Mock
     import infrastructure.mysql.automatic_client_accounting as writer
@@ -195,7 +221,7 @@ def test_manual_handoff_writer_waits_for_formal_end_and_never_rewrites_an_existi
     assert not reads
     persist.assert_not_called()
 
-    order['status']='訂單完成'
+    order['status']=terminal_status
     writer.synchronize_terminal_subsidy_return(caller,'AUTO-1',**options)
     persist.assert_called_once()
     refund = persist.call_args.args[2]

@@ -144,6 +144,7 @@ const OrderLifecycleStatusSchema = z.enum([
   '服務中',
   '訂單完成',
   '訂單取消',
+  '成立後未服務',
   '歷史訂單－未服務',
   '歷史訂單－服務中',
   '歷史訂單－服務完成',
@@ -272,7 +273,7 @@ export const OrderCoreStageTimelineSchema = z.strictObject({
       message: 'branch_type 必須對應正式 lifecycle status',
     });
   }
-  if (timeline.branch_type !== 'normal' && hasCurrentCode) {
+  if ((timeline.branch_type !== 'normal' || timeline.lifecycle_status === '成立後未服務') && hasCurrentCode) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['current_core_stage_code'],

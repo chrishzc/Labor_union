@@ -162,6 +162,41 @@ def test_1013_accepts_exact_historical_accounting_check_successor() -> None:
     ) == "drift"
 
 
+@pytest.mark.parametrize("shape,expected", [
+    ("successor", "exact"), ("unselected", "drift"),
+    ("unknown", "drift"), ("partial", "drift"),
+    ("unenforced", "drift"), ("missing", "drift"),
+])
+def test_1013_accepts_only_selected_exact_unserved_successor(
+    monkeypatch, shape, expected,
+) -> None:
+    descriptor = migration._canonical_artifact_descriptor(ORDER_LIFECYCLE_ARTIFACT)
+    successor = migration._canonical_artifact_descriptor(
+        "1081_order_established_unserved_status.sql"
+    )
+    key = ("order_lifecycle_state_events", "chk_order_lifecycle_state_event_before_status")
+    snapshot = _empty_snapshot()
+    clause = successor["checks"][key]
+    if shape == "unknown":
+        clause = clause.replace("成立後未服務", "未發布狀態")
+    elif shape == "partial":
+        clause = clause.replace(",'歷史訂單－未服務'", "")
+    if shape != "missing":
+        snapshot["constraints"].append({
+            "table_name": key[0], "constraint_name": key[1],
+            "constraint_type": "CHECK", "check_clause": clause,
+            "enforced": "NO" if shape == "unenforced" else "YES",
+        })
+    if shape == "unselected":
+        monkeypatch.setattr(migration, "SCHEMA_PARTS", tuple(
+            path for path in migration.SCHEMA_PARTS
+            if path.name != "1081_order_established_unserved_status.sql"
+        ))
+    assert migration.local_additive_descriptor_state(
+        snapshot, descriptor, ORDER_LIFECYCLE_ARTIFACT
+    ) == expected
+
+
 @pytest.mark.parametrize("successor", [
     ORDER_LIFECYCLE_ARTIFACT, HISTORICAL_ACCOUNTING_ARTIFACT,
     "1081_order_established_unserved_status.sql",

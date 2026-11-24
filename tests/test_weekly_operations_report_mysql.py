@@ -63,7 +63,7 @@ def api():
         raise AssertionError("test root session could not be created")
     token = session[0]
 
-    statuses = list(OrderLifecycleStatus)
+    statuses = [status for status in OrderLifecycleStatus if status is not OrderLifecycleStatus.ESTABLISHED_UNSERVED]
     rows = [(1, datetime(2026, 1, 6, 9), OrderLifecycleStatus.ESTABLISHED)]
     rows.extend((index + 2, datetime(2026, 8, 31, 9) if index < 5
                  else datetime(2026, 9, 7, 9), status)

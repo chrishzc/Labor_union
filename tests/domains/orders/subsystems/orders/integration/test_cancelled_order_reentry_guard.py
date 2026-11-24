@@ -19,7 +19,7 @@ class _Repository:
         self.facts = facts
         self.preview_loads = 0
 
-    def load_for_preview(self, case_no, requested_staff_ids):
+    def load_for_preview(self, case_no, requested_staff_ids, *, allow_missing_payroll_rates=False):
         self.preview_loads += 1
         return self.facts
 

@@ -28,10 +28,15 @@ from domains.payroll.monthly_aggregation import (
     build_staff_monthly_payroll_summary,
 )
 from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
+from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, is_full_subsidy_case
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
+)
+from infrastructure.mysql.staff_payable_correction_sql import (
+    effective_staff_obligation_amount,
+    selectable_staff_obligation,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -319,6 +324,7 @@ def _rebuild_facts(
         staff_payment_due_date=_payment_due_date(
             root, pricing, len({day for assignment in service_facts for day in assignment.service_dates}),
         ),
+        order_status=OrderLifecycleStatus(root["order_status"]) if root.get("order_status") else None,
     )
 
 
@@ -546,8 +552,11 @@ def _replace_missing_due_date(cursor, persistence, action, ordinal):
 
     successor_identity = _due_date_successor_identity(persistence, action)
     successor_owner = _assignment_owner(cursor, action.assignment_identity)
-    if successor_owner["due_date"] != action.due_date:
+    if successor_owner["due_date"] is not None and successor_owner["due_date"] != action.due_date:
         raise ValueError("staff_obligation_due_date_stale")
+    # The caller saves the first Orders due date after this synchronization.
+    # Carry the fresh owner's calculated date, as for a new obligation.
+    successor_owner["due_date"] = action.due_date
     established_event_id = _insert_event(
         cursor,
         persistence,
@@ -967,17 +976,37 @@ _RECEIPT_INSERT_SQL = (
     "(idempotency_key,command_fingerprint,preview_fingerprint,case_no,"
     "resulting_payroll_version,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s)"
 )
+_MONTHLY_AMOUNT_SQL = (
+    "COALESCE(installments.amount_ntd,"
+    + effective_staff_obligation_amount("obligations") + ")"
+)
+_MONTHLY_DUE_DATE_SQL = (
+    "CASE WHEN installments.obligation_identity IS NULL "
+    "THEN COALESCE(obligations.due_date,case_order.staff_payment_due_date) "
+    "ELSE installments.due_date END"
+)
+# Paid source plans remain immutable; only a plan conserving current entitlement
+# can supply the amounts and dates for monthly payable queries.
 _MONTHLY_OBLIGATIONS_SQL = (
     "SELECT obligations.obligation_identity,obligations.assignment_id,obligations.case_no,"
     "obligations.staff_id,obligations.direction,"
-    "COALESCE(installments.amount_ntd,(SELECT COALESCE(c.settlement_base_ntd,c.effective_ntd) FROM payroll_amount_controls c WHERE c.obligation_identity=obligations.obligation_identity),obligations.amount_due_ntd) AS amount_due_ntd,"
-    "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END AS due_date "
-    "FROM staff_obligations obligations LEFT JOIN staff_obligation_installments installments "
+    + _MONTHLY_AMOUNT_SQL + " AS amount_due_ntd,"
+    + _MONTHLY_DUE_DATE_SQL + " AS due_date "
+    "FROM staff_obligations obligations "
+    "LEFT JOIN orders case_order ON case_order.case_no=obligations.case_no "
+    "LEFT JOIN staff_obligation_installments installments "
     "ON installments.obligation_identity=obligations.obligation_identity "
     "WHERE obligations.staff_id=%s AND "
-    "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END >=%s AND "
-    "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END <%s "
-    "AND obligations.status='open' AND COALESCE(installments.amount_ntd,(SELECT COALESCE(c.settlement_base_ntd,c.effective_ntd) FROM payroll_amount_controls c WHERE c.obligation_identity=obligations.obligation_identity),obligations.amount_due_ntd)>0 "
+    + _MONTHLY_DUE_DATE_SQL + ">=%s AND "
+    + _MONTHLY_DUE_DATE_SQL + "<%s "
+    "AND obligations.status='open' AND "
+    + selectable_staff_obligation("obligations") + " AND "
+    + effective_staff_obligation_amount("obligations") + ">0 "
+    "AND (installments.obligation_identity IS NULL OR "
+    "(SELECT SUM(formed.amount_ntd) FROM staff_obligation_installments formed "
+    "WHERE formed.obligation_identity=obligations.obligation_identity)="
+    + effective_staff_obligation_amount("obligations") + ") AND "
+    + _MONTHLY_AMOUNT_SQL + ">0 "
     "ORDER BY obligations.obligation_identity"
 )
 

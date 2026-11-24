@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { OrderCancellationPreviewSchema, OrderCancellationQuerySchema, OrderCancellationReceiptSchema, OrderCancellationApplyPayloadSchema, orderCancellationClient } from '../api/orders/order_cancellation_client';
+import type { HistoricalUnservedCorrection } from '../api/orders/order_cancellation_client';
 import { transport } from '../api/shared/transport';
 
 const queryFixture = {
@@ -101,6 +102,23 @@ describe('orderCancellationClient', () => {
     );
   });
 
+  it('decodes historical review codes separately from blockers with no establishment records', async () => {
+    const correction = {
+      blockers: [], review_codes: ['historical_unserved_establishment_evidence_missing', 'historical_unserved_cash_evidence_requires_review'],
+      establishment_lifecycle_event_ids: [], establishment_adoption_receipt_ids: [],
+      establishment_owner_status: null, historical_adoption_receipt_ids: [], historical_absence_event_ids: [],
+      actual_service_evidence: [], actual_start_date: null, actual_end_date: null, prior_fee_ntd: '0',
+      prior_fee_reason: '', net_cash_received_ntd: null, prior_cancellation_event_id: null,
+      client_obligations: [], payroll_obligations: [],
+    };
+    vi.spyOn(transport, 'get').mockResolvedValue({
+      success: true, message: 'ok', error: null,
+      data: { ...queryFixture, lifecycle_status: '訂單取消', historical_unserved_correction: correction },
+    });
+    const result = await orderCancellationClient.query('CASE-1');
+    expect(result.historical_unserved_correction).toEqual({ ...correction, prior_fee_ntd: 0n });
+  });
+
   it('opens the existing workbench only for explicit historical mid-service confirmation capability', async () => {
     const historical = {
       ...queryFixture,
@@ -131,6 +149,37 @@ describe('orderCancellationClient', () => {
         headers: expect.objectContaining({ 'X-Correlation-ID': expect.stringContaining('orders-cancellation-preview-CASE-1-') }),
       }),
     );
+  });
+
+  it('decodes zero-service termination and historical recovery evidence', async () => {
+    const data = {
+      ...previewFixture,
+      lifecycle_impact: { ...previewFixture.lifecycle_impact, after_status: '成立後未服務',
+        establishment_evidence: { lifecycle_event_ids: [1], historical_adoption_ids: [2], current_owner_status: null } },
+      historical_unserved_correction: {
+        classification_only: false, client_cash_difference_requires_review: true, retired_adopted_assignment_ids: [3],
+        payroll_recoveries: [{ obligation_identity: 'historical-payable', staff_id: 7, paid_ntd: '9500', recovery_increase_ntd: '6000' }],
+      },
+    };
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({ success: true, message: 'ok', data, error: null });
+    const correction: HistoricalUnservedCorrection = { reason: '', evidence_source: '', confirmed_actual_service_day_count: 0 };
+    const result = await orderCancellationClient.preview('CASE-1', [], undefined, { historical_unserved_correction: correction });
+    expect(result.lifecycle_impact.after_status).toBe('成立後未服務');
+    expect(result.historical_unserved_correction?.client_cash_difference_requires_review).toBe(true);
+    expect(result.historical_unserved_correction?.payroll_recoveries[0]?.recovery_increase_ntd).toBe(6000n);
+    expect(post).toHaveBeenCalledWith('/api/v1/orders/CASE-1/cancellation/preview',
+      { confirmed_service_days: [], historical_unserved_correction: correction }, expect.anything());
+    post.mockResolvedValueOnce({
+      success: true, message: 'ok', error: null,
+      data: {
+        ...data,
+        historical_unserved_correction: {
+          ...data.historical_unserved_correction,
+          client_cash_difference_requires_review: 'true',
+        },
+      },
+    });
+    await expect(orderCancellationClient.preview('CASE-1', [], undefined, { historical_unserved_correction: correction })).rejects.toThrow();
   });
 
   it.each([null, { covered_rate: 300, excess_rate: 450, subsidy_hours: 40, directly_subsidized: false }])(
@@ -226,6 +275,29 @@ describe('orderCancellationClient', () => {
         }),
       }),
     );
+  });
+
+  it('accepts empty historical notes and rejects nonzero or boolean service day confirmation in Apply', async () => {
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({
+      success: true, message: 'ok', data: { ...receiptFixture, lifecycle_status: '成立後未服務' }, error: null,
+    });
+    const payload = {
+      confirmed_service_days: [],
+      expected_order_version: 0,
+      expected_scheduling_version: 0,
+      expected_client_finance_version: 0,
+      expected_payroll_version: 0,
+      preview_fingerprint: 'a'.repeat(64),
+      reason: '',
+      historical_unserved_correction: { reason: '', evidence_source: '', confirmed_actual_service_day_count: 0 },
+    };
+    const parsed = OrderCancellationApplyPayloadSchema.parse(payload);
+    await orderCancellationClient.apply('CASE-1', parsed, { idempotencyKey: 'correct-case-1', actor: 'operator-a' });
+    expect(post).toHaveBeenCalledWith('/api/v1/orders/CASE-1/cancellation/apply', payload, expect.anything());
+    for (const count of [1, false, true]) {
+      const invalid = { ...payload, historical_unserved_correction: { ...payload.historical_unserved_correction, confirmed_actual_service_day_count: count } };
+      expect(OrderCancellationApplyPayloadSchema.safeParse(invalid).success).toBe(false);
+    }
   });
 
   it('rejects query identity drift and extra preview fields', async () => {

@@ -39,10 +39,13 @@ def persist_payroll_terms_impact(cursor, command) -> None:
         resolution = dict(command.candidate.rate_source_assignments)
     from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
     if not isinstance(command.candidate.payroll, HistoricalCasePayrollCandidate):
-        unchanged_paid = {item.candidate_assignment_key for item in command.candidate.frozen_settlements
-                          if item.previous_entitlement == item.revised_entitlement}
+        # Paid roots and their source schedules remain on the original assignment.
+        # Entitlement corrections have separate identities, including when the
+        # replacement generation changes the amount.
+        frozen_assignments = {item.candidate_assignment_key for item in command.candidate.frozen_settlements
+                              if item.candidate_assignment_key is not None}
         persist_payroll_installments(cursor, command.candidate.case_no, command.candidate.payroll, resolution,
-                                     unchanged_paid=unchanged_paid, staff_ids=command.installment_staff_ids)
+                                     unchanged_paid=frozen_assignments, staff_ids=command.installment_staff_ids)
 
 
 def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, result) -> None:

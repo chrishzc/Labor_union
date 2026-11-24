@@ -5,21 +5,32 @@ Description: 在明確 disposable MySQL 驗證歷史狀態、assignment、event�
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import closing
 from datetime import date, datetime, timezone
 from io import BytesIO
 import os
 from uuid import uuid4
 
 import pytest
+from fastapi import Request
+from openpyxl import load_workbook
 
+from api.routes.operations_reports import export_weekly_operations_report_xlsx, query_weekly_operations_report
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.historical_completion_writer import MySqlHistoricalServiceCompletionWriter
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.order_cancellation_repository import MySqlOrderCancellationRepository
+from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.weekly_operations_report_query_adapter import MySqlWeeklyOperationsReportQueryAdapter
 from .historical_accounting_fixture import seed_accounting_basis
 from shared_kernel.clock import FixedBusinessClock
-from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.orders.cancellation_workflow import OrderCancellationApplyRequest, OrderCancellationWorkflow
+from subsystems.orders.core_stage_filter_query import CoreStageProjectionFilterQuery, query_core_stage_page
+from subsystems.orders.core_stage_projection_query import project_core_stage_timeline
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionRequest,
     HistoricalOrderAdoptionWorkflow,
@@ -32,8 +43,11 @@ from subsystems.orders.historical_completion_apply import (
     ApplyHistoricalServiceCompletion,
     HistoricalServiceCompletionApplyWorkflow,
 )
+from subsystems.orders.stage_projection_query import OrderStageProjectionQueryService, StageProjectionQuery
 from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
+from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.historical_unserved_correction import HistoricalUnservedCorrectionIntent
 from shared_kernel.fingerprints import fingerprint_payload
 
 
@@ -42,6 +56,252 @@ pytestmark = pytest.mark.skipif(
     not DATABASE or os.getenv("DB_DATABASE") != DATABASE,
     reason="requires an explicitly configured disposable lu_test_* MySQL database",
 )
+
+
+@pytest.mark.parametrize(
+    ("original_status", "application_day", "original_established", "original_cancelled"),
+    [
+        (OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, date(2025, 1, 6), 1, 0),
+        (OrderLifecycleStatus.CANCELLED, date(2025, 1, 13), 0, 1),
+    ],
+    ids=["misadopted-service", "legacy-cancelled"],
+)
+def test_historical_zero_service_corrects_standalone_payroll_and_survives_reimport(
+    original_status, application_day, original_established, original_cancelled,
+):
+    token = uuid4().hex
+    case_no = f"WP80-ZERO-{token[:12]}"
+    connection = get_connection()
+    try:
+        clock = FixedBusinessClock(datetime(2025, 4, 15, tzinfo=timezone.utc))
+        staff_name = f"歷史零服務-{token[:8]}"
+        staff_id = _seed_case(connection, case_no, staff_name)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE clients SET created_at=%s,identity_status='一般市民',hcm_review_status='符合' WHERE case_no=%s",
+                (application_day, case_no),
+            )
+        connection.commit()
+        original_receivable, original_cash_id = _seed_ghost_receivable_with_cash(connection, case_no)
+        row = _source_row(case_no, token, staff_name)
+        adoption = HistoricalOrderAdoptionWorkflow(
+            MySqlHistoricalOrderAdoptionRepository(connection),
+            lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection),
+            clock=clock,
+        )
+        adopted_preview = adoption.preview(row)
+        adoption.apply(HistoricalOrderAdoptionRequest(
+            row, adopted_preview.fingerprint, f"{token}:adopt", "synthetic", "Original workbook", token,
+        ))
+        legacy_reason = "Legacy cancellation label" if original_cancelled else None
+        with connection.cursor() as cursor:
+            if original_cancelled:
+                # Model the legacy misclassification while retaining the formal adoption records.
+                cursor.execute(
+                    "UPDATE orders SET status=%s,cancel_reason=%s WHERE case_no=%s",
+                    (original_status.value, legacy_reason, case_no),
+                )
+                cursor.execute("UPDATE staff SET status=%s WHERE id=%s", ("inactive", staff_id))
+                assert cursor.rowcount == 1
+            cursor.execute("SELECT obligation_identity,assignment_id FROM staff_obligations WHERE case_no=%s AND status='open'", (case_no,))
+            original = cursor.fetchone()
+        connection.commit()
+        assert original is not None
+
+        weekly_query = WeeklyOperationsReportQuery(MySqlWeeklyOperationsReportQueryAdapter(connection), clock.now)
+        before = _historical_weekly_report(weekly_query, application_day, case_no)
+        before_row = before["case_rows"][0]
+        assert before_row["order_status"] == original_status.value
+        assert before_row["service_days"] == 30
+        assert before_row["cancel_reason"] == legacy_reason
+        assert (before_row["order_established"], before_row["cancelled"]) == (original_established, original_cancelled)
+        for counts in (before["summary"], before["monthly_subtotals"][0]):
+            assert _report_case_counts(counts) == (1, original_established, original_cancelled)
+
+        repository = MySqlOrderCancellationRepository(connection)
+        correction = OrderCancellationWorkflow(repository, lambda: MySqlUnitOfWork(connection), clock)
+        facts = repository.load_for_preview(case_no, ())
+        assert facts.historical_unserved_evidence.establishment.historical_adoption_ids
+        intent = HistoricalUnservedCorrectionIntent("Workbook service dates entered in error", "Zero-service audit")
+        preview = correction.preview(case_no, (), historical_correction=intent)
+        assert preview.candidate.official_service_day_count == 0
+        assert preview.payroll_impact.actions[0].obligation_identity == original["obligation_identity"]
+        assert preview.client_finance_impact.cancellation_settlement.refund_due_ntd == 6000
+        request = OrderCancellationApplyRequest(
+            case_no, (), ExpectedVersion(preview.order_version),
+            _expected_version(preview.scheduling_version), _expected_version(preview.client_finance_version),
+            _expected_version(preview.payroll_version), preview.fingerprint, IdempotencyKey(f"{token}:correct"),
+            ActorContext("synthetic"), intent.reason, CorrelationId(token), historical_correction=intent,
+        )
+        receipt = correction.apply(request)
+        assert receipt.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+
+        after = _historical_weekly_report(weekly_query, application_day, case_no)
+        after_row = after["case_rows"][0]
+        assert after_row["order_status"] == "成立後未服務"
+        assert after_row["service_status"] == "成立後未服務"
+        assert after_row["service_days"] == 0
+        assert after_row["cancel_reason"] == intent.reason
+        assert (after_row["order_established"], after_row["cancelled"]) == (1, 0)
+        for counts in (after["summary"], after["monthly_subtotals"][0]):
+            assert _report_case_counts(counts) == (1, 1, 0)
+        before_annual = _report_case_counts(before["annual_totals"][0])
+        assert _report_case_counts(after["annual_totals"][0]) == (
+            before_annual[0], before_annual[1] + 1 - original_established, before_annual[2] - original_cancelled,
+        )
+        assert after["service_rows"] == []
+        _assert_historical_unserved_workbench(connection, clock, case_no)
+
+        assert correction.apply(request) == receipt
+        reimport_preview = adoption.preview(row)
+        assert "historical_order_confirmed_zero_service_conflict" in reimport_preview.issue_codes
+        reviewed = adoption.apply(HistoricalOrderAdoptionRequest(
+            row, reimport_preview.fingerprint, f"historical-order-row:{token}", "synthetic",
+            "Workbook reimport", token, workbook_import=True,
+        ))
+        assert reviewed.assignment_count == 0
+        assert reviewed.review_identity
+        assert _historical_weekly_report(weekly_query, application_day, case_no) == after
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT status,service_days,actual_start_date,actual_end_date FROM orders WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone() == {
+                "status": OrderLifecycleStatus.ESTABLISHED_UNSERVED.value,
+                "service_days": 30,
+                "actual_start_date": None,
+                "actual_end_date": None,
+            }
+            cursor.execute("SELECT obligation_identity,status FROM staff_obligations WHERE case_no=%s", (case_no,))
+            assert cursor.fetchall() == [{"obligation_identity": original["obligation_identity"], "status": "cancelled"}]
+            cursor.execute(
+                "SELECT a.status,p.assignment_id,a.staff_id,s.status AS staff_status "
+                "FROM case_staff_assignments a "
+                "JOIN historical_order_pairing_evidence p ON p.assignment_id=a.id "
+                "JOIN staff s ON s.id=a.staff_id WHERE a.id=%s",
+                (original["assignment_id"],),
+            )
+            assert cursor.fetchone() == {
+                "status": "cancelled",
+                "assignment_id": original["assignment_id"],
+                "staff_id": staff_id,
+                "staff_status": "inactive" if original_cancelled else "active",
+            }
+            cursor.execute(
+                "SELECT obligation_type,amount_due_ntd,status FROM client_obligations WHERE case_no=%s ORDER BY obligation_type",
+                (case_no,),
+            )
+            assert cursor.fetchall() == [
+                {"obligation_type": "first", "amount_due_ntd": 0, "status": "settled"},
+                {"obligation_type": "refund", "amount_due_ntd": 6000, "status": "open"},
+            ]
+            cursor.execute(
+                "SELECT entry.id,entry.entry_type,entry.amount_ntd,allocation.obligation_identity "
+                "FROM client_ledger_entries entry JOIN client_ledger_obligation_allocations allocation "
+                "ON allocation.ledger_entry_id=entry.id WHERE entry.case_no=%s",
+                (case_no,),
+            )
+            assert cursor.fetchall() == [{
+                "id": original_cash_id, "entry_type": "receipt", "amount_ntd": 6000,
+                "obligation_identity": original_receivable,
+            }]
+            cursor.execute("SELECT COUNT(*) AS count FROM order_cancellation_apply_receipts WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["count"] == 1
+    finally:
+        connection.close()
+
+
+def _report_case_counts(summary):
+    return summary["application_count"], summary["order_established_count"], summary["cancelled_count"]
+
+
+async def _read_report_xlsx(response):
+    return b"".join([chunk async for chunk in response.body_iterator])
+
+
+def _historical_weekly_report(query, application_day, case_no):
+    request = Request({"type": "http", "query_string": b""})
+    parameters = {
+        "request": request, "start_date": application_day, "end_date": application_day,
+        "principal": None, "query": query,
+    }
+    report = query_weekly_operations_report(
+        schema_version="operations-report.v5", **parameters,
+    ).model_dump(mode="json")["data"]
+    assert [row["case_no"] for row in report["case_rows"]] == [case_no]
+    row = report["case_rows"][0]
+
+    response = export_weekly_operations_report_xlsx(**parameters)
+    with closing(load_workbook(BytesIO(asyncio.run(_read_report_xlsx(response))))) as workbook:
+        sheet = workbook["週報案件受理總表"]
+        assert sheet.max_column == 26
+        assert (sheet["O3"].value, sheet["Q3"].value, sheet["S2"].value, sheet["Y2"].value) == (
+            "訂單成立", "取消", "服務天數", "取消原因",
+        )
+        rows = tuple(sheet.values)[3:]
+        (detail,) = (cells for cells in rows if cells[0] == row["serial_number"])
+        assert (detail[7], detail[14], detail[16]) == (1, row["order_established"] or None, row["cancelled"] or None)
+        assert (detail[18], detail[22], detail[24]) == (row["service_days"], row["service_status"], row["cancel_reason"])
+        for label, total in (
+            ("114年度累計", report["annual_totals"][0]),
+            ("114年1月小計", report["monthly_subtotals"][0]),
+        ):
+            (subtotal,) = (cells for cells in rows if cells[0] == label)
+            assert (subtotal[7], subtotal[14], subtotal[16]) == _report_case_counts(total)
+    return report
+
+
+def _assert_historical_unserved_workbench(connection, clock, case_no):
+    query = OrderStageProjectionQueryService(MySqlOrdersStageProjectionRepository(connection), clock)
+    page = query.query(StageProjectionQuery(200))
+    (item,) = (item for item in page.items if item.case_no == case_no)
+    assert item.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    assert item.current_step_ordinal is None
+    core = project_core_stage_timeline(item)
+    assert core.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    assert core.current_core_stage_ordinal is None
+    stage_status = {stage.code: stage.status for stage in core.core_stages}
+    assert stage_status["service_completion"] == "unavailable"
+    assert stage_status["client_settlement"] == "blocked"
+    in_progress = query_core_stage_page(
+        query, CoreStageProjectionFilterQuery(page_size=50, case_no_search=case_no, workbench_scope="in_progress"),
+    )
+    assert in_progress.items == (core,)
+
+
+def _expected_version(value):
+    return ExpectedVersion(value) if value is not None else None
+
+
+def _seed_ghost_receivable_with_cash(connection, case_no):
+    obligation = f"{case_no}:first"
+    with connection.cursor() as cursor:
+        cursor.execute("INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES(%s,1)", (case_no,))
+        cursor.execute(
+            "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,"
+            "before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,"
+            "idempotency_key,actor,reason) VALUES(%s,%s,'first','receivable_from_client','established',"
+            "0,30000,'2025-01-15',%s,0,%s,'fixture','Original service receivable')",
+            (obligation, case_no, f"{case_no}:first-source", f"{case_no}:first-event"),
+        )
+        cursor.execute(
+            "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,"
+            "due_date,status,current_event_id,projection_version) "
+            "VALUES(%s,%s,'first','receivable_from_client',24000,'2025-01-15','open',%s,1)",
+            (obligation, case_no, cursor.lastrowid),
+        )
+        cursor.execute(
+            "INSERT INTO client_ledger_entries(case_no,entry_type,amount_ntd,occurred_on,reconciliation_reference,"
+            "idempotency_key,actor,reason) VALUES(%s,'receipt',6000,'2025-01-10',%s,%s,'fixture','Bank receipt')",
+            (case_no, f"{case_no}:cash-reference", f"{case_no}:cash"),
+        )
+        ledger_entry_id = int(cursor.lastrowid)
+        cursor.execute(
+            "INSERT INTO client_ledger_obligation_allocations(ledger_entry_id,obligation_identity,amount_ntd,"
+            "allocation_ordinal) VALUES(%s,%s,6000,1)",
+            (ledger_entry_id, obligation),
+        )
+    connection.commit()
+    return obligation, ledger_entry_id
 
 
 def test_historical_order_apply_is_atomic_and_replays():
@@ -610,3 +870,100 @@ def _assert_statement_reconciles(connection, case_no, staff_id, *, rematch=False
         cursor.execute("SELECT p.balance_ntd FROM staff_payable_projections p JOIN staff_obligations o "
                        "ON o.obligation_identity=p.obligation_identity WHERE o.case_no=%s AND o.staff_id=%s", (case_no, staff_id))
         assert cursor.fetchone()["balance_ntd"] == 0
+
+
+def test_historical_zero_service_reclassification_reuses_original_control():
+    """A new correction key keeps the prior paid penalty and immutable control link."""
+    from dataclasses import replace
+
+    token = uuid4().hex
+    case_no = f"WP80-CLASS-{token[:10]}"
+    connection = get_connection()
+    try:
+        clock = FixedBusinessClock(datetime(2025, 4, 15, tzinfo=timezone.utc))
+        staff_name = f"classification-{token[:8]}"
+        _seed_case(connection, case_no, staff_name)
+        _seed_ghost_receivable_with_cash(connection, case_no)
+        row = _source_row(case_no, token, staff_name)
+        adoption = HistoricalOrderAdoptionWorkflow(
+            MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection), clock=clock,
+        )
+        adopted_preview = adoption.preview(row)
+        adoption.apply(HistoricalOrderAdoptionRequest(
+            row, adopted_preview.fingerprint, f"{token}:adopt", "synthetic", "Original workbook", token,
+        ))
+        repository = MySqlOrderCancellationRepository(connection)
+        workflow = OrderCancellationWorkflow(repository, lambda: MySqlUnitOfWork(connection), clock)
+        intent = HistoricalUnservedCorrectionIntent("Confirmed no actual service", "Original audited workbook")
+        first_preview = workflow.preview(case_no, (), fee_ntd=6000, fee_reason="Agreed penalty", historical_correction=intent)
+        assert first_preview.classification_only is False
+        assert first_preview.client_finance_impact.cancellation_settlement.refund_due_ntd == 0
+        first_request = OrderCancellationApplyRequest(
+            case_no, (), ExpectedVersion(first_preview.order_version),
+            _expected_version(first_preview.scheduling_version), _expected_version(first_preview.client_finance_version),
+            _expected_version(first_preview.payroll_version), first_preview.fingerprint, IdempotencyKey(f"{token}:original-cancel"),
+            ActorContext("synthetic"), intent.reason, CorrelationId(token), fee_ntd=6000,
+            fee_reason="Agreed penalty", historical_correction=intent,
+        )
+        workflow.apply(first_request)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_event_id FROM order_lifecycle_control_state WHERE case_no=%s AND control_type='cancellation' AND control_key='order_cancelled'", (case_no,))
+            original_control_id = cursor.fetchone()["current_event_id"]
+            cursor.execute("UPDATE orders SET status='訂單取消' WHERE case_no=%s", (case_no,))
+        connection.commit()
+        financial_before = _classification_financial_snapshot(connection, case_no)
+        corrected_intent = HistoricalUnservedCorrectionIntent("Correct legacy cancellation label", "Original cancellation settlement receipt")
+        preview = workflow.preview(case_no, (), historical_correction=corrected_intent)
+        assert preview.classification_only is True
+        assert preview.existing_cancellation_control_event_id == original_control_id
+        assert preview.client_finance_impact is None and preview.payroll_impact is None
+        request = OrderCancellationApplyRequest(
+            case_no, (), ExpectedVersion(preview.order_version),
+            _expected_version(preview.scheduling_version), _expected_version(preview.client_finance_version),
+            _expected_version(preview.payroll_version), preview.fingerprint, IdempotencyKey(f"{token}:classification"),
+            ActorContext("synthetic"), corrected_intent.reason, CorrelationId(token), historical_correction=corrected_intent,
+        )
+        # Ordinary cancellation still requires this command's own activation key.
+        with pytest.raises(RuntimeError, match="cancellation_control_event_not_found"):
+            repository.persist_cancellation_lifecycle(replace(first_request, idempotency_key=request.idempotency_key), first_preview, original_control_id)
+        connection.rollback()
+        # A legitimate prior control cannot authorize a different case or a stale control reference.
+        with pytest.raises(RuntimeError, match="cancellation_control_event_not_found"):
+            repository.persist_cancellation_lifecycle(replace(request, case_no=case_no+"-other"), preview, original_control_id)
+        connection.rollback()
+        with pytest.raises(RuntimeError, match="historical_cancellation_control_reference_invalid"):
+            repository.persist_cancellation_lifecycle(request, preview, original_control_id+1)
+        connection.rollback()
+        receipt = workflow.apply(request)
+        assert receipt.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+        assert workflow.apply(request) == receipt
+        assert _classification_financial_snapshot(connection, case_no) == financial_before
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT status FROM orders WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["status"] == OrderLifecycleStatus.ESTABLISHED_UNSERVED.value
+            cursor.execute("SELECT idempotency_key,cancellation_control_event_id FROM order_cancellation_apply_receipts WHERE case_no=%s ORDER BY order_version", (case_no,))
+            assert cursor.fetchall() == [
+                {"idempotency_key": first_request.idempotency_key.value, "cancellation_control_event_id": original_control_id},
+                {"idempotency_key": request.idempotency_key.value, "cancellation_control_event_id": original_control_id},
+            ]
+            cursor.execute("SELECT COUNT(*) AS count FROM order_lifecycle_control_events WHERE case_no=%s AND control_type='cancellation'", (case_no,))
+            assert cursor.fetchone()["count"] == 1
+    finally:
+        connection.close()
+
+
+def _classification_financial_snapshot(connection, case_no):
+    tables = (
+        'client_finance_accounts', 'client_obligations', 'client_obligation_events',
+        'client_finance_apply_receipts', 'client_ledger_entries', 'payroll_case_accounts',
+        'staff_obligations', 'staff_obligation_events',
+    )
+    snapshot = {}
+    with connection.cursor() as cursor:
+        for table in tables:
+            cursor.execute(f"SELECT * FROM {table} WHERE case_no=%s", (case_no,))
+            snapshot[table] = cursor.fetchall()
+        cursor.execute("SELECT a.* FROM client_ledger_obligation_allocations a JOIN client_ledger_entries e ON e.id=a.ledger_entry_id WHERE e.case_no=%s ORDER BY a.id", (case_no,))
+        snapshot['client_ledger_obligation_allocations'] = cursor.fetchall()
+    return snapshot

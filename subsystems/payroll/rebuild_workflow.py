@@ -19,6 +19,7 @@ from domains.payroll.calculation import (
     build_case_payroll_candidate,
 )
 from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
+from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
@@ -75,6 +76,7 @@ class PayrollRebuildFacts:
     adjustments: tuple[PayrollAdjustment, ...]
     existing_obligations: tuple[ExistingStaffObligation, ...]
     staff_payment_due_date: date | None
+    order_status: OrderLifecycleStatus | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _IDENTITY_MAXIMUM_LENGTH)
@@ -194,6 +196,8 @@ class PayrollRebuildWorkflow:
     def synchronize_in_unit_of_work(self, case_no, *, actor, key, correlation_id):
         """Automatic source-fact synchronization; the caller owns commit/rollback."""
         facts = self._repository.load(case_no, for_update=True)
+        if facts.order_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+            return facts.staff_payment_due_date
         if any(item.handover_corrections_exist for item in facts.existing_obligations):
             facts = self._repository.resolve_handover_obligations(facts)
             payroll = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)
@@ -246,6 +250,13 @@ class PayrollRebuildWorkflow:
 
 
 def _build_preview(facts: PayrollRebuildFacts) -> PayrollRebuildPreview:
+    if facts.order_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+        raise PayrollRebuildError(TypedError(
+            ErrorCategory.DOMAIN_BLOCKED,
+            "payroll_zero_service_terminated",
+            "成立後未服務案件應沿原帳務更正流程處理，不可依登記服務量重建薪資。",
+            CorrelationId("payroll-rebuild-preview"),
+        ))
     if any(item.handover_corrections_exist for item in facts.existing_obligations):
         raise ValueError("payroll_handover_settlement_required")
     payroll = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)

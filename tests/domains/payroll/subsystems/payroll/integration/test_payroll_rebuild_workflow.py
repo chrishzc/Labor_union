@@ -88,6 +88,32 @@ def _request(preview, *, version=4, key="payroll-rebuild-1"):
     )
 
 
+def test_zero_service_termination_blocks_rebuild_and_automatic_sync_preserves_obligations():
+    from dataclasses import replace
+    from domains.orders.lifecycle import OrderLifecycleStatus
+    from shared_kernel.fingerprints import PreviewFingerprint
+
+    existing = ExistingStaffObligation("assignment:8", "original", MoneyNTD(0), True,
+                                      date(2026, 9, 15))
+    facts = replace(_facts((existing,)), order_status=OrderLifecycleStatus.ESTABLISHED_UNSERVED)
+    repository, uow = _Repository(facts), _UnitOfWork()
+    workflow = PayrollRebuildWorkflow(repository, lambda: uow)
+    with pytest.raises(PayrollRebuildError) as preview_error:
+        workflow.preview("CASE-1")
+    assert preview_error.value.error.code == "payroll_zero_service_terminated"
+    assert preview_error.value.error.category is ErrorCategory.DOMAIN_BLOCKED
+    request = _request(SimpleNamespace(fingerprint=PreviewFingerprint("a" * 64)))
+    with pytest.raises(PayrollRebuildError) as apply_error:
+        workflow.apply(request)
+    assert apply_error.value.error.code == "payroll_zero_service_terminated"
+    assert workflow.synchronize_in_unit_of_work(
+        "CASE-1", actor=request.actor, key=request.idempotency_key, correlation_id=request.correlation_id,
+    ) == facts.staff_payment_due_date
+    assert repository.persisted == []
+    assert repository.facts.existing_obligations == (existing,)
+    assert not uow.committed
+
+
 def test_mysql_service_facts_crossing_decimal_id_boundary_can_be_calculated():
     from domains.payroll.calculation import build_case_payroll_candidate
     facts = mysql_rebuild._service_facts(
@@ -256,3 +282,253 @@ def test_created_obligation_persists_preview_payment_date_instead_of_null_compat
     action=SimpleNamespace(assignment_identity='assignment:6',obligation_identity='obligation:6',after_amount=MoneyNTD(24000),due_date=date(2026,11,15))
     mysql_rebuild._create_service_obligation(None,None,action,1)
     assert saved[0]['due_date']==date(2026,11,15)
+
+
+@pytest.mark.parametrize('stored_due_date', [None, date(2026, 11, 15)])
+def test_missing_due_date_successor_uses_fresh_preview_before_orders_save(monkeypatch, stored_due_date):
+    class Cursor:
+        rowcount = 1
+
+        def execute(self, statement, parameters):
+            self.statement = statement
+            self.parameters = parameters
+
+    monkeypatch.setattr(mysql_rebuild, '_obligation_owner', lambda *_: {'due_date': None})
+    monkeypatch.setattr(mysql_rebuild, '_assignment_owner', lambda *_: {'due_date': stored_due_date})
+    monkeypatch.setattr(mysql_rebuild, '_insert_event', lambda *_, **__: 1)
+    monkeypatch.setattr(mysql_rebuild, '_due_date_successor_identity', lambda *_: 'dated-successor')
+    saved = []
+    monkeypatch.setattr(mysql_rebuild, '_insert_projection',
+                        lambda _cursor, _persistence, owner, *_: saved.append(dict(owner)))
+    persistence = SimpleNamespace(request=SimpleNamespace(case_no='CASE-1'),
+                                  receipt=SimpleNamespace(payroll_version=5))
+    action = SimpleNamespace(
+        assignment_identity='assignment:6', obligation_identity='original',
+        before_amount=MoneyNTD(5800), after_amount=MoneyNTD(5800), due_date=date(2026, 11, 15),
+    )
+    mysql_rebuild._replace_missing_due_date(Cursor(), persistence, action, 1)
+    assert saved == [{'due_date': date(2026, 11, 15)}]
+
+
+def test_missing_due_date_successor_rejects_different_existing_orders_date(monkeypatch):
+    class Cursor:
+        rowcount = 1
+
+        def execute(self, *_):
+            pass
+
+    monkeypatch.setattr(mysql_rebuild, '_obligation_owner', lambda *_: {'due_date': None})
+    monkeypatch.setattr(mysql_rebuild, '_assignment_owner', lambda *_: {'due_date': date(2026, 12, 15)})
+    monkeypatch.setattr(mysql_rebuild, '_insert_event', lambda *_, **__: 1)
+    monkeypatch.setattr(mysql_rebuild, '_due_date_successor_identity', lambda *_: 'dated-successor')
+    monkeypatch.setattr(mysql_rebuild, '_insert_projection',
+                        lambda *_: pytest.fail('conflicting date must not establish a successor'))
+    persistence = SimpleNamespace(request=SimpleNamespace(case_no='CASE-1'),
+                                  receipt=SimpleNamespace(payroll_version=5))
+    action = SimpleNamespace(
+        assignment_identity='assignment:6', obligation_identity='original',
+        before_amount=MoneyNTD(5800), after_amount=MoneyNTD(5800), due_date=date(2026, 11, 15),
+    )
+    with pytest.raises(ValueError, match='staff_obligation_due_date_stale'):
+        mysql_rebuild._replace_missing_due_date(Cursor(), persistence, action, 1)
+
+
+@pytest.fixture
+def monthly_sql_connection():
+    import sqlite3
+
+    raw = sqlite3.connect(':memory:')
+    raw.row_factory = sqlite3.Row
+    raw.executescript('''
+        CREATE TABLE orders(case_no TEXT PRIMARY KEY, staff_payment_due_date DATE);
+        CREATE TABLE staff_obligations(
+            obligation_identity TEXT PRIMARY KEY, assignment_id INTEGER, case_no TEXT,
+            staff_id INTEGER, direction TEXT, amount_due_ntd INTEGER, due_date DATE,
+            status TEXT, source_obligation_identity TEXT
+        );
+        CREATE TABLE staff_obligation_installments(
+            obligation_identity TEXT, amount_ntd INTEGER, due_date DATE
+        );
+        CREATE TABLE payroll_amount_controls(
+            obligation_identity TEXT, settlement_base_ntd INTEGER, effective_ntd INTEGER
+        );
+    ''')
+
+    class Cursor:
+        def __enter__(self):
+            self.cursor = raw.cursor()
+            return self
+
+        def __exit__(self, *_):
+            self.cursor.close()
+
+        def execute(self, statement, parameters):
+            assert statement.startswith('SELECT ')
+            self.cursor.execute(
+                statement.replace('%s', '?').replace('%%', '%'),
+                tuple(value.isoformat() if isinstance(value, date) else value for value in parameters),
+            )
+
+        def fetchall(self):
+            return [dict(row, due_date=date.fromisoformat(row['due_date'])) for row in self.cursor.fetchall()]
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    try:
+        yield raw, mysql_rebuild.MySqlPayrollRebuildRepository(Connection())
+    finally:
+        raw.close()
+
+
+def _seed_monthly_paid_root(raw, root_due=None, order_due='2026-11-15'):
+    raw.execute('INSERT INTO orders VALUES (?,?)', ('CASE-1', order_due))
+    raw.execute('INSERT INTO staff_obligations VALUES (?,?,?,?,?,?,?,?,?)',
+                ('original-paid', 1, 'CASE-1', 7, 'payable_to_staff', 13000, root_due, 'open', None))
+    raw.execute('INSERT INTO staff_obligations VALUES (?,?,?,?,?,?,?,?,?)',
+                ('staff-handover:correction', 1, 'CASE-1', 7, 'receivable_from_staff', 7200,
+                 root_due, 'open', 'original-paid'))
+
+
+@pytest.mark.parametrize(('root_due', 'order_due', 'month', 'expected'), [
+    (None, '2026-11-15', 11, 5800),
+    ('2026-12-15', '2026-11-15', 11, 0),
+    ('2026-12-15', '2026-11-15', 12, 5800),
+    (None, None, 11, 0),
+    (None, '2026-11-15', 12, 0),
+])
+def test_monthly_query_uses_effective_paid_entitlement_and_existing_dates(
+    monthly_sql_connection, root_due, order_due, month, expected,
+):
+    raw, repository = monthly_sql_connection
+    _seed_monthly_paid_root(raw, root_due, order_due)
+    before = [tuple(row) for row in raw.execute('SELECT * FROM staff_obligations ORDER BY obligation_identity')]
+    changes = raw.total_changes
+    summary = repository.query_staff_month(7, 2026, month)
+    assert summary.payable_total == summary.net_payable == MoneyNTD(expected)
+    assert summary.receivable_total == MoneyNTD(0)
+    assert tuple(item.obligation_identity for item in summary.obligations) == (('original-paid',) if expected else ())
+    assert raw.total_changes == changes
+    assert [tuple(row) for row in raw.execute('SELECT * FROM staff_obligations ORDER BY obligation_identity')] == before
+
+
+@pytest.mark.parametrize(('settlement_base', 'effective', 'expected'), [
+    (5200, 4800, 5200), (None, 4800, 4800), (0, 4800, 0),
+])
+def test_monthly_query_shares_existing_amount_control_precedence(
+    monthly_sql_connection, settlement_base, effective, expected,
+):
+    raw, repository = monthly_sql_connection
+    _seed_monthly_paid_root(raw)
+    raw.execute('INSERT INTO payroll_amount_controls VALUES (?,?,?)',
+                ('original-paid', settlement_base, effective))
+    changes = raw.total_changes
+    summary = repository.query_staff_month(7, 2026, 11)
+    assert summary.payable_total == summary.net_payable == MoneyNTD(expected)
+    assert summary.receivable_total == MoneyNTD(0)
+    assert raw.total_changes == changes
+
+
+def test_monthly_query_preserves_formal_installment_amounts_and_dates(monthly_sql_connection):
+    raw, repository = monthly_sql_connection
+    _seed_monthly_paid_root(raw, order_due='2027-01-15')
+    raw.executemany('INSERT INTO staff_obligation_installments VALUES (?,?,?)', [
+        ('original-paid', 3300, '2026-11-15'), ('original-paid', 2500, '2026-12-15'),
+    ])
+    changes = raw.total_changes
+    assert repository.query_staff_month(7, 2026, 11).net_payable == MoneyNTD(3300)
+    assert repository.query_staff_month(7, 2026, 12).net_payable == MoneyNTD(2500)
+    assert repository.query_staff_month(7, 2027, 1).net_payable == MoneyNTD(0)
+    assert raw.total_changes == changes
+
+
+@pytest.mark.parametrize(('settlement_base', 'effective'), [
+    (None, None), (None, 0), (0, 4800),
+])
+def test_monthly_query_excludes_preserved_installments_that_do_not_conserve_entitlement(
+    monthly_sql_connection, settlement_base, effective,
+):
+    raw, repository = monthly_sql_connection
+    _seed_monthly_paid_root(raw, root_due='2027-01-15', order_due='2027-01-15')
+    raw.executemany('INSERT INTO staff_obligation_installments VALUES (?,?,?)', [
+        ('original-paid', 1000, '2026-11-15'), ('original-paid', 12000, '2026-12-15'),
+    ])
+    if settlement_base is not None or effective is not None:
+        raw.execute('INSERT INTO payroll_amount_controls VALUES (?,?,?)',
+                    ('original-paid', settlement_base, effective))
+    raw.execute('INSERT INTO staff_obligations VALUES (?,?,?,?,?,?,?,?,?)',
+                ('actual-receivable', 1, 'CASE-1', 7, 'receivable_from_staff', 1500,
+                 '2026-11-15', 'open', None))
+    original_installments = [tuple(row) for row in raw.execute(
+        'SELECT * FROM staff_obligation_installments ORDER BY due_date',
+    )]
+    changes = raw.total_changes
+
+    for year, month in [(2026, 11), (2026, 12), (2027, 1)]:
+        summary = repository.query_staff_month(7, year, month)
+        expected_receivable = 1500 if month == 11 else 0
+        assert summary.payable_total == MoneyNTD(0)
+        assert summary.receivable_total == MoneyNTD(expected_receivable)
+        assert summary.net_payable == MoneyNTD(-expected_receivable)
+        assert tuple(item.obligation_identity for item in summary.obligations) == (
+            ('actual-receivable',) if expected_receivable else ()
+        )
+
+    assert raw.total_changes == changes
+    assert [tuple(row) for row in raw.execute(
+        'SELECT * FROM staff_obligation_installments ORDER BY due_date',
+    )] == original_installments
+
+
+@pytest.mark.parametrize('preserve_installments', [False, True], ids=['no-plan', 'preserved-plan'])
+def test_monthly_query_excludes_handover_zero_without_amount_control(
+    monthly_sql_connection, preserve_installments,
+):
+    raw, repository = monthly_sql_connection
+    _seed_monthly_paid_root(raw, root_due='2026-11-15', order_due='2027-01-15')
+    raw.execute('INSERT INTO staff_obligations VALUES (?,?,?,?,?,?,?,?,?)',
+                ('staff-handover:final-zero', 1, 'CASE-1', 7, 'receivable_from_staff', 5800,
+                 '2026-11-15', 'open', 'original-paid'))
+    if preserve_installments:
+        raw.executemany('INSERT INTO staff_obligation_installments VALUES (?,?,?)', [
+            ('original-paid', 1000, '2026-11-15'), ('original-paid', 12000, '2026-12-15'),
+        ])
+    raw.execute('INSERT INTO staff_obligations VALUES (?,?,?,?,?,?,?,?,?)',
+                ('actual-receivable', 1, 'CASE-1', 7, 'receivable_from_staff', 1500,
+                 '2026-11-15', 'open', None))
+    assert raw.execute('SELECT COUNT(*) FROM payroll_amount_controls').fetchone()[0] == 0
+    tables = ('orders', 'staff_obligations', 'staff_obligation_installments', 'payroll_amount_controls')
+    before = {table: [tuple(row) for row in raw.execute(f'SELECT * FROM {table}')]
+              for table in tables}
+    changes = raw.total_changes
+
+    for year, month in [(2026, 11), (2026, 12), (2027, 1)]:
+        summary = repository.query_staff_month(7, year, month)
+        expected_receivable = 1500 if month == 11 else 0
+        assert summary.payable_total == MoneyNTD(0)
+        assert summary.receivable_total == MoneyNTD(expected_receivable)
+        assert summary.net_payable == MoneyNTD(-expected_receivable)
+        assert tuple(item.obligation_identity for item in summary.obligations) == (
+            ('actual-receivable',) if expected_receivable else ()
+        )
+
+    assert raw.total_changes == changes
+    assert {table: [tuple(row) for row in raw.execute(f'SELECT * FROM {table}')]
+            for table in tables} == before
+
+
+def test_monthly_query_retains_genuine_receivables_and_staff_scope(monthly_sql_connection):
+    raw, repository = monthly_sql_connection
+    _seed_monthly_paid_root(raw)
+    raw.execute('INSERT INTO staff_obligations VALUES (?,?,?,?,?,?,?,?,?)',
+                ('actual-receivable', 1, 'CASE-1', 7, 'receivable_from_staff', 1500,
+                 '2026-11-15', 'open', None))
+    raw.execute('INSERT INTO staff_obligations VALUES (?,?,?,?,?,?,?,?,?)',
+                ('other-staff', 2, 'CASE-1', 8, 'payable_to_staff', 9000,
+                 '2026-11-15', 'open', None))
+    summary = repository.query_staff_month(7, 2026, 11)
+    assert summary.payable_total == MoneyNTD(5800)
+    assert summary.receivable_total == MoneyNTD(1500)
+    assert summary.net_payable == MoneyNTD(4300)
+    assert summary.obligation_count == 2

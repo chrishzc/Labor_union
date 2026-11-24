@@ -6,9 +6,10 @@ Description: 定義實際週界營運報表 operations-report.v3／v4／v5 的�
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.schemas.government_subsidy_report import GovernmentSubsidyReportRowView
+from domains.orders.lifecycle import OrderLifecycleStatus
 
 
 class _StrictModel(BaseModel):
@@ -121,7 +122,7 @@ class WeeklyReportCaseRowView(_StrictModel):
         "pending",
     ]
     order_status: str | None
-    service_days: int | None = Field(default=None, gt=0)
+    service_days: int | None = Field(default=None, ge=0)
     service_hours_per_day: float | None = Field(default=None, gt=0, le=24, multiple_of=0.5)
     planned_start_date: date | None
     planned_end_date: date | None
@@ -130,6 +131,12 @@ class WeeklyReportCaseRowView(_StrictModel):
     week_start_date: date | None
     week_end_date: date | None
     week_label: str
+
+    @model_validator(mode="after")
+    def validate_zero_service_days(self) -> "WeeklyReportCaseRowView":
+        if self.service_days == 0 and self.order_status != OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+            raise ValueError("zero service days require a confirmed established-unserved outcome")
+        return self
 
 
 class WeeklyReportCaseRowCancellationView(WeeklyReportCaseRowView):

@@ -4,9 +4,13 @@
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { sessionClient } from '../api/auth/session_client';
 import { weeklyOperationsReportQueryClient } from '../api/reports/weekly_operations_report_query_client';
 import { ReportsPage } from '../pages/ReportsPage';
-import { WEEKLY_OPERATIONS_REPORT } from './fixtures/reports/weekly_operations_report_contract_fixtures';
+import {
+  WEEKLY_OPERATIONS_REPORT,
+  WEEKLY_OPERATIONS_RESPONSE,
+} from './fixtures/reports/weekly_operations_report_contract_fixtures';
 
 describe('ReportsPage service-hours display', () => {
   afterEach(() => {
@@ -51,6 +55,56 @@ describe('ReportsPage service-hours display', () => {
     expect(screen.getByRole('status')).toHaveTextContent('已保留可得明細');
     expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.getByText('未設定 陳**')).toBeInTheDocument();
+  });
+
+  it('套用日期後顯示同週不同每日時數的合計，保留所選日期', async () => {
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('fixture-session');
+    const expectedStart = '2026-08-20';
+    const expectedEnd = '2026-08-26';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input), 'https://weekly-report.invalid');
+      if (!url.pathname.endsWith('/operations-reports/weekly')) {
+        return new Response(null, { status: 404 });
+      }
+      const start_date = url.searchParams.get('start_date');
+      const end_date = url.searchParams.get('end_date');
+      const selectedPeriod = start_date === expectedStart && end_date === expectedEnd;
+      const serviceRow = WEEKLY_OPERATIONS_REPORT.service_rows[0];
+
+      return Response.json({
+        ...WEEKLY_OPERATIONS_RESPONSE,
+        data: {
+          ...WEEKLY_OPERATIONS_REPORT,
+          period: { ...WEEKLY_OPERATIONS_REPORT.period, start_date, end_date },
+          service_rows: selectedPeriod
+            ? [{ ...serviceRow, service_hours_per_day: null, weekly_work_days: 2, weekly_hours: 12 }]
+            : [serviceRow],
+        },
+      });
+    });
+
+    render(<ReportsPage />);
+    await screen.findByRole('table', { name: '週報案件受理總表' });
+    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
+    const startInput = screen.getByLabelText('起日');
+    const endInput = screen.getByLabelText('迄日');
+    fireEvent.change(startInput, { target: { value: expectedStart } });
+    fireEvent.change(endInput, { target: { value: expectedEnd } });
+    fireEvent.blur(endInput);
+
+    const serviceTable = within(await screen.findByRole('region', { name: '服務工時資料，可左右捲動' }));
+    await serviceTable.findByRole('cell', { name: '12' });
+    const cells = within(serviceTable.getAllByRole('row')[1]).getAllByRole('cell');
+    expect(cells.at(-4)).toBeEmptyDOMElement();
+    expect(cells.at(-3)).toHaveTextContent(/^2$/);
+    expect(serviceTable.queryByRole('status')).not.toBeInTheDocument();
+    expect(startInput).toHaveValue(expectedStart);
+    expect(endInput).toHaveValue(expectedEnd);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`/operations-reports/weekly?start_date=${expectedStart}&end_date=${expectedEnd}`),
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('營運報表有其他資料但沒有服務工時時明確顯示無資料', async () => {

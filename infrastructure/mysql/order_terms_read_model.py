@@ -791,14 +791,14 @@ def _client_obligation(row):
     )
 
 
-def _load_payroll(cursor, order_row, assignment_rows, lock):
+def _load_payroll(cursor, order_row, assignment_rows, lock, *, allow_missing_payroll_rates: bool = False):
     case_no = str(order_row["case_no"])
     account_row = _select_payroll_account(cursor, case_no, lock)
     case_policy = _select_case_payroll_policy(
         cursor,
         case_no,
         lock,
-        required=not assignment_rows,
+        required=not assignment_rows and not allow_missing_payroll_rates,
     )
     assignment_ids = tuple(int(row["id"]) for row in assignment_rows)
     ancestry = _select_payroll_assignment_ancestry(cursor, case_no, assignment_rows, lock)
@@ -819,6 +819,7 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
         case_policy,
         rate_override,
         ancestry,
+        allow_missing_payroll_rates=allow_missing_payroll_rates,
     )
     from infrastructure.mysql.pricing_configuration_repository import load_case_pricing, payroll_tiers
     pricing = load_case_pricing(cursor, order_row, lock=lock)
@@ -971,6 +972,8 @@ def _payroll_source(
     case_policy,
     rate_override=None,
     ancestry=None,
+    *,
+    allow_missing_payroll_rates: bool = False,
 ):
     effective_case_policy = (
         CasePayrollPolicyTerms(
@@ -990,6 +993,7 @@ def _payroll_source(
                 row, rates, adjustments, effective_case_policy, ancestry
             )
             for row in assignment_rows
+            if not allow_missing_payroll_rates or int(row["id"]) in rates
         ),
         existing_obligations=tuple(
             _staff_obligation(row) for row in obligations

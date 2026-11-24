@@ -17,6 +17,7 @@ from openpyxl.styles import Font, PatternFill
 
 from domains.case_import.order_information import project_order_information
 from domains.client_finance.subsidy_coverage import default_subsidy_hour_cap, normalize_subsidy_policy_identity
+from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.pricing_configuration_repository import CASE_PRICING_FACTS_SQL
 
 QUARTERLY_HEADERS = (
@@ -443,6 +444,8 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
     This is a read-only estimate, never a claim, approval or receivable root.
     Missing facts stay unknown instead of becoming a zero-value subsidy.
     """
+    if source.get("order_status") == "成立後未服務":
+        return SubsidyReceivableEstimate(0, None)
     if source.get("scheduling_source_invalid"):
         return SubsidyReceivableEstimate(None, "scheduling_effective_generation_invalid")
     if source.get("pricing_active") and source.get("pricing_rule") == "non_citizen":
@@ -483,6 +486,8 @@ def _service_volume(
     daily_hours: Decimal,
     contracted_service_days: Decimal,
 ) -> tuple[Decimal, object]:
+    if source.get("order_status") == "成立後未服務":
+        return Decimal(0), 0
     if source.get("order_status") == "訂單取消":
         actual_days = Decimal(str(source.get("official_service_days") or 0))
         return actual_days * daily_hours, int(actual_days)
@@ -533,6 +538,8 @@ def _register_eligibility(source: dict) -> str:
 
 
 def _to_register_row(source: dict) -> dict | None:
+    if source.get("order_status") == "成立後未服務":
+        return None
     if source.get("scheduling_source_invalid"):
         raise ValueError("scheduling_effective_generation_invalid")
     if source.get("pricing_active") and source.get("pricing_subsidy_hours") is None:
@@ -848,6 +855,8 @@ def _operations_report_order_rows(
         connection_factory,
         OPERATIONS_REPORT_ORDER_STATUSES,
     ):
+        if source.get("order_status") == OrderLifecycleStatus.CANCELLED:
+            continue
         source_case_no = str(source.get("case_no") or "")
         application_roc_year = _case_application_roc_year(source_case_no)
         source_end = _as_date(source.get("actual_end_date"))

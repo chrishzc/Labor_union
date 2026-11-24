@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, time
 from dataclasses import replace
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -9,12 +10,19 @@ from domains.bootstrap.case_architecture import ClientPaymentTermsRootFacts
 from domains.client_finance.obligation_planning import (
     ClientFinanceDirection,
     ClientFinanceTermsSourceFacts,
+    ClientObligationActionKind,
     ClientPaymentTerms,
     ExistingClientStageObligation,
+    PriorClientCancellationBalance,
 )
 from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.cancellation import CancellationAssignmentFacts, CancellationOrderFacts, CancellationSchedulingFacts, ConfirmedServiceDay
-from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
+from domains.orders.historical_unserved_correction import (
+    HistoricalCancellationSettlement,
+    HistoricalUnservedCorrectionIntent,
+    HistoricalUnservedEvidence,
+)
+from domains.orders.lifecycle import OrderEstablishmentEvidence, OrderLifecycleRootFacts, OrderLifecycleStatus
 from domains.orders.terms import OrderTerms, ServiceTimeTerms
 from domains.payroll.calculation import PayrollPolicyKind
 from domains.scheduling.generation import AssignmentIdentityResolution
@@ -41,9 +49,9 @@ class _Repository:
         self.persisted = []
         self.commits = 0
 
-    def load_for_preview(self, *_): return self.facts
+    def load_for_preview(self, *_, allow_missing_payroll_rates=False): return self.facts
     def preflight_impacted_staff_ids(self, *_): return (7,)
-    def load_for_apply(self, *_): return self.facts
+    def load_for_apply(self, *_, allow_missing_payroll_rates=False): return self.facts
     def claim_command(self, *_): return CommandClaimState.CREATED if self.receipt is None else CommandClaimState.MATCHED
     def find_receipt(self, *_args, **_kwargs): return self.receipt
     def append_cancellation_event(self, *_): self.persisted.append("event"); return 11
@@ -79,19 +87,19 @@ def _workflow(repository):
 
 
 def _request(preview):
-    return OrderCancellationApplyRequest("CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),), ExpectedVersion(4), ExpectedVersion(2), ExpectedVersion(5), ExpectedVersion(3), preview.fingerprint, IdempotencyKey("cancel-1"), ActorContext("admin"), "client requested cancellation", CorrelationId("corr-1"))
+    return OrderCancellationApplyRequest("CASE-1", (), ExpectedVersion(4), ExpectedVersion(2), ExpectedVersion(5), ExpectedVersion(3), preview.fingerprint, IdempotencyKey("cancel-1"), ActorContext("admin"), "client requested cancellation", CorrelationId("corr-1"))
 
 
 def test_cancellation_preview_apply_persists_canonical_cross_domain_chain():
     repository = _Repository(_facts())
     workflow = _workflow(repository)
-    preview = workflow.preview("CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),))
+    preview = workflow.preview("CASE-1", ())
     receipt = workflow.apply(_request(preview))
     assert receipt.order_version == 5
     assert receipt.scheduling_version == 3
     assert receipt.client_finance_version == 6
     assert receipt.payroll_version == 4
-    assert receipt.lifecycle_status is OrderLifecycleStatus.CANCELLED
+    assert receipt.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
     assert repository.persisted[-1].stored_receipt.receipt == receipt
     order_update = repository.persisted[-2]
     assert order_update.actor == ActorContext("admin")
@@ -138,7 +146,7 @@ def test_cancellation_synchronizes_government_difference_only_after_fresh_order_
 def test_cancellation_apply_replays_matching_receipt_without_new_writes():
     repository = _Repository(_facts())
     workflow = _workflow(repository)
-    preview = workflow.preview("CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),))
+    preview = workflow.preview("CASE-1", ())
     request = _request(preview)
     first = workflow.apply(request)
     write_count = len(repository.persisted)
@@ -146,7 +154,7 @@ def test_cancellation_apply_replays_matching_receipt_without_new_writes():
     assert len(repository.persisted) == write_count
 
 
-def test_four_day_twins_cancellation_credits_posted_deposit_and_first_payment():
+def test_historical_four_day_twins_remediation_preserves_posted_receipt_accounting():
     service_dates = (
         date(2026, 7, 30),
         date(2026, 7, 31),
@@ -217,7 +225,11 @@ def test_four_day_twins_cancellation_credits_posted_deposit_and_first_payment():
         False,
     )
     repository = _Repository(
-        CancellationWorkflowFacts(order, terms, scheduling, finance, payroll, lifecycle)
+        CancellationWorkflowFacts(
+            replace(order, service_started=False, actual_start_date=None), terms, scheduling, finance, payroll,
+            replace(lifecycle, current_status=OrderLifecycleStatus.CANCELLED, cancellation_effective=True),
+            historical_cancellation_origin=True,
+        )
     )
 
     preview = _workflow(repository).preview(
@@ -249,7 +261,7 @@ def test_cancellation_receipt_preserves_exact_numeric_hours(hours):
 
     repository = _Repository(_facts())
     workflow = _workflow(repository)
-    preview = workflow.preview("CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),))
+    preview = workflow.preview("CASE-1", ())
     receipt = replace(workflow.apply(_request(preview)), official_service_hours=hours)
     row = asdict(receipt)
     row.update(
@@ -328,12 +340,12 @@ def test_large_cancellation_fee_preview_serializes_exact_decimal_values():
 
     amount = 9_007_199_254_740_993
     preview = _workflow(_Repository(_facts())).preview(
-        "CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),), amount, "verified cancellation"
+        "CASE-1", (), amount, "verified cancellation"
     )
     view = OrderCancellationPreviewView.model_validate(_preview_payload(preview)).model_dump(mode="json")
     finance = view["client_finance_impact"]
     assert finance["cancellation_settlement"]["fee_ntd"] == str(amount)
-    assert finance["actions"][-1]["direction_amount_ntd"] == str(preview.client_finance_impact.actions[-1].direction_amount_ntd)
+    assert finance["actions"][-1]["direction_amount_ntd"] == str(amount)
 
 
 @pytest.mark.parametrize("owner", ["scheduling", "client_finance", "payroll"])
@@ -367,8 +379,11 @@ def test_deposit_refund_without_assignment_does_not_require_payroll_root():
     assert not any(type(item).__name__ == "PayrollImpactPersistenceCommand" for item in repository.persisted)
 
 
-@pytest.mark.parametrize("fee,kind,amount,recognized", [(0, "refund", 2000, 0), (2500, "adjustment", 500, 2000)])
-def test_cancellation_posts_one_cash_difference_for_partial_receipt(monkeypatch, fee, kind, amount, recognized):
+@pytest.mark.parametrize("fee,kind,direction,amount,recognized", [
+    (2500, "refund", "payable_to_client", 5500, 2500),
+    (8500, "adjustment", "receivable_from_client", 500, 8000),
+])
+def test_cancellation_posts_one_cash_difference_for_partial_receipt(monkeypatch, fee, kind, direction, amount, recognized):
     from infrastructure.mysql import client_finance_terms_writer as writer
     from infrastructure.mysql import client_difference_repository as differences
     from infrastructure.mysql import client_receipt_reconciliation_repository as receipts
@@ -376,20 +391,23 @@ def test_cancellation_posts_one_cash_difference_for_partial_receipt(monkeypatch,
 
     facts = _facts()
     old = ExistingClientStageObligation("old:first", PaymentStage.FIRST, MoneyNTD(10000), MoneyNTD(6000), date(2026, 8, 1), True)
-    finance = replace(facts.client_finance, existing_obligations=(old,),
-                      payment_terms=replace(facts.client_finance.payment_terms, client_hourly_rate=MoneyNTD(500)))
-    repository = _Repository(replace(facts, client_finance=finance, net_cash_received=MoneyNTD(6000),
-                                     order_terms=replace(facts.order_terms, floor_fee=MoneyNTD(0))))
+    deposit = ExistingClientStageObligation("old:deposit", PaymentStage.DEPOSIT, MoneyNTD(2000), MoneyNTD(2000), date(2026, 7, 1), True)
+    finance = replace(facts.client_finance, existing_obligations=(old, deposit))
+    repository = _Repository(replace(facts, client_finance=finance, net_cash_received=MoneyNTD(8000)))
     workflow = _workflow(repository)
-    days = (ConfirmedServiceDay(date(2026, 8, 1), 7),)
-    reason = "approved fee" if fee else ""
-    preview = workflow.preview("CASE-1", days, fee, reason)
+    reason = "approved fee"
+    preview = workflow.preview("CASE-1", (), fee, reason)
     summary = preview.client_finance_impact.cancellation_settlement
-    assert (summary.service_due_ntd, summary.net_received_ntd, summary.fee_received_ntd) == (4000, 6000, recognized)
+    assert (summary.service_due_ntd, summary.net_received_ntd, summary.fee_received_ntd) == (0, 8000, recognized)
+    assert (summary.refund_due_ntd, summary.additional_charge_due_ntd) == (
+        (amount, 0) if kind == "refund" else (0, amount)
+    )
     assert repository.persisted == []
     request = replace(_request(preview), fee_ntd=fee, fee_reason=reason)
-    workflow.apply(request)
-    workflow.apply(request)
+    terminal = workflow.apply(request)
+    assert terminal.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    assert terminal.official_service_day_count == 0
+    assert workflow.apply(request) == terminal
     assert repository.commits == 1
     command, = [entry for entry in repository.persisted if type(entry).__name__ == "ClientFinanceImpactPersistenceCommand"]
     statements = []
@@ -405,8 +423,9 @@ def test_cancellation_posts_one_cash_difference_for_partial_receipt(monkeypatch,
     writer.persist_client_finance_terms_impact(cursor, command)
     closed, = [params for sql, params in statements if sql == writer._PROJECTION_UPDATE_SQL]
     assert closed[:3] == (0, date(2026, 8, 1), "settled")
+    assert closed[-2] == "old:first"
     inserted, = [params for sql, params in statements if sql == writer._PROJECTION_INSERT_SQL]
-    assert inserted[2:6] == (kind, "payable_to_client" if not fee else "receivable_from_client", "old:first", amount)
+    assert inserted[2:6] == (kind, direction, "old:first", amount)
 
 
 def test_nullable_cancellation_receipt_roundtrip_and_integrity():
@@ -456,3 +475,183 @@ def test_cancellation_http_query_preview_apply_and_receipt_with_absent_owners():
     assert receipt.json()["data"] == response.json()["data"]
     del body["expected_client_finance_version"]
     assert client.post("/api/v1/orders/CASE-1/cancellation/apply", json=body, headers=headers).status_code == 422
+
+
+def test_normal_nonzero_service_is_rejected_before_any_cancellation_write():
+    repository = _Repository(_facts())
+    with pytest.raises(CancellationWorkflowError) as error:
+        _workflow(repository).preview("CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),))
+    assert error.value.error.code == "order_cancellation_has_actual_service"
+    assert "條款" in error.value.error.message
+    assert repository.persisted == []
+    assert repository.commits == 0
+
+
+def test_zero_service_refunds_all_valid_receipts_less_the_confirmed_fee():
+    repository = _Repository(replace(_facts(), net_cash_received=MoneyNTD(72000)))
+    preview = _workflow(repository).preview("CASE-1", (), fee_ntd=2000, fee_reason="約定違約金")
+    summary = preview.client_finance_impact.cancellation_settlement
+    assert summary.service_due_ntd == 0
+    assert summary.net_received_ntd == 72000
+    assert summary.refund_due_ntd == 70000
+    assert summary.additional_charge_due_ntd == 0
+    assert preview.payroll_impact.payroll.total_payable.amount == 0
+    assert preview.candidate.official_service_day_count == 0
+    assert preview.candidate.official_service_hours == 0
+    assert preview.lifecycle_impact.after_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+
+
+def test_historical_classification_preserves_prior_refund_and_financial_versions():
+    facts = _facts()
+    proof = OrderEstablishmentEvidence((9,), (), None)
+    prior_balance = PriorClientCancellationBalance(
+        "refund-before-correction", PaymentStage.REFUND, MoneyNTD(9500), MoneyNTD(9500), None, None,
+    )
+    historical = HistoricalUnservedEvidence(
+        proof, (), (10,), (), HistoricalCancellationSettlement(
+            11, 14, 0, 20, obligation_identity=prior_balance.obligation_identity, client_balance=prior_balance,
+        ),
+    )
+    facts = replace(
+        facts,
+        order=replace(facts.order, actual_start_date=None, service_started=False),
+        scheduling=CancellationSchedulingFacts("CASE-1", None, None, ()),
+        payroll=None,
+        client_finance=replace(facts.client_finance, open_nonstage_obligation_count=1),
+        net_cash_received=MoneyNTD(9500),
+        lifecycle=replace(facts.lifecycle, current_status=OrderLifecycleStatus.CANCELLED, cancellation_effective=True),
+        historical_unserved_evidence=historical,
+    )
+    repository = _Repository(facts)
+    workflow = _workflow(repository)
+    intent = HistoricalUnservedCorrectionIntent("核對原案未服務", "已採納歷史文件第1列")
+    preview = workflow.preview("CASE-1", (), historical_correction=intent)
+    assert preview.classification_only is True
+    assert preview.client_finance_impact is None
+    assert preview.payroll_impact is None
+    receipt = workflow.apply(replace(
+        _request(preview), expected_scheduling_version=None, expected_payroll_version=None,
+        historical_correction=intent,
+    ))
+    assert receipt.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    assert receipt.client_finance_version == 5
+    assert receipt.payroll_version is None
+    assert "control" not in repository.persisted
+    assert repository.commits == 1
+    count = len(repository.persisted)
+    assert workflow.apply(replace(
+        _request(preview), expected_scheduling_version=None, expected_payroll_version=None,
+        historical_correction=intent,
+    )) == receipt
+    assert len(repository.persisted) == count
+
+
+@pytest.mark.parametrize("already_refunded", [0, 3000])
+def test_operator_correction_recalculates_the_same_prior_refund_without_repeating_paid_cash(already_refunded):
+    facts = _facts()
+    prior_balance = PriorClientCancellationBalance(
+        "existing-refund", PaymentStage.REFUND, MoneyNTD(9500),
+        MoneyNTD(9500 - already_refunded), None, "legacy-service-stage",
+    )
+    evidence = HistoricalUnservedEvidence(
+        OrderEstablishmentEvidence(current_owner_status=OrderLifecycleStatus.CANCELLED),
+        (), (), ("service_day_log",),
+        HistoricalCancellationSettlement(
+            11, 14, 1, 20, 500, "原違約金", 5000,
+            prior_balance.obligation_identity, prior_balance,
+        ),
+        review_codes=("historical_unserved_cash_evidence_requires_review",),
+    )
+    repository = _Repository(replace(
+        facts,
+        order=replace(facts.order, service_data_locked=True),
+        lifecycle=replace(facts.lifecycle, current_status=OrderLifecycleStatus.CANCELLED),
+        client_finance=replace(facts.client_finance, open_nonstage_obligation_count=1),
+        net_cash_received=MoneyNTD(15000 - already_refunded),
+        historical_unserved_evidence=evidence,
+    ))
+    workflow = _workflow(repository)
+    intent = HistoricalUnservedCorrectionIntent()
+    preview = workflow.preview("CASE-1", (), historical_correction=intent)
+    impact = preview.client_finance_impact
+    assert not preview.classification_only and impact.blockers == ()
+    assert preview.lifecycle_impact.after_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    assert not preview.lifecycle_impact.establishment_evidence.established
+    assert impact.cancellation_settlement.service_due_ntd == 0
+    assert impact.cancellation_settlement.refund_due_ntd == 14500 - already_refunded
+    assert impact.cancellation_obligation_identity == prior_balance.obligation_identity
+    (adjustment,) = impact.actions
+    assert adjustment.action is ClientObligationActionKind.REPLACE_OPEN
+    assert adjustment.obligation_identity == prior_balance.obligation_identity
+    assert adjustment.payment_stage is PaymentStage.REFUND
+    assert adjustment.after_amount == MoneyNTD(14500)
+    assert adjustment.obligation_amount == MoneyNTD(14500 - already_refunded)
+    assert adjustment.direction is ClientFinanceDirection.REFUND_DUE
+    assert adjustment.direction_amount_ntd == 5000
+    request = replace(_request(preview), historical_correction=intent)
+    receipt = workflow.apply(request)
+    assert receipt.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    assert receipt.client_finance_version == 6
+    assert receipt.official_service_day_count == 0
+    count = len(repository.persisted)
+    assert workflow.apply(request) == receipt
+    assert len(repository.persisted) == count
+
+
+def test_operator_correction_records_unidentified_cash_target_without_duplicating_refund():
+    from api.routes.order_cancellation import _historical_correction_preview_payload, _historical_correction_query_payload
+    from infrastructure.mysql.client_finance_terms_writer import _save_cancellation_settlement
+    from infrastructure.mysql.order_cancellation_repository import _lifecycle_values
+
+    facts = _facts()
+    deposit = ExistingClientStageObligation(
+        "original-deposit", PaymentStage.DEPOSIT, MoneyNTD(8000), MoneyNTD(3000), None, True,
+    )
+    evidence = HistoricalUnservedEvidence(OrderEstablishmentEvidence(), (), (), (), None)
+    repository = _Repository(replace(
+        facts,
+        lifecycle=replace(facts.lifecycle, current_status=OrderLifecycleStatus.CANCELLED),
+        client_finance=replace(facts.client_finance, open_nonstage_obligation_count=1, existing_obligations=(deposit,)),
+        net_cash_received=MoneyNTD(3000),
+        historical_unserved_evidence=evidence,
+    ))
+    workflow = _workflow(repository)
+    intent = HistoricalUnservedCorrectionIntent()
+    preview = workflow.preview("CASE-1", (), historical_correction=intent)
+    impact = preview.client_finance_impact
+    assert impact.blockers == () and impact.cancellation_obligation_identity is None
+    assert impact.cancellation_cash_difference_requires_review
+    (closure,) = impact.actions
+    assert closure.obligation_identity == deposit.obligation_identity
+    assert closure.after_amount == MoneyNTD(3000)
+    assert _historical_correction_preview_payload(preview)["client_cash_difference_requires_review"]
+
+    request = replace(_request(preview), historical_correction=intent)
+    receipt = workflow.apply(request)
+    assert receipt.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    query = _historical_correction_query_payload(replace(
+        repository.facts,
+        lifecycle=replace(repository.facts.lifecycle, current_status=receipt.lifecycle_status),
+    ))
+    assert query["review_codes"].count("historical_unserved_cash_evidence_requires_review") == 1
+    lifecycle_values = _lifecycle_values(request, preview, None)
+    assert lifecycle_values[4] == request.actor.actor_id
+    confirmation = json.loads(lifecycle_values[-1])["historical_unserved_correction"]
+    assert confirmation["confirmed_established"] is True
+    assert confirmation["confirmed_actual_service_day_count"] == 0
+
+    statements = []
+    cursor = SimpleNamespace(
+        execute=lambda sql, parameters: statements.append((sql, parameters)),
+        fetchone=lambda: {"entry_id": 19},
+    )
+    _save_cancellation_settlement(
+        cursor, SimpleNamespace(candidate=impact, source_event_id=11, idempotency_key=request.idempotency_key),
+        impact.cancellation_settlement,
+    )
+    settlement = json.loads(statements[-1][1][-1])["cancellation_settlement"]
+    assert settlement["cash_difference_requires_review"] is True
+    assert settlement["refund_due_ntd"] == 3000
+    assert settlement["service_due_ntd"] == 0
+    assert settlement["obligation_identity"] is None
+    assert settlement["cash_entry_id"] == 19

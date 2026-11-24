@@ -11,6 +11,7 @@
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- `db/schema_parts/1084_staff_payable_projection_zero.sql` 由 `db/migration_releases/labor_union_2026_11_24_staff_payable_projection_zero_v1.json` 及同名 descriptors 登錄。Fresh 與保留資料升級共用有效應付可為 0 元的金額 CHECK。驗證舊、新 CHECK 時同時核對既有投影表結構與狀態 CHECK。升級不改寫出款、核銷或既有投影列。Contract 位於 `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_staff_payable_projection_zero_schema.py`。
 - Schema predecessor `db/schema_parts/1081_order_established_unserved_status.sql` is a shared fresh/preserve artifact. The release manifest `db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.json` and its descriptors register the artifact.
 - `db/schema_parts/1082_service_date_adjustments.sql` — 逐日時數、事前人員及復原回執的共用 fresh／preserve artifact。
 - LINE 六個月寄送明細清理 guard：`db/schema_parts/1079_line_delivery_retention_guards.sql`，`db/migration_releases/labor_union_2026_11_18_line_delivery_retention_v1.json` 及對應 descriptors。fresh／preserve 同 artifact；保留原 registry-delete 分支，追加精確 receipt、合法終態、無租約及 DB 臺灣六個月 cutoff 上限。完整 guard normalization、fresh assembly及 NAS compact 沿原生成入口。

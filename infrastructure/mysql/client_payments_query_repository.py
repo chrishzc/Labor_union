@@ -324,14 +324,22 @@ __all__ = [
 
 
 def query_case_net_cash(cursor, case_no):
+    # A settled refund may allocate a recognized transfer fee in addition to
+    # the bank amount. A return reverses both parts of that settled obligation.
+    refund_principal = (
+        "GREATEST(entry.amount_ntd,COALESCE((SELECT SUM(allocation.amount_ntd) "
+        "FROM client_ledger_obligation_allocations allocation "
+        "WHERE allocation.ledger_entry_id=entry.id),0))"
+    )
     cursor.execute(
         "SELECT COALESCE(SUM(CASE "
         "WHEN entry.entry_type='receipt' THEN entry.amount_ntd "
-        "WHEN entry.entry_type='refund' THEN -entry.amount_ntd "
+        f"WHEN entry.entry_type='refund' THEN -{refund_principal} "
         "WHEN entry.entry_type='reversal' AND original.entry_type='receipt' THEN -entry.amount_ntd "
-        "WHEN entry.entry_type='reversal' AND original.entry_type='refund' THEN entry.amount_ntd ELSE 0 END),0) AS amount "
+        "WHEN entry.entry_type IN ('reversal','refund_reversal') AND original.entry_type='refund' "
+        f"THEN {refund_principal} ELSE 0 END),0) AS amount "
         "FROM client_ledger_entries entry LEFT JOIN client_ledger_entries original "
-        "ON original.id=entry.reversal_of_entry_id WHERE entry.case_no=%s",
+        "ON original.id=entry.reversal_of_entry_id AND original.case_no=entry.case_no WHERE entry.case_no=%s",
         (case_no,),
     )
     return int(cursor.fetchone()["amount"])
@@ -343,12 +351,14 @@ CANCELLATION_ALLOCATED_CASH_SQL = (
     "WHEN entry.entry_type='refund' OR original.entry_type='receipt' THEN -a.amount_ntd "
     "ELSE 0 END AS cash_delta "
     "FROM client_ledger_obligation_allocations a JOIN client_ledger_entries entry ON entry.id=a.ledger_entry_id "
-    "LEFT JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id AND entry.entry_type='reversal' "
-    "WHERE entry.entry_type IN ('receipt','refund','reversal') "
+    "LEFT JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id "
+    "AND original.case_no=entry.case_no AND entry.entry_type IN ('reversal','refund_reversal') "
+    "WHERE entry.entry_type IN ('receipt','refund','reversal','refund_reversal') "
     "UNION ALL SELECT entry.case_no,entry.id,entry.created_at,NULL,original.id,"
     "CASE WHEN original.entry_type='receipt' THEN -entry.amount_ntd ELSE entry.amount_ntd END "
     "FROM client_ledger_entries entry JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id "
-    "WHERE entry.entry_type='reversal' AND original.entry_type IN ('receipt','refund')"
+    "AND original.case_no=entry.case_no "
+    "WHERE entry.entry_type IN ('reversal','refund_reversal') AND original.entry_type IN ('receipt','refund')"
 )
 _CANCELLATION_CASH_CUTOFF = "CAST(JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.cash_entry_id')) AS UNSIGNED)"
 CANCELLATION_CASH_JOIN = (
@@ -411,7 +421,7 @@ def query_cancellation_accounting(connection, case_no, *, cancellation_event_id=
                 "FROM client_ledger_obligation_allocations a JOIN client_ledger_entries entry ON entry.id=a.ledger_entry_id "
                 "LEFT JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id "
                 "WHERE a.obligation_identity=%s AND (entry.entry_type='refund' "
-                "OR (entry.entry_type='reversal' AND original.entry_type='refund'))",
+                "OR (entry.entry_type IN ('reversal','refund_reversal') AND original.entry_type='refund'))",
                 (facts["obligation_identity"],),
             )
             bank_refunded = transfer_fee = 0
@@ -422,7 +432,7 @@ def query_cancellation_accounting(connection, case_no, *, cancellation_event_id=
                 if fee and total != gross:
                     bank_refunded = transfer_fee = None
                     break
-                sign = -1 if entry["entry_type"] == "reversal" else 1
+                sign = -1 if entry["entry_type"] in {"reversal", "refund_reversal"} else 1
                 bank_refunded += sign * (gross - fee)
                 transfer_fee += sign * fee
     return ClientCancellationAccounting(

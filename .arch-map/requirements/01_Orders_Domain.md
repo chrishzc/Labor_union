@@ -19,6 +19,7 @@
 | actual end | derived_projection | 有效 assignment-owned 正式服務日最大日期 |
 | lifecycle status | derived_projection | Lifecycle evaluator（嚴禁 caller 傳入 `target_status`） |
 | cancellation／controlled reopen | immutable_event | Cancellation／Reopen event（重開不刪取消歷史） |
+| 曾成立與零服務終止 | owner fact／derived_projection | 曾成立依 Orders 已提交成立歷程或正式採納的歷史成立證據判定；[歷史零服務更正](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-unserved-correction)例外依本次人員明確確認曾成立及未服務。零服務終止保存人員確認與來源，投影為「成立後未服務」，不得只靠目前狀態字串或登記天數推定 |
 | service-data lock | 不可逆 derived fact | `order_service_data_locks`（`completed` 或完工確認成立，永不回退或因退款解鎖） |
 | lifecycle version | concurrency projection | 每個成功非重播命令遞增 1 |
 | `orders.staff_id`／`orders.deposit_date` | compatibility_projection | 嚴禁作為排班／薪資／訂金到期日 fallback（正式訂金日由 Client Finance 擁有） |
@@ -32,7 +33,7 @@
 
 輸入僅接受：有效取消事件、契約完成事實、訂金有效核銷、[Client Finance 有效未付訂金人工放行](04_Client_Finance_Domain.md#unpaid-deposit-override)、actual start 確認、最後正式服務時刻、Domain blockers、客戶義務結清與不可逆服務資料鎖。評估優先序：
 
-1. 未履約完成且存在有效取消事件 → **訂單取消**
+1. 存在有效零服務取消結果 → 曾成立者為 **成立後未服務**，未成立者為 **訂單取消**；成立證據與實際服務量由 Orders 核對，不接受 caller 指定結果狀態
 2. 全部約定服務已完成 → **訂單完成**（此後一律拒絕取消，回 `order_cancellation_after_full_service`）
 3. 契約完成 ∧（訂金有效核銷 ∨ 有效訂金未付人工放行）∧ execution schedule 有效 ∧ actual start 已到且無重認阻擋 → **服務中**
 4. 訂金有效核銷 ∨ 有效訂金未付人工放行 → **訂單成立**（不代表已簽回，亦不單獨授權 execution conversion）
@@ -55,6 +56,12 @@
 - **唯讀狀態查詢**：`GET /api/v1/orders/{case_no}/service-completion` 回報權威完成時刻與目前進度，不設一般工作台人工「辦理完工確認」步驟（由背景 durable discovery 委派 canonical handler 自動評估）。
 - **完工後服務日更正（`official-service-dates`）**：已完成案件若只需更正服務日期，且服務天數不變、不涉及調整、補助退還等價格變動，可走正式服務日更正。Scheduling 以 replacement 更新各 assignment 的服務日並推進 `actual_end_date`，不解除原資料鎖、不改寫原完工事件，也不新增金融義務。
 - **服務人員或區段更正**。見 [Scheduling 多月嫂調整](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction)。歷史結清狀態依 [歷史帳務完成投影](27_歷史訂單生命週期與服務天數帳務正式規格.md#7-帳務完成投影) 處理。
+
+<a id="order-completion-catchup"></a>
+
+#### 過期完工的補抓 ^order-completion-catchup
+
+背景發現流程須涵蓋所有 `completion_instant <= evaluation_at` 且符合完工條件的案件，不限當日到期。人員今日縮短服務天數、將最後有效服務日改為昨日後，Terms Apply 同步保存服務天數、有效班表及 `actual_end_date`；之後由同一 `AutoCompleteOrderService` fresh-read 並辦理完工。不得要求人員把結束日改到今天、再修改一次資料或改走取消才能推進。完工前仍保留既有時段、排班一致性、版本與 blocker 檢查；背景未執行或有阻擋時，查詢須能分辨等待評估與阻擋原因。工作階段與結算依 [看板 §2.2](01A_訂單看板與事前日期及歷史採納規格.md#22-未完成清單與-beta-看板wb-state-0105)。
 
 ### 3.3 訂金 Reversal 與開工重認
 
@@ -79,6 +86,12 @@
   - **反例**：只填 21:00 和 05:00，未填是否跨日。系統拒絕這次時段變更，不自行推定為跨日。
 - **已簽 PDF 歸檔與完約**。依 [簽約正式規格 §3.4](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#34-分開文件回收手工證明與本機測試跳過)，Orders 在歸檔交易登記 `contract_completed`，並依訂金核銷事實投影成立狀態。服務時段、承諾服務日與期款資格由各自 owner 判定。
 
+<a id="order-early-finish"></a>
+
+#### 服務中提前結束的處理路徑 ^order-early-finish
+
+已有實際服務、其餘服務不再執行時，人員沿用本節「解除鎖定並修改」，一次確認實際保留的正整數服務天數及完整替代班表，保留原實際開工日，由 Scheduling、Client Finance 與 Payroll 各自承接影響。不得只刪未來排班而保留不一致的訂單天數。儲存不建立取消事件，也不接受直接指定完成狀態；依 [過期完工補抓](#order-completion-catchup) 交由唯一完工入口評估，最終顯示「訂單完成」，不設「服務提前結束」狀態。完全沒有服務者依 [零服務取消](#order-zero-service-termination) 辦理。
+
 ### 3.5 Actual Start Preview／Apply
 
 - 首次確認與更正皆須 Preview／Apply（正常案件開工與代班流程依 [Scheduling §3.3 SSTART-01～08](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 自動同步並保存群組結果日曆；禁止以 `planned_start` 或預設日 fallback）。
@@ -90,16 +103,18 @@
   - **反例**：同一案件不能僅憑舊排班，把 8 月 1 至 7 日補成已服務。這些日期不列入本次預覽或重建的正式服務日。
 - **更正日期的檔期基準**：Preview 與 Apply 的檔期檢查均使用本次送交 Orders 的新實際開始日。假日或排休可能使第一個正式服務日晚於該日期，不得改以首個服務日、原開始日或預定開始日推定檔期基準。Scheduling 候選只承載其既有排班事實；跨 owner 檢查由 Actual Start 流程明確提供當次日期。
 
-### 3.6 Cancellation 與 Controlled Reopen
+<a id="order-zero-service-termination"></a>
 
-- **Cancellation（未完整履約前適用）**：
+### 3.6 Cancellation 與 Controlled Reopen ^order-zero-service-termination
+
+- **Cancellation（零服務終止）**：一般訂單沿用「取消訂單」入口與是否收取違約金的操作。未成立即取消與曾成立後未服務，由 §3.1 依正式事實區分；已有實際服務須引導至 [服務中提前結束](#order-early-finish)，不得以取消結果結束服務或產生額外狀態。
   - 取消預覽固定以臺北業務日為取消日。已開始服務的案件，先列出截至該日的排定服務日期及各日的月嫂，供承辦人依實際履約增減。若確認完全未履約，可將實際服務日確認為 `0` 天；取消日之後的日期不得列為已服務日。具權限的工會人員逐案輸入取消違約金（不收為 `0`，收取輸入正整數 NTD＋必填原因；一般取消原因選填）。
     - **正例**：案件已記錄開工但實際尚未服務，也未完成或鎖定。承辦人在取消預覽移除所有預填服務日，可取得 `0` 日的取消預覽，原排班不計入實際服務日。
     - **反例**：相同案件的取消預覽若填入臺北業務日的次日作為已服務日，系統拒絕該次預覽，不會產生可確認的取消結果。
     - **違約金正例**：具權限的工會人員開啟一筆可取消且有客戶帳務的案件，勾選「收取違約金」，輸入 500 元及收取原因。其他檢查通過時，預覽列出違約金 500 元，一般取消原因可留白。
     - **違約金反例**：同一案件已勾選收取並輸入 500 元，但只填一般取消原因，收取原因留白。系統提示填寫正整數金額及收取原因，不產生取消預覽。
   - Preview 只顯示試算，不保存取消事件，也不建立正式退款或補收義務。列示服務應付 `S`、違約金 `F`、淨實收 `R`及應退／應補收。最後應付依 Client Finance 以 `S + F` 計算。有 Client Finance 帳務影響時，每筆必填 `direction`（`refund_due | additional_charge_due | no_finance_change`）與 `direction_amount_ntd`，畫面不靠金額正負推定方向。結算依 [Client Finance §3.2](04_Client_Finance_Domain.md#client-cancellation-settlement)。
-  - Apply 在單一 outer transaction 保存取消事件、解除等待鎖、更新實際服務 assignments 與雙邊義務。正式提交成功後，案件狀態才轉為「訂單取消」；如需退款或補收，所建立的是待處理義務，不表示已退款或已收款。取消結算通知依 [LINE 客服與月嫂自助服務 §4.5](20_LINE客服與月嫂自助服務正式規格.md#45-月嫂薪資明細查詢與訂單異動通知)。
+  - Apply 在單一 outer transaction 保存零服務取消結果與成立證據、解除等待鎖、更新有效服務與雙邊義務，最後由 §3.1 投影狀態。原已記錄開工但經確認完全未服務者，不能因原班表或開始日產生服務費、月嫂薪資或服務工時。退款與補收依 [Client Finance §3.2](04_Client_Finance_Domain.md#client-cancellation-settlement) 建立待處理義務，不表示已退款或已收款。通知沿既有 [LINE 訂單異動契約](20_LINE客服與月嫂自助服務正式規格.md#45-月嫂薪資明細查詢與訂單異動通知)。
 - **Controlled Reopen**：管理端入口位於客戶名冊的「訂單取消」案件詳情上方。重開檢查只受理已取消、且尚未因該次取消發生正式退款、沖正或結算的案件。一旦已有這類正式帳務紀錄，舊案不得重開；若仍需安排服務，另建新案。備註選填（空白則系統稽核補記「系統記錄受控重開訂單」）；追加 reopen event、不刪取消歷史、不恢復舊排班／等待鎖／分期。重開後的候選詢問、重新推薦與資格核對遵循 [媒合開放資格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
   - **可觀察結果**：具權限的工會人員預覽並確認已取消案件；該次取消未留下正式退款、沖正或結算，且其他重開檢查通過時，可重開，取消歷史仍可查，舊排班與等待鎖不恢復。若該次取消已正式退還客戶款項，重開預覽即拒絕，案件不會因這次操作重開。
 
@@ -120,6 +135,12 @@
 
 | 驗收 ID | S：情境與前提 | T：使用者任務 | A：可重現操作 | R：可觀察結果 |
 |---|---|---|---|---|
+| ORDER-UNSERVED-01 | 一般訂單曾成立，實際服務為零，具取消處理權限。 | 終止服務並保留成立成果。 | 由既有取消入口確認零服務、選擇是否收違約金，Preview 後 Apply 並讀回。 | 顯示「成立後未服務」、有效服務量為零，成立證據可追溯；不建立服務費、月嫂服務薪資或工時。 |
+| ORDER-UNSERVED-02 | 案件尚未成立，且實際未服務。 | 取消本案。 | 從取消入口完成 Preview／Apply。 | 顯示「訂單取消」，不產生曾成立事實。 |
+| ORDER-EARLY-END-01 | 一般訂單服務中且已有實際服務，無完工鎖。 | 將未執行的後續服務終止。 | 解鎖服務條件，縮短天數並提供一致的完整班表，核對帳務後 Apply。 | Orders、有效班表與雙邊帳務原子更新；不建立取消事件或「服務提前結束」狀態，依正式完工入口轉為「訂單完成」。 |
+| ORDER-EARLY-END-02 | 已有實際服務，卻從取消入口嘗試結束案件。 | 選擇正確處理入口。 | 送出非零實際服務量的取消請求。 | 回傳可判讀的拒絕與 Terms 修改引導，不保存取消狀態或部分帳務。 |
+| ORDER-CATCHUP-01 | 原班表尚有未來服務；昨日其實已是最後服務日，背景完工工作正常運行且無 blocker。 | 今日補登提前結束，接續完工及結算。 | 今日由 Terms 同步縮短天數與班表至昨日，執行一輪既有到期發現及完工處理，再讀回看板。 | 依昨日實際班次結束時刻辦理「訂單完成」與第 11 步，接續未完成的第 12／13 步；無須改成今日、重存或取消，未收付項目不假稱結清。 |
+| ORDER-CATCHUP-02 | 回填後班次尚未結束、服務量不一致，或存在有效完工 blocker。 | 檢查能否完工。 | 查詢完工狀態並執行相同完工評估。 | 不提前完工；明示未到時間或阻擋原因，不建立完工事件或服務資料鎖。 |
 | ACTUAL-START-REPLAN-01 | 已有正式排班、人員有效且新日期無檔期衝突；新開始日可為排休日。 | 更正實際開始日並核對逐段排班。 | 送出新日期 Preview，核對後 Apply，再重新讀取本案日期與正式排班。 | Preview 零寫入，檔期檢查使用送交日期；Apply 原子更新日期及排班，讀回與預覽一致，人員順序、服務日數及原費率快照保持既有契約。 |
 | ACTUAL-START-REPLAN-02 | 更正後的月嫂日期與其他案件的有效占用衝突。 | 確認更正是否可辦理。 | 送出 Preview，另驗證 Apply 提交前新增衝突的情境。 | 回傳可辨識的檔期衝突，無日期、排班或帳務部分寫入；畫面顯示拒絕原因。 |
 | ACTUAL-START-REPLAN-03 | Preview 完成後 Orders 或 Scheduling owner version 已變更。 | 提交先前核對的更正。 | 使用原 Preview 與版本 Apply，再重新查詢。 | 回傳 typed version／stale conflict，保留最新 owner 事實並要求重新核對；不得以重試或 generic 500 掩蓋衝突。 |

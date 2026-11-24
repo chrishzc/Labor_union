@@ -7,9 +7,32 @@
 ## Responsibility
 將受控、單一月嫂 historical order workbook 的可採納來源值套用到既有 Orders root。每次匯入重新檢查整份工作簿，檔內採納與檔外取消共用同一 outer UoW。採納保留原帳務，歷史服務完成時委派 Payroll 同步月嫂應付，匯入收據另列略過原因，並依正式方案委派 Client Finance 同步客戶補助退款。
 
+<a id="historical-unserved-design"></a>
+
+## 歷史零服務更正的實作邊界 ^historical-unserved-design
+
+- 更正語意見 [歷史訂單 §6.2.1](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-unserved-correction)。目標設計由 Domain 表達人員明確確認曾成立及未服務，原因與證據來源選填；缺失、矛盾、服務痕跡及舊款項待查核列非阻擋提示。實作是否符合此設計待驗，不把既有 `historical_unserved` 當作已終止狀態。
+- 更正能力歸 Orders application boundary，經既有 cancellation Query／Preview／Apply 的 `historical_unserved_correction` typed 輸入及面板模式接線。API 要求零服務確認，沒有任意 target status；`historical_unserved_correction_read_model.py` 提供採納、事件、原結算與既有指派證據，共用原 cancellation workflow 的 fresh-lock／版本／冪等契約。
+- Query 組成正式成立證據、現行服務事實及各 owner 帳務摘要；Preview 純計算更正影響；Apply 在單一 outer UoW 驗 current versions，委派 Orders、Client Finance、Payroll／Staff Payables 原 ports 保存結果與可追溯事件。帳務已正確的取消案件只補正分類，不重新執行退款。
+- Repository adapters 保存本次人員確認，原採納關聯存在時保留，不假造採納收據；原歷史 assignment writer 退役原日班關聯指派，保留原列與 pairing 證據。Workbook import／adoption 對「成立後未服務」保留更正結果，衝突來源交查核，不以原日期恢復服務量；原收付及不可變事件保留。
+- `build_historical_unserved_payroll_impact` 將零服務配置交 Payroll 原 impact builder。帳務已正確且官方服務量為零的原取消採分類更正分支，沿用原 cancellation control，不再次建立退款或替換班表。
+- 驗收對應 `HIST-UNSERVED-01/02/03/04`，沿本 module 既有測試根及被借用的帳務 owner 入口，核對未付更正、已付追償／查核、同命令重播與重匯；真實 DB 執行結果與 source mapping 分開判定。
+- Orders Subsystem 負責跨模組整合驗證。[WP80 測試](../../../../../../tests/domains/orders/subsystems/orders/modules/historical-adoption/integration/test_wp80_disposable_mysql_e2e.py)涵蓋歷史採納、零服務更正後重匯與週報、看板回讀。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: historical-unserved-design
+  target: '.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#^historical-unserved-correction'
+```
+
 ## Implementation
 - primary:
   - `domains/orders/historical_adoption.py` — 採納候選只有在案件狀態改變或日期有修正時才推進 Orders lifecycle version；這是候選結果，不代表已寫入。
+  - `domains/orders/historical_unserved_correction.py` — 更正意圖與人員確認；非阻擋核對提示及符合新規格的行為待驗。
+  - `subsystems/orders/historical_unserved_correction.py` — 沿 Payroll owner 組成歷史零服務應付更正。
+  - `infrastructure/mysql/historical_unserved_correction_read_model.py` — typed 歷史更正證據讀取。
+  - `infrastructure/mysql/order_establishment_read_model.py` — 共用正式成立證據。
+  - `infrastructure/mysql/historical_assignment_writer.py` — 原交易內退役已核對的歷史 standalone 指派，保留 pairing 與事件。
   - `subsystems/orders/historical_adoption_workflow.py`
   - `subsystems/orders/historical_order_workbook.py`
   - `subsystems/orders/historical_order_workbook_import.py`
@@ -20,6 +43,9 @@
   - `infrastructure/mysql/historical_order_adoption_cancellation_decorator.py`
   - `infrastructure/mysql/historical_actual_start_date_planner.py`
 - entrypoints:
+  - `api/routes/order_cancellation.py` — 沿原 cancellation Query／Preview／Apply 承接受限歷史零服務更正。
+  - `api/schemas/historical_unserved_correction.py` — 選填原因、來源及明確零服務確認的目標 transport 契約，待驗。
+  - `ui_react/src/components/OrderCancellationPanel.tsx` — 由案件抽屜提供受限歷史更正模式。
   - `api/exception_handlers/historical_order_database.py` — 建連與執行期間共用 MySQL errno 去敏分類、typed HTTP 503 與安全診斷日誌。
   - `api/routes/historical_order_adoption.py`
   - `api/exception_handlers/historical_order_database.py` — 歷史工作簿連線與執行期的封閉資料庫錯誤轉譯；回傳代碼及追蹤編號，不輸出原始資料庫訊息。

@@ -20,6 +20,7 @@ from api.dependencies.order_cancellation import (
     get_order_cancellation_application,
 )
 from api.schemas.base import BaseResponse
+from api.schemas.historical_unserved_correction import HistoricalUnservedCorrectionBody
 from api.schemas.order_cancellation import (
     CancellationPayrollImpactView,
     ClientFinanceImpactView,
@@ -31,6 +32,11 @@ from domains.orders.cancellation import (
     CancellationCandidateError,
     ConfirmedServiceDay,
 )
+from domains.orders.historical_unserved_correction import (
+    historical_unserved_blockers,
+    historical_unserved_review_codes,
+)
+from domains.client_finance.obligation_planning import has_unidentified_cancellation_cash_difference
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -63,11 +69,14 @@ class OrderCancellationPreviewBody(BaseModel):
     confirmed_service_days: list[CancellationServiceDayBody]
     fee_ntd: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
     fee_reason: str = Field(default="", max_length=500)
+    historical_unserved_correction: HistoricalUnservedCorrectionBody | None = None
 
     @model_validator(mode="after")
     def validate_fee_reason(self):
         if bool(self.fee_ntd) != bool(self.fee_reason.strip()) or self.fee_reason != self.fee_reason.strip():
             raise ValueError("cancellation_fee_reason_invalid")
+        if self.historical_unserved_correction is not None and (self.confirmed_service_days or self.fee_ntd):
+            raise ValueError("historical_unserved_correction_has_service_or_fee")
         return self
 
 
@@ -149,7 +158,7 @@ def preview_order_cancellation(
     confirmed_days = _confirmed_service_days(body.confirmed_service_days)
     return _call_endpoint(
         lambda: _preview_payload(
-            application.preview(case_no, confirmed_days, body.fee_ntd, body.fee_reason)
+            _preview_for_intent(application, case_no, confirmed_days, body)
         ),
         "成功產生訂單取消預覽",
         identity,
@@ -188,6 +197,7 @@ def apply_order_cancellation(
 
 
 def _apply_request(case_no, body, key, correlation, principal):
+    correction = body.historical_unserved_correction
     return OrderCancellationApplyRequest(
         case_no,
         _confirmed_service_days(body.confirmed_service_days),
@@ -198,10 +208,20 @@ def _apply_request(case_no, body, key, correlation, principal):
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),
         ActorContext(str(principal.username or "").strip()),
-        body.reason,
+        correction.reason if correction is not None else body.reason,
         CorrelationId(correlation),
         body.fee_ntd,
         body.fee_reason,
+        historical_correction=correction.to_intent() if correction is not None else None,
+    )
+
+
+def _preview_for_intent(application, case_no, confirmed_days, body):
+    correction = body.historical_unserved_correction
+    if correction is None:
+        return application.preview(case_no, confirmed_days, body.fee_ntd, body.fee_reason)
+    return application.preview(
+        case_no, (), historical_correction=correction.to_intent(),
     )
 
 
@@ -238,6 +258,57 @@ def _query_payload(result) -> dict[str, Any]:
         "payroll_version": facts.payroll.payroll_version if facts.payroll else None,
         "confirmed_service_days": _current_service_days(facts.scheduling, result.cancellation_date),
         "caregiver_options": list(result.caregiver_options),
+        "historical_unserved_correction": _historical_correction_query_payload(facts),
+    }
+
+
+def _historical_correction_query_payload(facts):
+    evidence = getattr(facts, "historical_unserved_evidence", None)
+    if evidence is None:
+        return None
+    proof = evidence.establishment
+    prior = evidence.prior_settlement
+    review_codes = list(historical_unserved_review_codes(evidence))
+    if facts.client_finance and has_unidentified_cancellation_cash_difference(
+        facts.client_finance, prior.client_balance if prior else None,
+    ) and "historical_unserved_cash_evidence_requires_review" not in review_codes:
+        review_codes.append("historical_unserved_cash_evidence_requires_review")
+    return {
+        "blockers": historical_unserved_blockers(evidence, facts.lifecycle.current_status),
+        "review_codes": review_codes,
+        "establishment_lifecycle_event_ids": proof.lifecycle_event_ids,
+        "establishment_adoption_receipt_ids": proof.historical_adoption_ids,
+        "establishment_owner_status": proof.current_owner_status,
+        "historical_adoption_receipt_ids": evidence.historical_adoption_ids,
+        "historical_absence_event_ids": evidence.historical_absence_event_ids,
+        "adopted_assignment_ids": evidence.standalone_assignment_ids,
+        "actual_service_evidence": evidence.actual_service_evidence,
+        "actual_start_date": facts.lifecycle.actual_start_date,
+        "actual_end_date": evidence.actual_end_date,
+        "prior_fee_ntd": prior.fee_ntd if prior is not None else 0,
+        "prior_fee_reason": prior.fee_reason if prior is not None else "",
+        "net_cash_received_ntd": facts.net_cash_received.amount if facts.net_cash_received is not None else None,
+        "prior_cancellation_event_id": prior.cancellation_event_id if prior is not None else None,
+        "client_obligations": [
+            {
+                "obligation_identity": item.obligation_identity,
+                "payment_stage": item.payment_stage.value,
+                "contracted_ntd": item.contracted_amount.amount,
+                "settled_ntd": item.net_settled_amount.amount,
+            }
+            for item in (facts.client_finance.existing_obligations if facts.client_finance else ())
+        ],
+        "payroll_obligations": [
+            {
+                "obligation_identity": item.obligation_identity,
+                "obligation_kind": item.obligation_kind.value,
+                "staff_id": item.staff_id,
+                "contracted_ntd": item.contractual_amount.amount,
+                "outstanding_ntd": item.outstanding_amount.amount,
+                "paid_ntd": item.paid_net_amount.amount,
+            }
+            for item in (facts.payroll.existing_obligations if facts.payroll else ())
+        ],
     }
 
 
@@ -265,6 +336,31 @@ def _preview_payload(preview) -> dict[str, Any]:
         "payroll_impact": _payroll_impact_payload(preview.payroll_impact),
         "lifecycle_impact": _materialize(preview.lifecycle_impact),
         "preview_fingerprint": preview.fingerprint.value,
+        "historical_unserved_correction": _historical_correction_preview_payload(preview),
+    }
+
+
+def _historical_correction_preview_payload(preview):
+    if getattr(preview, "historical_correction", None) is None:
+        return None
+    payroll = preview.payroll_impact
+    finance = preview.client_finance_impact
+    return {
+        "classification_only": preview.classification_only,
+        "client_cash_difference_requires_review": bool(
+            finance and finance.cancellation_cash_difference_requires_review
+        ),
+        "retired_adopted_assignment_ids": preview.standalone_assignment_ids,
+        "payroll_recoveries": [
+            {
+                "obligation_identity": item.obligation_identity,
+                "staff_id": item.staff_id,
+                "paid_ntd": item.paid_net_amount.amount,
+                "recovery_increase_ntd": item.recovery_increase.amount,
+            }
+            for item in (payroll.frozen_settlements if payroll else ())
+            if item.recovery_increase.amount > 0
+        ],
     }
 
 

@@ -207,6 +207,7 @@ class ClientObligationAction:
             self.action,
             self.before_amount,
             self.after_amount,
+            self.payment_stage,
         )
         if self.direction is not expected_direction:
             raise ValueError("client_finance_direction_mismatch")
@@ -227,6 +228,8 @@ class ClientFinanceTermsCandidate:
     subsidy_return_plan: ClientSubsidyReturnPlan | None = None
     payment_terms: ClientPaymentTerms | None = None
     cancellation_settlement: ClientCancellationSettlement | None = None
+    cancellation_obligation_identity: str | None = None
+    cancellation_cash_difference_requires_review: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +242,34 @@ class ClientCancellationSettlement:
     fee_received_ntd: int
     fee_reason: str
     processed_on: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class PriorClientCancellationBalance:
+    obligation_identity: str
+    payment_stage: PaymentStage
+    contracted_amount: MoneyNTD
+    remaining_amount: MoneyNTD
+    due_date: date | None
+    source_obligation_identity: str | None
+
+    def __post_init__(self) -> None:
+        _validate_identity(self.obligation_identity, "cancellation obligation identity")
+        if self.payment_stage not in {PaymentStage.REFUND, PaymentStage.ADJUSTMENT}:
+            raise ValueError("historical_unserved_prior_settlement_invalid")
+        _require_nonnegative_money(self.contracted_amount, "cancellation contracted amount")
+        _require_nonnegative_money(self.remaining_amount, "cancellation remaining amount")
+        if self.remaining_amount.amount > self.contracted_amount.amount:
+            raise ValueError("historical_unserved_prior_settlement_invalid")
+        if self.source_obligation_identity is not None:
+            _validate_identity(self.source_obligation_identity, "cancellation source obligation identity")
+
+
+def has_unidentified_cancellation_cash_difference(
+    source: ClientFinanceTermsSourceFacts, prior_balance: PriorClientCancellationBalance | None,
+) -> bool:
+    known_open_balance = prior_balance is not None and not prior_balance.remaining_amount.is_zero
+    return source.open_nonstage_obligation_count > int(known_open_balance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,8 +561,12 @@ def build_client_finance_cancellation_impact(
     fee: MoneyNTD = MoneyNTD(0),
     fee_reason: str = "",
     processed_on: date | None = None,
+    prior_balance: PriorClientCancellationBalance | None = None,
+    confirmed_zero_service: bool = False,
 ) -> ClientFinanceTermsCandidate:
     service_dates = _scheduling_service_dates(scheduling) if scheduling is not None else ()
+    if confirmed_zero_service and service_dates:
+        raise ValueError("historical_unserved_confirmation_required")
     earned_floor_fee = prorate_floor_fee(
         order_terms.floor_fee,
         order_terms.service_days,
@@ -547,7 +582,10 @@ def build_client_finance_cancellation_impact(
         else _terms_facts_from_service_dates(cancellation_source, cancellation_terms, ())
     )
     candidate = build_client_finance_terms_candidate(facts, change_identity)
-    candidate = _settle_cancellation(candidate, source_facts, change_identity, net_cash_received, fee, fee_reason, processed_on)
+    candidate = _settle_cancellation(
+        candidate, source_facts, change_identity, net_cash_received, fee, fee_reason, processed_on,
+        prior_balance, confirmed_zero_service,
+    )
     plan = _cancellation_subsidy_return_plan(
         cancellation_source,
         cancellation_terms,
@@ -570,7 +608,8 @@ def build_client_finance_cancellation_impact(
     )
 
 
-def _settle_cancellation(candidate, source, change_identity, net_cash_received, fee, fee_reason, processed_on):
+def _settle_cancellation(candidate, source, change_identity, net_cash_received, fee, fee_reason, processed_on,
+                         prior_balance, confirmed_zero_service):
     stages = source.existing_obligations
     received = net_cash_received.amount if net_cash_received is not None else sum(
         item.net_settled_amount.amount for item in stages
@@ -586,7 +625,21 @@ def _settle_cancellation(candidate, source, change_identity, net_cash_received, 
         for item in stages
         if item.net_settled_amount.amount < item.contracted_amount.amount
     ]
-    if net_due and received >= 0:
+    settlement_obligation = None
+    unidentified_difference = has_unidentified_cancellation_cash_difference(source, prior_balance)
+    review_required = confirmed_zero_service and unidentified_difference
+    pending_balance = prior_balance is not None and not prior_balance.remaining_amount.is_zero
+    if pending_balance and not review_required:
+        direction_matches = (
+            (net_due < 0 and prior_balance.payment_stage is PaymentStage.REFUND)
+            or (net_due > 0 and prior_balance.payment_stage is PaymentStage.ADJUSTMENT)
+        )
+        remaining = abs(net_due) if direction_matches else 0
+        if remaining != prior_balance.remaining_amount.amount:
+            actions.append(_revise_prior_cancellation_balance(prior_balance, remaining))
+        if direction_matches:
+            settlement_obligation = prior_balance.obligation_identity
+    if net_due and received >= 0 and settlement_obligation is None and not review_required:
         kind = ClientObligationActionKind.CREATE_REFUND if net_due < 0 else ClientObligationActionKind.CREATE_ADJUSTMENT
         source_stage = next((item for item in stages if item.net_settled_amount.amount > 0), None)
         before, after = MoneyNTD(received), MoneyNTD(service_due + fee.amount)
@@ -598,23 +651,47 @@ def _settle_cancellation(candidate, source, change_identity, net_cash_received, 
             source_stage.obligation_identity if source_stage else None,
             *_expected_direction(kind, before, after),
         ))
+        settlement_obligation = actions[-1].obligation_identity
     blockers = candidate.blockers
-    if source.open_nonstage_obligation_count:
+    if confirmed_zero_service:
+        blockers = tuple(code for code in blockers if code != "full_subsidy_existing_financial_history_conflict")
+    if unidentified_difference and not review_required:
         blockers += ("cancellation_existing_cash_difference_requires_review",)
     if received < 0:
         blockers += ("cancellation_net_receipts_inconsistent",)
-    if service_due + fee.amount > 9_223_372_036_854_775_807:
+    if service_due + fee.amount > 9_223_372_036_854_775_807 or any(
+        action.after_amount.amount > 9_223_372_036_854_775_807
+        or action.obligation_amount.amount > 9_223_372_036_854_775_807 for action in actions
+    ):
         blockers += ("cancellation_amount_out_of_storage_range",)
     return replace(
         candidate, actions=tuple(actions), blockers=blockers,
         resulting_account_version=source.account_version + 1,
         cancellation_settlement=summary,
+        cancellation_obligation_identity=settlement_obligation,
+        cancellation_cash_difference_requires_review=review_required,
         fingerprint=fingerprint_payload({
             "terms": candidate.fingerprint.value, "net_received_ntd": received,
             "fee_ntd": fee.amount, "fee_reason": fee_reason,
             "actions": [_action_payload(action) for action in actions],
             "blockers": blockers,
+            **({
+                "settlement_obligation_identity": settlement_obligation,
+                "cash_difference_requires_review": review_required,
+            } if confirmed_zero_service else {}),
         }),
+    )
+
+
+def _revise_prior_cancellation_balance(balance: PriorClientCancellationBalance, remaining: int) -> ClientObligationAction:
+    retained_amount = balance.contracted_amount.amount - balance.remaining_amount.amount
+    after = MoneyNTD(retained_amount + remaining)
+    kind = ClientObligationActionKind.CANCEL_OPEN if after.is_zero else ClientObligationActionKind.REPLACE_OPEN
+    return ClientObligationAction(
+        kind, balance.payment_stage, balance.obligation_identity, balance.contracted_amount,
+        after, MoneyNTD(remaining), balance.due_date, balance.due_date,
+        balance.source_obligation_identity,
+        *_expected_direction(kind, balance.contracted_amount, after, balance.payment_stage),
     )
 
 
@@ -743,7 +820,7 @@ def _charge_days(service_dates):
 
 def confirmed_zero_payment_stages(facts: ClientFinanceTermsFacts) -> frozenset[PaymentStage]:
     """Accept zero only when formal terms agree with the recorded obligations."""
-    if facts.payment_terms.deposit_service_days > len(facts.charge_days):
+    if facts.payment_terms.deposit_service_days and not facts.charge_days:
         return frozenset()
     stages = {plan.payment_stage: plan.amount for plan in _build_stage_plans(facts)}
     if any(stages[item.payment_stage] != item.contracted_amount for item in facts.existing_obligations):
@@ -789,8 +866,11 @@ def _validate_precontract_deposit_action(action: ClientObligationAction) -> None
 
 def _split_charge_days(facts):
     deposit_count = facts.payment_terms.deposit_service_days
-    if deposit_count > len(facts.charge_days):
+    if deposit_count and not facts.charge_days:
         raise ValueError("deposit service days exceed official service days")
+    # The policy selects the first N actual dates; shortening service does not
+    # create extra charge dates or rewrite the original payment terms.
+    deposit_count = min(deposit_count, len(facts.charge_days))
     charge_days = facts.charge_days
     uses_payable_days = (
         deposit_count == 0
@@ -949,6 +1029,7 @@ def _expected_direction(
     action: ClientObligationActionKind,
     before_amount: MoneyNTD,
     after_amount: MoneyNTD,
+    payment_stage: PaymentStage | None = None,
 ) -> tuple[ClientFinanceDirection, int]:
     """Return the canonical public direction for the cancellation action.
 
@@ -967,7 +1048,11 @@ def _expected_direction(
         # receivable or refund impact.
         if difference <= 0:
             return ClientFinanceDirection.NO_FINANCE_CHANGE, 0
-        return ClientFinanceDirection.ADDITIONAL_CHARGE_DUE, difference
+        direction = (
+            ClientFinanceDirection.REFUND_DUE
+            if payment_stage is PaymentStage.REFUND else ClientFinanceDirection.ADDITIONAL_CHARGE_DUE
+        )
+        return direction, difference
     if action is ClientObligationActionKind.CANCEL_OPEN:
         if after_amount.amount != 0 or before_amount.amount <= 0:
             raise ValueError("client_finance_direction_mapping_invalid")

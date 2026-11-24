@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-staff-payable-projection-zero-2026-11-24-v1",
+  "release_metadata": {
+    "release_name": "Staff payable projection for zero entitlement",
+    "application_version": "staff-payable-projection-zero-v1",
+    "published_at": "2026-11-24",
+    "description": "Allow zero effective entitlement while retaining prior payouts, balances and status guards."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-staff-web-profile-2026-11-24-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1084_staff_payable_projection_zero.sql",
+      "relative_path": "db/schema_parts/1084_staff_payable_projection_zero.sql",
+      "sha256": "4f964f269a3c1ade4c4dd8201e6cfa4611cb2a46b6810c047b5f959d411bd273",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; forward-only-after-zero-entitlement",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "staff-payable-projection-money-check-exact",
+      "phase": "post-schema",
+      "policy": "Verify the enforced nonnegative entitlement check, existing status guard and preserved rows.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "staff-payable-projection-zero-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "staff-payable-projection-money-check-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_24_staff_payable_projection_zero_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_24_staff_payable_projection_zero_v1.descriptors.json",
+    "sha256": "df411a710e72b624a67124486eff117106b19b0a18194322c72bfe91068b1360",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

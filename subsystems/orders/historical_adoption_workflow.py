@@ -268,11 +268,6 @@ class HistoricalOrderAdoptionWorkflow:
             not row.case_no
             or not row.client_name
             or not row.asserted_status
-            or row.asserted_status is HistoricalOrderSourceStatus.CANCELLED
-            or (
-                row.asserted_status is HistoricalOrderSourceStatus.DISCUSSION
-                and not any(item.name for item in row.caregivers)
-            )
         ):
             return _unmatched_preview(row)
         current = self._repository.load_order(row.case_no, row.client_name, for_update=for_update)
@@ -292,6 +287,13 @@ class HistoricalOrderAdoptionWorkflow:
             source,
             self._clock.today(),
         )
+        if candidate.outcome is HistoricalOrderOutcome.REVIEW_REQUIRED:
+            return _review_required_preview(row, current, candidate, (), candidate.issue_codes)
+        if row.asserted_status is HistoricalOrderSourceStatus.CANCELLED or (
+            row.asserted_status is HistoricalOrderSourceStatus.DISCUSSION
+            and not any(item.name for item in row.caregivers)
+        ):
+            return _unmatched_preview(row)
         if candidate.result is HistoricalOrderResult.NOT_ADOPTED:
             return _not_adopted_preview(row, current)
         pairings = self._pairings(row, current, candidate, for_update)

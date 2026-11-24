@@ -8,12 +8,29 @@
 以 canonical `start_date`／`end_date` 協調自選期間內案件與 Scheduling 正式工作日，按實際星期一至星期日分週；「補助案件統計表」則固定取得 `end_date` 所屬完整年度的 Government Subsidy owner rows，並依民國申請年度與身分類別組成頂端筆數／金額摘要，以既有專用欄位格式提供 strict JSON 及同 candidate XLSX，不得改套獨立「年度補助」報表格式。
 案件年度累計自 1 月 1 日起算；正常與歷史訂單依相同業務狀態合併計數，JSON／XLSX 共用 Reporting classification。待辦看板另使用同一 owner 的獨立唯讀案件統計 GET，按匯入曆年／季度／月份計數，維持全年度累計，不查服務、補助或 weekly metrics；計數 adapter 不讀取姓名、地址或原始拒絕原因。
 
+<a id="reporting-established-design"></a>
+
+## 曾成立統計的實作邊界 ^reporting-established-design
+
+- 分類契約見 [曾成立案件統計](../../../../../requirements/34_營運報表與統計口徑正式規格.md#established-case-count)。`WeeklyOperationsReportQuery._case_row` 消費正式成立證據，沿用同一 classification 與同候選 XLSX；「成立後未服務」明細的服務天數為零，現有受理總表欄位不變。
+- MySQL read adapter 透過 bounded typed projection 提供 Orders 的正式成立證據、目前狀態及已確認零服務量；Reporting 應用層在同一分類結果產生模板四欄與明細。成立認列與目前生命週期分布分開，UI／XLSX 只格式化正式查詢結果，不自行判斷、增減或累加款項。
+- 取消案更正後的數量變化由重查正式 owner facts 自然得到，不執行「取消 counter 減一、成立 counter 加一」寫入，避免重送重複增減；日期、身分與案件類別沿原查詢邊界。
+- `weekly_operations_report_query_adapter.py` 借用 `order_establishment_read_model.py` 的共用成立證據 SQL；歷史零服務更正原因來自已提交 lifecycle event 的更正意圖，普通零服務終止原因來自生效的 cancellation control。UI 與 XLSX 不從原工作簿猜測目前分類。
+- 驗證入口對應 `REPORT-ESTABLISHED-01/02/03`：正常／歷史、前後重讀、同候選 XLSX 與零服務原因的正反案例分別在 Reporting owner tests 及歷史更正 MySQL integration。來源 mappings 與本節文字不表示真實 DB 已驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-established-design
+  target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^established-case-count'
+```
+
 ## Implementation
 - primary:
   - `subsystems/reporting/weekly_operations_report_query.py`
   - `subsystems/reporting/weekly_operations_report_export.py`
   - `subsystems/reporting/weekly_report_metrics_service.py`
   - `infrastructure/mysql/weekly_operations_report_query_adapter.py`
+  - `infrastructure/mysql/order_establishment_read_model.py` — 借用 Orders 正式成立事件／歷史採納證據的唯讀 SQL，不在 Reporting 重定義成立。
   - `api/dependencies/operations_reports.py`
   - `api/schemas/operations_reports.py`
   - `db/schema_parts/218_weekly_report_metrics.sql`
@@ -104,7 +121,7 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 
 ### 週報取消原因的讀取與輸出 ^reporting-weekly-cancel-reason
 
-[需求書 §2.2「案件受理總表的取消原因」](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-case-cancel-reason) 定義顯示條件。由 `weekly_operations_report_query_adapter.py` 依該案目前生效的 cancellation control 找到 Orders 取消事件；現行 adapter 以 `COALESCE(cancellation.reason, o.cancel_reason)` 讀取可用原因。接著 `WeeklyOperationsReportQuery._case_row` 只在訂單狀態為「訂單取消」時保留值，其他返回 `None`。這是週報明細投影，不是待辦看板的統計欄位。
+[需求書 §2.2「案件受理總表的取消原因」](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-case-cancel-reason) 定義顯示條件。`weekly_operations_report_query_adapter.py` 對「訂單取消」依生效 cancellation control 的原因回退 Orders `cancel_reason`；對「成立後未服務」先讀已提交更正 lifecycle event 的 `historical_unserved_correction.reason`，沒有更正原因時使用生效的取消原因。`WeeklyOperationsReportQuery._case_row` 在這兩種狀態保留原因，其他返回 `None`。這是週報明細投影，不是待辦看板的統計欄位。
 
 `api/routes/operations_reports.py` 僅在 `operations-report.v5` 的案件明細輸出 `cancel_reason`（字串或 `null`），`v3`／`v4` 省略欄位。`OperationsReportsWorkspace.tsx` 對 `null` 留空；`weekly_operations_report_export.py` 同樣消費該明細值，寫入案件受理總表第 25 欄，原因存為純文字，不求值為 Excel 公式。
 
@@ -122,6 +139,7 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 - test_root: `tests/test_weekly_operations_report_contract.py`
 - test_root: `tests/test_weekly_operations_report_api_versions.py`
 - integration_root: `tests/test_weekly_operations_report_mysql.py`
+- higher_boundary: [Orders historical-adoption 的整合測試](../../../../../../tests/domains/orders/subsystems/orders/modules/historical-adoption/integration/test_wp80_disposable_mysql_e2e.py) — 引用該 owner 的歷史零服務更正前後真實 Query／JSON／XLSX、分類重播與重匯一致性。
 - integration_root: `ui_react/src/tests/reports_query_page.test.tsx`
 - integration_root: `ui_react/src/tests/reports_weekly_totals.test.tsx`
 - integration_root: `ui_react/src/tests/reports_weekly_api_versions.test.tsx`
