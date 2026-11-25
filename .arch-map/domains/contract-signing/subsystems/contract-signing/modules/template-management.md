@@ -24,7 +24,21 @@
 - `ui_react/src/api/contract_templates/contract_templates_client.ts`
 
 ## Contracts
-- `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — CTM-01～06。
+### 模板預覽、保存與啟用 ^template-catalog-lifecycle
+
+[需求書 §3.1](../../../../../requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#contract-template-versioning) 定義三個動作的不同效果。
+
+| 負責角色 | 正式約定 | 去哪查 |
+| --- | --- | --- |
+| 系統管理員／前端 | 上傳 XLSX 並檢查映射。示範只用虛構資料；保存與啟用是兩個獨立操作，不能把保存成功顯示成已啟用。 | `ContractTemplatesPage.tsx`、`contract_templates_client.ts` |
+| Contract Signing／後端 | 伺服器驗證格式與映射。示範預覽不寫入，也不讀真實案件；保存及啟用分別交給模板目錄。 | `ContractTemplateManagement.inspect/save/activate`、`api/routes/contract_templates.py` |
+| 檔案儲存 | 模板 bytes 與映射保存為不可變版本。目錄更新檢查 `expected_catalog_version`，並記錄操作者及重送識別；不在案件 DB 交易內。啟用只影響後續產製，舊文件仍取原版。 | `infrastructure/file/contract_template_store.py`、下方 Verification |
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: template-catalog-lifecycle
+  target: '.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#^contract-template-versioning'
+```
 
 ## Verification
 - layout_status: `custom_current`
