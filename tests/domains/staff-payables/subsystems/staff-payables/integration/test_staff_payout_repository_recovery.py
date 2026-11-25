@@ -116,19 +116,19 @@ def test_funding_projection_uses_settlement_links_by_bank_including_fee_and_reop
     assert 'reversal_of_event_id' in cursor.calls[1][0]
 
 
-@pytest.mark.parametrize('bank,occurred_on,memo,expected,error', [
-    ('sinopac', date(2026, 10, 15), None, 18000, None),
-    ('taishin', date(2026, 10, 15), '合成月嫂甲', 12000, None),
-    ('taishin', date(2026, 11, 15), '合成月嫂甲 HC115807', 12000, None),
-    ('taishin', date(2026, 11, 15), '合成月嫂甲', None, 'outgoing_staff_payout_month_no_match'),
-    ('taishin', date(2026, 10, 15), '合成月嫂甲 HC115808', None, 'staff_memo_case_mismatch'),
+@pytest.mark.parametrize('bank,occurred_on,memo,subsidy_due,expected,error', [
+    ('sinopac', date(2026, 10, 15), None, date(2026, 10, 15), 18000, None),
+    ('taishin', date(2026, 10, 15), '合成月嫂甲', date(2026, 10, 15), 12000, None),
+    ('taishin', date(2026, 11, 15), '合成月嫂甲 HC115807', date(2026, 10, 15), 12000, None),
+    ('taishin', date(2026, 11, 15), '合成月嫂甲', date(2026, 10, 15), None, 'outgoing_staff_payout_month_no_match'),
+    ('taishin', date(2026, 10, 15), '合成月嫂甲 HC115808', date(2026, 10, 15), None, 'staff_memo_case_mismatch'),
+    ('taishin', date(2026, 11, 15), '合成月嫂甲', None, 12000, None),
 ])
 def test_owner_load_checks_taishin_memo_case_and_month_and_limits_each_bank_installment(
-    monkeypatch, bank, occurred_on, memo, expected, error,
+    monkeypatch, bank, occurred_on, memo, subsidy_due, expected, error,
 ):
     from types import SimpleNamespace
     from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
-    import infrastructure.mysql.accounting_workspace_repository as accounting
     import infrastructure.mysql.manual_supplement_evidence as evidence
     import infrastructure.mysql.staff_payout_repository as module
 
@@ -149,8 +149,6 @@ def test_owner_load_checks_taishin_memo_case_and_month_and_limits_each_bank_inst
     monkeypatch.setattr(cursor, 'fetchone', lambda: None, raising=False)
     selection = SimpleNamespace(event_type=StaffPayoutEventType.PAYOUT, difference_mode=None, obligation_identities=('obligation:1',))
     monkeypatch.setattr(evidence, 'manual_source_matches', lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(accounting, 'query_subsidy_payable_handoff', lambda *_args, **_kwargs:
-        SimpleNamespace(service_completed=True, staff_subsidy_reason=None))
     monkeypatch.setattr(module, '_load_bank_accounts', lambda *_: ())
     monkeypatch.setattr(module, '_load_obligation_events', lambda *_: ())
     monkeypatch.setattr(module, '_obligation_facts', lambda *_: (StaffPayableFacts('obligation:1', 7, MoneyNTD(30000)),))
@@ -160,7 +158,7 @@ def test_owner_load_checks_taishin_memo_case_and_month_and_limits_each_bank_inst
     monkeypatch.setattr(module, '_bank_facts_version', lambda *_: 1)
     monkeypatch.setattr(module, 'query_staff_funding_portions', lambda *_args, **_kwargs: (
         StaffFundingPortion('client', 18000, date(2026, 10, 15), 0, 18000),
-        StaffFundingPortion('subsidy', 12000, date(2026, 10, 15), 0, 12000)))
+        StaffFundingPortion('subsidy', 12000, subsidy_due, 0, 12000)))
     def qualified_split(_cursor, _banks, roots, _obligations, _lock):
         from domains.payroll.installments import PayrollInstallment
         from subsystems.staff_payables.payout_reconciliation import StaffSubsidySplit
@@ -168,7 +166,7 @@ def test_owner_load_checks_taishin_memo_case_and_month_and_limits_each_bank_inst
             raise ValueError('staff_installment_funding_unconfirmed')
         return StaffSubsidySplit(case_no,'obligation:1',1,True,30000,12000,18000,12000,False,
             (PayrollInstallment('client',18000,date(2026,10,15)),
-             PayrollInstallment('subsidy',12000,date(2026,10,15))))
+             PayrollInstallment('subsidy',12000,subsidy_due)))
     monkeypatch.setattr(repository, '_prepare_subsidy_split', qualified_split)
     source = {'transaction_date': occurred_on, 'currency': 'TWD', 'format_id': bank, 'memo': memo}
     obligation = {'obligation_identity': 'obligation:1', 'case_no': case_no, 'has_installments': True}

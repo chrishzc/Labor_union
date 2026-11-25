@@ -909,6 +909,19 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
             const hasConfirmedFee = itemTransactions.some(t => (t.transfer_fee_ntd ?? 0) > 0);
             const isSettled = item.settled || item.remaining_ntd === 0 || (item.actual_ntd >= item.expected_ntd && item.has_payment);
             const isFeeSettled = isSettled && hasConfirmedFee;
+            const availability = data.staff_accounting_availability?.find(entry => entry.obligation_identities.includes(item.identity));
+            const arrangementPendingReasons = new Set([
+              'historical_payroll_due_date_missing',
+              'historical_payroll_funding_source_missing',
+              'historical_payroll_end_date_missing',
+              'historical_payroll_installment_date_pending',
+              'historical_payroll_funding_pending',
+              'historical_payroll_funding_conflict',
+            ]);
+            const paymentArrangementPending = !isSettled && (
+              (item.funding_portions?.length ? item.funding_portions.some(portion => portion.due_date === null) : item.due_date === null)
+              || Boolean(availability?.pending_reasons.some(reason => arrangementPendingReasons.has(reason)))
+            );
             return (
               <tr key={item.identity}>
                 <td>
@@ -968,9 +981,9 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                   ) : isSettled ? (
                     <span className="finance-paid">出款已結清</span>
                   ) : item.has_payment ? (
-                    <span>部分出款</span>
+                    <span>{paymentArrangementPending ? '部分出款 · 付款安排待確認' : '部分出款'}</span>
                   ) : (
-                    <span>待排程出款</span>
+                    <span>{paymentArrangementPending ? '付款安排待確認' : '待排程出款'}</span>
                   )}
                 </td>
                 <td>

@@ -25,7 +25,6 @@ def qualify_staff_subsidy_manual_review(
     from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
     from domains.finance_import.transaction_classifier import _is_same_month
     from domains.staff_payables.reconciliation import StaffPayoutEventType, project_staff_payable
-    from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
     from infrastructure.mysql.staff_payout_repository import MySqlStaffPayoutRepository, query_staff_funding_portions
     from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
     from subsystems.staff_payables.payout_reconciliation import StaffPayoutSelection
@@ -46,9 +45,6 @@ def qualify_staff_subsidy_manual_review(
         resolved = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
     if resolved.get('result') != 'resolved' or resolved.get('case_no') != target['case_no']:
         return StaffSubsidyManualReviewQualification(unavailable_reason='staff_memo_case_mismatch')
-    handoff = query_subsidy_payable_handoff(connection, target['case_no'], proposed_scheme='split')
-    if not handoff.service_completed or handoff.staff_subsidy_reason:
-        return StaffSubsidyManualReviewQualification(unavailable_reason=handoff.staff_subsidy_reason or 'subsidy_service_not_completed')
     selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (str(row['row_id']),), tuple(target['obligation_identities']))
     try:
         facts = MySqlStaffPayoutRepository(connection).load(selection, for_update=False)

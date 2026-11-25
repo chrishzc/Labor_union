@@ -77,9 +77,17 @@ export function ClientRegistryAccountingSummary({caseNo, revision}: {caseNo: str
         </div>)}
       </section>}
       {staffPayables.length > 0 ? <ul>
-        {staffPayables.map(item =>
-          <li key={item.identity}>{item.party}／{item.label}：{money(item.expected_ntd)}，應付日 {item.due_date ?? '待確認'}</li>
-        )}
+        {staffPayables.map(item => {
+          const isSettled = item.settled || item.remaining_ntd === 0 || (item.actual_ntd >= item.expected_ntd && item.has_payment);
+          const remaining = item.remaining_ntd ?? Math.max(0, item.expected_ntd - item.actual_ntd);
+          const arrangement = !isSettled && item.due_date == null ? '（付款安排待確認）' : '';
+          return (
+            <li key={item.identity}>
+              已建立應付 · {item.party}／{item.label}：{money(item.expected_ntd)}，應付日 {item.due_date ?? '待確認'}
+              {arrangement} · 已核銷 {money(item.actual_ntd)}／剩餘 {money(remaining)}
+            </li>
+          );
+        })}
       </ul> : <p>{state.data.staff_receivable_ntd == null
         ? '尚無月嫂應付明細。'
         : `月嫂薪資預估 ${money(state.data.staff_receivable_ntd)}，正式應付待確認。`}</p>}

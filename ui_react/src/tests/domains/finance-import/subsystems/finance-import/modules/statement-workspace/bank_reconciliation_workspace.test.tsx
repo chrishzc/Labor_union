@@ -1398,4 +1398,35 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       token.mockRestore();
     }
   });
+
+  it('keeps undated established staff obligation selectable from bank reconciliation entry', async () => {
+    const undatedRow: FinanceBankTransaction = {
+      ...sinopac,
+      row_id: 205,
+      row_identity: 'finance-import-row:205',
+      direction: 'outgoing',
+      amount_ntd: 47985,
+      classification_type: 'staff_salary',
+      review_reason: 'due_date_missing',
+      counterparty_name: '合成月嫂甲',
+      cases: ['115000888'],
+      reconciliation_unavailable_reason: 'due_date_missing',
+      reconciliation_target: {
+        case_no: '115000888',
+        staff_id: 7,
+        obligation_identities: ['staff-obligation:assignment:1'],
+        requires_selection: true,
+      },
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [undatedRow],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    const btn = await screen.findByRole('button', { name: `核對交易 ${undatedRow.reference}` });
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(onReconcile).toHaveBeenCalledWith(undatedRow);
+  });
 });

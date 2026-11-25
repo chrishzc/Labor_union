@@ -62,6 +62,7 @@ DB 變更須 additive、可追溯，並區分 fresh bootstrap、preserve-data up
 ## 5. 驗證、文件與資料
 
 - 從最低受影響邊界驗證：Static → Module → Subsystem → Domain → Global。只有實際 failure signal 或整合風險才擴大到 full suite、DB、Browser、stress、security 或 performance。
+- 業務規則與跨模組流程優先用替身 port／repository 驗證，不因更動業務邏輯就跑 MySQL。只有受影響的持久化契約無法由替身證明，才在隔離 MySQL 跑對應案例；不預設跑整套。分層、擴大條件及回報見 [07 §5](.arch-map/requirements/07_跨Domain交易與pytest驗收架構.md#5-pytest-分層)。
 - snapshot／golden／validation dataset 不得為了過測試任意重寫；canonical change 造成 deterministic drift 時，只同步直接受影響的 current asset。
 - `.arch-map/requirements/` 是 current 正式規格的維護位置，遵守 `document/架構重整/00_規格書撰寫與生命週期規範.md` 之 Living Current Truth 原則並以 `scripts/validate_spec_hygiene.py` 檢核，但不是所有 current Markdown 的唯一位置。治理、導覽、仍有效決策、current register 與必要驗證來源依既有索引保留，不因位於基線目錄外就判定過時、搬移或刪除。新語意優先原地改寫既有 owner spec並移除失效條文；只有既有 owner 無法承接且 current acceptance 明確需要時才新增正式規格。
 - 非 Markdown 附件只作 input、範例或 evidence；不得因存在而升格為 SSOT。

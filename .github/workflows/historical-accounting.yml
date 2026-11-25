@@ -57,6 +57,7 @@ jobs:
           tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_query.py
           tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_repository_recovery.py
           tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py
+          tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_owning_domain_composite.py
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_source_projection.py
           tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_baseline_obligation_sync.py
           tests/domains/staff-payables/subsystems/staff-payables/modules/historical-payment-settlement/contract/test_historical_completion_read_adapter.py
@@ -64,10 +65,9 @@ jobs:
           tests/domains/orders/subsystems/orders/modules/historical-precision-restart/unit/test_historical_precision_restart_repository_contract.py
       - name: Verify isolated MySQL query to accounting API and read-only snapshots
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: >-
-          python -m pytest -vv
-          tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
-          -k historical_accounting
+        run: |
+          python -m pytest -vv tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py -k historical_accounting
+          python -m pytest -vv tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py
       - name: Verify bank review through isolated money owners
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
@@ -83,7 +83,7 @@ jobs:
           bootstrap(Namespace(host='127.0.0.1', port=3307, user='root', password='',
                               database=database, confirm_database=database))
           PY
-          python -m pytest -vv tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py
+          python -m pytest -vv tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py -k 'test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation or test_staff_subsidy_without_suffix_cannot_bypass_cross_month_guard or test_staff_subsidy_cross_month_qualification_preserves_manual_amount_choices or test_shared_name_with_suffix_cannot_manually_reconcile_another_month or (test_bank_preview_then_apply_confirms_builds_and_settles_once and advance)'
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -100,11 +100,11 @@ jobs:
           -t 隔離
       - name: Check Python types and lint at the affected boundaries
         run: |
-          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/subsidy_confirmation_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py subsystems/finance_import/query.py api/schemas/finance_import.py api/dependencies/finance_import.py api/routes/finance_statement_workspace.py
-          pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/query.py infrastructure/mysql/subsidy_confirmation_repository.py infrastructure/mysql/staff_payout_repository.py api/dependencies/finance_import.py api/schemas/finance_import.py
+          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/subsidy_confirmation_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py subsystems/finance_import/query.py api/schemas/finance_import.py api/dependencies/finance_import.py api/routes/finance_statement_workspace.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/finance_import_owning_domain_composite.py infrastructure/mysql/accounts_payable_export_sources.py infrastructure/mysql/payroll_rebuild_repository.py infrastructure/mysql/finance_import_repository.py infrastructure/mysql/historical_staff_payout_repository.py subsystems/orders/historical_adoption_workflow.py
+          pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/query.py infrastructure/mysql/subsidy_confirmation_repository.py infrastructure/mysql/staff_payout_repository.py api/dependencies/finance_import.py api/schemas/finance_import.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/accounts_payable_export_sources.py
       - name: Check the owning specification and whitespace
         run: |
-          python scripts/validate_spec_hygiene.py --path .arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md
+          python scripts/validate_spec_hygiene.py
           python scripts/validate_spec_hygiene.py --path .arch-map/requirements/22B_帳務差額處置與工作台UI正式規格.md
           python scripts/validate_spec_hygiene.py --path .arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md
           git diff --check ${{ github.event.pull_request.base.sha || 'HEAD^' }} HEAD
@@ -131,6 +131,7 @@ jobs:
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/bank_reconciliation_workspace.test.tsx
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/import_retry.test.tsx
           src/tests/domains/finance-import/subsystems/finance-import/modules/finance-import-correction/finance_import_correction_form.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_pricing.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_parameters_components.test.tsx
           src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx

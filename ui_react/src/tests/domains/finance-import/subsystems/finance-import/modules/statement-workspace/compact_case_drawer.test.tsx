@@ -1173,8 +1173,37 @@ it('正式零額款仍保留原到期日',async()=>{
 });
 
 it('正常未付款只有待付，不以應付減已付顯示差額操作',async()=>{
+ const scheduled=facts();scheduled.staff_items=[{...scheduled.staff_items[0],due_date:'2026-11-15'}];
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(scheduled);
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);const table=await screen.findByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'});
  expect(table).toHaveTextContent('待排程出款');expect(within(table).queryByRole('button',{name:'處置差額'})).not.toBeInTheDocument();
+});
+it('已建立應付但付款日與補助流向未定時顯示付款安排待確認，不推定為可排程出款',async()=>{
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({
+  ...facts(),historical_stages:true,scheme:'waiting',subsidy_ntd:12000,customer_amount_ntd:48000,
+  staff_items:[{identity:'staff-obligation:assignment:1',direction:'payable',label:'服務費',party:'合成月嫂甲',expected_ntd:48000,actual_ntd:0,remaining_ntd:48000,has_payment:false,version:'1',due_date:null}],
+  staff_accounting_availability:[{assignment_id:1,staff_id:7,party:'合成月嫂甲',obligation_identities:['staff-obligation:assignment:1'],status:'formal',pending_reasons:['historical_payroll_due_date_missing','historical_payroll_funding_source_missing'],estimated_self_pay_date:null,estimated_subsidy_date:null}],
+ });
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ const table=await screen.findByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'});
+ expect(table).toHaveTextContent('付款安排待確認');
+ expect(table).not.toHaveTextContent('待排程出款');
+ expect(screen.getByText('原正式應付缺少到期日，金額與付款紀錄保留。')).toBeVisible();
+});
+it('既有永豐出款核銷後讀回 48,000 應付、47,985 實付、15 手續費與 0 剩餘待付，補助仍待查',async()=>{
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({
+  ...facts(),historical_stages:true,scheme:'waiting',subsidy_ntd:12000,customer_amount_ntd:48000,payable_ntd:48000,paid_ntd:48000,
+  staff_items:[{identity:'staff-obligation:assignment:1',direction:'payable',label:'服務費',party:'合成月嫂甲',expected_ntd:48000,actual_ntd:48000,remaining_ntd:0,has_payment:true,settled:true,version:'1',due_date:null}],
+  transactions:[{identity:'payout:1',item_identity:'staff-obligation:assignment:1',occurred_on:'2026-10-15',kind:'payout',amount_ntd:48000,bank:'sinopac',bank_amount_ntd:47985,transfer_fee_ntd:15}],
+ });
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ const table=await screen.findByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'});
+ expect(table).toHaveTextContent('NT$ 48,000');
+ expect(table).toHaveTextContent('銀行實付 NT$ 47,985');
+ expect(table).toHaveTextContent('NT$ 15');
+ expect(table).toHaveTextContent('手續費內扣結清');
+ expect(within(screen.getByLabelText('月嫂薪資匯總')).getByText('已付齊')).toBeVisible();
+ expect(screen.getAllByText('補助歸屬待確認').length).toBeGreaterThan(0);
 });
 it.each([false,true])('正式追償來源可定位%s時才進既有核對入口',async located=>{
  vi.mocked(differenceResolutionClient.staff).mockResolvedValue({case_no:caseNo,items:[{identity:'recovery-1',staff_id:11,party:'合成月嫂',original_ntd:1000,remaining_ntd:1000,noncash_ntd:0,version:1,status:'待追償',related_cases:[caseNo],source_obligation_identities:located?['staff']:[],has_source_cash_evidence:located}],events:[]});
@@ -1424,7 +1453,7 @@ it.skipIf(!historicalContractPath)('隔離 MySQL 帳務 API 原回應經 strict 
     const original=drawer.getByRole('row',{name:new RegExp(formal.party)});
     expect(original).toHaveTextContent('NT$ 28,000');
     expect(original).toHaveTextContent('2026-11-03');
-    expect(registry.getByText(`${formal.party}／${formal.label}：28,000 元，應付日 2026-11-05`)).toBeVisible();
+    expect(registry.getByText(`已建立應付 · ${formal.party}／${formal.label}：28,000 元，應付日 2026-11-05 · 已核銷 0 元／剩餘 28,000 元`)).toBeVisible();
     await waitFor(()=>expect(screen.getAllByRole('region',{name:'歷史月嫂應付依據'})).toHaveLength(2));
     for(const region of screen.getAllByRole('region',{name:'歷史月嫂應付依據'})){
      const source=within(region);

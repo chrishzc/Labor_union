@@ -53,7 +53,10 @@ def query_case_staff_accounting_availability(
                 "SELECT evidence.assignment_id,evidence.staff_id,s.name AS staff_name,"
                 "o.service_days,o.service_days*o.service_hours_per_day AS service_hours,"
                 "COALESCE(rate.hourly_rate_ntd,base.hourly_rate_ntd) AS hourly_rate_ntd,"
-                "a.id IS NOT NULL AS assignment_valid,evidence.source_end_date,1 AS pairing_evidence_count "
+                "a.id IS NOT NULL AS assignment_valid,evidence.source_end_date,1 AS pairing_evidence_count,"
+                "(SELECT COUNT(DISTINCT sched.work_date) FROM staff_schedule sched "
+                "WHERE sched.case_no=receipt.case_no AND sched.assignment_id=a.id AND sched.staff_id=a.staff_id "
+                "AND sched.effective_marker=1 AND sched.is_work_day=1) AS schedule_service_days "
                 "FROM historical_order_pairing_evidence evidence "
                 "JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id "
                 "JOIN orders o ON o.case_no=receipt.case_no "
@@ -62,7 +65,7 @@ def query_case_staff_accounting_availability(
                 "LEFT JOIN staff s ON s.id=evidence.staff_id "
                 "LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=a.id "
                 "LEFT JOIN case_payroll_rate_policy_snapshots base ON base.case_no=receipt.case_no "
-                "WHERE evidence.receipt_id=%s ORDER BY evidence.assignment_id",
+                "WHERE evidence.receipt_id=%s AND evidence.resolution <> 'blank' ORDER BY evidence.assignment_id",
                 (root["adoption_receipt_id"],),
             )
         sources = tuple(cursor.fetchall())
@@ -153,7 +156,11 @@ def query_case_staff_accounting_availability(
         if not person_sources or (source is not None and (not source["assignment_valid"] or pairing_evidence_count == 0)):
             reasons.append("historical_payroll_assignment_source_missing")
         if root["day_event_id"] is None and len(sources) > 1:
-            reasons.append("historical_payroll_service_attribution_missing")
+            if source is not None and "schedule_service_days" in source:
+                if not _positive_number(source["schedule_service_days"]) or not _positive_number(root.get("service_hours_per_day")):
+                    reasons.append("historical_payroll_service_basis_missing")
+            else:
+                reasons.append("historical_payroll_service_attribution_missing")
         elif source is not None and (not _positive_number(source["service_days"]) or not _positive_number(source["service_hours"])):
             reasons.append("historical_payroll_service_basis_missing")
         if source is not None and not _positive_number(source["hourly_rate_ntd"]):

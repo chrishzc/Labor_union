@@ -28,6 +28,8 @@ const historicalAccountingReasons: Record<string,string> = {
  installment_date_pending: '原應付日期尚未形成。',
  historical_payroll_due_date_missing: '原正式應付缺少到期日，金額與付款紀錄保留。',
  historical_payroll_funding_source_missing: '單筆應付尚缺可證實的付款來源，預計日待確認。',
+ historical_payroll_funding_pending: '月嫂付款來源與補助流向尚未確認，預計付款日與分期保留待確認。',
+ historical_payroll_funding_conflict: '補助流向與正式款項來源待查，預計付款日與分期保留待確認。',
  historical_payroll_installment_date_pending: '原正式來源分期缺少到期日。',
  historical_payroll_assignment_source_missing: '缺少歷史月嫂指派來源。',
  historical_payroll_assignment_source_ambiguous: '歷史月嫂指派來源不唯一，請核對歸屬。',

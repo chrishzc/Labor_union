@@ -430,8 +430,12 @@ class MySqlFinanceImportOwningDomainComposite:
 
 def _resolve_client_receipt(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
+    paired_case = next(
+        (item.removeprefix("bank-paired-case:") for item in candidate.evidence if item.startswith("bank-paired-case:")),
+        None,
+    )
     case_no, trans_date, source_blocker = (
-        (None, None, None)
+        (paired_case, None, None)
         if client_id is not None
         else _virtual_account_case_info(
             connection,
@@ -461,6 +465,11 @@ def _resolve_client_receipt(connection, candidate):
             (target,),
             "exact-open-client-obligation",
         )
+    if trans_date is None and client_id is not None and paired_case is not None:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT transaction_date FROM finance_import_rows WHERE id=%s", (_row_id(candidate.row_identity),))
+            date_row = cursor.fetchone()
+            trans_date = date_row.get("transaction_date") if date_row else None
     # 2026-11-05 人工裁決：非精確匹配（未完全相符）時比對月份
     if trans_date is None:
         if case_no is not None:
@@ -480,18 +489,28 @@ def _resolve_client_receipt(connection, candidate):
         if len(rows) == 1:
             return _ready_candidate(candidate, (str(rows[0]["obligation_identity"]),), "exact-open-client-obligation")
         return candidate
-    if not open_rows:
+    competing_rows = _filter_competing_obligations(
+        open_rows,
+        case_no=case_no,
+        counterparty_key="client_id",
+        counterparty_id=client_id,
+        purpose_key="direction",
+        allowed_purposes=frozenset({"receivable_from_client"}),
+        excluded_types=frozenset({"refund", "subsidy_return"}),
+        exact_identities=_exact_obligation_targets(candidate),
+    )
+    if not competing_rows:
         return replace(candidate, client_receipt_review=ClientReceiptReviewDiagnostic(
             "sinopac_client_receipt_no_open_obligation",
         ))
-    if any(row.get('due_date') is None for row in open_rows):
+    if any(row.get('due_date') is None for row in competing_rows):
         return replace(candidate, client_receipt_review=ClientReceiptReviewDiagnostic(
             'due_date_missing', tuple(ClientReceiptReviewCandidate(
                 str(row['obligation_identity']), str(row['obligation_type']), None,
-            ) for row in open_rows if row.get('due_date') is None),
+            ) for row in competing_rows if row.get('due_date') is None),
         ))
     month_matched = [
-        row for row in open_rows
+        row for row in competing_rows
         if _is_same_month(trans_date, row.get("due_date"))
     ]
     month_exact = [
@@ -582,9 +601,53 @@ def _without_redundant_historical_baseline(rows):
     )
 
 
+def _exact_obligation_targets(candidate) -> frozenset[str]:
+    direct = {
+        item
+        for item in getattr(candidate, "target_identities", ())
+        if isinstance(item, str) and not item.startswith(("staff:", "client:"))
+    }
+    paired = {
+        item.removeprefix("bank-paired-obligation:")
+        for item in getattr(candidate, "evidence", ())
+        if isinstance(item, str) and item.startswith("bank-paired-obligation:")
+    }
+    return frozenset(direct | paired)
+
+
+def _filter_competing_obligations(
+    rows,
+    *,
+    case_no=None,
+    counterparty_key=None,
+    counterparty_id=None,
+    purpose_key=None,
+    allowed_purposes=None,
+    excluded_types=frozenset(),
+    exact_identities=frozenset(),
+):
+    filtered = []
+    for row in rows:
+        if case_no is not None and row.get("case_no") is not None and str(row["case_no"]) != case_no:
+            continue
+        if counterparty_key and counterparty_id is not None and row.get(counterparty_key) is not None:
+            if int(row[counterparty_key]) != counterparty_id:
+                continue
+        if purpose_key and allowed_purposes is not None and row.get(purpose_key) is not None:
+            if str(row[purpose_key]) not in allowed_purposes:
+                continue
+        if excluded_types and row.get("obligation_type") is not None and str(row["obligation_type"]) in excluded_types:
+            continue
+        if exact_identities and str(row.get("obligation_identity", "")) not in exact_identities:
+            continue
+        filtered.append(row)
+    return tuple(filtered)
+
+
 def _client_receipt_open_obligations_query(client_id, case_no):
     base = (
-        "SELECT obligation.obligation_identity,obligation.due_date,obligation.amount_due_ntd,obligation.obligation_type "
+        "SELECT obligation.case_no,obligation.obligation_identity,obligation.due_date,"
+        "obligation.amount_due_ntd,obligation.obligation_type,obligation.direction "
         "FROM client_obligations obligation "
     )
     predicates = (
@@ -592,6 +655,14 @@ def _client_receipt_open_obligations_query(client_id, case_no):
         "AND obligation.status='open' "
         "ORDER BY obligation.due_date,obligation.obligation_identity"
     )
+    if client_id is not None and case_no is not None:
+        return (
+            base
+            + "JOIN orders order_row ON order_row.case_no=obligation.case_no "
+            + "WHERE order_row.client_id=%s AND obligation.case_no=%s "
+            + predicates,
+            (client_id, case_no),
+        )
     if client_id is not None:
         return (
             base
@@ -710,16 +781,25 @@ def _resolve_client_subsidy_return(connection, candidate):
     rows = _load_client_refund_targets(
         connection, client_id, case_no, subsidy_return=True
     )
+    competing_rows = _filter_competing_obligations(
+        rows,
+        case_no=case_no,
+        counterparty_key="client_id",
+        counterparty_id=client_id,
+        purpose_key="obligation_type",
+        allowed_purposes=frozenset({"subsidy_return"}),
+        exact_identities=_exact_obligation_targets(candidate),
+    )
     if trans_date is None:
         return replace(candidate, pending_reason='bank_transaction_date_missing')
-    if not rows:
+    if not competing_rows:
         return replace(pending, pending_reason='outgoing_client_refund_no_open_obligation')
-    if is_taishin and any(row['due_date'] is None for row in rows):
+    if is_taishin and any(row['due_date'] is None for row in competing_rows):
         return replace(pending, pending_reason='due_date_missing')
-    if not any(_is_same_month(trans_date, row['due_date']) for row in rows):
-        reason = 'due_date_missing' if any(row['due_date'] is None for row in rows) else 'outgoing_client_refund_month_no_match'
+    if not any(_is_same_month(trans_date, row['due_date']) for row in competing_rows):
+        reason = 'due_date_missing' if any(row['due_date'] is None for row in competing_rows) else 'outgoing_client_refund_month_no_match'
         return replace(pending, pending_reason=reason)
-    matches = _monthly_payout_target_candidates(rows, trans_date, candidate.amount.amount, by_case=True)
+    matches = _monthly_payout_target_candidates(competing_rows, trans_date, candidate.amount.amount, by_case=True)
     if len(matches) != 1:
         reason = 'outgoing_client_refund_multiple_fee_matches' if matches else 'outgoing_client_refund_amount_mismatch'
         return replace(pending, pending_reason=reason)
@@ -784,6 +864,15 @@ def _resolve_client_refund(connection, candidate):
         rows = _load_client_refund_targets(connection, client_id, case_no, for_update=True)
     else:
         rows = _load_client_refund_targets(connection, client_id, case_no)
+    competing_rows = _filter_competing_obligations(
+        rows,
+        case_no=case_no,
+        counterparty_key="client_id",
+        counterparty_id=client_id,
+        purpose_key="obligation_type",
+        allowed_purposes=frozenset({"refund"}) if reclassifying else frozenset({"refund", "adjustment"}),
+        exact_identities=_exact_obligation_targets(candidate),
+    )
     if is_sinopac:
         pending = replace(candidate, disposition=FinanceImportDisposition.BUSINESS_PENDING,
                           available_actions=("resolve_owning_domain_target",), pending_reason=None)
@@ -791,17 +880,17 @@ def _resolve_client_refund(connection, candidate):
             return replace(pending, pending_reason="bank_transaction_date_missing")
         if source.get("currency") is not None and str(source["currency"]).upper() not in {"TWD", "NTD"}:
             return replace(pending, pending_reason="bank_currency_not_twd")
-        if not rows:
+        if not competing_rows:
             return replace(pending, pending_reason="outgoing_client_refund_no_open_obligation")
         cancellation_refunds = [
-            row for row in rows
+            row for row in competing_rows
             if row["obligation_identity"].startswith("client-cancellation:create_refund:")
         ]
-        if any(row.get("due_date") is None for row in rows):
+        if any(row.get("due_date") is None for row in competing_rows):
             return replace(pending, pending_reason="due_date_missing")
-        if not cancellation_refunds and not any(_is_same_month(trans_date, row["due_date"]) for row in rows):
+        if not cancellation_refunds and not any(_is_same_month(trans_date, row["due_date"]) for row in competing_rows):
             return replace(pending, pending_reason="outgoing_client_refund_month_no_match")
-        matches = _monthly_payout_target_candidates(rows, trans_date, candidate.amount.amount, by_case=True)
+        matches = _monthly_payout_target_candidates(competing_rows, trans_date, candidate.amount.amount, by_case=True)
         matches += tuple(
             (row["obligation_identity"],)
             for row in cancellation_refunds
@@ -815,16 +904,23 @@ def _resolve_client_refund(connection, candidate):
         if reclassifying:
             if len(targets) != 1 or not any(
                 row["obligation_identity"] == targets[0] and row.get("obligation_type") == "refund"
-                for row in rows
+                for row in competing_rows
             ):
                 return replace(pending, pending_reason="outgoing_client_refund_target_ambiguous")
     else:
-        targets = _unique_monthly_payout_targets(rows, trans_date, candidate.amount.amount, by_case=True)
+        if any(row.get("due_date") is None for row in competing_rows):
+            return replace(
+                candidate,
+                disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                available_actions=("resolve_owning_domain_target",),
+                pending_reason="due_date_missing",
+            )
+        targets = _unique_monthly_payout_targets(competing_rows, trans_date, candidate.amount.amount, by_case=True)
     if targets is None:
         return candidate
     selected_total = sum(
         int(row["amount_due_ntd"])
-        for row in rows
+        for row in competing_rows
         if str(row["obligation_identity"]) in targets
     )
     diff = selected_total - candidate.amount.amount
@@ -972,7 +1068,8 @@ def _resolve_staff_payout(connection, candidate):
     parameters = (staff_id, case_no) if case_no is not None else (staff_id,)
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT obligation.obligation_identity,obligation.due_date,"
+            "SELECT obligation.case_no,obligation.staff_id,obligation.obligation_kind,"
+            "obligation.obligation_identity,obligation.due_date,"
             "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligation.obligation_identity) AS has_installments,"
             "COALESCE((SELECT plan.scheme FROM finance_case_subsidy_plan_events plan WHERE plan.case_no=obligation.case_no ORDER BY plan.version DESC LIMIT 1),'')='split' AS requires_funding_split,"
             + effective_staff_obligation_amount('obligation') + " AS full_amount_ntd,COALESCE(projection.net_paid_ntd,0) AS settled_total_ntd,"
@@ -992,10 +1089,23 @@ def _resolve_staff_payout(connection, candidate):
             "ORDER BY obligation.obligation_identity",
             parameters,
         )
-        rows = tuple(cursor.fetchall())
+        rows = _filter_competing_obligations(
+            tuple(cursor.fetchall()),
+            case_no=case_no,
+            counterparty_key="staff_id",
+            counterparty_id=staff_id,
+            purpose_key="obligation_kind",
+            allowed_purposes=frozenset({"service_pay"}),
+            exact_identities=_exact_obligation_targets(candidate),
+        )
         if is_sinopac or is_taishin:
             from infrastructure.mysql.staff_payout_repository import query_staff_funding_portions
             funding = 'client' if is_sinopac else 'subsidy'
+            rows = _filter_competing_obligations(
+                rows,
+                purpose_key="funding_kind",
+                allowed_purposes=frozenset({funding}),
+            )
             scoped_rows = []
             for row in rows:
                 if not row.get('has_installments'):
@@ -1045,6 +1155,13 @@ def _resolve_staff_payout(connection, candidate):
             return replace(candidate,disposition=FinanceImportDisposition.BUSINESS_PENDING,available_actions=('resolve_owning_domain_target',),pending_reason=reason)
         targets = matches[0]
     else:
+        if any(row.get('due_date') is None for row in rows):
+            return replace(
+                candidate,
+                disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                available_actions=('resolve_owning_domain_target',),
+                pending_reason='due_date_missing',
+            )
         targets = _unique_monthly_payout_targets(rows, trans_date, candidate.amount.amount)
     if targets is None:
         return candidate
