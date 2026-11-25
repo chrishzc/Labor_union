@@ -10,6 +10,7 @@ from api.middleware.compression import ResponseCompressionMiddleware
 
 @asynccontextmanager
 async def _management_lifespan(_):
+    from api.dependencies.admin_auth import ensure_development_line_configuration
     from api.dependencies.knowledge_retrieval import ensure_builtin_knowledge_catalog
     from infrastructure.mysql.mysql_adapter import close_connection_pools
     from infrastructure.mysql.nas_mutations import ensure_nas_procedures
@@ -23,6 +24,7 @@ async def _management_lifespan(_):
     except Exception:
         pass
     ensure_builtin_knowledge_catalog()
+    ensure_development_line_configuration()
     from api.dependencies.registration_runtime import registration_maintenance_runtime
     try:
         with registration_maintenance_runtime():
@@ -33,15 +35,7 @@ async def _management_lifespan(_):
 
 def management_app():
     from api.main import app
-    from api.routes.line_table_images import private_router as private_table_images_router
-    from api.routes.nas_line_operations import private_router as private_line_operations_router
     app.router.lifespan_context = _management_lifespan
-    if not getattr(app.state, "private_line_media_attached", False):
-        app.include_router(private_table_images_router)
-        app.state.private_line_media_attached = True
-    if not getattr(app.state, "private_line_operations_attached", False):
-        app.include_router(private_line_operations_router)
-        app.state.private_line_operations_attached = True
     return app
 
 
@@ -59,16 +53,18 @@ async def _line_lifespan(_):
 
 
 def line_app():
-    from api.routes.line_table_images import proxy_router as table_images_proxy_router
+    from fastapi import APIRouter
     from api.line_webhook_boundary import canonical_line_webhook
     from api.routes import (
-        line_identity, line_order_change, line_staff_self_service,
-        private_operations, line_system_config,
+        line_candidate_contact, line_deposit_payment, line_feedback, line_identity,
+        line_mobile_admin, line_mobile_staff_leave_coordination, line_order_change,
+        line_service_help, line_staff_self_service, line_system_config,
+        line_table_images, matches, notification_task_actions, private_operations,
+        staff_leave_intake,
     )
-    from api.routes.nas_line_operations import public_router as line_operations_router
     app = FastAPI(title="LINE public service", docs_url=None, redoc_url=None, openapi_url=None,
                   lifespan=_line_lifespan)
-    app.include_router(table_images_proxy_router)
+    app.include_router(line_table_images.router)
     app.add_middleware(ResponseCompressionMiddleware, minimum_size=1024, compresslevel=5)
     app.add_api_route("/webhook/line", canonical_line_webhook, methods=["POST"])
     app.include_router(line_identity.page_router)
@@ -79,8 +75,33 @@ def line_app():
     for route in line_identity.public_router.routes:
         if "/admin/" not in route.path:
             app.router.routes.append(route)
-    for router in (line_order_change.router, line_staff_self_service.router,
-                   line_operations_router):
+    postponement_prefix = "/api/v1/line/staff-self-service/leave-results"
+    postponement_paths = {f"{postponement_prefix}/{step}" for step in ("cases", "preview", "propose")}
+    postponement_operations = APIRouter()
+    postponement_operations.routes.extend(
+        route for route in staff_leave_intake.router.routes if route.path in postponement_paths
+    )
+    app.add_api_route(
+        f"{postponement_prefix}/submit", staff_leave_intake.submit_leave_result,
+        methods=["POST"], include_in_schema=False,
+    )
+    for router in (
+        line_order_change.router,
+        line_staff_self_service.router,
+        line_deposit_payment.router,
+        line_service_help.public_router,
+        line_feedback.router,
+        line_mobile_admin.router,
+        line_mobile_staff_leave_coordination.router,
+        notification_task_actions.mobile_router,
+        matches.resume_router,
+        postponement_operations,
+        line_candidate_contact.page_router,
+        line_deposit_payment.page_router,
+        line_service_help.page_router,
+        line_mobile_admin.page_router,
+        matches.resume_page_router,
+    ):
         app.include_router(router)
     for route in private_operations.router.routes:
         if route.path in {"/internal/v1/runtime/check", "/internal/v1/runtime/line/run-once"}:

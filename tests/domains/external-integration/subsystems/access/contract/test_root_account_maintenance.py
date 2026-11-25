@@ -93,15 +93,14 @@ def test_rename_is_atomic_with_revocation_and_audit(monkeypatch, failure):
 
 def test_interactive_denied_auth_never_prompts_operation(monkeypatch, tmp_path, capsys):
     (tmp_path / ".env").touch()
-    (tmp_path / ".env.nas-maintenance").touch()
-    settings = {"host": "localhost", "port": 33331, "database": "lu_test_example", "runtime": {}}
+    settings = {"host": "127.0.0.1", "port": 3306, "database": "union_db", "runtime": {}}
     monkeypatch.setattr(terminal, "_require_stopped_runtime", MagicMock())
     monkeypatch.setattr(terminal, "_target_settings", lambda _: settings)
     monkeypatch.setattr(terminal, "_connection_factory", MagicMock())
     monkeypatch.setattr(terminal, "totp_cipher_from_settings", MagicMock())
     monkeypatch.setattr(terminal, "_secret", MagicMock(return_value="example"))
     monkeypatch.setattr("builtins.input", MagicMock(side_effect=[
-        "ROOT localhost:33331/lu_test_example", "root-example",
+        "ROOT 127.0.0.1:3306/union_db", "root-example",
     ]))
     monkeypatch.setattr(terminal, "verify_root", MagicMock(
         side_effect=maintenance.RootMaintenanceRejected("example rejection"),
@@ -111,19 +110,54 @@ def test_interactive_denied_auth_never_prompts_operation(monkeypatch, tmp_path, 
     assert "修改登入帳號" not in capsys.readouterr().out
 
 
-def test_connection_preserves_pinned_ca_and_rejects_mysql_without_tls(monkeypatch):
+@pytest.mark.parametrize("database", ["union_db", "custom_db"])
+def test_target_settings_accepts_env_without_nas_pin_or_tls(tmp_path, monkeypatch, database):
+    for key in (
+        "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD", "DB_PASSWORD_FILE",
+        "DB_SSL_MODE", "DB_SSL_CA", "DB_SSL_CERT", "DB_SSL_KEY",
+        "ACCESS_CONTROL_TOTP_KEYRING", "ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    (tmp_path / ".env").write_text(
+        "APP_ENV=production\n"
+        "DB_HOST=127.0.0.1\n"
+        "DB_PORT=3306\n"
+        f"DB_DATABASE={database}\n"
+        "DB_USER=union_app\n"
+        "DB_PASSWORD=synthetic-password\n"
+        "DB_SSL_MODE=disabled\n",
+        encoding="utf-8",
+    )
+    settings = terminal._target_settings(tmp_path)
+    assert settings["host"] == "127.0.0.1"
+    assert settings["port"] == 3306
+    assert settings["database"] == database
+    assert settings["tls"] == {}
+
+
+def test_connection_factory_supports_non_tls_and_preserves_optional_tls(monkeypatch):
     conn, cursor = _connection()
-    cursor.fetchone.return_value = ("Ssl_cipher", "")
+    cursor.fetchone.return_value = ("union_db", datetime.now(timezone.utc).replace(tzinfo=None))
     mysql_connect = MagicMock(return_value=conn)
     monkeypatch.setattr(terminal.pymysql, "connect", mysql_connect)
-    settings = {
+
+    plain_settings = {
+        "host": "127.0.0.1", "port": 3306, "database": "union_db",
+        "runtime": {"DB_USER": "union_app", "DB_PASSWORD": "synthetic-password"},
+        "tls": {},
+    }
+    connected = terminal._connection_factory(plain_settings)()
+    assert connected is conn
+    plain_options = mysql_connect.call_args.kwargs
+    assert "ssl" not in plain_options
+
+    tls_settings = {
         "host": "nas.example.test", "port": 3306, "database": "union_db",
         "runtime": {"DB_USER": "example", "DB_PASSWORD": "synthetic-password"},
         "tls": {"ssl": {"ca": "synthetic-pinned-ca.pem", "check_hostname": True}},
     }
-    with pytest.raises(maintenance.RootMaintenanceRejected, match="未使用 TLS"):
-        terminal._connection_factory(settings)()
-    options = mysql_connect.call_args.kwargs
-    assert options["ssl"] == settings["tls"]["ssl"]
-    assert not any(key.startswith("ssl_") for key in options)
-    conn.close.assert_called_once()
+    connected_tls = terminal._connection_factory(tls_settings)()
+    assert connected_tls is conn
+    tls_options = mysql_connect.call_args.kwargs
+    assert tls_options["ssl"] == tls_settings["tls"]["ssl"]
+    assert not any(key.startswith("ssl_") for key in tls_options)

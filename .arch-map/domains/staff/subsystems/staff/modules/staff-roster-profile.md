@@ -129,6 +129,7 @@ flowchart LR
 ```
 
 ## Verification
+- 1086 資格證據：`validation/receipts/PROV-STAFF-WEB-FEEDBACK-local-additive-qualification-20261125.json`（`QUAL-1086-20261125`）。紀錄涵蓋新建與保留資料候選；不代表現用資料庫已升級或客戶頁通過。
 - layout_status: `custom_current`
 - test_root: `tests/domains/staff/subsystems/staff/modules/staff-roster-profile/`
 - test_root: `ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roster-profile/`

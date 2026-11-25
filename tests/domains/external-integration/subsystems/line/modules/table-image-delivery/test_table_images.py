@@ -370,21 +370,14 @@ def test_existing_action_wording_is_preserved_when_image_body_copy_is_retired(ke
     assert json.loads(saved['templates'][0]['content']) == values
 
 
-def test_png_routes_fail_closed_and_private_machine_gate_is_distinct_from_the_image_bearer():
+def test_png_routes_fail_closed_with_cache_and_referrer_headers():
     from api.routes import line_table_images as routes
-    from api.dependencies.internal_service_auth import require_internal_service, InternalServicePrincipal
     web = FastAPI()
     web.include_router(routes.router)
-    web.include_router(routes.private_router)
     query = SimpleNamespace(read=lambda reference: render_table_image(document()))
     web.dependency_overrides[routes.get_table_image_query] = lambda: query
-    web.dependency_overrides[require_internal_service] = lambda: InternalServicePrincipal('line-media-proxy', 'local_shared_key')
     with TestClient(web) as client:
-        assert client.post('/internal/v1/line-media/table-images/' + token()).status_code == 403
-        web.dependency_overrides[require_internal_service] = lambda: InternalServicePrincipal('wrong-service', 'nas_service_token')
-        assert client.post('/internal/v1/line-media/table-images/' + token()).status_code == 403
-        web.dependency_overrides[require_internal_service] = lambda: InternalServicePrincipal('line-media-proxy', 'nas_service_token')
-        response = client.post('/internal/v1/line-media/table-images/' + token())
+        response = client.get('/api/v1/line/table-images/' + token())
         assert response.status_code == 200 and response.headers['content-type'] == 'image/png'
         assert response.headers['cache-control'] == 'private, no-store'
         assert response.headers['referrer-policy'] == 'no-referrer'

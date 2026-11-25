@@ -77,10 +77,10 @@ def test_file_changed_during_confirmation_is_preserved(entry):
     assert list(path.parent.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("setting,value", [("APP_ENV", "production"), ("DB_HOST", "nas.example.test"), ("DB_DATABASE", "other_database")])
-def test_runtime_refuses_production_remote_and_wrong_database(entry, monkeypatch, setting, value):
+@pytest.mark.parametrize("setting,value", [("DB_HOST", "nas.example.test"), ("DEPLOYMENT_PROFILE", "nas")])
+def test_runtime_refuses_remote_host(entry, monkeypatch, setting, value):
     from infrastructure.mysql import mysql_adapter
-    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv(setting, value)
     monkeypatch.setattr(mysql_adapter, "_database_config_from_environment", lambda: {
         "host": cli.os.getenv("DB_HOST", "127.0.0.1"), "database": cli.os.getenv("DB_DATABASE", "union_db")})
@@ -88,6 +88,18 @@ def test_runtime_refuses_production_remote_and_wrong_database(entry, monkeypatch
     # Exercise the real guard, not the fixture's isolated runtime adapter.
     with pytest.raises(cli.ConfigurationBlocked):
         REAL_RUNTIME(entry[0])
+
+
+@pytest.mark.parametrize("environment,database", [("production", "union_db"), ("production", "custom_union_db"), ("development", "custom_db")])
+def test_runtime_accepts_production_and_custom_database_on_loopback(entry, monkeypatch, environment, database):
+    from infrastructure.mysql import mysql_adapter
+    monkeypatch.setenv("APP_ENV", environment)
+    monkeypatch.setenv("DB_DATABASE", database)
+    monkeypatch.setattr(mysql_adapter, "_database_config_from_environment", lambda: {
+        "host": "127.0.0.1", "database": cli.os.getenv("DB_DATABASE", "union_db")})
+    monkeypatch.setattr(cli, "load_dotenv", Mock())
+    resolved_database, _ = REAL_RUNTIME(entry[0])
+    assert resolved_database == database
 
 
 REAL_RUNTIME = cli._runtime

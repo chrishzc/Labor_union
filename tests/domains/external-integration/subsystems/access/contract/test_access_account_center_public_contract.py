@@ -15,52 +15,6 @@ from subsystems.access.authentication_session import AccountCommandReceipt, Admi
 from subsystems.access import authentication_session as authentication
 
 
-@pytest.mark.parametrize("failure", [None, "database", "identity", "version", "duplicate", "audit"])
-def test_local_root_recovery_preserves_identity_and_is_atomic(monkeypatch, failure):
-    monkeypatch.setenv("APP_ENV", "development")
-    conn = MagicMock()
-    cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.side_effect = [
-        {"database_name": "wrong" if failure == "database" else "lu_test_recovery"},
-        {"id": 2 if failure == "identity" else 1, "enabled": 1,
-         "access_control_version": 2 if failure == "version" else 1},
-        {"id": 2} if failure == "duplicate" else None,
-    ]
-    audit = MagicMock(side_effect=RuntimeError("audit failed") if failure == "audit" else None)
-    monkeypatch.setattr(authentication, "_record_admin_audit_with_cursor", audit)
-    args = dict(connection_factory=lambda: conn, target_database="lu_test_recovery",
-                expected_account_id=1, expected_version=1, username="MockRoot",
-                password="mock-only-password", reason="authorized local test")
-    if failure:
-        with pytest.raises((ValueError, RuntimeError)):
-            authentication.recover_local_root_credentials(**args)
-        conn.commit.assert_not_called()
-        conn.rollback.assert_called_once()
-    else:
-        assert authentication.recover_local_root_credentials(**args) == 2
-        conn.commit.assert_called_once()
-        updates = [call.args for call in cursor.execute.call_args_list if call.args[0].startswith("UPDATE")]
-        assert len(updates) == 2
-        assert updates[0][1][0] == "mockroot"
-        assert authentication.verify_admin_password(args["password"], updates[0][1][1])
-        assert updates[0][1][2] == 1
-        assert "admin_sessions" in updates[1][0]
-        assert "mock-only-password" not in str(audit.call_args)
-        assert "admin_totp" not in str(cursor.execute.call_args_list)
-    conn.close.assert_called_once()
-
-
-@pytest.mark.parametrize("environment,target", [("production", "lu_test_recovery"), ("development", "union_db")])
-def test_local_root_recovery_rejects_nonlocal_scope(monkeypatch, environment, target):
-    monkeypatch.setenv("APP_ENV", environment)
-    factory = MagicMock()
-    with pytest.raises(ValueError):
-        authentication.recover_local_root_credentials(
-            connection_factory=factory, target_database=target, expected_account_id=1,
-            expected_version=1, username="mock", password="mock-only-password", reason="test")
-    factory.assert_not_called()
-
-
 @pytest.mark.parametrize("length,accepted", [(9, False), (10, True), (11, True), (12, True)])
 def test_create_reset_and_bootstrap_password_minimum(length, accepted) -> None:
     password = "x" * length
@@ -82,42 +36,6 @@ def test_create_reset_and_bootstrap_password_minimum(length, accepted) -> None:
     else:
         with pytest.raises(ValueError, match="10 個字元"):
             hash_admin_password(password)
-
-
-@pytest.mark.parametrize("failure", [None, "encryption", "target", "version", "audit"])
-def test_local_root_mfa_reset_is_scoped_atomic_and_preserves_password(monkeypatch, failure):
-    monkeypatch.setenv("APP_ENV", "development")
-    conn = MagicMock()
-    factory = MagicMock(return_value=conn)
-    cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.side_effect = [
-        {"database_name": "wrong" if failure == "target" else "lu_test_recovery"},
-        {"id": 1, "enabled": 1, "access_control_version": 9 if failure == "version" else 2},
-    ]
-    monkeypatch.setattr(authentication, "totp_cipher_from_environment",
-                        MagicMock(side_effect=ValueError("no key") if failure == "encryption" else None))
-    monkeypatch.setattr(authentication, "_record_admin_audit_with_cursor",
-                        MagicMock(side_effect=RuntimeError("audit failed") if failure == "audit" else None))
-    args = dict(connection_factory=factory, target_database="lu_test_recovery",
-                expected_account_id=1, expected_version=2, reason="authorized offline reset")
-    if failure:
-        with pytest.raises((ValueError, RuntimeError)):
-            authentication.reset_local_root_mfa(**args)
-        conn.commit.assert_not_called()
-        if failure == "encryption":
-            factory.assert_not_called()
-        else:
-            conn.rollback.assert_called_once()
-    else:
-        assert authentication.reset_local_root_mfa(**args) == 3
-        conn.commit.assert_called_once()
-        updates = [call.args for call in cursor.execute.call_args_list if call.args[0].startswith("UPDATE")]
-        assert len(updates) == 6
-        assert all(args[1] == (1,) for args in updates)
-        assert "password_hash" not in str(updates)
-        assert "username" not in str(updates)
-        assert "admin_totp_recovery_codes" in str(updates)
-        assert "admin_mfa_enrollment_challenges" in str(updates)
 
 
 def test_account_directory_projection_excludes_roles_and_personal_metadata(monkeypatch) -> None:

@@ -77,7 +77,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 顯示 `passed` 後完整重啟網站，即可建立 root、掃描 QR Code、驗證綁定、保存復原碼，再返回登入。
 
 工具將隨機金鑰保存於本機 `.env`，不顯示金鑰，也不寫入 MySQL。
-有效金鑰會原樣保留；僅本機 development／local／test 且帳號、TOTP、session 及 challenge 資料全空時，才允許建立金鑰。
+有效金鑰會原樣保留；僅本機資料庫且帳號、TOTP、session 及 challenge 資料全空時，才允許建立金鑰。
 若已有帳號或驗證資料，會拒絕替換，應恢復原金鑰。請妥善保管 `.env`，不要貼出或提交 Git。
 預覽可執行 `python -m scripts.configure_initial_totp_key`，不加 `--apply` 不會寫檔。
 
@@ -87,7 +87,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 工具會顯示本機資料庫、root id 與版本；只有輸入畫面指定的完整確認文字才會清除該初始帳號。
 完成後重新啟動網站，即可重新設定帳號密碼，並依「建立 root → QR Code → TOTP 驗證 → 保存復原碼 → 返回登入」完成設定。
 
-僅允許本機 development／local／test 的 `union_db` 或 `lu_test_*`，且帳號安全版本必須仍為初始值 `1`。曾更換帳密／安全設定、已綁定／使用過 TOTP、登入過、已有其他管理員或業務資料引用時拒絕重置。
+僅允許本機資料庫，且帳號安全版本必須仍為初始值 `1`。曾更換帳密／安全設定、已綁定／使用過 TOTP、登入過、已有其他管理員或業務資料引用時拒絕重置。
 業務資料、稽核紀錄及加密金鑰保留；不需提供舊帳密。取消不會異動資料。
 只想先檢查時，執行 `python -m scripts.reset_incomplete_root_setup`；加上 `--apply` 才會進入確認操作。
 
@@ -121,8 +121,8 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
     union_db_20261030_180000.zip
 ```
 
-每日備份是不停機的 SQL 一致性快照。ZIP 內含 `.sql.gz`、`.sha256` 校驗檔與成功紀錄 `.json`；`_partial/` 保存未完成材料，`_maintenance/` 保存升級／復原紀錄。舊備份仍按原格式查核，不須重包；匯入時串流解壓。
-復原可由預設備份區或 Windows 選檔窗選取已驗證的 ZIP；舊 `.sql.gz` 須保留完整同名 `.sha256` 和對應 `_receipts/` 成功紀錄。選檔等待操作人員，不設 30 秒時限；取消不連線或修改資料庫。技術人員也可用 `--backup-file` 指定來源。手動來源唯讀、不搬移、不改 `.env`。復原紀錄仍寫入設定的備份區。損壞、不完整或經 symlink／junction 的來源不匯入；詳細前提見下方同名復原流程。
+每日備份是不停機的 SQL 一致性快照。ZIP 內含 `.sql.gz`、`.sha256` 校驗檔與成功紀錄 `.json`；`_partial/` 保存未完成材料，`_maintenance/` 保存適用的升級紀錄。舊備份仍按原格式查核，不須重包；匯入時串流解壓。
+復原可由預設備份區或 Windows 選檔窗選取已驗證的 ZIP；舊 `.sql.gz` 須保留完整同名 `.sha256` 和對應 `_receipts/` 成功紀錄。選檔等待操作人員，不設 30 秒時限；取消不連線或修改資料庫。技術人員也可用 `--backup-file` 指定來源。手動來源唯讀、不搬移、不改 `.env`。同名復原不在備份區寫入跨次紀錄。損壞、不完整或經 symlink／junction 的來源不匯入；詳細前提見下方同名復原流程。
 一般手動備份不由復原流程覆蓋或刪除；請維護人員定期確認成功備份、可用容量及獨立設備副本。備份有完整個資，僅授權人員可存取，不提供網頁下載。
 
 合約、模板及其他業務附件的根目錄另依[受控檔案正式規格 §8.2](../../.arch-map/requirements/30_Controlled_File_Storage_NAS正式規格.md)；上方 SQL 備份的專案路徑預設不適用於業務附件。部署切換不自動搬移既有附件。
@@ -130,7 +130,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 新受控附件由背景 worker 在原交易提交後驗證並歸檔；舊檔的識別與下載不改，失敗保留暫存供核對。本機開發使用非 NAS 根目錄時，保留既有明確合約／媒體路徑及舊 staging 讀取；不會自動搬移現存資料，此調整不修改現有 `.env`。
 
 升級會先備份，再在新的資料庫副本執行既有 migration 與資料保留驗證。通過驗證及原帳號連線測試後，才切換正式電腦 `.env` 的資料庫名稱。**升級時的原庫、舊備份及失敗副本都保留。**
-復原依[同名復原流程](../../.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore)進行，庫名與 `.env` 不變，選定備份 A 保留；本次備份 B 與唯一暫存資料庫在成功後刪除，失敗時保留，清理中斷時只接續清理。
+復原依[同名復原流程](../../.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore)進行，庫名與 `.env` 不變，選定備份 A 保留；暫存庫及系統暫存目錄無論成功、失敗都清理；不新增備份 B、跨次進度檔或 `_maintenance/`。替換前驗證未過時保留原庫，不執行替換。
 完成後重新啟動工會系統，使用原帳號及 MFA 確認登入、資料查詢與操作。升級切換後已產生新資料時，不能直接切回舊庫而忽略新資料。
 失敗時不要清空或重複執行，保留畫面與備份紀錄交給維護人員；備份版本不符會停止切換。
 

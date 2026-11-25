@@ -123,8 +123,8 @@ def test_sql_backup_restore_and_current_upgrade_noop_keep_source_accounts_and_ne
                     assert not any("restore" in row[0] for row in cursor.fetchall())
         connection.close()
         upgrade_run = nas.upgrade(settings)
-        assert upgrade_run == settings["backup_root"] / "_maintenance" / "direct_upgrade"
-        assert json.loads((upgrade_run / "result.json").read_text(encoding="utf-8")) == {"status": "completed", "database": source_db}
+        assert upgrade_run is None
+        assert not (settings["backup_root"] / "_maintenance" / "direct_upgrade").exists()
         assert runtime.read_bytes() == runtime_before
         assert list(settings["backup_root"].glob("????-??/*.zip")) == [backup]
         for user, password in (("fixture_app", app_password), ("fixture_reader", read_password)):

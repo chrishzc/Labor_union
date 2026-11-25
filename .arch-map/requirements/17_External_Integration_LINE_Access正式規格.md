@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：External Integration Boundary、Access Control Domain、Knowledge Retrieval Domain
-- 單一負責範圍：外部平台整合共同安全不變量（`SystemPrincipal`、去敏安全回條、durable inbox／outbox 與 Reply 5xx 不確認處理）、Access Control（統一業務授權、單一 enabled `root` 生命週期、兩段式登入／MFA、8 小時 session 上限、統一網頁建帳 bootstrap 與離線 root 維護、管理員密碼雜湊與帳號命令收據、NAS DB P01–P10 受限權限程序與 worker TLS 憑證、`Security Audit` 兩年遮罩查詢與歸檔、`Data Browser` 六源相容唯讀契約），以及 Knowledge Retrieval 審查發布與來源 citation 契約。
+- 單一負責範圍：外部平台整合共同安全不變量（`SystemPrincipal`、去敏安全回條、durable inbox／outbox 與 Reply 5xx 不確認處理）、Access Control（統一業務授權、單一 enabled `root` 生命週期、兩段式登入／MFA、8 小時 session 上限、統一網頁建帳 bootstrap 與離線 root 維護、管理員密碼雜湊與帳號命令收據、NAS DB P01–P10 受限權限程序、`Security Audit` 兩年遮罩查詢與歸檔、`Data Browser` 六源相容唯讀契約），以及 Knowledge Retrieval 審查發布與來源 citation 契約。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Migration 與 Cutover](10_Global_保留資料Migration與Cutover_Subsystem.md)、[LINE Gateway、Inbox 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[Case Import 與非市民 Redis 待審](17B_Case_Import與非市民Redis待審正式規格.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Access Control Production Cutover](25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
 
 ## 2. Global External Integration Boundary
@@ -29,7 +29,7 @@
 - **全體內部人員同等業務權限**：所有已登入且 `enabled` 的內部使用者擁有完整業務功能集合（包含刪除假日／資格／偏好、替換匯入／虛擬帳號／排班、異常重查、封存與知識清理）；不以職稱、部門或 role bundle 做業務功能差異授權。唯「帳號中心」僅供唯一 enabled `root` 使用（非業務權限差異）。
 - **人工操作極簡化互動**：依 [Global 共同契約 §2.4](00_Global_共同契約.md#24-管理端一次點擊送出與選填原因)，內部寫入操作改採一次點擊送出、原因選填。
 - **NAS 資料庫權限分離（`NAS-DB-01～03`）**：日常執行帳號無直接 `DELETE`／`DDL`／`GRANT OPTION`／`CREATE USER`；刪除一律透過專用不可登入 DEFINER 預存程序 `P01`–`P10` 執行（P01 日期、P02 資格／交通差、P03 六項關聯、P04 偏好集合、P05 歷史人員替換、P06 案號虛擬帳號 mapping、P07 被替換排班世代、P08 失效異常投影、P09 過期已封存 audit、P10 核准刪除之 knowledge target），不自開 COMMIT／ROLLBACK；runtime profile 持有作用域內 `LOCK TABLES` 供 `FOR UPDATE` 鎖定讀取。LINE 對外帳號僅讀寫 LINE 自身必要邊界，嚴禁持有 `P01`–`P10` 或管理端寫入憑證。
-- **Worker 機器身分隔離（`NAS-WORKER-01～02`）**：NAS production 使用 `nas_service_token`（逐服務獨立憑證＋隔離網段 HTTPS/mTLS，嚴禁攜帶 DB 帳密或以 `X-Internal-Service-Name` 冒充他服務）；私人操作僅於隔離網路開放，Local 開發共用金鑰嚴禁延伸至正式環境。
+- **Worker 內部服務驗證與邊界隔離**：Worker 與 monitor 透過 loopback `local_shared_key`（至少 32 字元之共享金鑰與 `X-Internal-Service-Name` 操作端點綁定，缺漏、過短或非支援模式皆 fail closed）呼叫 Private Operations API，嚴禁攜帶 DB 帳密或冒充他服務操作。
 - **禁止 legacy key**：human mutation 嚴禁接受 `X-Legacy-Shared-Key`。
 
 ### 3.2 根事實、登入、統一網頁 Bootstrap 與離線 Root 重置
@@ -39,7 +39,7 @@
 - **統一網頁首次建帳 Bootstrap（`GET／POST /api/v1/admin/setup`）**：
   - 不分主機環境皆以 MySQL `admin_root_account` 是否存在 `root` 決定首次設定（全面移除環境變數自動建 root 分支；需同源與 HTTPS 或 loopback）。
   - `bootstrap_root_admin` 於同一 UoW 建立 `root` 與 `enrollment_pending` factor（競爭回 `409`）；流程固定「建 root → 立即顯示 QR → 驗證綁定 → 保存復原碼 → 清除機密返回登入頁」。缺少 TOTP 加密金鑰須停機執行離線工具 `scripts.configure_initial_totp_key --apply`（確認空帳號與空安全表後原子寫入 `.env`，不於網站啟動時自動生鑰）。
-- **錯誤初始 Root 本機離線重置（`scripts.reset_incomplete_root_setup`）**：僅限 `localhost` development／test（`union_db`／`lu_test_*`），確認安全版本仍為 `1`、零登入／LINE 綁定／業務 FK 且人工輸入 `RESET ROOT <database> <id>` 後，於單一 UoW 移除未完成建帳狀態並保留稽核記錄（禁止新增 HTTP 重置或 break-glass 端點）。
+- **錯誤初始 Root 本機離線重置（`scripts.reset_incomplete_root_setup`）**：僅限 `localhost` 資料庫連線（`configure_initial_totp_key` 與 `reset_incomplete_root_setup` 皆不限 `APP_ENV` 或資料庫名稱），確認安全版本仍為 `1`、零登入／LINE 綁定／業務 FK 且人工輸入 `RESET ROOT <database> <id>` 後，於單一 UoW 移除未完成建帳狀態並保留稽核記錄（禁止新增 HTTP 重置或 break-glass 端點）。
 
 ### 3.3 帳號指令、Security Audit 與 Data Browser 相容查詢
 
@@ -49,7 +49,7 @@
 
 ### 3.4 Windows 主機離線管理 root 帳號
 
-- 正式環境的例行入口為工會 Windows 主機上的 `Windows管理.bat` → `11 管理 root 帳號`。由授權維運人員在維護窗操作，確認正式資料庫目標及 TLS 連線，提交前須停止受管管理服務並等已受理的請求結束。帳號中心與 HTTP API 不提供這項維運操作。憑證遺失時依 [正式環境離線復原規格](25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md#2-業務場景與不變量) 處理。
+- 例行入口為工會 Windows 主機上的 `Windows管理.bat` → `11 管理 root 帳號`。由授權維運人員依 `.env` 資料庫連線設定操作（不限 `APP_ENV`、資料庫名稱，亦不要求 `.env.nas-maintenance` 或強制 TLS），提交前須停止受管管理服務並等已受理的請求結束。帳號中心與 HTTP API 不提供這項維運操作。憑證遺失時依 [正式環境離線復原規格](25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md#2-業務場景與不變量) 處理。
 - 選擇 `11` 後，先互動輸入目前的 root 登入帳號、密碼與已啟用驗證器的 TOTP 動態碼。沿用登入的限流與防重放規則。只有同一個啟用中的 root 三項均驗證成功，才顯示操作選單。失敗或取消即結束本次操作。驗證結果只在本次互動有效，綁定 root ID 與帳號安全版本，且最多允許提交一項操作。
 
 | 選項 | 操作與確認 |
@@ -79,7 +79,7 @@
 ## 5. 驗收標準
 
 1. Unit／Subsystem 驗證簽章與 payload 分層隔離、Reply 5xx 不確認禁止重送 Push、兩段 MFA／setup bootstrap／離線重置守衛、`P01–P10` 定點授權刪除與直接 DELETE 拒絕、Knowledge 作者不得自審發布及無來源 fail closed。
-2. Global／隔離 MySQL 驗證同源 setup 競爭 409、worker 憑證防冒充、兩年稽核遮罩與 Data Browser 唯讀 6 源穩定契約。
+2. Global／隔離 MySQL 驗證同源 setup 競爭 409、worker 內部服務驗證與操作邊界隔離、兩年稽核遮罩與 Data Browser 唯讀 6 源穩定契約。
 
 ### 5.1 Access Control 驗收
 

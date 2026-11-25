@@ -178,14 +178,12 @@
 
 - Only the new, unexposed NAS candidate may reuse its complete admission snapshot for exact/allowed retired-absent parts. Pending/partial statement checks and final whole-copy preservation/currentness/switch fresh reads remain canonical and mandatory; existing local/DSM callers retain their original path.
 
-### 同名復原協調與接續
+### 同名復原協調
 
-本節描述依 [同名復原契約](../../../../../requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore) 接線的復原協調；行為驗證由下方既有 Windows maintenance 測試入口承接。
+本節描述依 [同名復原契約](../../../../../requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore) 接線的單次同名復原流程；行為驗證由下方既有 Windows maintenance 測試入口承接。
 
-- `scripts/nas_database_maintenance.py:restore` 維持既有入口，由 `SameNameRestore` 與 `RestorePhase` 協調固定目標庫、備份A、本次備份B、唯一暫存庫及最終匯出物。目標身分、設定 digest、各備份 digest、驗證基準、逐步進度與已完成的清理項目均綁定同一操作；不以庫名前綴搜尋可刪除目標。備份B與最終匯出ZIP位於該次 `_maintenance/` 子目錄，與一般備份列表及排程淘汰分開。
-- 復原紀錄先於對應副作用持久化。原庫存在時先完整備份B；暫存庫匯入A並經既有 migration、Access 收據保護與固定程序準備後，輸出可驗證 SQL，再以該輸出重建同名目標。最終結構、筆數與主鍵證據沿用 migration 能力；復原協調器補上 deterministic full-row fingerprints，核對完整列內容，不以 checksum 或主鍵雜湊替代完整列證據。不更改 `.env`。
-- 復原使用同一 MySQL 維護鎖排除其他維護寫入，Windows 入口另沿既有管理鎖與 runtime 停止讀回排除啟動競爭。重跑先核對既有紀錄與實際狀態：未完成操作不再建立另一庫；已證明資料復原成功者只接續清理；重建或匯入結果未明者先核對證據，不盲目重播。清理逐項讀回，本次備份B、暫存庫及匯出物全部移除才完成；備份A與其他操作資料不動。
-- 啟動保護由 `scripts/check_runtime_database.py` 呼叫 `restore_startup_blocked`，唯讀核對本機 sanitized 目標綁定及備份區 journal。實際 host／port／database 的復原未驗證或紀錄不完整時阻擋啟動；資料已驗證而只待清理時，不將其誤判為未驗證資料。完成後移除本機 marker，後續啟動不依賴備份區在線。狀態不含憑證、SQL 或業務原文。Local Runtime 僅消費此 guard，不擁有復原 writer。
+- `scripts/nas_database_maintenance.py:restore` 維持既有入口，採單次獨立執行（不寫入 `same-name-restore.json` 或備份區 `_maintenance/` 進度／暫存資料夾）：先驗證備份A，再於系統暫存目錄與唯一暫存庫完成升級、收據保護、固定程序及證據核對，通過後重建並匯入同名目標庫；不論成功或失敗，皆於 `finally` 撤銷暫存庫權限、刪除暫存庫並清除系統暫存目錄，失敗時只保留錯誤訊息。不更改 `.env`。
+- `scripts/check_runtime_database.py` 呼叫 `restore_startup_blocked` 固定回傳 `False`。
 
 ```mermaid
 flowchart TD

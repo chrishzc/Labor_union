@@ -26,7 +26,6 @@ from infrastructure.http.private_operations_client import (
     PrivateOperationsClient,
     discard_database_credentials,
 )
-from infrastructure.runtime.worker_credentials import prepare_credentials
 import infrastructure.http.private_operations_client as private_operations_client
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
 from subsystems.line.runtime_monitoring import RuntimeHealthObservation, RuntimeHealthStatus
@@ -97,8 +96,32 @@ def test_private_endpoint_accepts_local_service_key(monkeypatch) -> None:
     ]
 
 
-def test_production_rejects_local_shared_key(monkeypatch) -> None:
+@pytest.mark.parametrize("environment", ["production", "development", None])
+def test_private_endpoint_accepts_local_shared_key_across_environments(monkeypatch, environment) -> None:
+    if environment is None:
+        monkeypatch.delenv("APP_ENV", raising=False)
+    else:
+        monkeypatch.setenv("APP_ENV", environment)
+    monkeypatch.delenv("INTERNAL_SERVICE_AUTH_MODE", raising=False)
+    monkeypatch.setenv("INTERNAL_SERVICE_SHARED_KEY", LOCAL_KEY)
+
+    response = _client().post(
+        "/internal/v1/runtime/check",
+        json={},
+        headers={
+            "X-Internal-Service-Key": LOCAL_KEY,
+            "X-Internal-Service-Name": "test-worker",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"status": "ready", "service": "test-worker"}
+
+
+@pytest.mark.parametrize("mode", ["nas_service_token", "google_oidc", "unsupported"])
+def test_retired_or_unsupported_auth_mode_fails_closed(monkeypatch, mode) -> None:
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", mode)
     monkeypatch.setenv("INTERNAL_SERVICE_SHARED_KEY", LOCAL_KEY)
 
     response = _client().post(
@@ -111,80 +134,20 @@ def test_production_rejects_local_shared_key(monkeypatch) -> None:
     assert response.json()["detail"]["code"] == "internal_service_authentication_unavailable"
 
 
-def _nas_client(monkeypatch, tmp_path):
-    prepare_credentials(tmp_path)
+@pytest.mark.parametrize("shared_key", ["", "too-short"])
+def test_missing_or_short_shared_key_fails_closed(monkeypatch, shared_key) -> None:
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", "nas_service_token")
-    monkeypatch.setenv("INTERNAL_SERVICE_CREDENTIALS_FILE", str(tmp_path / "api/verifiers.json"))
-    app = FastAPI()
-    app.include_router(private_operations.router)
-    return TestClient(app, base_url="https://private-api.example"), {
-        "Authorization": "Bearer " + (tmp_path / "durable-job-worker/token").read_text().strip(),
-        "X-Internal-Service-Name": "durable-job-worker",
-    }
-
-
-def test_production_accepts_bound_nas_machine_credential(monkeypatch, tmp_path) -> None:
-    client, headers = _nas_client(monkeypatch, tmp_path)
-    response = client.post(
-        "/internal/v1/runtime/check",
-        json={},
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["service"] == "durable-job-worker"
-
-
-def test_production_rejects_credential_claiming_another_worker(monkeypatch, tmp_path) -> None:
-    client, headers = _nas_client(monkeypatch, tmp_path)
-    headers["X-Internal-Service-Name"] = "line-worker"
-    response = client.post(
-        "/internal/v1/runtime/check",
-        json={},
-        headers=headers,
-    )
-
-    assert response.status_code == 401
-    assert response.json()["detail"]["retryable"] is False
-
-
-def test_production_rejects_revoked_machine_credential(monkeypatch, tmp_path) -> None:
-    client, headers = _nas_client(monkeypatch, tmp_path)
-    headers["Authorization"] = "Bearer revoked-machine-token"
-    response = client.post(
-        "/internal/v1/runtime/check",
-        json={},
-        headers=headers,
-    )
-
-    assert response.status_code == 401
-    assert "revoked-machine-token" not in response.text
-
-
-def test_production_rejects_cleartext_machine_credential(monkeypatch, tmp_path) -> None:
-    _, headers = _nas_client(monkeypatch, tmp_path)
-    response = _client().post(
-        "/internal/v1/runtime/check",
-        json={},
-        headers=headers,
-    )
-
-    assert response.status_code == 426
-    assert response.json()["detail"]["code"] == "internal_service_https_required"
-
-
-def test_missing_environment_fails_closed(monkeypatch) -> None:
-    monkeypatch.delenv("APP_ENV", raising=False)
-    monkeypatch.setenv("INTERNAL_SERVICE_SHARED_KEY", LOCAL_KEY)
+    monkeypatch.delenv("INTERNAL_SERVICE_AUTH_MODE", raising=False)
+    monkeypatch.setenv("INTERNAL_SERVICE_SHARED_KEY", shared_key)
 
     response = _client().post(
         "/internal/v1/runtime/check",
         json={},
-        headers={"X-Internal-Service-Key": LOCAL_KEY},
+        headers={"X-Internal-Service-Key": shared_key or "x" * 32},
     )
 
     assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "internal_service_authentication_unavailable"
 
 
 def test_durable_endpoint_delegates_one_complete_cycle(monkeypatch) -> None:
@@ -606,33 +569,23 @@ def test_private_client_retries_transient_failure_within_budget(monkeypatch) -> 
     assert delays == [0.25]
 
 
-def test_private_client_uses_own_machine_credential_and_ca(monkeypatch, tmp_path) -> None:
-    captured = {}
-
-    def fake_post(url, **kwargs):
-        captured.update(kwargs["headers"])
-        assert kwargs["verify"] == "private-api-ca.pem"
-        return _Response(200, {"data": {"status": "ready"}})
-
+def test_private_client_rejects_retired_nas_service_token_mode(monkeypatch) -> None:
     monkeypatch.setattr(
         "infrastructure.http.private_operations_client.requests.post",
-        fake_post,
+        lambda *args, **kwargs: pytest.fail("must fail before request"),
     )
-    prepare_credentials(tmp_path)
-    token_path = tmp_path / "durable-job-worker/token"
     client = PrivateOperationsClient(
         "durable-job-worker",
         base_url="https://private-api.example",
-        shared_key="",
+        shared_key=LOCAL_KEY,
         auth_mode="nas_service_token",
-        token_file=str(token_path),
-        ca_file="private-api-ca.pem",
     )
 
-    client.check()
+    with pytest.raises(PrivateOperationError) as error:
+        client.check()
 
-    assert captured["Authorization"] == "Bearer " + token_path.read_text().strip()
-    assert "X-Internal-Service-Key" not in captured
+    assert error.value.retryable is False
+    assert error.value.code == "internal_service_authentication_unavailable"
 
 
 class _Response:

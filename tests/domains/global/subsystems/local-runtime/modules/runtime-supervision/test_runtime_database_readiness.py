@@ -120,41 +120,6 @@ def test_driver_error_does_not_print_credentials(database_environment, monkeypat
     assert '"status": "blocked"' in output
 
 
-@pytest.mark.parametrize(("phase", "changed_target", "blocked"), [
-    ("prepared", {}, True),
-    ("importing_target", {}, True),
-    ("verifying_target", {}, True),
-    ("cleanup_pending", {}, False),
-    ("completed", {}, False),
-    ("corrupt", {}, True),
-    ("importing_target", {"DB_PORT": "3308"}, False),
-    ("importing_target", {"DB_HOST": "other.test"}, False),
-    ("importing_target", {"DB_DATABASE": "lu_test_neighbor"}, False),
-])
-def test_restore_state_guards_actual_runtime_target_without_db(database_environment, tmp_path, monkeypatch, phase, changed_target, blocked):
-    marker = nas._restore_marker(tmp_path / ".env")
-    marker.parent.mkdir(parents=True)
-    journal = tmp_path / "operation.json"
-    target = {"host": "nas.test", "port": 3307, "database": "lu_test_nas"}
-    candidate = "lu_nas_restore_20261123125159_01234567"
-    nas._restore_write(marker, {"target": target, "candidate": candidate, "journal": str(journal)})
-    if phase == "corrupt":
-        journal.write_text("{", encoding="utf-8")
-    else:
-        nas._restore_write(journal, {
-            "phase": phase, "target": target, "candidate": candidate,
-            "server_uuid": "11111111-1111-4111-8111-111111111111",
-            "archive_sha256": "f" * 64, "archive_path_sha256": "1" * 64, "environment_sha256": "2" * 64,
-            "target_existed": False, "verified_sha256": "3" * 64,
-            "evidence": {"schema_sha256": "4" * 64, "rows": {}},
-        })
-    for key, value in changed_target.items():
-        monkeypatch.setenv(key, value)
-    connect = Mock(side_effect=AssertionError("restore state check connected to a database"))
-    monkeypatch.setattr(readiness.pymysql, "connect", connect)
-    if blocked:
-        with pytest.raises(readiness.RuntimeDatabaseBlocked, match="restore"):
-            readiness.check_database(dry_run=True)
-    else:
-        assert readiness.check_database(dry_run=True)["status"] == "configured"
-    connect.assert_not_called()
+def test_restore_startup_blocked_is_always_false_for_single_run_restore(database_environment, tmp_path):
+    assert nas.restore_startup_blocked("nas.test", 3307, "lu_test_nas", environment_file=tmp_path / ".env") is False
+    assert readiness.check_database(dry_run=True)["status"] == "configured"

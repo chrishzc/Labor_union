@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：LINE Integration Domain（`domains/line/`、`subsystems/line/`）
-- 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、開工當天群組問候、服務開始與換人結果日期表群組通知、Rich Menu 草稿編輯與發布 saga、通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`），以及私人日誌照片傳輸代理（`NAS-LINE-04`）。
+- 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、開工當天群組問候、服務開始與換人結果日期表群組通知、Rich Menu 草稿編輯與發布 saga，以及通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`）。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)。
 
 ## 2. LINE Webhook Inbox 與 Delivery Task 骨架
@@ -127,12 +127,7 @@
   - [候選月嫂的案件資訊](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)使用表格 PNG 呈現資料。正式推薦的月嫂連結、案件資訊與回覆按鈕依[客戶確認包契約](02A_媒合候選池與客戶決定及通勤規格.md#32-客戶推薦確認手動更正與服務前整案換人r-04)組合。已提交的任務重試時沿用提交時保存的投遞格式。
   - 圖片快照與投遞任務在同一交易提交。`GET /api/v1/line/table-images/{token}` 以七日有效的圖片連結讀取快照，表格按快照渲染。既有已提交的履歷圖片任務仍讀提交時保存的 PNG；圖片連結維持既有簽章驗證，回應含 `private, no-store, nosniff, no-referrer`。圖片服務異常回 `503`。月嫂個人網頁不經此圖片快照端點提供。
 
-## 6. 私人日誌照片媒體傳輸（`NAS-LINE-04`）
-
-- NAS 環境對外日誌照片上傳與下載經專用隔離代理路由 `/internal/v1/line-media/`（由 `line-media-proxy` 憑證驗證原 LINE ID token、目前綁定與本人當日服務權限），公開 DB 帳號對受控附件與日誌主檔嚴格限制唯讀 `SELECT`。
-- 本人附件下載 `POST /api/v1/line/staff-self-service/service-day-logs/{log_id}/photos/{file_id}/download` 驗證該日誌附件歸屬後回傳私密 `JPEG/PNG` blob（`no-store/nosniff`，禁止 URL query 傳 token）。
-
-## 7. 驗收標準
+## 6. 驗收標準
 
 | S 情境 | T 任務 | A 操作 | R 可觀察結果 |
 |---|---|---|---|
@@ -145,4 +140,4 @@
 | 已開啟「雙方合意延期」客戶確認卡 | 核對草稿文案在卡片上的位置 | 依序跳到標題、開頭說明及按鈕，修改各欄內容，再點預覽中的按鈕 | 中央直接顯示文案欄位，公版資料由右側預覽直接帶入。各欄聚焦正確，草稿更新前仍顯示上一版卡片。新版保留原卡樣式並顯示修改後的文案。預覽按鈕只顯示用途，沒有發送或執行業務操作。 |
 
 1. 驗證 Inbox 斷點回滾重試與 `follow/unfollow` 保序、Worker 租約防止重播、群組 `綁定訂單／發送邀請` 與單人代班邀請各階段狀態分離。
-2. 驗證 `NAS-LINE-03` 退役端點 410 與 `/runtime/query` 去敏摘要、`LINE-006` 逐來源重播及 skip 解除、Rich Menu 三態草稿與 3-table saga、文案 `504px` 公版預覽、`table-images` 受眾薪資／費用分離，及 `NAS-LINE-04` 跨憑證下載防護。
+2. 驗證 `NAS-LINE-03` 退役端點 410 與 `/runtime/query` 去敏摘要、`LINE-006` 逐來源重播及 skip 解除、Rich Menu 三態草稿與 3-table saga、文案 `504px` 公版預覽，及 `table-images` 受眾薪資／費用分離。

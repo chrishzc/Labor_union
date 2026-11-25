@@ -16,8 +16,8 @@
 - `subsystems/line/table_image_query.py` — verify reference before readonly committed snapshot lookup.
 - `infrastructure/line/table_image_renderer.py` — in-memory PNG for tables and each PDF resume page. Resume pages use the same committed picture read and lead the customer confirmation Flex carousel in a single Push.
 - `infrastructure/line/table_image_logging.py` — redact capability URLs in uvicorn access and HTTPX transport logs without changing their typed formatter arguments.
-- `api/routes/line_table_images.py` — bounded PNG read; public NAS forwards through existing media machine identity to private API.
-- shared: `infrastructure/mysql/line_delivery_task_repository.py`, `subsystems/line/ports.py`, `infrastructure/line/messaging_api_adapter.py`, `infrastructure/http/line_media_client.py`, `api/main.py`, `api/nas_apps.py`.
+- `api/routes/line_table_images.py` — bounded PNG read (`GET /api/v1/line/table-images/{token}`).
+- shared: `infrastructure/mysql/line_delivery_task_repository.py`, `subsystems/line/ports.py`, `infrastructure/line/messaging_api_adapter.py`, `api/main.py`, `api/nas_apps.py`.
 - callers: `subsystems/scheduling/candidate_contact_pool_workflow.py`, `subsystems/scheduling/matching_notification_application.py`.
 - preview: `notification-rules-presentation` injects same renderer, only embeds sample/authorized preview PNG data; no delivery URL or token is exposed.
 
