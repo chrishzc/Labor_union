@@ -1453,7 +1453,7 @@ it.skipIf(!historicalContractPath)('隔離 MySQL 帳務 API 原回應經 strict 
     const original=drawer.getByRole('row',{name:new RegExp(formal.party)});
     expect(original).toHaveTextContent('NT$ 28,000');
     expect(original).toHaveTextContent('2026-11-03');
-    expect(registry.getByText(`${formal.party}／${formal.label}：28,000 元，應付日 2026-11-05`)).toBeVisible();
+    expect(registry.getByText(`已建立應付 · ${formal.party}／${formal.label}：28,000 元，應付日 2026-11-05 · 已核銷 0 元／剩餘 28,000 元`)).toBeVisible();
     await waitFor(()=>expect(screen.getAllByRole('region',{name:'歷史月嫂應付依據'})).toHaveLength(2));
     for(const region of screen.getAllByRole('region',{name:'歷史月嫂應付依據'})){
      const source=within(region);
