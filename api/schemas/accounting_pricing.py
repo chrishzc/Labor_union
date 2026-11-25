@@ -73,11 +73,13 @@ class PricingImpactView(PricingModel):
     covered_hours: float
     excess_hours: float
     client_amount: int
-    staff_covered_amount: int
-    staff_excess_amount: int
+    staff_covered_amount: int | None
+    staff_excess_amount: int | None
     staff_total_amount: int
     subsidy_amount: int
     subsidy_return_amount: int
+    case_total_amount: int
+    union_income_amount: int | None
 
 
 class CasePricingView(PricingModel):

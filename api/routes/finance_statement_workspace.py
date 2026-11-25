@@ -81,8 +81,14 @@ def _case_view(case):
     payload.pop("funding")
     payload.pop("customer_paid_ntd")
     payload["zero_stages"] = list(payload["zero_stages"])
-    for field in ("client_items", "staff_items", "transactions", "warnings", "bank_memos", "subsidy_payments"):
+    payload["accounting_pending_reasons"] = list(payload["accounting_pending_reasons"])
+    payload["stale_payment_evidence_identities"] = list(payload["stale_payment_evidence_identities"])
+    payload["pending_bank_row_identities"] = list(payload["pending_bank_row_identities"])
+    for field in ("client_items", "staff_items", "transactions", "warnings", "bank_memos", "subsidy_payments", "staff_accounting_availability"):
         payload[field] = list(payload[field])
+    for availability in payload["staff_accounting_availability"]:
+        availability["obligation_identities"] = list(availability["obligation_identities"])
+        availability["pending_reasons"] = list(availability["pending_reasons"])
     for field in ("client_items", "staff_items"):
         for item, projected in zip(getattr(case, field), payload[field]):
             projected.update(remaining_ntd=item.remaining_ntd, noncash_ntd=item.noncash_ntd)

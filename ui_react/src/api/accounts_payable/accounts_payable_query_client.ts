@@ -22,9 +22,21 @@ export type HistoricalUnpaidPayableCommand = {
 };
 
 const HistoricalPayrollSyncOutcomeSchema = z.discriminatedUnion('action', [
-  z.object({ case_no: z.string(), action: z.enum(['created', 'updated']) }),
   z.object({
-    case_no: z.string(), action: z.literal('skipped'), reason: z.string().min(1), detail: z.string().min(1).optional(),
+    case_no: z.string(),
+    action: z.enum(['created', 'updated']),
+    due_date: z.string().nullable().optional(),
+    payment_arrangement_pending: z.boolean().optional(),
+    pending_reason: z.string().nullable().optional(),
+    detail: z.string().nullable().optional(),
+  }),
+  z.object({
+    case_no: z.string(),
+    action: z.literal('skipped'),
+    reason: z.string().min(1),
+    pending_reason: z.string().nullable().optional(),
+    payment_arrangement_pending: z.boolean().optional(),
+    detail: z.string().min(1).optional(),
   }),
 ]);
 const HistoricalPayrollSyncResponseSchema = z.object({

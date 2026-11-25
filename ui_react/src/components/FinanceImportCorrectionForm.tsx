@@ -4,9 +4,10 @@ import { taipeiDate } from '../shared/taipeiTime';
  * Description: WF-04 銀行流水逐筆人工核對與核銷表單，支援預填已辨識案件或月嫂。
  */
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { financeImportCorrectionClient, financeRefundBlockerMessage, type FinanceImportCorrectionPreview, type FinanceImportCorrectionSelection } from '../api/finance_import/finance_import_correction_client';
+import { FinanceImportQueryError } from '../api/finance_import/finance_import_query_errors';
 import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
 import { StaffPayoutRemediationWorkbench, type StaffPayoutRemediationTarget } from './StaffPayoutRemediationWorkbench';
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
@@ -26,7 +27,7 @@ const refundModes = {
   overage: '退款超出，另列待追回款',
 };
 
-export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, bankAmount, governmentRefund = false, initialKind = 'client_receipt', initialCaseNo, initialCounterpartyName, lockedObligations, onPosted, onBusyChange }: {
+export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, bankAmount, governmentRefund = false, initialKind = 'client_receipt', initialCaseNo, initialCounterpartyName, lockedObligations, previewOnMount = false, onPosted, onBusyChange }: {
   rowIdentity: string; sourceLabel: string; staff: readonly { id: number; label: string }[];
   bankAmount?: number;
   governmentRefund?: boolean;
@@ -34,6 +35,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   initialCaseNo?: string;
   initialCounterpartyName?: string;
   lockedObligations?: readonly { id: string; label: string }[];
+  previewOnMount?: boolean;
   onPosted?: () => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
@@ -72,9 +74,11 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [completed, setCompleted] = useState(false);
-  const [identity] = useState(() => ({ idempotencyKey: `finance-correction-${crypto.randomUUID()}`, correlationId: `finance-correction-${crypto.randomUUID()}` }));
   const [retryCommand, setRetryCommand] = useState<CorrectionCommand | null>(null);
-  const closeLocked = busy || payoutBusy || groupBusy || (!!retryCommand && !submitted) || (!!jobId && !completed);
+  const correctionInFlight = useRef(false);
+  const initialPreviewStarted = useRef(false);
+  const hasLockedObligations = Boolean(lockedObligations?.length);
+  const closeLocked = busy || payoutBusy || groupBusy || Boolean(retryCommand || jobId);
   useEffect(() => { onBusyChange?.(closeLocked); return () => onBusyChange?.(false); }, [closeLocked, onBusyChange]);
   const loadCases = async (query: string, after?: string) => {
     caseRequest.current?.abort();
@@ -181,6 +185,15 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   };
 
   const invalidate = () => { setPayoutTarget(null); setPreview(null); setSelection(null); setMessage(''); setSubsidyError(''); };
+  const resetRejectedCorrection = (failureMessage: string) => {
+    invalidate();
+    setOptions(lockedObligations ?? []);
+    setSelected(lockedObligations?.map(item => item.id) ?? []);
+    setJobId(null);
+    setRetryCommand(null);
+    setSubmitted(false);
+    setMessage(failureMessage);
+  };
   const load = async () => {
     if (retryCommand) return;
     setBusy(true); invalidate(); setOptions([]); setSelected([]);
@@ -205,7 +218,8 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
     finally { setBusy(false); }
   };
   const review = async () => {
-    if (retryCommand) return;
+    if (retryCommand || correctionInFlight.current || selected.length === 0) return;
+    correctionInFlight.current = true;
     setBusy(true); invalidate();
     const request: FinanceImportCorrectionSelection = { row_identity: rowIdentity, classification_type: kind,
       target_obligation_identities: selected, refund_ledger_entry_identity: null, allow_partial_refund_recovery: (kind === 'client_refund' || kind === 'client_subsidy_return') && refundMode === 'partial',
@@ -216,27 +230,45 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
       if (!result.candidate.allocations.length || result.candidate.allocations.some((item) => !selected.includes(item.obligation_identity))) throw new Error('更正預覽包含未選取的款項。');
       setSelection(request); setPreview(result);
     } catch (error) { setMessage(error instanceof Error ? error.message : '更正預覽失敗。'); }
-    finally { setBusy(false); }
+    finally { correctionInFlight.current = false; setBusy(false); }
   };
-  const apply = async (checked?: CorrectionCommand) => {
-    const command = retryCommand ?? checked ?? (preview && selection ? { preview, selection, identity } : null);
-    if (!command || submitted) return;
+  const previewInitialSelection = useEffectEvent(() => { void review(); });
+  useEffect(() => {
+    if (!previewOnMount || !hasLockedObligations || initialPreviewStarted.current) return;
+    initialPreviewStarted.current = true;
+    previewInitialSelection();
+  }, [previewOnMount, hasLockedObligations]);
+  const apply = async () => {
+    if (!preview || !selection || submitted || correctionInFlight.current) return;
+    const command: CorrectionCommand = retryCommand ?? {
+      preview, selection,
+      identity: {
+        idempotencyKey: `finance-correction-${crypto.randomUUID()}`,
+        correlationId: `finance-correction-${crypto.randomUUID()}`,
+      },
+    };
+    correctionInFlight.current = true;
     setBusy(true); setSubmitted(true);
     try {
       const job = await financeImportCorrectionClient.apply(command.preview, command.selection, command.identity);
       setRetryCommand(null); setJobId(job.job_id); setMessage('更正已受理，正在確認核銷結果。');
       await readOutcome(job.job_id, command.preview);
+    } catch (error) {
+      if (
+        !retryCommand && error instanceof FinanceImportQueryError && !error.retryable
+        && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 408
+      ) {
+        resetRejectedCorrection(error.message);
+      } else {
+        setRetryCommand(command);
+        setSubmitted(false);
+        const detail = error instanceof Error ? `${error.message} ` : '';
+        setMessage(`${detail}更正結果尚未確認，請使用原操作重新確認。`);
+      }
     }
-    catch (error) {
-      setRetryCommand(command);
-      setSubmitted(false);
-      setMessage(`${error instanceof Error ? error.message : '更正結果未知。'} 請使用同一個確認更正操作重新確認。`);
-    }
-    finally { setBusy(false); }
+    finally { correctionInFlight.current = false; setBusy(false); }
   };
-  const readOutcome = async (selectedJob = jobId, checkedPreview = preview) => {
-    if (!selectedJob || !checkedPreview) return;
-    setBusy(true);
+  const readOutcome = async (selectedJob: string, checkedPreview: FinanceImportCorrectionPreview) => {
     try {
       let outcome = await financeImportCorrectionClient.queryOutcome(selectedJob);
       for (let attempt = 0; attempt < 9 && !['succeeded', 'failed', 'cancelled'].includes(outcome.status); attempt++) {
@@ -251,29 +283,50 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
           || outcome.receipt.preview_fingerprint !== checkedPreview.preview_fingerprint
         ) throw new Error('更正收據尚未確認，不能判定完成。');
         if (kind === 'client_refund' || kind === 'client_subsidy_return') {
-          const fresh = await clientSettlementRemediationClient.query(target, { includeNotDue: true });
-          const obligations = kind === 'client_refund' ? fresh.refund_obligations : fresh.subsidy_return_obligations;
-          setOptions(obligations.map((item) => ({ id: item.obligation_identity, label: `${fresh.case_no} · ${kind === 'client_refund' ? '客戶退款' : '客戶補助退款'} · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}${kind === 'client_refund' ? ` · ${item.obligation_type === 'adjustment' ? '退款調整' : '一般退款'} · 預計退款日 ${item.due_date ?? '未設定'}` : ''}` })));
+          const fresh = await clientSettlementRemediationClient.query(target, { includeNotDue: true }).catch(() => null);
+          const obligations = kind === 'client_refund' ? fresh?.refund_obligations : fresh?.subsidy_return_obligations;
+          if (fresh && obligations) {
+            setOptions(obligations.map((item) => ({ id: item.obligation_identity, label: `${fresh.case_no} · ${kind === 'client_refund' ? '客戶退款' : '客戶補助退款'} · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}${kind === 'client_refund' ? ` · ${item.obligation_type === 'adjustment' ? '退款調整' : '一般退款'} · 預計退款日 ${item.due_date ?? '未設定'}` : ''}` })));
+          }
           setSelected([]);
           const overage = checkedPreview.candidate.allow_refund_overage_recovery
             && checkedPreview.candidate.bank_amount_ntd > checkedPreview.candidate.allocations.reduce((sum, item) => sum + item.amount_ntd, 0);
           setMessage(overage ? '退款核銷完成；超退金額已另列待追回款，請至案件帳務查看。'
+            : !obligations ? '退款核銷完成，已確認核銷收據。'
             : obligations.length ? '退款核銷完成；已更新剩餘待退款，後續清冊只列餘額。' : kind === 'client_refund' ? '退款核銷完成；本案一般退款已退清。' : '客戶補助退款核銷完成；本案補助待退款已退清。');
         } else setMessage('帳務更正完成，已確認核銷收據。');
+        setJobId(null);
         setCompleted(true); onPosted?.();
+      } else if (outcome.status === 'failed' || outcome.status === 'cancelled') {
+        const failureCode = outcome.failure_code;
+        const isRefundFailure = outcome.status === 'failed' && (kind === 'client_refund' || kind === 'client_subsidy_return');
+        const fallback = isRefundFailure ? financeRefundBlockerMessage(undefined, kind)
+          : outcome.status === 'cancelled' ? '更正已取消，請重新查詢帳務資料。' : '更正未完成，請重新查詢帳務資料。';
+        const detail = isRefundFailure ? financeRefundBlockerMessage(failureCode, kind) : fallback;
+        resetRejectedCorrection(failureCode && detail === fallback ? `${detail}（${failureCode}）` : detail);
       } else {
-        if (outcome.status === 'failed' || outcome.status === 'cancelled') setCompleted(true);
-        setMessage(outcome.status === 'failed' && (kind === 'client_refund' || kind === 'client_subsidy_return')
-          ? financeRefundBlockerMessage(outcome.failure_code, kind)
-          : outcome.status === 'failed' || outcome.status === 'cancelled' ? '更正未完成，請重新查詢帳務資料。' : '更正仍在處理中。');
+        setMessage('更正仍在處理中。');
       }
-    } catch (error) { setMessage(error instanceof Error ? error.message : '無法讀取結果。'); }
-    finally { setBusy(false); }
+    } catch (error) {
+      const detail = error instanceof Error ? `${error.message} ` : '';
+      setMessage(`${detail}請重新查詢更正結果。`);
+    }
+  };
+  const querySubmittedCorrection = async () => {
+    if (!jobId || !preview || correctionInFlight.current) return;
+    correctionInFlight.current = true;
+    setBusy(true);
+    try {
+      await readOutcome(jobId, preview);
+    } finally {
+      correctionInFlight.current = false;
+      setBusy(false);
+    }
   };
   useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '退款核銷方式': refundModes[refundMode], '原因': reason }, { enabled: !groupOpen && (kind !== 'staff_payout' || !payoutTarget) && kind !== 'government_subsidy', busy: closeLocked, resetKey: completed, discard: () => { setSelected([]); setTarget(''); setReason(''); setRefundMode('exact'); invalidate(); } });
 
   return <section aria-label="銀行款項更正" className="order-case-review-note finance-correction-form">
-    <p>將這筆銀行紀錄對應至正確的客戶收款、客戶退款、月嫂付款或政府整期入款。金額由後端核對，不可手動標記已付。</p>
+    {!lockedObligations && <p>將這筆銀行紀錄對應至正確的客戶收款、客戶退款、月嫂付款或政府整期入款。金額由後端核對，不可手動標記已付。</p>}
     <fieldset disabled={busy || payoutBusy || groupOpen || submitted || retryCommand !== null}>
       {!lockedObligations && kind !== 'government_subsidy' && <label>款項用途<select value={kind} onChange={(event) => { if (retryCommand) return; setKind(event.target.value as typeof kind); setCaseSearch(''); setRefundMode('exact'); setTarget(''); setOptions([]); setSelected([]); invalidate(); }}><option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="client_subsidy_return">退客戶先墊補助</option><option value="staff_payout">月嫂付款</option><option value="government_subsidy">{subsidyLabel}</option></select></label>}
       {kind === 'government_subsidy' ? (
@@ -458,7 +511,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
       <button type="button" disabled={busy} onClick={() => void apply()}>確認核銷</button>
     )}
     {retryCommand && <button type="button" disabled={busy || submitted} onClick={() => void apply()}>以原操作確認更正結果</button>}
-    {jobId && <button type="button" disabled={busy} onClick={() => void readOutcome()}>重新查詢更正結果</button>}
+    {jobId && <button type="button" disabled={busy} onClick={() => void querySubmittedCorrection()}>重新查詢更正結果</button>}
     {message && <p role="status">{message}</p>}
   </section>;
 }

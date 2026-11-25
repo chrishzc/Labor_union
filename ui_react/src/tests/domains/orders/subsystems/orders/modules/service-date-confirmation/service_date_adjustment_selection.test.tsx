@@ -221,3 +221,22 @@ it('指定新日期時可合併一個分裂結果與另一個服務日', async (
     targets: [{ service_date: merged.service_date, staff_id: 3 }], reverse_receipt_id: null,
   });
 });
+
+
+it.each([
+  { outcome: 'failed', label: '重算失敗', reason_code: 'holiday_service_attribution_ambiguous' },
+  { outcome: 'preserved_cash_history', label: '已有正式收付，保留原帳', reason_code: 'formal_settlement_exists' },
+] satisfies { outcome: import('../../../../../../../api/scheduling/holiday_schemas').HolidayCaseRepricing['outcome']; label: string; reason_code: string }[])(
+  '日期儲存後保留 $outcome 帳務結果，不能冒稱完成', async ({ outcome, label, reason_code }) => {
+    mutations.apply.mockResolvedValue({ receipt_id: 42, scheduling_version: 6, confirmed_version: null,
+      case_result: { case_no: 'ADJUST-SELECTION', outcome, reason_code, case_total_amount: null } });
+    const adjust = editor();
+    chooseTarget(adjust);
+    fireEvent.click(adjust.getByRole('button', { name: `服務日期 ${independent.service_date}` }));
+    fireEvent.click(adjust.getByRole('button', { name: `服務日期 ${other.service_date}` }));
+    fireEvent.click(adjust.getByRole('button', { name: '儲存日期調整' }));
+    await waitFor(() => expect(adjust.getByText(new RegExp(label))).toBeInTheDocument());
+    expect(adjust.getByText(new RegExp(reason_code))).toBeInTheDocument();
+    expect(mutations.apply).toHaveBeenCalledTimes(1);
+  },
+);

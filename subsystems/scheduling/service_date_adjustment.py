@@ -1,5 +1,6 @@
 """Apply a versioned date adjustment in the Scheduling owner's unit of work."""
 
+from subsystems.scheduling.holiday_maintenance import HolidayCaseRepricingResult
 from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
@@ -36,6 +37,7 @@ class ServiceDateAdjustmentFacts:
     selectable_dates: tuple[date, ...]
     planned_owners: tuple[tuple[date, int], ...] = ()
     first_schedule_days: tuple[ServiceDay, ...] = ()
+    accounting_result: HolidayCaseRepricingResult | None = None
 
     @property
     def versions(self) -> tuple[int, int, int | None]:
@@ -62,6 +64,7 @@ class ServiceDateAdjustmentReceipt:
     receipt_id: int
     scheduling_version: int
     confirmed_version: int | None
+    case_result: HolidayCaseRepricingResult | None = None
 
 
 class ServiceDateAdjustmentRepository(Protocol):

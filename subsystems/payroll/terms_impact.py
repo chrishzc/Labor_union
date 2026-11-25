@@ -119,10 +119,13 @@ class PayrollTermsSourceFacts:
     staff_payment_due_date: date | None
     case_policy: CasePayrollPolicyTerms | None = None
     recovery_balances: tuple["PayrollRecoveryBalance", ...] = ()
+    double_pay_dates: tuple[date, ...] = ()
+    identity_status: str | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _IDENTITY_MAXIMUM_LENGTH)
         require_nonnegative_integer(self.payroll_version, "payroll version")
+        _validate_dates(self.double_pay_dates, "enabled holiday dates")
         if self.case_policy is not None and not isinstance(self.case_policy, CasePayrollPolicyTerms):
             raise TypeError("case payroll policy is invalid")
 
@@ -443,7 +446,12 @@ def _handover_root_actions(facts, root, total, key, children, change_identity, a
         MoneyNTD(previous), total, root.paid_net_amount, MoneyNTD(recovery_delta), key))
 
 
-def _impact_facts(source, scheduling, order_terms):
+def _impact_facts(source: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms) -> PayrollTermsImpactFacts:
+    enabled_dates = source.double_pay_dates
+    scheduling = replace(scheduling, assignments=tuple(
+        replace(item, double_pay_dates=tuple(day for day in item.service_dates if day in enabled_dates))
+        for item in scheduling.assignments
+    ))
     return PayrollTermsImpactFacts(source.case_no, source.payroll_version, scheduling, _payroll_terms(order_terms), source.source_terms, source.existing_obligations, source.staff_payment_due_date)
 
 
@@ -487,6 +495,7 @@ def _service_facts(facts):
     return tuple(
         OfficialAssignmentServiceFacts(
             item.candidate_key, item.staff_id, item.service_dates,
+            double_pay_dates=item.double_pay_dates,
             financial_assignment_identity=(
                 sources[item.source_assignment_id].financial_assignment_identity
                 if item.source_assignment_id in sources

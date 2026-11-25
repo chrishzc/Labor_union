@@ -585,6 +585,15 @@ def export_combined_reconciliation(
             application_year, quarter, get_connection
         )
     except ValueError as exc:
+        if str(exc) not in {
+            "application_year must be a Gregorian year",
+            "quarter must be 1, 2, 3, or 4",
+        }:
+            raise internal_query_error(
+                "combined_subsidy_export_source_invalid",
+                "核銷清冊來源資料不完整。",
+                "combined-subsidy-export",
+            ) from exc
         raise typed_http_error(
             400,
             "validation",

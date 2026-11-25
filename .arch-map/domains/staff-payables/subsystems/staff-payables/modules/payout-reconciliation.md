@@ -27,7 +27,9 @@
   source: staff-payout-owner-write
   target: .arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md#^staff-payout-reconciliation
 ```
-- 台新原始備註的唯一月嫂姓名與正式案件／指派關聯，可於原 Preview 投影方案一分期，選填六碼須與該案一致。交易月份由 Finance Import 自動配對檢查；六碼指定案件的跨月流水可走單筆人工核對，沿原 Preview／Apply 重驗對象、案件及款項。Apply 沿原 outer UoW 鎖來源、確認銀行方案及原 Payroll 分期，再核銷原月嫂義務。一般／歷史訂單同用資格，無方案或分期不直接視為無款；未達資格明示阻擋，方案不得使月嫂總應收增加。既有永豐自備款限制保留。
+- 台新原始備註的唯一月嫂姓名與正式案件／指派關聯，可於原 Preview 投影方案一分期，選填六碼須與該案一致。交易月份以原補助分期或 owner 預檢日期檢查；跨月只接受有效六碼唯一定位同案同月嫂的既有例外。清單人工資格由唯讀 owner 事實投影，原 Preview／Apply fresh-load 再驗月份、用途、對象、案件及款項，不能依 UI 隱藏按鈕保護。Apply 沿原 outer UoW 鎖來源、確認銀行方案及原 Payroll 分期，再核銷原月嫂義務。一般／歷史訂單同用資格，無方案或分期不直接視為無款；未達資格明示阻擋，方案不得使月嫂總應收增加。既有永豐自備款及正式人工補登來源限制保留。
+- `POST /api/v1/staff-payables/payout/preview`、`payout/apply`（差額沿 `payout-difference/preview`、`payout-difference/apply`）與 `GET /api/v1/jobs/{job_id}` 為原付款核對路徑；精確銀行來源 `finance_import_row_ids` 與所選 `obligation_identities` 隨預檢及命令傳遞，正式成功回執後重查來源與款項。入口顯示契約見 [WF-04](../../../../../requirements/22B_帳務差額處置與工作台UI正式規格.md#bank-subsidy-review-entry)。
+- 未知付款日的既有核對仍依 [支出配對契約](../../../../../requirements/22_銀行流水匯入與帳務異常處理正式規格.md#44-對帳單支出四階段配對與-0100-元手續費核銷)。單筆入口的人工跨月旗標只在已知補助日期時成立，不代替原 owner 的資格，也不把付款日、路由或額外完工條件加回核銷前置。
 - `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3。
 - `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md`。
 - #16 §2.2：非同步 Apply 的 `202 JobAccepted` 是受理，不是已核銷。付款事件、義務連結和成功收據在原 owner 的同一交易提交；以背景工作成功收據加正式根資料回讀為核銷證據。不等於所有款都結清，清償狀態以各選定義務回讀為準。

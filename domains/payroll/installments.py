@@ -37,7 +37,7 @@ def payroll_installments(candidate: AssignmentPayrollCandidate, completed_on: da
     total = candidate.total_payable.amount if effective_total is None else effective_total
     if not isinstance(total,int) or isinstance(total,bool) or total<0:
         raise ValueError('payroll_installment_amount_invalid')
-    subsidy = min(total, candidate.covered_salary) if candidate.directly_subsidized else 0
+    subsidy = min(total, candidate.covered_salary - candidate.covered_holiday_salary) if candidate.directly_subsidized else 0
     client = total - subsidy
     return tuple(PayrollInstallment(kind, amount,
         funding_due_date(completed_on, directly_subsidized=kind == "subsidy") if completed_on else None)

@@ -38,7 +38,7 @@ from infrastructure.mysql.staff_payable_correction_sql import (
     effective_staff_obligation_amount,
     selectable_staff_obligation,
 )
-from infrastructure.mysql.service_date_adjustment_repository import load_payroll_service_dates
+from infrastructure.mysql.service_date_adjustment_repository import load_holiday_priced_service_dates, load_payroll_service_dates
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -221,8 +221,14 @@ def _load_schedules(cursor, root, assignments, lock):
     generation_id = root["effective_generation_id"]
     if generation_id is None:
         return ()
-    return load_payroll_service_dates(
-        cursor, generation_id, assignments, int(root["service_days"]), lock=lock,
+    from infrastructure.mysql.order_terms_read_model import is_holiday_pricing_excluded
+    if is_holiday_pricing_excluded(cursor, {"case_no": root["case_no"], "status": root.get("order_status")}, lock=lock):
+        return load_payroll_service_dates(
+            cursor, generation_id, assignments, int(root["service_days"]), lock=lock,
+        )
+    return load_holiday_priced_service_dates(
+        cursor, generation_id, assignments, int(root["service_days"]),
+        Decimal(str(root["service_hours_per_day"])), lock=lock,
     )
 
 
@@ -379,6 +385,11 @@ def _service_facts(assignments, schedules):
             service_dates=tuple(
                 item["work_date"] for item in schedules[int(row["id"])]
             ),
+            holiday_hour_segments=tuple(
+                (item["work_date"], offset, hours)
+                for item in schedules[int(row["id"])]
+                for offset, hours in item.get("holiday_hour_segments", ())
+            ),
             financial_assignment_identity=next((
                 item["financial_assignment_identity"]
                 for item in schedules[int(row["id"])]
@@ -442,6 +453,10 @@ def _persist_action(cursor, persistence, action, ordinal):
         _create_service_obligation(cursor, persistence, action, ordinal)
         return
     if action.action is StaffObligationActionKind.REPLACE_UNPAID:
+        if (action.delta_amount.is_zero and action.due_date is not None
+                and isinstance(persistence.preview.payroll, HistoricalCasePayrollCandidate)):
+            _set_historical_missing_due_date(cursor, persistence, action)
+            return
         if (action.delta_amount.is_zero and action.due_date is not None
                 and not isinstance(persistence.preview.payroll, HistoricalCasePayrollCandidate)):
             _replace_missing_due_date(cursor, persistence, action, ordinal)
@@ -515,6 +530,20 @@ def _replace_unpaid_obligation(cursor, persistence, action, ordinal):
             action.obligation_identity,
             persistence.request.case_no,
         ),
+    )
+    if int(cursor.rowcount) != 1:
+        raise ValueError("staff_obligation_frozen")
+
+
+def _set_historical_missing_due_date(cursor, persistence, action):
+    owner = _obligation_owner(cursor, action.obligation_identity)
+    if owner["due_date"] is not None:
+        raise ValueError("staff_obligation_due_date_already_established")
+    cursor.execute(
+        "UPDATE staff_obligations SET due_date=%s "
+        "WHERE obligation_identity=%s AND case_no=%s "
+        "AND due_date IS NULL AND payout_history_exists=0 AND status='open'",
+        (action.due_date, action.obligation_identity, persistence.request.case_no),
     )
     if int(cursor.rowcount) != 1:
         raise ValueError("staff_obligation_frozen")

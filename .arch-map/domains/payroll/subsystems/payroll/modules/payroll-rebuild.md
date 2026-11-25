@@ -10,7 +10,7 @@
 
 服務完成可在 Orders 既有 UoW 呼叫 `synchronize_in_unit_of_work`，應付動作全部未變時不寫入重建結果；使用分段計價時仍同步分期。不建立新人工步驟，交易由呼叫方持有。
 
-純日期合併、分裂及復原使用 Scheduling 的原財務日期讀取投影，保留原受款人、時數、費率及樓層費分配。current generation 完整原列優先；僅純 Actual Start 的同月嫂 lineage 可承接最近完整基準，真正財務更正沿自身 current effective 口徑。
+除需求書定義的假日加成外，純日期合併、分裂及復原使用 Scheduling 的原財務日期讀取投影，保留原受款人、時數、費率及樓層費分配。current generation 完整原列優先；僅純 Actual Start 的同月嫂 lineage 可承接最近完整基準，真正財務更正沿自身 current effective 口徑。
 neutral 重排承接原財務指派身分作樓層費同餘數排序，計算結果仍使用 current assignment；此身分只存在於計算輸入，不新增資料庫或畫面欄位。
 
 ## Implementation
@@ -33,3 +33,15 @@ neutral 重排承接原財務指派身分作樓層費同餘數排序，計算結
 
 ## Change triggers
 Reconcile when rebuild input facts、projection contract or verification root changes.
+
+## 國定假日計價接線 ^payroll-rebuild-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: payroll-rebuild-holiday-pricing
+  target: ".arch-map/requirements/03_Payroll_Domain.md#^payroll-service-pricing"
+```
+- 假日計價接線由下列 owner 實作，驗證見既有測試入口。`payroll_rebuild_repository.py` 分開讀 Scheduling 實際有效日時數及原財務基準，`rebuild_workflow.py` 使用 assignment 凍結費率算月嫂服務薪資。一般與歷史入口分流，兩方收付 facts 經同一 caller UoW 重讀後才交 Payroll writer；不可單獨改未付款一邊。
+
+
+- 全額免自備未收付案件仍依22A §2.3重算月嫂應付並供正式 Query 讀回，負擔與分錄未定的差額獨立保留，不透過補助或客戶款補平。歷史精準重啟來源沿 `order_terms_read_model.py` 既有事件查詢傳入，與 Client Finance 及假日 writer 一致排除。

@@ -392,7 +392,9 @@ def _adjusted_days(facts, days):
 
 
 def _adjustment_query_payload(facts):
+    from dataclasses import asdict
     return {
+        "accounting_result": asdict(facts.accounting_result) if facts.accounting_result is not None else None,
         "days": _adjusted_days(facts, facts.days),
         "staff": [{"staff_id": staff_id, "staff_name": name} for staff_id, name in facts.staff],
         "pairs": [

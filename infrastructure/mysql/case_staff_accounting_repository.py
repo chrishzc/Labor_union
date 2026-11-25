@@ -1,6 +1,193 @@
 """Staff owner projection for one case, including effective historical facts."""
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+
+from pymysql.connections import Connection
+
+from domains.payroll.tiered_rates import funding_due_date
 from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount, selectable_staff_obligation
-from subsystems.staff_payables.case_accounting_query import StaffAccountingItem, StaffAccountingTransaction
+from subsystems.staff_payables.case_accounting_query import (
+    StaffAccountingAvailability, StaffAccountingItem, StaffAccountingTransaction,
+)
+
+
+def query_case_staff_accounting_availability(
+    connection: Connection, case_no: str,
+) -> tuple[StaffAccountingAvailability, ...]:
+    """Read each person's historical basis without running Payroll synchronization."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT o.status,o.service_days,o.service_hours_per_day,o.actual_end_date,"
+            "o.staff_payment_due_date,p.current_event_id AS day_event_id,"
+            "(SELECT receipt.id FROM historical_order_adoption_receipts receipt "
+            "WHERE receipt.case_no=o.case_no AND receipt.outcome='adopted' "
+            "ORDER BY receipt.id DESC LIMIT 1) AS adoption_receipt_id "
+            "FROM orders o LEFT JOIN historical_service_day_projections p ON p.case_no=o.case_no "
+            "WHERE o.case_no=%s", (case_no,),
+        )
+        root = cursor.fetchone()
+        if root is None or (root["adoption_receipt_id"] is None and root["day_event_id"] is None
+                            and not str(root["status"]).startswith("歷史")):
+            return ()
+        if root["day_event_id"] is not None:
+            cursor.execute(
+                "SELECT item.assignment_id,item.staff_id,s.name AS staff_name,"
+                "item.actual_service_days AS service_days,item.actual_service_hours AS service_hours,"
+                "item.hourly_rate_ntd,a.id IS NOT NULL AS assignment_valid,"
+                "(SELECT CASE WHEN COUNT(*)=1 THEN MIN(evidence.source_end_date) END "
+                "FROM historical_order_pairing_evidence evidence "
+                "WHERE evidence.receipt_id=%s AND evidence.assignment_id=item.assignment_id "
+                "AND evidence.staff_id=item.staff_id) AS source_end_date,"
+                "(SELECT COUNT(*) FROM historical_order_pairing_evidence evidence "
+                "WHERE evidence.receipt_id=%s AND evidence.assignment_id=item.assignment_id "
+                "AND evidence.staff_id=item.staff_id) AS pairing_evidence_count "
+                "FROM historical_service_day_items item "
+                "LEFT JOIN case_staff_assignments a ON a.id=item.assignment_id "
+                "AND a.staff_id=item.staff_id AND a.case_no=%s "
+                "LEFT JOIN staff s ON s.id=item.staff_id "
+                "WHERE item.event_id=%s ORDER BY item.item_ordinal",
+                (root["adoption_receipt_id"], root["adoption_receipt_id"], case_no, root["day_event_id"]),
+            )
+        else:
+            cursor.execute(
+                "SELECT evidence.assignment_id,evidence.staff_id,s.name AS staff_name,"
+                "o.service_days,o.service_days*o.service_hours_per_day AS service_hours,"
+                "COALESCE(rate.hourly_rate_ntd,base.hourly_rate_ntd) AS hourly_rate_ntd,"
+                "a.id IS NOT NULL AS assignment_valid,evidence.source_end_date,1 AS pairing_evidence_count,"
+                "(SELECT COUNT(DISTINCT sched.work_date) FROM staff_schedule sched "
+                "WHERE sched.case_no=receipt.case_no AND sched.assignment_id=a.id AND sched.staff_id=a.staff_id "
+                "AND sched.effective_marker=1 AND sched.is_work_day=1) AS schedule_service_days "
+                "FROM historical_order_pairing_evidence evidence "
+                "JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id "
+                "JOIN orders o ON o.case_no=receipt.case_no "
+                "LEFT JOIN case_staff_assignments a ON a.id=evidence.assignment_id "
+                "AND a.staff_id=evidence.staff_id AND a.case_no=receipt.case_no "
+                "LEFT JOIN staff s ON s.id=evidence.staff_id "
+                "LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=a.id "
+                "LEFT JOIN case_payroll_rate_policy_snapshots base ON base.case_no=receipt.case_no "
+                "WHERE evidence.receipt_id=%s AND evidence.resolution <> 'blank' ORDER BY evidence.assignment_id",
+                (root["adoption_receipt_id"],),
+            )
+        sources = tuple(cursor.fetchall())
+        cursor.execute(
+            "SELECT o.assignment_id,o.staff_id,s.name AS staff_name,o.obligation_identity,o.due_date,"
+            + effective_staff_obligation_amount("o") + " AS expected_ntd,"
+            "EXISTS(SELECT 1 FROM staff_obligation_installments part "
+            "WHERE part.obligation_identity=o.obligation_identity AND part.amount_ntd>0) AS has_installments,"
+            "EXISTS(SELECT 1 FROM staff_obligation_installments part "
+            "WHERE part.obligation_identity=o.obligation_identity AND part.amount_ntd>0 "
+            "AND part.due_date IS NULL) AS missing_installment_date,"
+            "EXISTS(SELECT 1 FROM staff_obligation_installments part "
+            "WHERE part.obligation_identity=o.obligation_identity AND part.amount_ntd>0 "
+            "AND part.funding_kind='client' AND part.due_date IS NULL) AS missing_client_date,"
+            "EXISTS(SELECT 1 FROM staff_obligation_installments part "
+            "WHERE part.obligation_identity=o.obligation_identity AND part.amount_ntd>0 "
+            "AND part.funding_kind='subsidy' AND part.due_date IS NULL) AS missing_subsidy_date "
+            "FROM staff_obligations o JOIN staff s ON s.id=o.staff_id "
+            "WHERE o.case_no=%s AND o.direction='payable_to_staff' AND o.status<>'cancelled' "
+            "AND " + selectable_staff_obligation("o") + " ORDER BY o.obligation_identity", (case_no,),
+        )
+        obligations = tuple(cursor.fetchall())
+
+    source_by_person = {}
+    for row in sources:
+        source_by_person.setdefault((row["assignment_id"], row["staff_id"]), []).append(row)
+    people = tuple(dict.fromkeys((*source_by_person, *((row["assignment_id"], row["staff_id"]) for row in obligations))))
+    if not people:
+        return (StaffAccountingAvailability(
+            None, None, "", (), "needs_review", ("historical_payroll_unique_assignment_required",),
+        ),)
+    result: list[StaffAccountingAvailability] = []
+    for assignment_id, staff_id in people:
+        person_sources = source_by_person.get((assignment_id, staff_id), ())
+        source = person_sources[0] if len(person_sources) == 1 else None
+        formal = tuple(row for row in obligations if (row["assignment_id"], row["staff_id"]) == (assignment_id, staff_id))
+        party = str((source or (formal[0] if formal else {})).get("staff_name") or "")
+        pairing_evidence_count = int(source["pairing_evidence_count"]) if source is not None else 0
+        source_is_unique = source is not None and bool(source["assignment_valid"]) and pairing_evidence_count == 1
+        end_date = _availability_date(source["source_end_date"]) if source is not None and source_is_unique else None
+        reasons: list[str] = []
+        if len(person_sources) > 1 or pairing_evidence_count > 1:
+            reasons.append("historical_payroll_assignment_source_ambiguous")
+        estimated_self_pay = estimated_subsidy = None
+        if formal:
+            if not person_sources or (source is not None and (not source["assignment_valid"] or pairing_evidence_count == 0)):
+                reasons.append("historical_payroll_assignment_source_missing")
+            if any(row["missing_installment_date"] for row in formal):
+                reasons.append("historical_payroll_installment_date_pending")
+                if end_date is not None:
+                    if any(row["missing_client_date"] for row in formal):
+                        estimated_self_pay = funding_due_date(end_date, directly_subsidized=False).isoformat()
+                    if any(row["missing_subsidy_date"] for row in formal):
+                        estimated_subsidy = funding_due_date(end_date, directly_subsidized=True).isoformat()
+                else:
+                    reasons.append("historical_payroll_end_date_missing")
+            recorded_due = None
+            if any(not row["has_installments"] and row["due_date"] is None for row in formal):
+                reasons.append("historical_payroll_due_date_missing")
+                recorded_due = _availability_date(root["staff_payment_due_date"])
+                if recorded_due is None:
+                    funding_known = False
+                    if (len(people) == len(obligations) == 1 and source_is_unique and end_date is not None
+                            and _positive_number(formal[0].get("expected_ntd"))):
+                        from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
+
+                        handoff = query_subsidy_payable_handoff(connection, case_no)
+                        total = int(formal[0]["expected_ntd"])
+                        subsidy = handoff.subsidy_ntd
+                        if (handoff.staff_subsidy_reason is None
+                                and handoff.scheme in {"split", "advance", "direct"}
+                                and subsidy is not None and 0 <= subsidy <= total):
+                            funding_known = True
+                            if handoff.scheme == "split" and subsidy:
+                                estimated_subsidy = funding_due_date(end_date, directly_subsidized=True).isoformat()
+                            if handoff.scheme != "split" or subsidy < total:
+                                estimated_self_pay = funding_due_date(end_date, directly_subsidized=False).isoformat()
+                    if not funding_known:
+                        reasons.append("historical_payroll_funding_source_missing")
+                        if end_date is None:
+                            reasons.append("historical_payroll_end_date_missing")
+            result.append(StaffAccountingAvailability(
+                assignment_id, staff_id, party, tuple(str(row["obligation_identity"]) for row in formal),
+                "formal", tuple(reasons), estimated_self_pay, estimated_subsidy,
+                recorded_due_date=recorded_due.isoformat() if recorded_due is not None else None,
+            ))
+            continue
+        if not person_sources or (source is not None and (not source["assignment_valid"] or pairing_evidence_count == 0)):
+            reasons.append("historical_payroll_assignment_source_missing")
+        if root["day_event_id"] is None and len(sources) > 1:
+            if source is not None and "schedule_service_days" in source:
+                if not _positive_number(source["schedule_service_days"]) or not _positive_number(root.get("service_hours_per_day")):
+                    reasons.append("historical_payroll_service_basis_missing")
+            else:
+                reasons.append("historical_payroll_service_attribution_missing")
+        elif source is not None and (not _positive_number(source["service_days"]) or not _positive_number(source["service_hours"])):
+            reasons.append("historical_payroll_service_basis_missing")
+        if source is not None and not _positive_number(source["hourly_rate_ntd"]):
+            reasons.append("payroll_rate_policy_not_found")
+        if end_date is None:
+            reasons.append("historical_payroll_end_date_missing")
+        result.append(StaffAccountingAvailability(
+            assignment_id, staff_id, party, (), "needs_review" if reasons else "not_established",
+            tuple(reasons) if reasons else ("historical_payroll_obligation_not_established",),
+        ))
+    return tuple(result)
+
+
+def _availability_date(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return None
+
+
+def _positive_number(value: object) -> bool:
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        return False
+    return number.is_finite() and number > 0
 
 
 def query_case_staff_accounting(connection, case_no, *, for_update=False):

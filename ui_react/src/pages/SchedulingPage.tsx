@@ -18,6 +18,8 @@ import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_direct
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import type { SchedulingCurrentAssignment, SchedulingCurrentProjection } from '../api/scheduling/scheduling_current_schemas';
 import { holidayClient } from '../api/scheduling/holiday_client';
+import type { HolidayCaseRepricing } from '../api/scheduling/holiday_schemas';
+import { HolidayRepricingResults } from '../components/HolidayRepricingResults';
 import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
 import { coordinatedServiceTime } from '../components/OrderServiceDateCalendar';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
@@ -289,16 +291,34 @@ function flowStateLabel(state: string): string {
 }
 
 function HolidayPolicyWorkspace() {
-  const year = taipeiCalendarDate(new Date()).year;
+  const [year, setYear] = useState(() => taipeiCalendarDate(new Date()).year);
   const [fromDate, setFromDate] = useState(`${year}-01-01`);
   const [toDate, setToDate] = useState(`${year}-12-31`);
   const [action, setAction] = useState<HolidayAction>('upsert');
   const [holidayDate, setHolidayDate] = useState(todayIsoDate());
   const [holidayName, setHolidayName] = useState('');
+  const [doublePay, setDoublePay] = useState(false);
   const [reason, setReason] = useState('');
   const submittingRef = useRef(false);
-  const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
+  const [holidayEditorTarget, setHolidayEditorTarget] = useState<'add' | string | null>(null);
   const [, setStoreRevision] = useState(0);
+  const rowRequests = useRef(new Map<string, { request: HolidayApplyRequest; key: string; committed: boolean }>());
+  const rowSubmitting = useRef(new Set<string>());
+  const [rowPending, setRowPending] = useState<ReadonlySet<string>>(new Set());
+  const [rowErrors, setRowErrors] = useState<Readonly<Record<string, string>>>({});
+  const [observedRows, setObservedRows] = useState<Readonly<Record<string, HolidayRow>>>({});
+  const [accountingResults, setAccountingResults] = useState<Readonly<Record<string, readonly HolidayCaseRepricing[]>>>({});
+  const [accountingReadError, setAccountingReadError] = useState('');
+  const [accountingReload, setAccountingReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setAccountingResults({});
+    setAccountingReadError('');
+    void holidayClient.accountingResults({ from_date: fromDate, to_date: toDate }).then(receipts => {
+      if (active) setAccountingResults(previous => ({ ...Object.fromEntries(receipts.map(item => [item.holiday_date, item.case_results])), ...previous }));
+    }).catch(() => { if (active) setAccountingReadError('帳務處理紀錄讀取失敗，請重新查詢。'); });
+    return () => { active = false; };
+  }, [fromDate, toDate, accountingReload]);
 
   useEffect(() => {
     const unsubscribe = holidayFlowStore.subscribe(() => setStoreRevision((value) => value + 1));
@@ -312,6 +332,45 @@ function HolidayPolicyWorkspace() {
   const draft = holidayFlowStore.get();
   const machine = resolveHolidayMachineState(draft);
   const calendar = draft?.calendar ?? null;
+  useEffect(() => { setObservedRows({}); }, [calendar]);
+  const toggleDoublePay = async (holiday: HolidayRow): Promise<void> => {
+    const date = holiday.holiday_date;
+    if (rowSubmitting.current.has(date)) return;
+    rowSubmitting.current.add(date);
+    setRowPending(new Set(rowSubmitting.current));
+    setRowErrors(previous => { const next = { ...previous }; delete next[date]; return next; });
+    const horizon = { from_date: fromDate, to_date: toDate };
+    try {
+      let pending = rowRequests.current.get(date);
+      if (!pending) {
+        const fresh = await holidayClient.query(horizon);
+        const current = fresh.holidays.find(item => item.holiday_date === date);
+        if (!current) throw new Error('該日假日資料已變更，請重新查詢。');
+        const command: HolidayPreviewRequest = { ...horizon, action: 'upsert', holiday_date: date,
+          holiday_name: current.holiday_name, is_double_pay_default: !holiday.is_double_pay_default };
+        const prepared = await holidayClient.preview(command);
+        pending = { request: { ...command, expected_calendar_version: prepared.command.expected_calendar_version,
+          preview_fingerprint: prepared.preview_fingerprint, reason: '' }, key: crypto.randomUUID(), committed: false };
+        rowRequests.current.set(date, pending);
+      }
+      if (!pending.committed) {
+        const receipt = await holidayClient.apply(pending.request, { idempotencyKey: pending.key });
+        setAccountingResults(previous => ({ ...previous, [date]: receipt.case_results ?? [] }));
+        pending.committed = true;
+      }
+      const readback = await holidayClient.query(horizon);
+      const result = readback.holidays.find(item => item.holiday_date === date);
+      if (!result) throw new Error('無法讀回該日的假日設定，請重試。');
+      setObservedRows(previous => ({ ...previous, [date]: result }));
+      rowRequests.current.delete(date);
+    } catch (error) {
+      if (error instanceof Error && 'status' in error && error.status === 409) rowRequests.current.delete(date);
+      setRowErrors(previous => ({ ...previous, [date]: error instanceof Error ? error.message : '儲存失敗，請重試。' }));
+    } finally {
+      rowSubmitting.current.delete(date);
+      setRowPending(new Set(rowSubmitting.current));
+    }
+  };
   const calendarMatchesHorizon = calendar?.planning_horizon.from_date === fromDate
     && calendar.planning_horizon.to_date === toDate;
   const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
@@ -324,7 +383,7 @@ function HolidayPolicyWorkspace() {
       action,
       holiday_date: holidayDate,
       holiday_name: action === 'upsert' ? holidayName.trim() || null : null,
-      is_double_pay_default: false,
+      is_double_pay_default: doublePay,
       from_date: fromDate,
       to_date: toDate,
       ...overrides,
@@ -340,31 +399,36 @@ function HolidayPolicyWorkspace() {
     if (!draft?.preview) return;
     const request = buildPreviewRequest();
     if (request) setHolidayDraft(request);
-  }, [action, fromDate, holidayDate, holidayName, toDate]);
+  }, [action, doublePay, fromDate, holidayDate, holidayName, toDate]);
 
   const query = () => {
     if (!fromDate || !toDate || fromDate > toDate || busy) return;
     void queryHolidayFlow({ from_date: fromDate, to_date: toDate }).catch(() => undefined);
   };
 
-  const handleOpenEditDrawer = (holiday: HolidayRow) => {
+  const handleOpenEditEditor = (holiday: HolidayRow) => {
     setAction('upsert');
     setHolidayDate(holiday.holiday_date);
     setHolidayName(holiday.holiday_name);
+    setDoublePay(holiday.is_double_pay_default);
     setReason('');
-    setHolidayDrawerOpen(true);
+    setHolidayEditorTarget(holiday.holiday_date);
   };
 
-  const handleOpenAddDrawer = () => {
+  const handleOpenAddEditor = () => {
     setAction('upsert');
     setHolidayDate(todayIsoDate());
     setHolidayName('');
+    setDoublePay(false);
     setReason('');
-    setHolidayDrawerOpen(true);
+    setHolidayEditorTarget('add');
   };
 
-  const apply = async () => {
-    const previewRequest = buildPreviewRequest();
+  const handleCloseEditor = () => {
+    setHolidayEditorTarget(null);
+  };
+
+  const apply = async (previewRequest = buildPreviewRequest()): Promise<void> => {
     if (!previewRequest || busy || submittingRef.current) return;
     submittingRef.current = true;
     try {
@@ -388,8 +452,144 @@ function HolidayPolicyWorkspace() {
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
-  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  const editorOpen = holidayEditorTarget !== null;
+  const editedRowVisibleInCalendar = Boolean(
+    holidayEditorTarget
+    && holidayEditorTarget !== 'add'
+    && calendar?.holidays.some(item => item.holiday_date === holidayEditorTarget),
+  );
+  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '雙倍': doublePay ? '開' : '關', '原因': reason }, { enabled: editorOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
 
+  const renderHolidayEditorPanel = () => (
+    <section
+      className="holiday-policy-inline-editor"
+      aria-label={action === 'delete' ? '刪除國定假日政策表單' : holidayEditorTarget === 'add' ? '新增國定假日政策表單' : '編輯國定假日政策表單'}
+    >
+      <div className="holiday-policy-inline-editor-header">
+        <h3>
+          {action === 'delete'
+            ? `🗑️ 刪除國定假日：${holidayName || holidayDate}`
+            : holidayEditorTarget === 'add'
+              ? '➕ 新增國定假日政策'
+              : `🗓️ 編輯國定假日政策：${holidayName || holidayDate}`}
+        </h3>
+        <button
+          type="button"
+          className="holiday-policy-btn-secondary"
+          onClick={handleCloseEditor}
+          disabled={busy}
+        >
+          取消
+        </button>
+      </div>
+
+      <div className="holiday-policy-form-grid">
+        <label>
+          變更類型
+          <select
+            aria-label="國定假日變更類型"
+            value={action}
+            disabled={busy}
+            onChange={(event) => {
+              const next = event.target.value as HolidayAction;
+              setAction(next);
+            }}
+          >
+            <option value="upsert">新增或更新</option>
+            <option value="delete">刪除國定假日</option>
+          </select>
+        </label>
+
+        <label>
+          國定假日日期
+          <input
+            aria-label="國定假日日期"
+            type="date"
+            value={holidayDate}
+            disabled={busy}
+            onChange={(event) => setHolidayDate(event.target.value)}
+          />
+        </label>
+
+        <label>
+          國定假日名稱
+          <input
+            aria-label="國定假日名稱"
+            value={holidayName}
+            disabled={busy || action === 'delete'}
+            maxLength={100}
+            placeholder="例如 端午節"
+            onChange={(event) => setHolidayName(event.target.value)}
+          />
+        </label>
+
+        <label className="holiday-policy-reason">
+          變更原因與審核註記（選填）
+          <textarea
+            aria-label="套用原因"
+            value={reason}
+            maxLength={500}
+            disabled={busy}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="holiday-policy-editor-actions">
+        <button
+          type="button"
+          className={action === 'delete' ? 'scheduling-danger' : 'scheduling-action'}
+          data-control-id="scheduling.holiday.apply"
+          disabled={!buildPreviewRequest() || busy}
+          onClick={() => void apply()}
+        >
+          {busy ? '⏳ 處理中…' : action === 'delete' ? '刪除國定假日' : '儲存國定假日變更'}
+        </button>
+        <button
+          type="button"
+          className="holiday-policy-btn-secondary"
+          onClick={handleCloseEditor}
+          disabled={busy}
+        >
+          收起
+        </button>
+      </div>
+
+      {calendar && !calendarMatchesHorizon && (
+        <small className="holiday-policy-notice">顯示的政策屬於先前查詢區間；儲存時會查詢目前區間的最新政策。</small>
+      )}
+
+      {draft?.receipt && (
+        <section className="holiday-policy-receipt" aria-live="polite">
+          <div className="holiday-policy-receipt-header">
+            <h3>國定假日政策已更新</h3>
+            <button
+              type="button"
+              className="holiday-policy-btn-secondary"
+              onClick={handleCloseEditor}
+            >
+              收起
+            </button>
+          </div>
+          <p>
+            {machine.type === 'observed' ? '已重新查詢並確認最新國定假日政策。' : '變更已受理，正在確認最新政策狀態。'}
+          </p>
+        </section>
+      )}
+
+      {errorText && <p className="holiday-policy-notice error" role="alert">{errorText}</p>}
+      {machine.type === 'outcome_unknown' && (
+        <button type="button" onClick={() => void retryHolidayApplyFlow().catch(() => undefined)}>
+          再次確認變更結果
+        </button>
+      )}
+      {machine.type === 'observation_failed' && (
+        <button type="button" onClick={() => void retryHolidayObservationFlow().catch(() => undefined)}>
+          重新查詢最新政策
+        </button>
+      )}
+    </section>
+  );
 
   return (
     <section className="holiday-policy-workspace" data-surface-id="scheduling.holiday-policy">
@@ -399,13 +599,12 @@ function HolidayPolicyWorkspace() {
           <h2>🗓️ 國定假日管理</h2>
           <p>排班前的初始建議預設跳過國定假日；人工已選日期與正式排班維持原安排。</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div className="holiday-policy-header-actions">
           <button
             type="button"
             className="btn-primary-action"
-            onClick={handleOpenAddDrawer}
+            onClick={handleOpenAddEditor}
             disabled={busy}
-            style={{ padding: '9px 16px', fontSize: '0.88rem', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer' }}
           >
             ➕ 新增國定假日
           </button>
@@ -414,11 +613,32 @@ function HolidayPolicyWorkspace() {
       </header>
 
       <OfficialHolidayCsvImport disabled={busy} onImported={importYear => {
+        setYear(importYear);
         setFromDate(`${importYear}-01-01`);
         setToDate(`${importYear}-12-31`);
       }} />
 
       <div className="holiday-policy-horizon">
+        <label className="holiday-policy-year-field">
+          年度
+          <input
+            aria-label="國定假日年度"
+            type="number"
+            min={1900}
+            max={9999}
+            value={year}
+            disabled={busy}
+            onChange={event => {
+              const selected = Number(event.target.value);
+              if (!Number.isInteger(selected) || selected < 1900 || selected > 9999) return;
+              setYear(selected);
+              const horizon = { from_date: `${selected}-01-01`, to_date: `${selected}-12-31` };
+              setFromDate(horizon.from_date);
+              setToDate(horizon.to_date);
+              void queryHolidayFlow(horizon).catch(() => undefined);
+            }}
+          />
+        </label>
         <label>
           查詢起日
           <input
@@ -444,7 +664,8 @@ function HolidayPolicyWorkspace() {
         </button>
       </div>
 
-      {!holidayDrawerOpen && errorText && <p className="holiday-policy-notice error" role="alert">{errorText}</p>}
+      {editorOpen && !editedRowVisibleInCalendar && renderHolidayEditorPanel()}
+      {!editorOpen && errorText && <p className="holiday-policy-notice error" role="alert">{errorText}</p>}
       {calendar && (
         <section className="holiday-policy-calendar" aria-label="國定假日日曆">
           <div className="holiday-policy-meta">
@@ -453,184 +674,86 @@ function HolidayPolicyWorkspace() {
           {calendar.holidays.length === 0 ? (
             <p className="holiday-policy-notice">此期間沒有國定假日資料。</p>
           ) : (
-            <ul className="holiday-policy-list" style={{ display: 'grid', gap: '10px' }}>
-              {calendar.holidays.map((holiday) => (
+            <ul className="holiday-policy-list">
+              {calendar.holidays.map(sourceHoliday => {
+                const holiday = observedRows[sourceHoliday.holiday_date] ?? sourceHoliday;
+                const isEditingRow = holidayEditorTarget === holiday.holiday_date;
+                const rowAccounting = accountingResults[holiday.holiday_date];
+                const rowError = rowErrors[holiday.holiday_date];
+                const showAccountingReadError = Boolean(accountingReadError && !rowAccounting);
+                const hasDetails = Boolean(rowAccounting || showAccountingReadError || rowError);
+
+                return (
                 <li
                   key={holiday.holiday_date}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '12px',
-                    padding: '12px 18px',
-                    borderRadius: '10px',
-                    background: '#ffffff',
-                    border: '1.5px solid #fed7aa',
-                    boxShadow: '0 1px 4px rgba(74, 69, 67, 0.04)',
-                  }}
+                  className={`holiday-policy-card${isEditingRow ? ' is-editing' : ''}`}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                    <time style={{ fontWeight: 800, fontSize: '0.92rem', color: '#9a3412', background: '#fff7ed', padding: '4px 10px', borderRadius: '6px', border: '1px solid #ffedd5' }}>
+                  <div className="holiday-policy-row-main">
+                    <time className="holiday-policy-date">
                       📅 {holiday.holiday_date}
                     </time>
-                    <strong style={{ fontSize: '1rem', color: '#1e1b19' }}>
+                    <strong className="holiday-policy-name">
                       {holiday.holiday_name}
                     </strong>
+                    <span className={`holiday-policy-pay-badge ${holiday.is_double_pay_default ? 'is-enabled' : 'is-disabled'}`}>
+                      {holiday.is_double_pay_default ? '雙倍已啟用' : '雙倍未啟用'}
+                    </span>
+                    <div className="holiday-policy-row-actions">
+                      <button
+                        type="button"
+                        className={holiday.is_double_pay_default ? 'holiday-policy-btn-secondary' : 'scheduling-action'}
+                        aria-label={`${holiday.holiday_date} ${holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}`}
+                        disabled={rowPending.has(holiday.holiday_date)}
+                        onClick={() => void toggleDoublePay(holiday)}
+                      >
+                        {holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}
+                      </button>
+                      <button
+                        type="button"
+                        className="holiday-policy-btn-secondary"
+                        aria-expanded={isEditingRow}
+                        onClick={() => (isEditingRow ? handleCloseEditor() : handleOpenEditEditor(holiday))}
+                        disabled={busy}
+                      >
+                        {isEditingRow ? '✏️ 編輯中' : '✏️ 編輯'}
+                      </button>
+                    </div>
                   </div>
 
-                  <div>
-                    <button
-                      type="button"
-                      className="scheduling-action"
-                      onClick={() => handleOpenEditDrawer(holiday)}
-                      disabled={busy}
-                      style={{
-                        padding: '7px 16px',
-                        fontSize: '0.86rem',
-                        border: '1px solid',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        fontWeight: 750,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      ✏️ 編輯
-                    </button>
-                  </div>
+                  {hasDetails && (
+                    <div className="holiday-policy-row-details">
+                      {rowAccounting && <HolidayRepricingResults results={rowAccounting} />}
+                      {showAccountingReadError && (
+                        <p className="holiday-policy-row-feedback">
+                          {accountingReadError}
+                          <button type="button" className="holiday-policy-btn-secondary" onClick={() => setAccountingReload(value => value + 1)}>
+                            重新讀取帳務紀錄
+                          </button>
+                        </p>
+                      )}
+                      {rowError && (
+                        <p className="holiday-policy-row-feedback is-error" role="alert">
+                          {rowError}
+                          <button
+                            type="button"
+                            className="holiday-policy-btn-secondary"
+                            disabled={rowPending.has(holiday.holiday_date)}
+                            onClick={() => void toggleDoublePay(holiday)}
+                          >
+                            重試
+                          </button>
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {isEditingRow && renderHolidayEditorPanel()}
                 </li>
-              ))}
+              ); })}
             </ul>
           )}
         </section>
       )}
-
-      {/* 國定假日政策編輯／新增抽屜 (Slide-over Drawer) */}
-      <Drawer
-        isOpen={holidayDrawerOpen}
-        onClose={() => setHolidayDrawerOpen(false)}
-        title={action === 'delete' ? `🗑️ 刪除國定假日：${holidayName || holidayDate}` : holidayName ? `🗓️ 編輯國定假日政策：${holidayName}` : '➕ 新增國定假日政策'}
-        size="wide"
-      >
-        <div style={{ display: 'grid', gap: '18px', padding: '4px' }}>
-          {/* 表單設定卡片 */}
-          <div style={{ background: '#fffaf8', padding: '18px 20px', borderRadius: '12px', border: '1.5px solid #fed7aa', display: 'grid', gap: '14px' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', color: '#9a3412', fontWeight: 700 }}>
-              ⚙️ 國定假日與薪資政策設定
-            </h3>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
-              <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
-                變更類型
-                <select
-                  aria-label="國定假日變更類型"
-                  value={action}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const next = event.target.value as HolidayAction;
-                    setAction(next);
-                  }}
-                  style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.9rem' }}
-                >
-                  <option value="upsert">新增或更新</option>
-                  <option value="delete">刪除國定假日</option>
-                </select>
-              </label>
-
-              <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
-                國定假日日期
-                <input
-                  aria-label="國定假日日期"
-                  type="date"
-                  value={holidayDate}
-                  disabled={busy}
-                  onChange={(event) => setHolidayDate(event.target.value)}
-                  style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.9rem' }}
-                />
-              </label>
-
-              <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
-                國定假日名稱
-                <input
-                  aria-label="國定假日名稱"
-                  value={holidayName}
-                  disabled={busy || action === 'delete'}
-                  maxLength={100}
-                  placeholder="例如 端午節"
-                  onChange={(event) => setHolidayName(event.target.value)}
-                  style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.9rem' }}
-                />
-              </label>
-            </div>
-
-            <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
-              變更原因與審核註記（選填）
-              <textarea
-                aria-label="套用原因"
-                value={reason}
-                maxLength={500}
-                disabled={busy}
-                onChange={(event) => setReason(event.target.value)}
-                style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.88rem', minHeight: '68px' }}
-              />
-            </label>
-          </div>
-
-          {/* 儲存控制列 */}
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className={action === 'delete' ? 'scheduling-danger' : 'scheduling-action'}
-              data-control-id="scheduling.holiday.apply"
-              disabled={!buildPreviewRequest() || busy}
-              onClick={() => void apply()}
-              style={{ flex: 1, padding: '10px 16px', fontSize: '0.92rem', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)' }}
-            >
-              {busy ? '⏳ 處理中…' : action === 'delete' ? '刪除國定假日' : '儲存國定假日變更'}
-            </button>
-          </div>
-
-          {calendar && !calendarMatchesHorizon && (
-            <small className="holiday-policy-notice">顯示的政策屬於先前查詢區間；儲存時會查詢目前區間的最新政策。</small>
-          )}
-
-          {/* Receipt 結果提示 */}
-          {draft?.receipt && (
-            <section className="holiday-policy-receipt" aria-live="polite" style={{ background: '#ecfdf5', border: '1.5px solid #6ee7b7', borderRadius: '10px', padding: '14px 16px', color: '#065f46' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#047857' }}>
-                  國定假日政策已更新
-                </h3>
-                <button
-                  type="button"
-                  className="scheduling-action"
-                  onClick={() => setHolidayDrawerOpen(false)}
-                  style={{ padding: '4px 10px', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-                >
-                  關閉抽屜
-                </button>
-              </div>
-              <p style={{ margin: 0, fontSize: '0.84rem' }}>
-                {machine.type === 'observed' ? '已重新查詢並確認最新國定假日政策。' : '變更已受理，正在確認最新政策狀態。'}
-              </p>
-            </section>
-          )}
-
-          {errorText && <p className="holiday-policy-notice error" role="alert">{errorText}</p>}
-          {machine.type === 'outcome_unknown' && (
-            <button type="button" onClick={() => void retryHolidayApplyFlow().catch(() => undefined)}>
-              再次確認變更結果
-            </button>
-          )}
-          {machine.type === 'observation_failed' && (
-            <button type="button" onClick={() => void retryHolidayObservationFlow().catch(() => undefined)}>
-              重新查詢最新政策
-            </button>
-          )}
-        </div>
-      </Drawer>
     </section>
   );
 }

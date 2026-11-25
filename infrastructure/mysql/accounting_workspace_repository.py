@@ -10,15 +10,18 @@ from domains.finance_import.cancellation_code import extract_sinopac_memo_case_s
 from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account, resolve_client_virtual_account_suffix
 
 
-def build_accounting_workspace(connection):
+def build_accounting_workspace(connection, *, include_staff_availability: bool = True):
     """One composition for the case page, payable export and original owner writers."""
     from functools import partial
-    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
+    from infrastructure.mysql.case_staff_accounting_repository import (
+        query_case_staff_accounting, query_case_staff_accounting_availability,
+    )
     from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting, query_case_accounting, query_case_payment_terms
     from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
     from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
     from infrastructure.mysql.subsidy_confirmation_repository import preview_manual_subsidy_plan, apply_manual_subsidy_plan
+    from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
     state = MySqlAccountingWorkspaceState(connection)
     return AccountingWorkspace(state, partial(query_case_accounting, connection),
         partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
@@ -27,7 +30,11 @@ def build_accounting_workspace(connection):
         cancellation=partial(query_cancellation_accounting, connection),
         bank_memos=partial(query_case_bank_memos, connection),
         subsidy_plan_preview=partial(preview_manual_subsidy_plan, connection),
-        subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection))
+        subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection),
+        case_total=MySqlPricingConfigurationRepository(connection).reporting_case_total_amount,
+        subsidy_detail=partial(query_case_subsidy_amount, connection),
+        staff_availability=(partial(query_case_staff_accounting_availability, connection)
+                            if include_staff_availability else None))
 
 
 def query_case_bank_memos(connection, case_no):
@@ -209,7 +216,7 @@ def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None, 
         row = cursor.fetchone()
     if row is None:
         raise LookupError('accounting_case_not_found')
-    case = build_accounting_workspace(connection).query(case_no)
+    case = build_accounting_workspace(connection, include_staff_availability=False).query(case_no)
     funding = case.funding
     status = str(row['status'])
     staff_total = case.staff_receivable_ntd

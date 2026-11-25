@@ -4,7 +4,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinanceBankReconciliationWorkspace } from '../../../../../../../components/FinanceBankReconciliationWorkspace';
 import { financeBankReviewPresentation, financeImportReviewReason } from '../../../../../../../adapters/finance/finance_import_query_adapter';
@@ -15,16 +15,19 @@ import { subsidyPeriodClient } from '../../../../../../../api/government_subsidy
 import { FinancePage } from '../../../../../../../pages/FinancePage';
 import { financeAccountingClient } from '../../../../../../../api/finance_import/finance_accounting_client';
 import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
+import { clientSettlementRemediationClient } from '../../../../../../../api/client_finance/client_settlement_remediation_client';
 import { caseVirtualAccountClient } from '../../../../../../../api/client_finance/case_virtual_account_client';
 import { clientRegistryClient } from '../../../../../../../api/client_registry/client_registry_client';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { paymentOverdueReminderClient } from '../../../../../../../api/line_order_groups/payment_overdue_reminder_client';
 import { transport } from '../../../../../../../api/shared/transport';
-import { ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
+import { ApiHttpError, ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
+import { differenceResolutionClient } from '../../../../../../../api/client_finance/difference_resolution_client';
 import { staffPayoutRemediationClient } from '../../../../../../../api/staff_payables/staff_payout_remediation_client';
 import { staffPayoutBlockerMessage } from '../../../../../../../api/staff_payables/staff_payout_remediation_errors';
 import { financeImportCorrectionClient } from '../../../../../../../api/finance_import/finance_import_correction_client';
 import { financeImportMutationClient } from '../../../../../../../api/finance_import/finance_import_mutation_client';
+import { FinanceImportQueryError } from '../../../../../../../api/finance_import/finance_import_query_errors';
 
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client', () => ({
   financeImportQueryClient: { listBankTransactions: vi.fn(), listImportHistory: vi.fn(), listExcludedBankTransactions: vi.fn(), pairBankTransaction: vi.fn(), excludeBankTransaction: vi.fn() },
@@ -60,13 +63,16 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
   };
   const posted: FinanceBankTransaction = {
     ...sinopac, row_id: 100, row_identity: 'finance-import-row:100', status: 'posted', amount_ntd: 6000,
-    reference: 'DEMO-POSTED-01', cases: ['DEMO-08'],
+    reference: 'DEMO-POSTED-01', cases: ['DEMO-08'], bank_memo: '合成原始備註 ****',
+    reconciliation_records: [{ owning_domain: 'client_finance', amount_ntd: 6000, recorded_at: '2026-01-09T10:00:00Z' }],
+    purpose_review: { classification_version: 1, candidates: [{ case_no: 'DEMO-08', purpose: 'client_refund', person_id: 17 }] },
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async query => ({
-      items: query.transaction_status === 'posted' ? [posted] : [taishin, sinopac].filter(row => !query.bank || row.bank === query.bank),
+      items: query.row_id ? [taishin, sinopac, posted].filter(row => row.row_id === query.row_id)
+        : query.transaction_status === 'posted' ? [posted] : [taishin, sinopac].filter(row => !query.bank || row.bank === query.bank),
       pending_count: query.transaction_status === 'posted' ? null : query.bank ? 1 : 2,
       next_before_row_id: null,
     }));
@@ -102,64 +108,442 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     confirmedImportReceipt: null,
   };
 
-  it('opens the existing single-transaction flow for a case-scoped staff subsidy', async () => {
-    const onPreviewBankBatch = vi.fn();
-    const row = { ...taishin, direction: 'outgoing' as const, classification_type: 'staff_payout',
+  it('opens the same single-transaction entry for a client subsidy return with a legacy batch hint', async () => {
+    const row: FinanceBankTransaction = {
+      ...taishin, direction: 'outgoing', classification_type: 'client_subsidy_return', cases: ['115000001'],
       staff_subsidy_batch_identity: 'finance-import-batch:9',
-      recorded_pending_reason: 'outgoing_staff_payout_month_no_match',
+      reconciliation_target: { case_no: '115000001', obligation_identities: ['client:subsidy-return'], staff_id: null },
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    const transaction = within(await screen.findByRole('row', { name: /交易明細#3/ }));
+    const entries = transaction.getAllByRole('button', { name: /核對交易|核對月嫂補助|單筆人工核對/ });
+    expect(entries).toHaveLength(1);
+    fireEvent.click(entries[0]);
+    expect(onReconcile).toHaveBeenCalledWith(row);
+  });
+
+  it('passes a pending transaction without a target to the review drawer from both entry points', async () => {
+    const row: FinanceBankTransaction = {
+      ...taishin, direction: 'outgoing', classification_type: 'client_subsidy_return',
+      reconciliation_unavailable_reason: 'case_unconfirmed',
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    fireEvent.click(await screen.findByRole('button', { name: /核對交易/ }));
+    fireEvent.click(screen.getByRole('button', { name: `查看交易 ${row.row_identity}` }));
+    const detail = screen.getByRole('dialog', { name: '待核對交易明細' });
+    fireEvent.click(within(detail).getByRole('button', { name: '核對交易' }));
+    expect(onReconcile.mock.calls).toEqual([[row], [row]]);
+    expect(onCase).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { subsidyNtd: undefined, reason: /尚無可供核對的正式客戶補助退款款項/ },
+    { subsidyNtd: null, reason: /本案正式補助金額來源待確認/ },
+    { subsidyNtd: 12000, reason: /本案正式補助金額 NT\$ 12,000，目前沒有可供核對的正式客戶補助退款款項/ },
+  ])('keeps a client subsidy return with no refund candidate read-only (subsidy data: $subsidyNtd)', async ({ subsidyNtd, reason }) => {
+    window.location.hash = '#finance?tab=bank';
+    const caseNo = '115000001';
+    const row: FinanceBankTransaction = {
+      ...taishin, direction: 'outgoing', classification_type: 'client_subsidy_return', cases: [caseNo],
+      reconciliation_unavailable_reason: 'no_open_items',
+      reconciliation_target: subsidyNtd === undefined ? null : {
+        case_no: caseNo, staff_id: null, obligation_identities: [], requires_selection: true,
+      },
+      pairing_candidates: [{ case_no: caseNo, purpose: 'client_subsidy_return', person_id: 17 }],
+      staff_subsidy_batch_identity: 'finance-import-batch:9',
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row], pending_count: 1, next_before_row_id: null,
+    });
+    const unexpected = new Error('本筆交易只有案件查閱入口。');
+    const post = vi.spyOn(transport, 'post').mockRejectedValue(unexpected);
+    const batchPreview = vi.spyOn(financeImportMutationClient, 'preview').mockRejectedValue(unexpected);
+    const staffQuery = vi.spyOn(staffPayoutRemediationClient, 'query').mockRejectedValue(unexpected);
+    const staffRecovery = vi.spyOn(differenceResolutionClient, 'staff').mockRejectedValue(unexpected);
+    const staffPreview = vi.spyOn(staffPayoutRemediationClient, 'preview').mockRejectedValue(unexpected);
+    const refundPreview = vi.spyOn(financeImportCorrectionClient, 'preview').mockRejectedValue(unexpected);
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({
+      case_no: caseNo, client_name: '合成客戶', subsidy_ntd: subsidyNtd,
+      receivable_ntd: 0, received_ntd: 0, payable_ntd: 0, paid_ntd: 0, pending_warning_count: 0,
+      staff_items: [], transactions: [], warnings: [], client_items: [],
+    });
+    const order = vi.spyOn(ordersQueryClient, 'getOrderDetail').mockRejectedValue(unexpected);
+    const registry = vi.spyOn(clientRegistryClient, 'query').mockRejectedValue(unexpected);
+    const account = vi.spyOn(caseVirtualAccountClient, 'query').mockRejectedValue(unexpected);
+    const reminder = vi.spyOn(paymentOverdueReminderClient, 'case').mockRejectedValue(unexpected);
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const review = within(screen.getByRole('dialog', { name: '核對交易' }));
+      expect(await review.findByText(reason)).toBeVisible();
+      expect(readCase).toHaveBeenCalledTimes(subsidyNtd === undefined ? 0 : 1);
+      expect(staffRecovery).not.toHaveBeenCalled();
+      fireEvent.click(review.getByRole('button', { name: '查看本案帳務' }));
+      const caseView = within(await screen.findByRole('dialog', { name: `案件帳務 · ${caseNo}` }));
+      expect(await caseView.findByText(/^本案補助 /)).toBeVisible();
+      staffRecovery.mockClear();
+      fireEvent.click(caseView.getByRole('button', { name: '返回核對交易' }));
+      const returned = within(await screen.findByRole('dialog', { name: '核對交易' }));
+      expect(await returned.findByText(reason)).toBeVisible();
+      expect(returned.queryByRole('group', { name: '候選案件' })).not.toBeInTheDocument();
+      expect(returned.queryByRole('button', { name: /預覽|確認|更正|單筆人工核對|移除誤匯入明細|調整本案/ })).not.toBeInTheDocument();
+      expect(financeImportQueryClient.pairBankTransaction).not.toHaveBeenCalled();
+      expect(financeImportQueryClient.excludeBankTransaction).not.toHaveBeenCalled();
+      expect(batchPreview).not.toHaveBeenCalled();
+      expect(staffQuery).not.toHaveBeenCalled();
+      expect(staffRecovery).not.toHaveBeenCalled();
+      expect(staffPreview).not.toHaveBeenCalled();
+      expect(refundPreview).not.toHaveBeenCalled();
+      expect(post).not.toHaveBeenCalled();
+    } finally {
+      [post, batchPreview, staffQuery, staffRecovery, staffPreview, refundPreview, readCase, order, registry, account, reminder]
+        .forEach(mock => mock.mockRestore());
+      window.location.hash = '';
+    }
+  });
+
+  it.each(['success', 'typed conflict', 'terminal failure'] as const)(
+    'rechecks the same client subsidy refund after viewing the case and handles %s', async (confirmation) => {
+    window.location.hash = '#finance?tab=bank';
+    const caseNo = '115000001';
+    const obligationIdentity = 'client:subsidy-return';
+    const row: FinanceBankTransaction = {
+      ...taishin, direction: 'outgoing', classification_type: 'client_subsidy_return', cases: [caseNo],
+      staff_subsidy_batch_identity: 'finance-import-batch:9',
+      reconciliation_target: { case_no: caseNo, obligation_identities: [obligationIdentity], staff_id: null },
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({items: [row], pending_count: 1, next_before_row_id: null});
+    const candidate = {
+      row_identity: row.row_identity, batch_identity: 'finance-import-batch:7', classification_type: 'client_subsidy_return',
+      owning_domain: 'client_finance', bank_amount_ntd: row.amount_ntd,
+      allocations: [{ obligation_identity: obligationIdentity, amount_ntd: row.amount_ntd }],
+      reason: '', evidence: [row.reference], refund_ledger_entry_identity: null, candidate_fingerprint: 'a'.repeat(64),
+      allow_partial_refund_recovery: false, allow_refund_overage_recovery: false, allow_client_receipt_overage: false,
+      refund_summary: { transfer_fee_ntd: 0, remaining_ntd: 0 },
+    };
+    const checked = { candidate, batch_version: 1, canonical_fact_version: 1, alert_version: 0, preview_fingerprint: 'b'.repeat(64) };
+    const batchPreview = vi.spyOn(financeImportMutationClient, 'preview');
+    const staffPreview = vi.spyOn(staffPayoutRemediationClient, 'preview');
+    const preview = vi.spyOn(financeImportCorrectionClient, 'preview')
+      .mockRejectedValueOnce(new Error('原銀行出款早於正式退款日。')).mockResolvedValue(checked);
+    const apply = vi.spyOn(financeImportCorrectionClient, 'apply').mockResolvedValue({ job_id: 'refund-job', status_url: '/refund-job', replayed: false });
+    const outcome = vi.spyOn(financeImportCorrectionClient, 'queryOutcome').mockResolvedValue({
+      job_id: 'refund-job', status: 'succeeded', attempt_count: 1, max_attempts: 1, result_reference: 'refund-receipt',
+      receipt: { row_identity: row.row_identity, batch_identity: candidate.batch_identity, preview_fingerprint: checked.preview_fingerprint,
+        resulting_batch_version: 2, classification_event_count: 1, ledger_entry_count: 1, allocation_count: 1,
+        reconciliation_receipt_count: 1, alert_resolved_event_count: 0 },
+    });
+    if (confirmation === 'typed conflict') {
+      apply.mockRejectedValueOnce(new FinanceImportQueryError('stale_preview', '退款資料版本已變更。', false, 409));
+    }
+    if (confirmation === 'terminal failure') {
+      outcome.mockResolvedValueOnce({ job_id: 'refund-job', status: 'failed', attempt_count: 1, max_attempts: 1,
+        result_reference: null, receipt: null, failure_code: 'stale_preview' });
+    }
+    const mocks = [preview, apply, outcome, batchPreview, staffPreview,
+      vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({ case_no: caseNo, client_name: '合成客戶',
+        receivable_ntd: 0, received_ntd: 0, payable_ntd: row.amount_ntd, paid_ntd: 0, pending_warning_count: 0,
+        staff_items: [], transactions: [], warnings: [], client_items: [{ identity: obligationIdentity,
+          direction: 'payable', label: '客戶補助退款', party: '合成客戶', expected_ntd: row.amount_ntd,
+          actual_ntd: 0, remaining_ntd: row.amount_ntd, has_payment: false, version: '1', due_date: '2026-01-09' }] }),
+      vi.spyOn(clientSettlementRemediationClient, 'query').mockResolvedValue({ case_no: caseNo, account_version: 2,
+        as_of: '2026-01-09', receivable_obligations: [], refund_obligations: [], subsidy_return_obligations: [],
+        incoming_bank_facts: [], refund_bank_facts: [], subsidy_return_bank_facts: [] }),
+      vi.spyOn(ordersQueryClient, 'getOrderDetail').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(clientRegistryClient, 'query').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(caseVirtualAccountClient, 'query').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(paymentOverdueReminderClient, 'case').mockRejectedValue(new Error('not needed')),
+    ];
+    try {
+      render(<FinancePage />);
+      fireEvent.change(await screen.findByLabelText('篩選銀行'), { target: { value: 'taishin' } });
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const reviewDrawer = within(await screen.findByRole('dialog', { name: /核對交易/ }));
+      const previewButton = await reviewDrawer.findByRole('button', { name: '預覽核銷' });
+      expect(reviewDrawer.getByText('退客戶先墊補助')).toBeVisible();
+      fireEvent.click(previewButton);
+      expect(await reviewDrawer.findByText('原銀行出款早於正式退款日。')).toBeVisible();
+      expect(reviewDrawer.queryByRole('button', { name: '確認核銷' })).not.toBeInTheDocument();
+      fireEvent.click(previewButton);
+      await reviewDrawer.findByRole('button', { name: '確認核銷' });
+
+      await waitFor(() => expect(reviewDrawer.getByRole('button', { name: '查看本案帳務' })).toBeEnabled());
+      fireEvent.click(reviewDrawer.getByRole('button', { name: '查看本案帳務' }));
+      const rowLookups = vi.mocked(financeImportQueryClient.listBankTransactions).mock.calls.filter(([query]) => query.row_id === row.row_id).length;
+      expect(preview).toHaveBeenCalledTimes(2);
+      fireEvent.click(await reviewDrawer.findByRole('button', { name: '返回核對交易' }));
+      await waitFor(() => expect(preview).toHaveBeenCalledTimes(3));
+      expect(vi.mocked(financeImportQueryClient.listBankTransactions).mock.calls.filter(([query]) => query.row_id === row.row_id).length).toBeGreaterThan(rowLookups);
+      expect(apply).not.toHaveBeenCalled();
+
+      const confirm = await reviewDrawer.findByRole('button', { name: '確認核銷' });
+      act(() => { confirm.click(); confirm.click(); });
+      expect(apply).toHaveBeenCalledTimes(1);
+      if (confirmation === 'success') {
+        await waitFor(() => expect(outcome).toHaveBeenCalledWith('refund-job'));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: '核對交易' })).not.toBeInTheDocument());
+      } else {
+        const error = confirmation === 'typed conflict' ? '退款資料版本已變更。' : /資料已更新，請重新查詢並預覽/;
+        expect(await reviewDrawer.findByText(error)).toBeVisible();
+        expect(reviewDrawer.queryByRole('button', { name: /以原操作確認更正結果|確認核銷/ })).not.toBeInTheDocument();
+        if (confirmation === 'typed conflict') expect(outcome).not.toHaveBeenCalled();
+        fireEvent.click(reviewDrawer.getByRole('button', { name: '預覽核銷' }));
+        expect(await reviewDrawer.findByRole('button', { name: '確認核銷' })).toBeEnabled();
+        expect(apply).toHaveBeenCalledTimes(1);
+      }
+      expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ row_identity: row.row_identity,
+        classification_type: 'client_subsidy_return', target_obligation_identities: [obligationIdentity] }));
+      expect(batchPreview).not.toHaveBeenCalled();
+      expect(staffPreview).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('篩選銀行')).toHaveValue('taishin');
+    } finally {
+      mocks.forEach(mock => mock.mockRestore());
+      window.location.hash = '';
+    }
+  });
+
+  it.each([false, true])('offers single-transaction manual staff review only for backend eligibility %s', async (allowed) => {
+    window.location.hash = '#finance?tab=bank';
+    const row: FinanceBankTransaction = { ...taishin, direction: 'outgoing', classification_type: 'staff_payout',
+      recorded_pending_reason: 'outgoing_staff_payout_month_no_match', staff_subsidy_manual_review_allowed: allowed,
       reconciliation_target: { case_no: '115000001', obligation_identities: ['staff:payment'], staff_id: 19 } };
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
       items: [row], pending_count: 1, next_before_row_id: null,
     });
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} onPreviewBankBatch={onPreviewBankBatch} />);
-    fireEvent.click(await screen.findByRole('button', { name: '單筆人工核對' }));
-    expect(onReconcile).toHaveBeenCalledWith(row);
-    expect(onPreviewBankBatch).not.toHaveBeenCalled();
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockRejectedValue(new Error('synthetic case'));
+    try {
+      render(<FinancePage />);
+      const transaction = within(await screen.findByRole('row', { name: /交易明細#3/ }));
+      expect(transaction.getAllByRole('button', { name: /核對交易|單筆人工核對/ })).toHaveLength(1);
+      fireEvent.click(transaction.getByRole('button', { name: /核對交易/ }));
+      const review = within(screen.getByRole('dialog', { name: '核對交易' }));
+      await review.findByRole('heading', { name: '未能核對原因' });
+      if (allowed) {
+        fireEvent.click(review.getByRole('button', { name: '單筆人工核對' }));
+        await waitFor(() => expect(readCase).toHaveBeenCalledWith('115000001', expect.any(AbortSignal)));
+      } else {
+        expect(review.queryByRole('button', { name: '單筆人工核對' })).not.toBeInTheDocument();
+        expect(readCase).not.toHaveBeenCalled();
+      }
+    } finally { readCase.mockRestore(); window.location.hash = ''; }
   });
 
-  it('reopens a pending subsidy batch and sends the explicitly selected case for preview', async () => {
-    const onPreviewBankBatch = vi.fn();
+  it('previews and applies the selected same-month staff subsidy case for only the original transaction and refreshes after receipt', async () => {
+    window.location.hash = '#finance?tab=bank';
     const rowIdentity = 'finance-import-row:102';
     const batchIdentity = 'finance-import-batch:9';
-    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
-      items: [{ ...taishin, direction: 'outgoing', classification_type: 'staff_payout',
-        staff_subsidy_batch_identity: batchIdentity }], pending_count: 1, next_before_row_id: null,
+    const selectedCaseNo = '115000002';
+    const previewFingerprint = 'b'.repeat(64);
+    const jobId = 'staff-subsidy-job';
+    const row: FinanceBankTransaction = { ...taishin, direction: 'outgoing', classification_type: 'staff_payout',
+      transaction_date: '2026-11-10', amount_ntd: 7970, staff_subsidy_batch_identity: batchIdentity };
+    const reconciled: FinanceBankTransaction = { ...row, status: 'posted', disposition: 'existing' };
+    let settled = false;
+    const readBankTransactions = vi.mocked(financeImportQueryClient.listBankTransactions);
+    readBankTransactions.mockImplementation(async query => {
+      const current = settled ? reconciled : row;
+      const matches = query.row_id === row.row_id || (!query.row_id && query.transaction_status === current.status);
+      return { items: matches ? [current] : [], pending_count: settled ? 0 : 1, next_before_row_id: null };
     });
-    const { rerender } = render(<FinanceBankReconciliationWorkspace {...defaultProps}
-      onPreviewBankBatch={onPreviewBankBatch} />);
-    fireEvent.click(await screen.findByRole('button', { name: '核對月嫂補助' }));
-    expect(onPreviewBankBatch).toHaveBeenCalledWith(batchIdentity, undefined, rowIdentity);
-    fireEvent.click(screen.getByRole('button', { name: `查看交易 ${rowIdentity}` }));
-    const detail = screen.getByRole('dialog', { name: '待核對交易明細' });
-    fireEvent.click(within(detail).getByRole('button', { name: '核對月嫂補助' }));
-    expect(onPreviewBankBatch).toHaveBeenCalledTimes(2);
-    expect(onPreviewBankBatch).toHaveBeenLastCalledWith(batchIdentity, undefined, rowIdentity);
-    rerender(<FinanceBankReconciliationWorkspace {...defaultProps} onPreviewBankBatch={onPreviewBankBatch}
-      batchPreview={{ kind: 'ready', data: {
+    const preview = vi.spyOn(financeImportMutationClient, 'preview').mockImplementation(async (_batch, _signal, selections) => {
+      const chosen = selections?.[rowIdentity] === selectedCaseNo;
+      return {
         batch_identity: batchIdentity, batch_version: 0, source_content_digest: 'a'.repeat(64),
-        classifier_version: 'v1', fingerprint_version: 'v1', preview_fingerprint: 'b'.repeat(64),
+        classifier_version: 'v1', fingerprint_version: 'v1', preview_fingerprint: chosen ? previewFingerprint : 'c'.repeat(64),
         rows: [{
-          row_identity: rowIdentity, canonical_fact_version: 0, amount_ntd: 11970,
-          classification_type: 'staff_payout', disposition: 'business_pending',
-          pending_reason: 'staff_subsidy_multiple_same_month_cases', target_identities: [],
+          row_identity: rowIdentity, canonical_fact_version: 0, amount_ntd: row.amount_ntd,
+          classification_type: 'staff_payout', disposition: chosen ? 'create' : 'business_pending',
+          pending_reason: chosen ? null : 'staff_subsidy_multiple_same_month_cases',
+          target_identities: chosen ? ['staff:subsidy-second'] : [],
           evidence: [], available_actions: [], integrity_violations: [],
           fingerprint_collision: false, formal_reference_conflict: false,
+          selected_staff_subsidy_case: chosen ? selectedCaseNo : null,
           staff_subsidy_cases: [
             { case_no: '115000001', payable_due_date: '2026-11-15', payable_amount_ntd: 12000 },
-            { case_no: '115000002', payable_due_date: '2026-11-15', payable_amount_ntd: 8000 },
+            { case_no: selectedCaseNo, payable_due_date: '2026-11-15', payable_amount_ntd: 8000 },
           ],
         }], apply_allowed: true, blocking_codes: [], dispatch_summaries: [],
         counts: { source_rows: 1, canonical_created: 1, duplicate_occurrences: 0,
-          ready_dispatch: 0, existing: 0, manual_review: 0, business_pending: 1, blocked: 0 },
-      } }} />);
-    const group = screen.getByRole('group', { name: '選擇同月補助案件' });
-    const first = within(group).getByRole('button', { name: /115000001.*12,000/ });
-    const second = within(group).getByRole('button', { name: /115000002.*8,000/ });
-    expect(first).toHaveAttribute('aria-pressed', 'false');
-    expect(second).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(second);
-    expect(onPreviewBankBatch).toHaveBeenCalledWith(batchIdentity, { [rowIdentity]: '115000002' }, rowIdentity);
-    expect(onApply).not.toHaveBeenCalled();
+          ready_dispatch: chosen ? 1 : 0, existing: 0, manual_review: 0, business_pending: chosen ? 0 : 1, blocked: 0 },
+      };
+    });
+    const token = vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-session');
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({ success: true, message: '', error: null,
+      data: { job_id: jobId, status_url: '/staff-subsidy-job', replayed: false } });
+    let finishReceipt: () => void = () => { throw new Error('尚未查詢本筆核銷結果。'); };
+    const outcome = vi.spyOn(financeImportMutationClient, 'queryBatchOutcome').mockImplementation(() => new Promise(resolve => {
+      finishReceipt = () => {
+        settled = true;
+        resolve({ job_id: jobId, status: 'succeeded', attempt_count: 1, max_attempts: 1, result_reference: 'staff-subsidy-receipt',
+          receipt: { batch_identity: batchIdentity, preview_fingerprint: previewFingerprint, resulting_batch_version: 1,
+            reconciled_count: 1, existing_count: 0, pending_count: 0 } });
+      };
+    }));
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const review = within(screen.getByRole('dialog', { name: '核對交易' }));
+      const firstGroup = await review.findByRole('group', { name: '選擇同月補助案件' });
+      expect(within(firstGroup).getByRole('button', { name: /115000001.*12,000/ })).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(screen.getByRole('button', { name: '關閉核對交易' }));
+      fireEvent.click(await screen.findByRole('button', { name: `查看交易 ${rowIdentity}` }));
+      const detail = screen.getByRole('dialog', { name: '待核對交易明細' });
+      fireEvent.click(within(detail).getByRole('button', { name: '核對交易' }));
+      const reopenedReview = within(screen.getByRole('dialog', { name: '核對交易' }));
+      const group = await reopenedReview.findByRole('group', { name: '選擇同月補助案件' });
+      expect(preview).toHaveBeenCalledTimes(2);
+      expect(preview).toHaveBeenLastCalledWith(batchIdentity, expect.any(AbortSignal), undefined, false, rowIdentity);
+      expect(reopenedReview.queryByRole('button', { name: '確認核銷本筆交易' })).not.toBeInTheDocument();
+      const second = within(group).getByRole('button', { name: /115000002.*8,000/ });
+      expect(second).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(second);
+      expect(preview).toHaveBeenLastCalledWith(batchIdentity, expect.any(AbortSignal), { [rowIdentity]: selectedCaseNo }, false, rowIdentity);
+      expect(await reopenedReview.findByRole('button', { name: /115000002.*8,000/, pressed: true })).toBeVisible();
+      const confirm = reopenedReview.getByRole('button', { name: '確認核銷本筆交易' });
+      expect(post).not.toHaveBeenCalled();
+      readBankTransactions.mockClear();
+      fireEvent.click(confirm);
+      await waitFor(() => expect(outcome).toHaveBeenCalledWith(jobId, expect.any(AbortSignal)));
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(post).toHaveBeenCalledWith('/api/v1/finance-import/batches/apply', {
+        batch_identity: batchIdentity, expected_batch_version: 0, preview_fingerprint: previewFingerprint, reason: '',
+        review_row_identity: rowIdentity, staff_subsidy_selections: { [rowIdentity]: selectedCaseNo },
+      }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }));
+      expect(reopenedReview.getByText('正在確認本筆核銷結果…')).toBeVisible();
+      expect(readBankTransactions).not.toHaveBeenCalled();
+      await act(async () => finishReceipt());
+      expect(await reopenedReview.findByText('本筆交易已核銷。')).toBeVisible();
+      await waitFor(() => expect(readBankTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ transaction_status: 'pending' }), expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ));
+      fireEvent.click(screen.getByRole('button', { name: '關閉核對交易' }));
+      expect(await screen.findByText('目前沒有符合條件的銀行交易資料。')).toBeVisible();
+      expect(screen.queryByRole('button', { name: `核對交易 ${row.reference}` })).not.toBeInTheDocument();
+      fireEvent.change(screen.getByRole('combobox', { name: '篩選處理狀態' }), { target: { value: 'posted' } });
+      expect(await screen.findByRole('row', { name: /交易明細#3.*已核銷/ })).toBeVisible();
+    } finally {
+      [preview, token, post, outcome].forEach(mock => mock.mockRestore());
+      window.location.hash = '';
+    }
+  });
+
+  it.each(['typed conflict', 'timeout then conflict', 'failed', 'cancelled', 'unknown outcome'] as const)(
+    'recovers a single staff subsidy Apply after %s', async firstResult => {
+    window.location.hash = '#finance?tab=bank';
+    const batchIdentity = 'finance-import-batch:9';
+    const row: FinanceBankTransaction = {
+      ...taishin, direction: 'outgoing', classification_type: 'staff_payout',
+      staff_subsidy_batch_identity: batchIdentity,
+    };
+    const jobId = 'staff-subsidy-job';
+    const conflictMessage = '本筆月嫂補助的預檢版本已變更。';
+    let previewVersion = 0;
+    let previewFingerprint = '';
+    let applyCount = 0;
+    let outcomeCount = 0;
+    const readBankTransactions = vi.mocked(financeImportQueryClient.listBankTransactions);
+    readBankTransactions.mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
+    const token = vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-session');
+    const envelope = (data: unknown) => ({ success: true, message: '', error: null, data });
+    const post = vi.spyOn(transport, 'post').mockImplementation(async path => {
+      if (path.endsWith('/preview')) {
+        previewVersion = firstResult === 'typed conflict' ? previewVersion + 1 : 1;
+        previewFingerprint = previewVersion === 1 ? 'a'.repeat(64) : 'b'.repeat(64);
+        return envelope({
+          batch_identity: batchIdentity, batch_version: previewVersion, preview_fingerprint: previewFingerprint,
+          source_content_digest: 'c'.repeat(64), classifier_version: 'v1', fingerprint_version: 'v1',
+          counts: { source_rows: 1, canonical_created: 1, duplicate_occurrences: 0, ready_dispatch: 1,
+            existing: 0, manual_review: 0, business_pending: 0, blocked: 0 },
+          rows: [{ row_identity: row.row_identity, canonical_fact_version: previewVersion, amount_ntd: row.amount_ntd,
+            classification_type: 'staff_payout', disposition: 'create', target_identities: ['staff:subsidy'],
+            evidence: [], available_actions: [], integrity_violations: [], fingerprint_collision: false, formal_reference_conflict: false }],
+          dispatch_summaries: [], blocking_codes: [], apply_allowed: true,
+        });
+      }
+      expect(path).toBe('/api/v1/finance-import/batches/apply');
+      applyCount += 1;
+      if (firstResult === 'timeout then conflict' && applyCount === 1) throw new ApiTimeoutError(30_000);
+      if ((firstResult === 'typed conflict' && applyCount === 1) || (firstResult === 'timeout then conflict' && applyCount === 2)) {
+        throw new ApiHttpError(409, 'stale_preview', conflictMessage);
+      }
+      return envelope({ job_id: jobId, status_url: '/staff-subsidy-job', replayed: firstResult === 'timeout then conflict' });
+    });
+    const get = vi.spyOn(transport, 'get').mockImplementation(async path => {
+      expect(path).toBe(`/api/v1/finance-import/jobs/${jobId}/batch-outcome`);
+      outcomeCount += 1;
+      if (outcomeCount === 1 && firstResult === 'unknown outcome') throw new ApiTimeoutError(30_000);
+      const status = outcomeCount === 1 && (firstResult === 'failed' || firstResult === 'cancelled') ? firstResult : 'succeeded';
+      return envelope({ job_id: jobId, status, attempt_count: 1, max_attempts: 1,
+        result_reference: status === 'succeeded' ? 'staff-receipt' : null,
+        receipt: status === 'succeeded' ? { batch_identity: batchIdentity, preview_fingerprint: previewFingerprint,
+          resulting_batch_version: previewVersion + 1, reconciled_count: 1, existing_count: 0, pending_count: 0 } : null,
+      });
+    });
+    const previewRequests = () => post.mock.calls.filter(([path]) => path.endsWith('/preview'));
+    const applyRequests = () => post.mock.calls.filter(([path]) => path.endsWith('/apply'));
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const review = within(await screen.findByRole('dialog', { name: '核對交易' }));
+      const confirm = await review.findByRole('button', { name: '確認核銷本筆交易' });
+      expect(applyRequests()).toHaveLength(0);
+      readBankTransactions.mockClear();
+      fireEvent.click(confirm);
+      if (firstResult === 'timeout then conflict') {
+        const original = await review.findByRole('button', { name: '以原操作確認核銷結果' });
+        expect(review.getByRole('button', { name: '關閉核對交易' })).toBeDisabled();
+        expect(review.queryByRole('button', { name: '重新查詢本筆預檢' })).not.toBeInTheDocument();
+        fireEvent.click(original);
+        expect(await review.findByText(`${conflictMessage} 核銷結果尚未確認，請使用原操作重新確認。`)).toBeVisible();
+        expect(review.getByRole('button', { name: '關閉核對交易' })).toBeDisabled();
+        expect(review.queryByText('本筆交易已核銷。')).not.toBeInTheDocument();
+        expect(previewRequests()).toHaveLength(1);
+        expect(get).not.toHaveBeenCalled();
+        expect(readBankTransactions).not.toHaveBeenCalled();
+        fireEvent.click(review.getByRole('button', { name: '以原操作確認核銷結果' }));
+        const [firstRequest] = applyRequests();
+        expect(applyRequests()).toEqual([firstRequest, firstRequest, firstRequest]);
+      } else if (firstResult === 'unknown outcome') {
+        const observe = await review.findByRole('button', { name: '重新查詢核銷結果' });
+        expect(review.getByRole('button', { name: '關閉核對交易' })).toBeDisabled();
+        expect(review.queryByRole('button', { name: /重新查詢本筆預檢|以原操作確認核銷結果/ })).not.toBeInTheDocument();
+        expect(readBankTransactions).not.toHaveBeenCalled();
+        fireEvent.click(observe);
+        expect(applyRequests()).toHaveLength(1);
+        expect(get).toHaveBeenCalledTimes(2);
+      } else {
+        const recheck = await review.findByRole('button', { name: '重新查詢本筆預檢' });
+        expect(review.getByRole('alert')).toHaveTextContent(firstResult === 'typed conflict' ? conflictMessage
+          : firstResult === 'failed' ? '本筆核銷作業失敗。' : '本筆核銷作業已取消。');
+        expect(review.getByRole('button', { name: '關閉核對交易' })).toBeEnabled();
+        expect(review.queryByRole('button', { name: /以原操作確認核銷結果|確認核銷本筆交易/ })).not.toBeInTheDocument();
+        expect(review.queryByText('本筆交易已核銷。')).not.toBeInTheDocument();
+        expect(readBankTransactions).not.toHaveBeenCalled();
+        expect(get).toHaveBeenCalledTimes(firstResult === 'typed conflict' ? 0 : 1);
+
+        fireEvent.click(recheck);
+        expect(previewRequests()).toHaveLength(2);
+        expect(previewRequests()[1][1]).toEqual({ batch_identity: batchIdentity, review_row_identity: row.row_identity });
+        const freshConfirm = await review.findByRole('button', { name: '確認核銷本筆交易' });
+        expect(applyRequests()).toHaveLength(1);
+        readBankTransactions.mockClear();
+        fireEvent.click(freshConfirm);
+        const [original, fresh] = applyRequests();
+        expect(fresh[1]).toEqual(expect.objectContaining({
+          preview_fingerprint: (firstResult === 'typed conflict' ? 'b' : 'a').repeat(64),
+          expected_batch_version: firstResult === 'typed conflict' ? 2 : 1, review_row_identity: row.row_identity,
+        }));
+        expect(fresh[2]?.headers?.['Idempotency-Key']).not.toEqual(original[2]?.headers?.['Idempotency-Key']);
+        expect(fresh[2]?.headers?.['X-Correlation-ID']).not.toEqual(original[2]?.headers?.['X-Correlation-ID']);
+      }
+      expect(await review.findByText('本筆交易已核銷。')).toBeVisible();
+      await waitFor(() => expect(readBankTransactions).toHaveBeenCalled());
+    } finally {
+      [token, post, get].forEach(mock => mock.mockRestore());
+      window.location.hash = '';
+    }
   });
 
   it.each(['staff_payout','staff_salary'] as const)(
@@ -511,7 +895,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       window.location.hash = '#finance?tab=bank';
       render(<FinancePage />);
       fireEvent.click(await screen.findByRole('button', { name: '核對交易 交易明細#3' }));
-      const dialog = screen.getByRole('dialog', { name: '政府整期核對' });
+      const dialog = screen.getByRole('dialog', { name: '核對交易' });
       fireEvent.change(await within(dialog).findByLabelText('款項'), { target: { value: 'government-period:17' } });
       fireEvent.click(within(dialog).getByRole('checkbox', { name: /我已核對/ }));
       fireEvent.click(within(dialog).getByRole('button', { name: '確認記錄本次處理' }));
@@ -566,7 +950,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       fireEvent.change(await screen.findByLabelText('篩選銀行'), { target: { value: 'sinopac' } });
       fireEvent.click(await screen.findByRole('button', { name: '核對交易 Sheet1#2' }));
 
-      const drawer = await screen.findByRole('dialog', { name: '案件帳務 · 115000001' });
+      const drawer = await screen.findByRole('dialog', { name: '核對交易' });
       expect(await within(drawer).findByRole('heading', { name: '客戶繳款 · 核對交易' })).toBeVisible();
       expect(await within(drawer).findByRole('checkbox', { name: '納入銀行款 101' })).toBeChecked();
       expect(within(drawer).getByRole('checkbox', { name: '納入銀行款 101' })).toBeEnabled();
@@ -594,6 +978,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     const ids = [`${kind}:first`, `${kind}:second`];
     const row: FinanceBankTransaction = { ...sinopac, bank: 'taishin', direction: 'outgoing',
       classification_type: kind === 'staff' ? 'staff_payout' : 'client_subsidy_return',
+      staff_subsidy_manual_review_allowed: kind === 'staff',
       reconciliation_target: { case_no: '115000001', staff_id: kind === 'staff' ? 7 : null,
         obligation_identities: ids, requires_selection: true } };
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
@@ -618,7 +1003,8 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     try {
       render(<FinancePage />);
       fireEvent.click(await screen.findByRole('button', { name: '核對交易 Sheet1#2' }));
-      const drawer = await screen.findByRole('dialog', { name: '案件帳務 · 115000001' });
+      const drawer = await screen.findByRole('dialog', { name: '核對交易' });
+      if (kind === 'staff') fireEvent.click(await within(drawer).findByRole('button', { name: '單筆人工核對' }));
       const first = await within(drawer).findByRole('checkbox', { name: `核銷款項 ${ids[0]}` });
       expect(first).not.toBeChecked();
       expect(within(drawer).getByRole('checkbox', { name: `核銷款項 ${ids[1]}` })).not.toBeChecked();
@@ -688,7 +1074,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     try {
       render(<FinancePage />);
       fireEvent.click(await screen.findByRole('button', { name: '核對交易 Sheet1#2' }));
-      const drawer = await screen.findByRole('dialog', { name: '案件帳務 · 115000001' });
+      const drawer = await screen.findByRole('dialog', { name: '核對交易' });
       const select = await within(drawer).findByRole('combobox', { name: '原退款' });
       expect(select).toHaveValue('');
       expect(within(drawer).getByRole('button', { name: '預覽退匯核銷' })).toBeDisabled();
@@ -727,7 +1113,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       ],
     };
     const fresh = {
-      ...bankRow,
+      ...bankRow, cases: [candidate.case_no],
       reconciliation_target: { case_no: candidate.case_no, staff_id: candidate.person_id, obligation_identities: ['staff:1'], requires_selection: true },
     };
     const real = await vi.importActual<typeof import('../../../../../../../api/finance_import/finance_import_query_client')>(
@@ -739,25 +1125,27 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     const get = vi.spyOn(transport, 'get').mockImplementation(async (_path, options) => ({
       success: true,
       message: '',
-      data: { items: [options?.params?.row_id ? fresh : source], pending_count: 1, next_before_row_id: null },
+      data: { items: [options?.params?.row_id && post.mock.calls.length ? fresh : source], pending_count: 1, next_before_row_id: null },
     }));
     const post = vi.spyOn(transport, 'post').mockResolvedValue({ success: true, message: '', data: { row_id: source.row_id } });
+    window.location.hash = '#finance?tab=bank';
     try {
-      const onReconcile = vi.fn();
-      render(<FinanceBankReconciliationWorkspace {...defaultProps} onReconcile={onReconcile} />);
-      fireEvent.click(await screen.findByRole('button', { name: '核對交易' }));
-      const selected = screen.getByRole('radio', { name: /115000002.*預估補助入帳 2026-10-15.*預估薪資入帳 2026-09-15/ });
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${source.reference}` }));
+      const selected = await screen.findByRole('radio', { name: /115000002.*預估補助入帳 2026-10-15.*預估薪資入帳 2026-09-15/ });
       expect(screen.getByRole('radio', { name: /A15000003.*預估補助入帳 —.*預估薪資入帳 2026-08-15/ })).toBeVisible();
       expect(screen.getByRole('radio', { name: /115000004.*預估補助入帳 —.*預估薪資入帳 —/ })).toBeVisible();
       expect(screen.getByRole('button', { name: '確認配對' })).toBeDisabled();
       fireEvent.click(selected);
       fireEvent.click(screen.getByRole('button', { name: '確認配對' }));
-      await waitFor(() => expect(onReconcile).toHaveBeenCalledWith(fresh));
+      await screen.findByRole('button', { name: '查看本案帳務' });
+      expect(financeImportQueryClient.listBankTransactions).toHaveBeenCalledWith(expect.objectContaining({ row_id: source.row_id }), expect.anything());
       expect(post).toHaveBeenCalledWith(`/api/v1/finance-import/bank-transactions/${source.row_id}/pair`, candidate, expect.anything());
     } finally {
       get.mockRestore();
       post.mockRestore();
       token.mockRestore();
+      window.location.hash = '';
     }
   });
 
@@ -772,65 +1160,68 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       ...source, classification_type: 'client_refund', purpose_review: null,
       reconciliation_target: { case_no: candidate.case_no, staff_id: null, obligation_identities: ['refund:1'] },
     };
-    vi.mocked(financeImportQueryClient.listBankTransactions)
-      .mockResolvedValueOnce({ items: [source], pending_count: 1, next_before_row_id: null })
-      .mockResolvedValue({ items: [fresh], pending_count: 1, next_before_row_id: null });
-    vi.mocked(financeImportQueryClient.pairBankTransaction).mockResolvedValueOnce(source.row_id);
-    const handleReconcile = vi.fn();
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} onReconcile={handleReconcile} />);
-    fireEvent.click(await screen.findByRole('button', { name: '更正出款用途' }));
-    const drawer = screen.getByRole('dialog', { name: '更正出款用途' });
-    expect(within(drawer).getByText(source.pairing_memo)).toBeVisible();
-    const confirm = within(drawer).getByRole('button', { name: '確認用途' });
-    expect(confirm).toBeDisabled();
-    fireEvent.click(within(drawer).getByRole('radio', { name: /115000002.*退款/ }));
-    fireEvent.click(confirm);
-    expect(financeImportQueryClient.pairBankTransaction).toHaveBeenCalledWith(source.row_id, candidate, 2);
-    await waitFor(() => expect(handleReconcile).toHaveBeenCalledWith(fresh));
+    window.location.hash = '#finance?tab=bank';
+    let paired = false;
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async () => ({ items: [paired ? fresh : source], pending_count: 1, next_before_row_id: null }));
+    vi.mocked(financeImportQueryClient.pairBankTransaction).mockImplementationOnce(async () => { paired = true; return source.row_id; });
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockRejectedValue(new Error('synthetic case'));
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${source.reference}` }));
+      const drawer = within(screen.getByRole('dialog', { name: '核對交易' }));
+      fireEvent.click(await drawer.findByRole('button', { name: '更正出款用途' }));
+      expect(drawer.getByText(source.pairing_memo)).toBeVisible();
+      const confirm = drawer.getByRole('button', { name: '確認用途' });
+      expect(confirm).toBeDisabled();
+      fireEvent.click(drawer.getByRole('radio', { name: /115000002.*退款/ }));
+      fireEvent.click(confirm);
+      expect(financeImportQueryClient.pairBankTransaction).toHaveBeenCalledWith(source.row_id, candidate, 2);
+      await waitFor(() => expect(readCase).toHaveBeenCalledWith(candidate.case_no, expect.anything()));
+      expect(await drawer.findByText('客戶退款')).toBeVisible();
+    } finally { readCase.mockRestore(); window.location.hash = ''; }
   });
 
-  it('requires a reason to exclude a pending row and refreshes the list', async () => {
-    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValueOnce({
-      items:[sinopac],pending_count:1,next_before_row_id:null,
-    }).mockResolvedValue({items:[],pending_count:0,next_before_row_id:null});
-    vi.mocked(financeImportQueryClient.excludeBankTransaction).mockResolvedValue(sinopac.row_id);
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
-    fireEvent.click(await screen.findByRole('button',{name:`查看交易 ${sinopac.row_identity}`}));
-    fireEvent.click(screen.getByRole('button',{name:'移除誤匯入明細'}));
-    expect(screen.getByRole('button',{name:'確認移除'})).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('移除原因'),{target:{value:'與案件無關'}});
-    fireEvent.click(screen.getByRole('button',{name:'確認移除'}));
-    await screen.findByText('目前沒有符合條件的銀行交易資料。');
-    expect(financeImportQueryClient.excludeBankTransaction).toHaveBeenCalledWith(sinopac.row_id,'與案件無關');
+  it('keeps details read-only and requires a reason to exclude from the review drawer', async () => {
+    window.location.hash = '#finance?tab=bank';
+    let excluded = false;
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async () => ({
+      items: excluded ? [] : [sinopac], pending_count: excluded ? 0 : 1, next_before_row_id: null,
+    }));
+    vi.mocked(financeImportQueryClient.excludeBankTransaction).mockImplementationOnce(async () => { excluded = true; return sinopac.row_id; });
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockRejectedValue(new Error('synthetic case'));
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `查看交易 ${sinopac.row_identity}` }));
+      const detail = within(screen.getByRole('dialog', { name: '待核對交易明細' }));
+      expect(detail.queryByRole('button', { name: '移除誤匯入明細' })).not.toBeInTheDocument();
+      fireEvent.click(detail.getByRole('button', { name: '核對交易' }));
+      const review = within(screen.getByRole('dialog', { name: '核對交易' }));
+      fireEvent.click(await review.findByRole('button', { name: '移除誤匯入明細' }));
+      expect(review.getByRole('button', { name: '確認移除' })).toBeDisabled();
+      fireEvent.change(review.getByLabelText('移除原因'), { target: { value: '與案件無關' } });
+      fireEvent.click(review.getByRole('button', { name: '確認移除' }));
+      await screen.findByText('目前沒有符合條件的銀行交易資料。');
+      expect(financeImportQueryClient.excludeBankTransaction).toHaveBeenCalledWith(sinopac.row_id, '與案件無關');
+    } finally { readCase.mockRestore(); window.location.hash = ''; }
   });
 
-  it('keeps an unresolved row visible without opening an arbitrary case', async () => {
-    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
-      items: [{ ...sinopac, reconciliation_target: null }], pending_count: 1, next_before_row_id: null,
-    });
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
-    expect(await screen.findByText('對應款項待確認')).toBeVisible();
-    expect(screen.queryByRole('button', { name: '核對交易 Sheet1#2' })).not.toBeInTheDocument();
-  });
-
-  it('labels an already stored unassigned row without offering case selection or reconciliation', async () => {
-    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
-      items: [{ ...sinopac, cases: [], reconciliation_target: null, reconciliation_unavailable_reason: 'case_unconfirmed' }],
-      pending_count: 1, next_before_row_id: null,
-    });
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
-    expect(await screen.findByText('尚未確認唯一案件。')).toBeVisible();
-    expect(screen.queryByRole('button', { name: /核對交易|選擇案件/ })).not.toBeInTheDocument();
-  });
-
-  it('shows the missing payee on a Taishin row with an identified case', async () => {
-    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
-      items: [{ ...taishin, direction: 'outgoing', classification_type: 'staff_salary', cases: ['115000001'],
-        reconciliation_target: null, reconciliation_unavailable_reason: 'staff_unconfirmed' }], pending_count: 1, next_before_row_id: null,
-    });
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
-    expect(await screen.findByText('案件已定位，尚未確認這筆出款的月嫂。')).toBeVisible();
-    expect(screen.queryByRole('button', { name: /核對交易|選擇案件/ })).not.toBeInTheDocument();
+  it.each([
+    [undefined, ['115000001'], '對應款項待確認'],
+    ['case_unconfirmed', [], '尚未確認唯一案件。'],
+    ['staff_unconfirmed', ['115000001'], '案件已定位，尚未確認這筆出款的月嫂。'],
+  ] as const)('shows the precise missing facts for an unresolved transaction (%s)', async (reason, cases, text) => {
+    window.location.hash = '#finance?tab=bank';
+    const row: FinanceBankTransaction = { ...sinopac, cases: [...cases], reconciliation_target: null,
+      reconciliation_unavailable_reason: reason };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const drawer = within(screen.getByRole('dialog', { name: '核對交易' }));
+      expect(await drawer.findByText(text)).toBeVisible();
+      expect(drawer.getByRole('region', { name: '銀行原始交易事實' })).toHaveTextContent('15,000');
+      expect(drawer.queryByRole('button', { name: /確認核銷|選擇案件/ })).not.toBeInTheDocument();
+    } finally { window.location.hash = ''; }
   });
 
   it('passes the selected bank row and obligation to the shared drawer entry', async () => {
@@ -856,19 +1247,24 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
   });
 
   it.each([
-    ['non_business_review', 'taishin_memo_case_requires_manual_scheme', '確認補助方案'],
-    ['staff_payout', 'outgoing_staff_payout_no_open_obligation', '查看案件帳務'],
-  ])('keeps the unique case reachable without payable items (%s)', async (classification_type, review_reason, action) => {
-    const row = { ...taishin, direction: 'outgoing' as const, classification_type, review_reason,
+    ['non_business_review', 'taishin_memo_case_requires_manual_scheme'],
+    ['staff_payout', 'outgoing_staff_payout_no_open_obligation'],
+  ])('keeps the linked case reachable from review without formal payable items (%s)', async (classification_type, review_reason) => {
+    window.location.hash = '#finance?tab=bank';
+    const row: FinanceBankTransaction = { ...taishin, direction: 'outgoing', classification_type, review_reason,
       cases: ['115000001'], reconciliation_target: null, reconciliation_unavailable_reason: 'purpose_unconfirmed' };
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
-    fireEvent.click(await screen.findByRole('button', { name: action }));
-    expect(onCase).toHaveBeenCalledWith('115000001');
-    expect(onReconcile).not.toHaveBeenCalled();
-    expect(screen.queryByText('此款項目前沒有可用的案件核對入口。')).not.toBeInTheDocument();
-    if (classification_type === 'staff_payout') expect(screen.getByText('補助轉交月嫂')).toBeVisible();
-    expect(screen.queryByRole('button', { name: /核對交易/ })).not.toBeInTheDocument();
+    const scope = vi.spyOn(financeAccountingClient, 'query').mockRejectedValue(new Error('synthetic case'));
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const drawer = within(screen.getByRole('dialog', { name: '核對交易' }));
+      fireEvent.click(await drawer.findByRole('button', { name: '查看本案帳務' }));
+      await waitFor(() => expect(scope).toHaveBeenCalledWith('115000001', expect.anything()));
+      fireEvent.click(drawer.getByRole('button', { name: '返回核對交易' }));
+      expect(await drawer.findByRole('button', { name: '查看本案帳務' })).toBeVisible();
+      expect(drawer.queryByRole('button', { name: '單筆人工核對' })).not.toBeInTheDocument();
+    } finally { scope.mockRestore(); window.location.hash = ''; }
   });
 
   it('shows both banks across all uploads and opens import history independently', async () => {
@@ -945,8 +1341,34 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     const viewBtn = screen.getByRole('button', { name: '查看交易 finance-import-row:100' });
     fireEvent.click(viewBtn);
 
-    expect(await screen.findByText('已核銷交易明細')).toBeInTheDocument();
-    expect(screen.getByText(/已核銷 · 唯讀查閱/)).toBeInTheDocument();
+    const detail = within(await screen.findByRole('dialog', { name: '已核銷交易明細' }));
+    expect(detail.getByText(/已核銷 · 唯讀查閱/)).toBeInTheDocument();
+    expect(detail.getByText('合成原始備註 ****')).toBeVisible();
+    expect(await detail.findByText(/客戶款項核銷 · NT\$ 6,000/)).toBeVisible();
+    expect(detail.queryByRole('button', { name: /核對交易|更正出款用途|移除誤匯入明細/ })).not.toBeInTheDocument();
+  });
+
+  it('returns from case accounting to the original read-only bank detail and keeps the list search', async () => {
+    window.location.hash = '#finance?tab=bank';
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockRejectedValue(new Error('synthetic case'));
+    try {
+      render(<FinancePage />);
+      fireEvent.change(screen.getByLabelText('篩選處理狀態'), { target: { value: 'posted' } });
+      fireEvent.change(screen.getByLabelText('搜尋交易'), { target: { value: 'DEMO' } });
+      fireEvent.click(await screen.findByRole('button', { name: `查看交易 ${posted.row_identity}` }));
+      const detail = within(screen.getByRole('dialog', { name: '已核銷交易明細' }));
+      await detail.findByText(/客戶款項核銷/);
+      fireEvent.click(detail.getByRole('button', { name: '開啟案件 DEMO-08' }));
+      const caseDrawer = within(screen.getByRole('dialog', { name: '案件帳務 · DEMO-08' }));
+      await waitFor(() => expect(readCase).toHaveBeenCalledWith('DEMO-08', expect.anything()));
+      const reads = vi.mocked(financeImportQueryClient.listBankTransactions).mock.calls.filter(([query]) => query.row_id === posted.row_id).length;
+      fireEvent.click(caseDrawer.getAllByRole('button', { name: '返回交易明細' })[0]);
+      const returned = within(await screen.findByRole('dialog', { name: '已核銷交易明細' }));
+      expect(await returned.findByText(/客戶款項核銷/)).toBeVisible();
+      expect(vi.mocked(financeImportQueryClient.listBankTransactions).mock.calls.filter(([query]) => query.row_id === posted.row_id)).toHaveLength(reads + 1);
+      expect(screen.getByLabelText('搜尋交易')).toHaveValue('DEMO');
+      expect(screen.getByLabelText('篩選處理狀態')).toHaveValue('posted');
+    } finally { readCase.mockRestore(); window.location.hash = ''; }
   });
 
   it('allows single-step import without a reason field', () => {
@@ -968,16 +1390,43 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
       expect(await screen.findByLabelText('銀行對帳統計摘要')).toHaveTextContent('待核對 1 筆');
       const row = evidence.bank_page.data.items[0];
-      if (row.reconciliation_target || row.classification_type === 'government_subsidy') {
-        expect(screen.getByRole('button', { name: `核對交易 ${row.reference}` })).toBeVisible();
-      } else {
-        expect(screen.getByText('對應款項待確認')).toBeVisible();
-      }
+      expect(screen.getByRole('button', { name: `核對交易 ${row.reference}` })).toBeVisible();
       expect(screen.queryByText(evidence.source_audit.issue_codes[0])).not.toBeInTheDocument();
       expect(get).toHaveBeenCalledWith('/api/v1/finance-import/bank-transactions', expect.anything());
     } finally {
       get.mockRestore();
       token.mockRestore();
     }
+  });
+
+  it('keeps undated established staff obligation selectable from bank reconciliation entry', async () => {
+    const undatedRow: FinanceBankTransaction = {
+      ...sinopac,
+      row_id: 205,
+      row_identity: 'finance-import-row:205',
+      direction: 'outgoing',
+      amount_ntd: 47985,
+      classification_type: 'staff_salary',
+      review_reason: 'due_date_missing',
+      counterparty_name: '合成月嫂甲',
+      cases: ['115000888'],
+      reconciliation_unavailable_reason: 'due_date_missing',
+      reconciliation_target: {
+        case_no: '115000888',
+        staff_id: 7,
+        obligation_identities: ['staff-obligation:assignment:1'],
+        requires_selection: true,
+      },
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [undatedRow],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    const btn = await screen.findByRole('button', { name: `核對交易 ${undatedRow.reference}` });
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(onReconcile).toHaveBeenCalledWith(undatedRow);
   });
 });

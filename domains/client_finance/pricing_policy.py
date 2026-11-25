@@ -162,12 +162,12 @@ def calculate_case_total_amount(terms: CasePricingTerms, service_hours: tuple[tu
         raise ValueError("pricing_floor_fee_invalid")
     consumed = Decimal(0)
     amount = Decimal(floor_fee)
-    for hours, _ in service_hours:
+    for hours, double_pay in service_hours:
         hours = Decimal(str(hours))
         if not hours.is_finite() or hours < 0:
             raise ValueError("pricing_service_hours_invalid")
         covered = min(hours, max(Decimal(0), terms.subsidy_hours - consumed))
-        amount += covered * terms.client.covered + (hours - covered) * terms.client.excess
+        amount += (covered * terms.client.covered + (hours - covered) * terms.client.excess) * (2 if double_pay else 1)
         consumed += hours
     return whole_ntd(amount)
 
@@ -176,3 +176,19 @@ def whole_ntd(value: Decimal) -> int:
     if not value.is_finite() or value != value.to_integral_value():
         raise ValueError("pricing_amount_must_be_whole_ntd")
     return int(value)
+
+
+def calculate_holiday_premium(
+    terms: CasePricingTerms,
+    service_hours: tuple[tuple[Decimal, tuple[tuple[Decimal, Decimal], ...]], ...],
+    *, payroll: bool = False,
+) -> int:
+    rates = terms.payroll if payroll else terms.client
+    consumed = Decimal(0)
+    amount = Decimal(0)
+    for hours, segments in service_hours:
+        for offset, premium_hours in segments:
+            covered = min(premium_hours, max(Decimal(0), terms.subsidy_hours - consumed - offset))
+            amount += covered * rates.covered + (premium_hours - covered) * rates.excess
+        consumed += hours
+    return whole_ntd(amount)

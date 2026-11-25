@@ -26,10 +26,22 @@ const item = z.strictObject({ funding_portions: z.array(StaffFundingPortionSchem
 const warning = z.strictObject({ item_identity: z.string(), kind: z.enum(['over_received', 'over_paid', 'under_paid']), expected_ntd: money, actual_ntd: money, difference_ntd: money, source_version: z.string(), dismissed: z.boolean(), dismissed_by: z.string().nullable(), dismissed_at: z.string().nullable() });
 const bankMemoSchema=z.strictObject({identity:z.string(),occurred_on:z.string().nullable(),memo:z.string()});
 export type CaseBankMemo=z.infer<typeof bankMemoSchema>;
-const detail = z.strictObject({ bank_memos:z.array(bankMemoSchema).optional(), case_no: z.string(), client_name: z.string(), receivable_ntd: money.nullable(), received_ntd: money.nullable(), payable_ntd: money.nullable(), paid_ntd: money.nullable(), pending_warning_count: z.number().int().nonnegative(), client_items: z.array(item), staff_items: z.array(item), transactions: z.array(z.strictObject({ identity: z.string(), item_identity: z.string(), occurred_on: z.string(), kind: z.string(), amount_ntd: money, bank: z.string().nullable(), bank_amount_ntd: money.nullish(), transfer_fee_ntd: money.nullish() })), warnings: z.array(warning), remaining_in_ntd: money.nullable().optional(), remaining_out_ntd: money.nullable().optional(), staff_receivable_ntd:money.nullable().optional(),customer_amount_ntd:money.nullable().optional(),customer_fully_received:z.boolean().nullable().optional(),subsidy_ntd:money.nullable().optional(),scheme:z.enum(['unknown','waiting','split','advance','direct']).optional(),cash_by_flow:z.strictObject({C:money,G:money,PS:money,PT:money,RS:money,RT:money}).nullable().optional(),cash_net_ntd:money.nullable().optional(),customer_burden_ntd:money.nullable().optional(),arrangement:arrangementSchema.nullable().optional(),scheme_conflict:z.boolean().optional(),can_confirm_direct:z.boolean().optional(), collection_progress:z.strictObject({stage:z.enum(['deposit','first','second','scheme']),sources_complete:z.boolean(),expected_ntd:money.nullable(),received_ntd:money.nullable(),remaining_ntd:money.nullable(),due_date:z.string().nullable()}).nullable().optional(), subsidy_plan:subsidyPlanSchema.nullable().optional(),ongoing_completed:z.boolean().optional(), bank_facts: z.array(z.strictObject({ identity: z.string(), occurred_on: z.string(), direction: z.enum(['in', 'out']), amount_ntd: money.positive(), cases: z.array(z.string()), bank: z.string().nullable().optional(), cash_flow: z.enum(['C','G','PS','PT','RS','RT']).nullable().optional() })).optional(), historical_marker: historicalMarkerSchema.nullable().optional() });
+const detail = z.strictObject({ bank_memos:z.array(bankMemoSchema).optional(), case_no: z.string(), client_name: z.string(), receivable_ntd: money.nullable(), received_ntd: money.nullable(), payable_ntd: money.nullable(), paid_ntd: money.nullable(), pending_warning_count: z.number().int().nonnegative(), client_items: z.array(item), staff_items: z.array(item), transactions: z.array(z.strictObject({ identity: z.string(), item_identity: z.string(), occurred_on: z.string(), kind: z.string(), amount_ntd: money, bank: z.string().nullable(), bank_amount_ntd: money.nullish(), transfer_fee_ntd: money.nullish() })), warnings: z.array(warning), remaining_in_ntd: money.nullable().optional(), remaining_out_ntd: money.nullable().optional(), staff_receivable_ntd:money.nullable().optional(),customer_amount_ntd:money.nullable().optional(),customer_fully_received:z.boolean().nullable().optional(),subsidy_ntd:money.nullable().optional(),scheme:z.enum(['unknown','waiting','split','advance','direct']).optional(),cash_by_flow:z.strictObject({C:money,G:money,PS:money,PT:money,RS:money,RT:money}).nullable().optional(),cash_net_ntd:money.nullable().optional(),customer_burden_ntd:money.nullable().optional(),arrangement:arrangementSchema.nullable().optional(),scheme_conflict:z.boolean().optional(),unallocated_service_difference_ntd:money.nullable().optional(),can_confirm_direct:z.boolean().optional(), collection_progress:z.strictObject({stage:z.enum(['deposit','first','second','scheme']),sources_complete:z.boolean(),expected_ntd:money.nullable(),received_ntd:money.nullable(),remaining_ntd:money.nullable(),due_date:z.string().nullable()}).nullable().optional(), subsidy_plan:subsidyPlanSchema.nullable().optional(),ongoing_completed:z.boolean().optional(), bank_facts: z.array(z.strictObject({ identity: z.string(), occurred_on: z.string(), direction: z.enum(['in', 'out']), amount_ntd: money.positive(), cases: z.array(z.string()), bank: z.string().nullable().optional(), cash_flow: z.enum(['C','G','PS','PT','RS','RT']).nullable().optional() })).optional(), historical_marker: historicalMarkerSchema.nullable().optional() });
 const caseDetail = detail.extend({
   zero_stages: z.array(z.enum(["deposit", "first", "second"])).optional(),
   full_subsidy: z.boolean().optional(),
+  historical_stages: z.boolean().optional(),
+  full_subsidy_eligibility: z.boolean().nullable().optional(),
+  accounting_pending_reasons: z.array(z.string()).optional(),
+  stale_payment_evidence_identities: z.array(z.string()).optional(),
+  pending_bank_row_identities: z.array(z.string()).optional(),
+  subsidy_pending_reason: z.string().nullable().optional(),
+  staff_accounting_availability: z.array(z.strictObject({
+    assignment_id: z.number().int().nullable(), staff_id: z.number().int().nullable(), party: z.string(),
+    obligation_identities: z.array(z.string()), status: z.enum(['formal','not_established','needs_review']),
+    pending_reasons: z.array(z.string()), estimated_self_pay_date: z.string().nullable(), estimated_subsidy_date: z.string().nullable(),
+    recorded_due_date: z.string().nullable().optional(),
+  })).optional(),
   estimated_subsidy_payment_date: z.string().nullable().optional(),
   subsidy_payments: z.array(z.strictObject({
     recipient: z.enum(['staff', 'client']), party: z.string(), amount_ntd: exactNtd,
@@ -41,6 +53,9 @@ const caseDetail = detail.extend({
   remaining_in_ntd: exactNtd.nullable().optional(), remaining_out_ntd: exactNtd.nullable().optional(),
   client_items: z.array(item.extend({
     obligation_type: z.string().nullable().optional(),
+    source_event_identity: z.string().nullable().optional(),
+    payment_evidence: z.enum(['historical_paid', 'historical_settled']).nullable().optional(),
+    payment_date: z.string().nullable().optional(),
     expected_ntd: exactNtd, actual_ntd: exactNtd, remaining_ntd: exactNtd.nullable().optional(),
     noncash_ntd: exactNtd.optional(), recognized_ntd: exactNtd.optional(), unallocated_surplus_ntd: exactNtd.optional(),
   })),

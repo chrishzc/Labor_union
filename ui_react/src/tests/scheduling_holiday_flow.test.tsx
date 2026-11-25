@@ -3,7 +3,7 @@
  * Description: 驗證國定假日政策的單擊儲存、選填原因與業務結果回讀。
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
@@ -29,6 +29,7 @@ describe('SchedulingPage holiday policy flow', () => {
     vi.spyOn(schedulingCurrentClient, 'queryCurrentCalendar').mockResolvedValue(
       SCHEDULING_PROJECTION_READY,
     );
+    vi.spyOn(holidayClient, 'accountingResults').mockResolvedValue([]);
     vi.spyOn(holidayClient, 'query').mockResolvedValue(HOLIDAY_CALENDAR);
     vi.spyOn(holidayClient, 'preview').mockResolvedValue(HOLIDAY_PREVIEW);
     vi.spyOn(holidayClient, 'apply').mockResolvedValue(HOLIDAY_RECEIPT);
@@ -53,6 +54,7 @@ describe('SchedulingPage holiday policy flow', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
 
     fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
+    expect(screen.queryByLabelText('當日雙倍計價')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('國定假日日期'), {
       target: { value: HOLIDAY_APPLY_REQUEST.holiday_date },
     });
@@ -113,5 +115,167 @@ describe('SchedulingPage holiday policy flow', () => {
     expect(holidayClient.apply).toHaveBeenCalledWith(
       expect.objectContaining({ ...horizon, reason: '' }), expect.anything(),
     );
+  });
+  it('換年度直接查詢全年並顯示該年度假日', async () => {
+    render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    await screen.findByText(/2026-02-17/);
+    const horizon = { from_date: '2027-01-01', to_date: '2027-12-31' };
+    vi.mocked(holidayClient.query).mockResolvedValue({
+      ...HOLIDAY_CALENDAR,
+      planning_horizon: horizon,
+      holidays: [{ holiday_date: '2027-01-01', holiday_name: '元旦', is_double_pay_default: false }],
+    });
+    fireEvent.change(screen.getByLabelText('國定假日年度'), { target: { value: '2027' } });
+    await screen.findByText(/2027-01-01 ～ 2027-12-31/);
+    expect(holidayClient.query).toHaveBeenLastCalledWith(horizon, undefined);
+    expect(screen.getByRole('button', { name: '2027-01-01 啟用雙倍' })).toBeEnabled();
+    expect(screen.queryByText(/2026-02-17/)).not.toBeInTheDocument();
+  });
+
+  it('年度清單兩日互不影響，直接啟用、關閉並重載後保留後端狀態', async () => {
+    const first = HOLIDAY_CALENDAR.holidays[0]!;
+    const second = { holiday_date: '2026-10-10', holiday_name: '國慶日', is_double_pay_default: false };
+    let rows = [first, second];
+    vi.mocked(holidayClient.query).mockImplementation(async () => ({ ...HOLIDAY_CALENDAR, holidays: rows }));
+    vi.mocked(holidayClient.preview).mockImplementation(async request => ({ ...HOLIDAY_PREVIEW,
+      command: { ...HOLIDAY_PREVIEW.command, ...request, expected_calendar_version: HOLIDAY_CALENDAR.calendar_version } }));
+    vi.mocked(holidayClient.apply).mockImplementation(async request => {
+      rows = rows.map(row => row.holiday_date === request.holiday_date ? { ...row, is_double_pay_default: request.is_double_pay_default ?? false } : row);
+      return { ...HOLIDAY_RECEIPT, holiday_date: request.holiday_date };
+    });
+    const view = render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    fireEvent.click(await screen.findByRole('button', { name: `${first.holiday_date} 啟用雙倍` }));
+    await screen.findByRole('button', { name: `${first.holiday_date} 取消雙倍` });
+    expect(holidayClient.apply).toHaveBeenCalledTimes(1);
+    expect(holidayClient.apply).toHaveBeenLastCalledWith(expect.objectContaining({ holiday_date: first.holiday_date, is_double_pay_default: true }), expect.anything());
+    expect(screen.getByRole('button', { name: `${second.holiday_date} 啟用雙倍` })).toBeEnabled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    view.unmount();
+    render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    fireEvent.click(await screen.findByRole('button', { name: `${first.holiday_date} 取消雙倍` }));
+    await screen.findByRole('button', { name: `${first.holiday_date} 啟用雙倍` });
+    expect(holidayClient.apply).toHaveBeenCalledTimes(2);
+    expect(holidayClient.apply).toHaveBeenLastCalledWith(expect.objectContaining({ holiday_date: first.holiday_date, is_double_pay_default: false }), expect.anything());
+    expect(rows[1]).toEqual(second);
+  });
+
+  it('送出僅鎖該列且連點不重送，失敗保留原狀並在該列重試同命令', async () => {
+    const first = HOLIDAY_CALENDAR.holidays[0]!;
+    const second = { holiday_date: '2026-10-10', holiday_name: '國慶日', is_double_pay_default: false };
+    vi.mocked(holidayClient.query).mockResolvedValue({ ...HOLIDAY_CALENDAR, holidays: [first, second] });
+    vi.mocked(holidayClient.preview).mockImplementation(async request => ({ ...HOLIDAY_PREVIEW,
+      command: { ...HOLIDAY_PREVIEW.command, ...request, expected_calendar_version: HOLIDAY_CALENDAR.calendar_version } }));
+    let fail: ((error: Error) => void) | undefined;
+    vi.mocked(holidayClient.apply).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    const button = await screen.findByRole('button', { name: `${first.holiday_date} 啟用雙倍` });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(holidayClient.apply).toHaveBeenCalledTimes(1));
+    expect(button).toBeDisabled();
+    expect(screen.getByRole('button', { name: `${second.holiday_date} 啟用雙倍` })).toBeEnabled();
+    fail!(new Error('隔離 fixture 寫入失敗'));
+    const error = await screen.findByRole('alert');
+    expect(error).toHaveTextContent('隔離 fixture 寫入失敗');
+    expect(button).toBeEnabled();
+    expect(screen.queryByRole('button', { name: `${first.holiday_date} 取消雙倍` })).not.toBeInTheDocument();
+    vi.mocked(holidayClient.apply).mockImplementationOnce(async () => {
+      vi.mocked(holidayClient.query).mockResolvedValue({ ...HOLIDAY_CALENDAR, holidays: [{ ...first, is_double_pay_default: true }, second] });
+      return { ...HOLIDAY_RECEIPT, holiday_date: first.holiday_date };
+    });
+    fireEvent.click(within(error).getByRole('button', { name: '重試' }));
+    await screen.findByRole('button', { name: `${first.holiday_date} 取消雙倍` });
+    expect(holidayClient.apply).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(holidayClient.apply).mock.calls[0]).toEqual(vi.mocked(holidayClient.apply).mock.calls[1]);
+    expect(screen.getByRole('button', { name: `${second.holiday_date} 啟用雙倍` })).toBeEnabled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('編輯已開啟日期的名稱時保留雙倍，採頁面內展開編輯而不開啟抽屜', async () => {
+    vi.mocked(holidayClient.query).mockResolvedValue({
+      ...HOLIDAY_CALENDAR,
+      holidays: HOLIDAY_CALENDAR.holidays.map(holiday => ({ ...holiday, is_double_pay_default: true })),
+    });
+    render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    await screen.findByText(/2026-02-17/);
+    fireEvent.click(screen.getByRole('button', { name: /編輯/ }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '關閉抽屜' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('當日雙倍計價')).not.toBeInTheDocument();
+    vi.mocked(holidayClient.preview).mockImplementation(async request => ({ ...HOLIDAY_PREVIEW,
+      command: { ...HOLIDAY_PREVIEW.command, ...request, expected_calendar_version: HOLIDAY_CALENDAR.calendar_version } }));
+    fireEvent.change(screen.getByLabelText('國定假日名稱'), { target: { value: '更正名稱' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存國定假日變更' }));
+    await waitFor(() => expect(holidayClient.apply).toHaveBeenCalled());
+    expect(holidayClient.preview).toHaveBeenCalledWith(expect.objectContaining({
+      holiday_name: '更正名稱', is_double_pay_default: true,
+    }), expect.anything());
+    expect(holidayClient.apply).toHaveBeenCalledWith(expect.objectContaining({ is_double_pay_default: true }), expect.anything());
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByLabelText('國定假日名稱')).not.toBeInTheDocument();
+  });
+
+  it('在頁面內刪除國定假日並重讀清單後，仍顯示更新回執', async () => {
+    const target = HOLIDAY_CALENDAR.holidays[0]!;
+    let currentRows = [target];
+    vi.mocked(holidayClient.query).mockImplementation(async () => ({ ...HOLIDAY_CALENDAR, holidays: currentRows }));
+    vi.mocked(holidayClient.preview).mockImplementation(async request => ({
+      ...HOLIDAY_PREVIEW,
+      command: { ...HOLIDAY_PREVIEW.command, ...request, expected_calendar_version: HOLIDAY_CALENDAR.calendar_version },
+    }));
+    vi.mocked(holidayClient.apply).mockImplementation(async request => {
+      currentRows = [];
+      return { ...HOLIDAY_RECEIPT, action: 'delete', holiday_date: request.holiday_date };
+    });
+    render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    await screen.findByText(target.holiday_name);
+    fireEvent.click(screen.getByRole('button', { name: /編輯/ }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('國定假日變更類型'), { target: { value: 'delete' } });
+    fireEvent.click(screen.getByRole('button', { name: '刪除國定假日' }));
+    expect(await screen.findByRole('heading', { name: '國定假日政策已更新' })).toBeInTheDocument();
+    expect(screen.getByText('此期間沒有國定假日資料。')).toBeInTheDocument();
+  });
+
+});
+
+
+describe('國定假日逐案帳務處理結果', () => {
+  it('設定成功仍區分重算、正式收付保留及失敗，重載讀回同一紀錄', async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(schedulingCurrentClient, 'queryCurrentCalendar').mockResolvedValue(SCHEDULING_PROJECTION_READY);
+    const cases = [
+      { case_no: 'REPRICE-OK', outcome: 'repriced', case_total_amount: 5600, staff_payable_amount: 5120 },
+      { case_no: 'REPRICE-PAID', outcome: 'preserved_cash_history', case_total_amount: 2800, reason_code: 'formal_settlement_exists' },
+      { case_no: 'REPRICE-FAIL', outcome: 'failed', case_total_amount: null, reason_code: 'holiday_service_attribution_ambiguous' },
+    ] satisfies import('../api/scheduling/holiday_schemas').HolidayCaseRepricing[];
+    vi.spyOn(transport, 'get').mockRejectedValue(new Error('無其他資料'));
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
+    vi.spyOn(holidayClient, 'accountingResults').mockResolvedValue([]);
+    vi.spyOn(holidayClient, 'query').mockResolvedValue(HOLIDAY_CALENDAR);
+    vi.spyOn(holidayClient, 'preview').mockResolvedValue(HOLIDAY_PREVIEW);
+    vi.spyOn(holidayClient, 'apply').mockResolvedValue({ ...HOLIDAY_RECEIPT, case_results: cases });
+    const view = render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '2026-02-17 啟用雙倍' }));
+    await screen.findByText('REPRICE-FAIL');
+    expect(screen.getByText(/有案件未重算/)).toBeInTheDocument();
+    expect(screen.getByText(/已有正式收付，保留原帳/)).toBeInTheDocument();
+    expect(screen.getByText(/holiday_service_attribution_ambiguous/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    vi.mocked(holidayClient.accountingResults).mockResolvedValue([
+      { holiday_date: '2026-02-17', receipt_key: 'same-receipt', case_results: cases },
+    ]);
+    view.unmount();
+    render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    expect(await screen.findByText('REPRICE-FAIL')).toBeInTheDocument();
   });
 });

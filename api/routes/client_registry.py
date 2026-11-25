@@ -74,6 +74,7 @@ from subsystems.client_profile.order_accounting_export import (
     ClientRegistryOrderAccountingExportApplication,
     OrderAccountingExportQuery,
     XLSX_MEDIA_TYPE,
+    _normalize_query as _normalize_export_query,
 )
 from subsystems.client_profile.case_inspection_export import ClientRegistryCaseInspectionExportApplication
 
@@ -173,6 +174,44 @@ def client_registry_filter_options(
         raise internal_query_error("client_registry_query_internal_error", "篩選選項載入失敗。", correlation) from error
 
 
+def _export_registry_xlsx(
+    *,
+    application: ClientRegistryOrderAccountingExportApplication | ClientRegistryCaseInspectionExportApplication,
+    query: str | None,
+    multi_birth_count: Literal["單胞胎", "雙胞胎"] | None,
+    order_status: str | None,
+    requires_cooking: bool | None,
+    sort_by: Literal["case_no", "customer_name", "service_days", "expected_start_date"] | None,
+    sort_order: Literal["asc", "desc"] | None,
+    column_filters: str | None,
+    headers: dict[str, str],
+    error_code: str,
+    error_message: str,
+) -> Response:
+    correlation = uuid4().hex
+    try:
+        selection = _normalize_export_query(OrderAccountingExportQuery(
+            query=query,
+            multi_birth_count=multi_birth_count,
+            order_status=order_status,
+            requires_cooking=requires_cooking,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            column_filters=parse_column_filters(column_filters),
+        ))
+    except ValueError as error:
+        raise _registry_error(error, correlation) from error
+    try:
+        content = application.export(selection)
+        return Response(content=content, media_type=XLSX_MEDIA_TYPE, headers=headers)
+    except ValueError as error:
+        if str(error).startswith("client_registry_"):
+            raise _registry_error(error, correlation) from error
+        raise internal_query_error(error_code, error_message, correlation) from error
+    except Exception as error:
+        raise internal_query_error(error_code, error_message, correlation) from error
+
+
 @router.get(
     "/export/order-accounting",
     response_class=Response,
@@ -192,36 +231,19 @@ def export_client_registry_order_accounting(
     column_filters: Annotated[str | None, Query(max_length=16000)] = None,
 ):
     del principal
-    correlation = uuid4().hex
-    try:
-        content = application.export(OrderAccountingExportQuery(
-            query=query,
-            multi_birth_count=multi_birth_count,
-            order_status=order_status,
-            requires_cooking=requires_cooking,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            column_filters=parse_column_filters(column_filters),
-        ))
-        return Response(
-            content=content,
-            media_type=XLSX_MEDIA_TYPE,
-            headers={"Content-Disposition": 'attachment; filename="client-order-accounting.xlsx"'},
-        )
-    except ValueError as error:
-        raise _registry_error(error, correlation) from error
-    except (OperationalError, ProgrammingError) as error:
-        raise internal_query_error(
-            "client_registry_order_accounting_export_internal_error",
-            "訂單帳務匯出失敗。",
-            correlation,
-        ) from error
-    except Exception as error:
-        raise internal_query_error(
-            "client_registry_order_accounting_export_internal_error",
-            "訂單帳務匯出失敗。",
-            correlation,
-        ) from error
+    return _export_registry_xlsx(
+        application=application,
+        query=query,
+        multi_birth_count=multi_birth_count,
+        order_status=order_status,
+        requires_cooking=requires_cooking,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        column_filters=column_filters,
+        headers={"Content-Disposition": 'attachment; filename="client-order-accounting.xlsx"'},
+        error_code="client_registry_order_accounting_export_internal_error",
+        error_message="訂單帳務匯出失敗。",
+    )
 
 
 @router.get(
@@ -241,23 +263,22 @@ def export_client_registry_case_inspection(
     column_filters: Annotated[str | None, Query(max_length=16000)] = None,
 ):
     del principal
-    correlation = uuid4().hex
-    try:
-        content = application.export(OrderAccountingExportQuery(
-            query=query, multi_birth_count=multi_birth_count, order_status=order_status,
-            requires_cooking=requires_cooking, sort_by=sort_by, sort_order=sort_order,
-            column_filters=parse_column_filters(column_filters),
-        ))
-        return Response(content=content, media_type=XLSX_MEDIA_TYPE, headers={
+    return _export_registry_xlsx(
+        application=application,
+        query=query,
+        multi_birth_count=multi_birth_count,
+        order_status=order_status,
+        requires_cooking=requires_cooking,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        column_filters=column_filters,
+        headers={
             "Content-Disposition": 'attachment; filename="client-case-inspection.xlsx"',
             "Cache-Control": "no-store",
-        })
-    except ValueError as error:
-        raise _registry_error(error, correlation) from error
-    except Exception as error:
-        raise internal_query_error(
-            "client_registry_case_inspection_export_internal_error", "案件資料檢查匯出失敗。", correlation,
-        ) from error
+        },
+        error_code="client_registry_case_inspection_export_internal_error",
+        error_message="案件資料檢查匯出失敗。",
+    )
 
 
 @router.get(

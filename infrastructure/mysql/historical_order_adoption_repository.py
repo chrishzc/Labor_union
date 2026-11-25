@@ -135,8 +135,11 @@ class MySqlHistoricalOrderAdoptionRepository:
         if (preview.outcome is HistoricalOrderOutcome.ADOPTED
                 and preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value):
             result = self.synchronize_completed_payroll(preview.case_no)
-            if result["action"] == "skipped":
-                payroll_skip_reason = result.get("reason")
+            issue_reason = result.get("reason") if result["action"] == "skipped" else result.get("pending_reason")
+            if issue_reason == "already_synced" and result.get("pending_reason"):
+                issue_reason = result["pending_reason"]
+            if issue_reason:
+                payroll_skip_reason = issue_reason
                 payroll_skip_detail = result.get("detail")
             self._synchronize_completed_subsidy_return(request, receipt_id)
         self._append_outbox(receipt_id, request, preview, review_identity)

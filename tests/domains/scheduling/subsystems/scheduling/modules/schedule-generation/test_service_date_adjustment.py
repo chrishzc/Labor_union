@@ -180,6 +180,22 @@ def test_formal_adjustment_pairs_exclude_retired_receipts_even_when_dates_match(
 
 @pytest.mark.parametrize("restore", [False, True])
 def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restore, monkeypatch):
+    from subsystems.scheduling.holiday_maintenance import HolidayCaseRepricingResult
+
+    accounting_calls: list[tuple[str, str]] = []
+
+    class UnchangedRepricing:
+        def __init__(self, _connection: object) -> None:
+            pass
+
+        def prepare_case(self, case_no: str) -> None:
+            accounting_calls.append(("prepare", case_no))
+
+        def reprice_case(self, case_no: str, key: str, actor: str) -> HolidayCaseRepricingResult:
+            accounting_calls.append(("reprice", case_no))
+            return HolidayCaseRepricingResult(case_no, "unchanged", reason_code="pricing_amounts_unchanged")
+
+    monkeypatch.setattr("infrastructure.mysql.holiday_repricing.MySqlHolidayRepricing", UnchangedRepricing)
     first, second, target = date(2026, 11, 1), date(2026, 11, 2), date(2026, 12, 3)
     original = (ServiceDay(first, 3, None), ServiceDay(second, 3, None))
     merged = plan_service_date_adjustment(original, Decimal(4), (first, second), (AdjustmentTarget(target, 3),))
@@ -208,6 +224,10 @@ def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restor
     assert values == (second if restore else target, "CASE-1", 3)
     assert "actual_end_date=%s,lifecycle_version=lifecycle_version+1" in sql
     assert receipt.scheduling_version == 5
+    assert accounting_calls == [("prepare", "CASE-1"), ("reprice", "CASE-1")]
+    assert receipt.case_result == HolidayCaseRepricingResult(
+        "CASE-1", "unchanged", reason_code="pricing_amounts_unchanged",
+    )
     assert all(token not in sql for token in ("status=", "actual_start_date=", "staff_payment_due_date="))
 
 
@@ -241,3 +261,82 @@ def test_scheduled_end_projection_rejects_stale_order_version():
         persist_order_scheduled_end_projection(
             Mock(rowcount=0), case_no="CASE-1", actual_end_date=date(2026, 12, 3), expected_order_version=3,
         )
+
+
+def _holiday_mapping_receipt(receipt_id, removed, inserted, reverse_id=None):
+    from subsystems.scheduling.service_date_adjustment import service_day_payload
+    return {"id": receipt_id, "reverse_receipt_id": reverse_id, "result_snapshot": {
+        "removed": [service_day_payload(day) for day in removed],
+        "inserted": [service_day_payload(day) for day in inserted],
+        "scheduling_version": receipt_id + 1, "confirmed_version": None,
+    }}
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_holiday_merge_prices_both_original_financial_owners(monkeypatch, enabled):
+    from infrastructure.mysql import service_date_adjustment_repository as repository
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from domains.client_finance.pricing_policy import (
+        CasePricingTerms, HourlyRates, IdentityRule, calculate_holiday_premium,
+    )
+    first, second, target = date(2026, 11, 9), date(2026, 11, 12), date(2026, 11, 10)
+    financial = (
+        {"assignment_id": 101, "work_date": first, "financial_assignment_identity": "assignment:101"},
+        {"assignment_id": 202, "work_date": second, "financial_assignment_identity": "assignment:202"},
+    )
+    assignments = ({"id": 101, "staff_id": 3}, {"id": 202, "staff_id": 7})
+    receipt = _holiday_mapping_receipt(1,
+        (ServiceDay(first, 3, None), ServiceDay(second, 7, None)), (ServiceDay(target, 3, 8),))
+    monkeypatch.setattr(repository, "load_payroll_service_dates", lambda *args, **kwargs: financial)
+    monkeypatch.setattr(repository, "_load_formal_receipts", lambda *args: (receipt,))
+    monkeypatch.setattr(MySqlSchedulingHolidayQuery, "query", lambda *args, **kwargs: SimpleNamespace(
+        holidays=(SimpleNamespace(holiday_date=target, is_double_pay_default=enabled),)))
+    cursor = Mock()
+    cursor.fetchall.return_value = ({"assignment_id": 101, "staff_id": 3, "work_date": target, "service_hours_override": 8},)
+    cursor.fetchone.side_effect = [{"case_no": "cross-owner"}, None] * 2
+    rows = repository.load_holiday_priced_service_dates(cursor, 9, assignments, 2, Decimal(4), lock=True)
+    replay = repository.load_holiday_priced_service_dates(cursor, 9, assignments, 2, Decimal(4), lock=True)
+    assert rows == replay
+    assert [(row["assignment_id"], row["financial_assignment_identity"]) for row in rows] == [
+        (101, "assignment:101"), (202, "assignment:202")]
+    assert [row["holiday_hours"] for row in rows] == [Decimal(4 if enabled else 0)] * 2
+    terms = CasePricingTerms("非市民", IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(0, 350), HourlyRates(0, 320))
+    days = tuple((Decimal(4), row["holiday_hour_segments"]) for row in rows)
+    client_amount = 2800 + calculate_holiday_premium(terms, days)
+    staff_amount = 2560 + calculate_holiday_premium(terms, days, payroll=True)
+    assert (client_amount, staff_amount, client_amount - staff_amount) == (
+        (5600, 5120, 480) if enabled else (2800, 2560, 240))
+
+
+def test_holiday_mapping_exact_reverse_restores_each_original_source():
+    from infrastructure.mysql.service_date_adjustment_repository import _holiday_priced_rows
+    first, second, target = date(2026, 11, 9), date(2026, 11, 12), date(2026, 11, 10)
+    originals = (ServiceDay(first, 3, None), ServiceDay(second, 7, None))
+    merged = (ServiceDay(target, 3, 8),)
+    rows = _holiday_priced_rows(
+        ({"assignment_id": 101, "work_date": first}, {"assignment_id": 202, "work_date": second}),
+        ({"assignment_id": 101, "staff_id": 3, "work_date": first, "service_hours_override": None},
+         {"assignment_id": 202, "staff_id": 7, "work_date": second, "service_hours_override": None}),
+        {101: 3, 202: 7},
+        (_holiday_mapping_receipt(1, originals, merged), _holiday_mapping_receipt(2, merged, originals, 1)),
+        Decimal(4), frozenset((target,)),
+    )
+    assert [row["holiday_hours"] for row in rows] == [0, 0]
+
+
+def test_holiday_mapping_rejects_missing_per_source_split_instead_of_guessing():
+    from infrastructure.mysql.service_date_adjustment_repository import _holiday_priced_rows, HolidayServiceAttributionError
+    first, second, merged, left, right = (date(2026, 11, value) for value in range(1, 6))
+    receipt = _holiday_mapping_receipt(1,
+        (ServiceDay(first, 3, None), ServiceDay(second, 7, None)), (ServiceDay(merged, 3, 8),))
+    split = _holiday_mapping_receipt(2, (ServiceDay(merged, 3, 8),),
+        (ServiceDay(left, 3, 4), ServiceDay(right, 7, 4)))
+    with pytest.raises(HolidayServiceAttributionError) as failure:
+        _holiday_priced_rows(
+            ({"assignment_id": 101, "work_date": first}, {"assignment_id": 202, "work_date": second}),
+            ({"assignment_id": 101, "staff_id": 3, "work_date": left, "service_hours_override": 4},
+             {"assignment_id": 202, "staff_id": 7, "work_date": right, "service_hours_override": 4}),
+            {101: 3, 202: 7}, (receipt, split), Decimal(4), frozenset((left,)),
+        )
+    assert failure.value.code == "holiday_service_attribution_ambiguous"
+    assert failure.value.missing_mapping == ("per_financial_source_to_target_hour_mapping",)

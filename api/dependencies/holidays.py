@@ -11,6 +11,7 @@ from infrastructure.cache import default_redis_cache_backend
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
 from subsystems.scheduling.holiday_maintenance import HolidayMaintenanceApplication
 from subsystems.scheduling.holiday_query_cache import (
     configure_holiday_query_cache_backend,
@@ -25,10 +26,13 @@ configure_holiday_query_cache_backend(default_redis_cache_backend)
 def get_holiday_maintenance_application():
     connection = get_connection()
     try:
+        repricing = MySqlHolidayRepricing(connection)
         yield HolidayMaintenanceApplication(
             MySqlSchedulingHolidayQuery(connection),
             lambda: MySqlUnitOfWork(connection),
             _invalidate_cache_after_commit,
+            repricing,
+            repricing.prepare,
         )
     finally:
         connection.close()

@@ -116,6 +116,9 @@ class AccountingItemView(_StrictModel):
 
 class ClientAccountingItemView(AccountingItemView):
     obligation_type: str | None = None
+    source_event_identity: str | None = None
+    payment_evidence: Literal["historical_paid", "historical_settled"] | None = None
+    payment_date: str | None = None
     expected_ntd: ExactNtd
     actual_ntd: ExactNtd
     unallocated_surplus_ntd: ExactNtd = 0
@@ -281,6 +284,18 @@ class SubsidyPaymentView(_StrictModel):
     source: Literal["estimate", "formal"]
 
 
+class StaffAccountingAvailabilityView(_StrictModel):
+    assignment_id: int | None
+    staff_id: int | None
+    party: str
+    obligation_identities: list[str]
+    status: Literal["formal", "not_established", "needs_review"]
+    pending_reasons: list[str]
+    estimated_self_pay_date: str | None = None
+    estimated_subsidy_date: str | None = None
+    recorded_due_date: str | None = None
+
+
 class CaseAccountingView(_StrictModel):
     manual_supplement_receipt: ManualSupplementReceiptView | None = None
     case_no: str
@@ -308,6 +323,7 @@ class CaseAccountingView(_StrictModel):
     customer_burden_ntd: int | None = None
     arrangement: CaseArrangementView | None = None
     scheme_conflict: bool = False
+    unallocated_service_difference_ntd: int | None = None
     can_confirm_direct: bool = False
     collection_progress: CollectionProgressView | None = None
     subsidy_plan: CaseSubsidyPlanView | None = None
@@ -316,6 +332,13 @@ class CaseAccountingView(_StrictModel):
     estimated_subsidy_payment_date: str | None = None
     zero_stages: list[Literal["deposit", "first", "second"]] = Field(default_factory=list)
     full_subsidy: bool = False
+    stale_payment_evidence_identities: list[str] = Field(default_factory=list)
+    pending_bank_row_identities: list[str] = Field(default_factory=list)
+    historical_stages: bool = False
+    full_subsidy_eligibility: bool | None = None
+    accounting_pending_reasons: list[str] = Field(default_factory=list)
+    subsidy_pending_reason: str | None = None
+    staff_accounting_availability: list[StaffAccountingAvailabilityView] = Field(default_factory=list)
     ongoing_completed: bool = False
     cancellation_settlement: CaseCancellationSettlementView | None = None
 
@@ -427,8 +450,17 @@ class FinanceBankPurposeReviewView(_StrictModel):
     candidates: list[FinanceBankPairingCandidateView]
 
 
+class FinanceBankReconciliationRecordView(_StrictModel):
+    owning_domain: Literal['client_finance', 'staff_payables']
+    amount_ntd: int
+    recorded_at: str
+
+
 class FinanceBankTransactionView(_StrictModel):
     row_id: int
+    bank_memo: str | None = None
+    reconciliation_records: list[FinanceBankReconciliationRecordView] = Field(default_factory=list)
+    staff_subsidy_manual_review_allowed: bool = False
     staff_subsidy_batch_identity: str | None = None
     pairing_candidates: list[FinanceBankPairingCandidateView] = Field(default_factory=list)
     pairing_memo: str | None = None

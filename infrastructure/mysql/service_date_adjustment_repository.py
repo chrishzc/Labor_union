@@ -1,6 +1,12 @@
 """Persist Scheduling date adjustments without replacing assignment or financial facts."""
 
 import json
+from dataclasses import asdict
+from subsystems.scheduling.holiday_maintenance import HolidayCaseRepricingResult
+from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from typing import Literal, NotRequired, TypedDict
+from pymysql.cursors import DictCursor
 from datetime import date
 from decimal import Decimal
 
@@ -69,6 +75,8 @@ class MySqlServiceDateAdjustmentRepository:
             days, tuple(dict.fromkeys((int(row["staff_id"]), str(row["name"])) for row in staff_rows)), pairs,
             int(order["service_days"]), selectable, planned_owners,
             first_schedule_days,
+            (HolidayCaseRepricingResult(**{**latest_result, "missing_mapping": tuple(latest_result.get("missing_mapping", ()))}) if receipts and
+                (latest_result := _parse_snapshot(receipts[-1]["result_snapshot"]).get("case_result")) else None),
         )
 
     def lock_case_and_staff(self, case_no, staff_ids):
@@ -98,7 +106,9 @@ class MySqlServiceDateAdjustmentRepository:
         if row["command_fingerprint"] != fingerprint:
             raise ValueError("service_date_adjustment_idempotency_conflict")
         snapshot = _parse_snapshot(row["result_snapshot"])
-        return ServiceDateAdjustmentReceipt(int(row["id"]), snapshot["scheduling_version"], snapshot["confirmed_version"])
+        return ServiceDateAdjustmentReceipt(int(row["id"]), snapshot["scheduling_version"], snapshot["confirmed_version"],
+            HolidayCaseRepricingResult(**{**snapshot["case_result"],
+                "missing_mapping": tuple(snapshot["case_result"].get("missing_mapping", ()))}) if snapshot.get("case_result") else None)
 
     def validate_availability(self, facts, change, *, lock):
         with self._connection.cursor() as cursor:
@@ -106,6 +116,9 @@ class MySqlServiceDateAdjustmentRepository:
 
     def save(self, preview, request, *, key, fingerprint, actor):
         facts, change = preview.facts, preview.change
+        from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+        repricing = MySqlHolidayRepricing(self._connection)
+        frozen_total = repricing.prepare_case(facts.case_no) if facts.generation_id is not None else None
         with self._connection.cursor() as cursor:
             if facts.generation_id is None:
                 scheduling_version, confirmed_version = facts.scheduling_version, _write_confirmed(
@@ -135,6 +148,7 @@ class MySqlServiceDateAdjustmentRepository:
                         raise ValueError("service_date_adjustment_stale_version") from error
                     raise
             snapshot = {
+                "frozen_case_total_amount": frozen_total,
                 "removed": [service_day_payload(day) for day in change.removed],
                 "inserted": [service_day_payload(day) for day in change.inserted],
                 "scheduling_version": scheduling_version,
@@ -150,7 +164,12 @@ class MySqlServiceDateAdjustmentRepository:
                 if error.args[0] == 1062:
                     raise ValueError("service_date_adjustment_idempotency_conflict") from error
                 raise
-            return ServiceDateAdjustmentReceipt(int(cursor.lastrowid), scheduling_version, confirmed_version)
+            receipt_id = int(cursor.lastrowid)
+            case_result = repricing.reprice_case(facts.case_no, key, actor) if facts.generation_id is not None else None
+            snapshot["case_result"] = asdict(case_result) if case_result is not None else None
+            cursor.execute("UPDATE service_date_adjustment_receipts SET result_snapshot=%s WHERE id=%s",
+                (json.dumps(snapshot), receipt_id))
+            return ServiceDateAdjustmentReceipt(receipt_id, scheduling_version, confirmed_version, case_result)
 
 
 def _formal_days(cursor, generation_id, suffix):
@@ -177,6 +196,195 @@ def load_payroll_service_dates(cursor, generation_id, assignments, service_days,
     )
     rows = tuple(cursor.fetchall())
     return _cancellation_floor_identities(cursor, generation_id, service_days, rows, lock=lock)
+
+
+
+class HolidayPricedServiceDate(TypedDict):
+    assignment_id: int
+    work_date: date
+    financial_assignment_identity: NotRequired[str]
+    holiday_hours: Decimal
+    holiday_hour_segments: tuple[tuple[Decimal, Decimal], ...]
+
+
+class HolidayServiceAttributionError(ValueError):
+    code = "holiday_service_attribution_ambiguous"
+
+    def __init__(self, *missing_mapping: str) -> None:
+        super().__init__(self.code)
+        self.missing_mapping = tuple(missing_mapping)
+
+
+@dataclass(frozen=True, slots=True)
+class _FinancialHourToken:
+    financial_row: int
+    offset: Decimal
+    hours: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class _AttributedServiceDay:
+    day: ServiceDay
+    tokens: tuple[_FinancialHourToken, ...]
+
+
+def load_holiday_priced_service_dates(
+    cursor: DictCursor, generation_id: int, assignments: Sequence[Mapping[str, int]],
+    service_days: int, hours_per_day: Decimal, *, lock: bool,
+) -> tuple[HolidayPricedServiceDate, ...]:
+    """Replay explicit date receipts without transferring financial ownership."""
+    financial = load_payroll_service_dates(cursor, generation_id, assignments, service_days, lock=lock)
+    suffix = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        "SELECT assignment_id,staff_id,work_date,service_hours_override FROM staff_schedule "
+        "WHERE generation_id=%s AND effective_marker=1 AND is_work_day=1 "
+        "ORDER BY work_date,id" + suffix, (generation_id,),
+    )
+    effective = tuple(cursor.fetchall())
+    if not effective:
+        return tuple(dict(row, holiday_hours=Decimal(0), holiday_hour_segments=()) for row in financial)
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    calendar = MySqlSchedulingHolidayQuery(cursor.connection).query(
+        min(row["work_date"] for row in effective), max(row["work_date"] for row in effective), lock=lock,
+    )
+    enabled = frozenset(day.holiday_date for day in calendar.holidays if day.is_double_pay_default)
+    if not any(row["work_date"] in enabled for row in effective):
+        return tuple(dict(row, holiday_hours=Decimal(0), holiday_hour_segments=()) for row in financial)
+    cursor.execute("SELECT case_no FROM case_staff_assignments WHERE generation_id=%s ORDER BY id LIMIT 1" + suffix,
+                   (generation_id,))
+    case = cursor.fetchone()
+    if case is None:
+        raise HolidayServiceAttributionError("generation_case_binding")
+    cursor.execute("SELECT id,version,scheduling_version FROM confirmed_service_date_versions "
+                   "WHERE case_no=%s AND is_current=1" + suffix, (case["case_no"],))
+    confirmation = cursor.fetchone()
+    receipts = _load_formal_receipts(cursor, case["case_no"], confirmation, suffix)
+    return _holiday_priced_rows(financial, effective,
+        {int(row["id"]): int(row["staff_id"]) for row in assignments}, receipts, hours_per_day, enabled)
+
+
+def _attribution_integer(value: object, field: str) -> int:
+    if type(value) is not int:
+        raise HolidayServiceAttributionError(field)
+    return value
+
+
+def _attribution_date(value: object) -> date:
+    if not isinstance(value, date):
+        raise HolidayServiceAttributionError("service_date")
+    return value
+
+
+def _attribution_override(value: object) -> Literal[4, 8] | None:
+    if value is None:
+        return None
+    if type(value) is int and value == 4:
+        return 4
+    if type(value) is int and value == 8:
+        return 8
+    raise HolidayServiceAttributionError("service_hours_override")
+
+
+def _receipt_attribution_days(value: object) -> tuple[ServiceDay, ...]:
+    if not isinstance(value, list):
+        raise HolidayServiceAttributionError("receipt_service_days")
+    days = []
+    for row in value:
+        if not isinstance(row, dict) or not isinstance(row.get("service_date"), str):
+            raise HolidayServiceAttributionError("receipt_service_day")
+        try:
+            occurred_on = date.fromisoformat(row["service_date"])
+        except ValueError as error:
+            raise HolidayServiceAttributionError("receipt_service_date") from error
+        staff_id = _attribution_integer(row.get("staff_id"), "receipt_staff_binding")
+        hours = _attribution_override(row.get("hours_override"))
+        days.append(ServiceDay(occurred_on, staff_id, hours))
+    return tuple(days)
+
+
+def _holiday_priced_rows(
+    financial: Sequence[Mapping[str, object]], effective: Sequence[Mapping[str, object]],
+    assignment_staff: Mapping[int, int], receipts: Sequence[Mapping[str, object]],
+    hours_per_day: Decimal, enabled_dates: frozenset[date],
+) -> tuple[HolidayPricedServiceDate, ...]:
+    ledger: dict[date, _AttributedServiceDay] = {}
+    for index, row in enumerate(financial):
+        assignment_id = _attribution_integer(row.get("assignment_id"), "financial_assignment")
+        occurred_on = _attribution_date(row.get("work_date"))
+        if assignment_id not in assignment_staff or occurred_on in ledger:
+            raise HolidayServiceAttributionError("unique_financial_date_and_staff")
+        ledger[occurred_on] = _AttributedServiceDay(
+            ServiceDay(occurred_on, assignment_staff[assignment_id], None),
+            (_FinancialHourToken(index, Decimal(0), hours_per_day),),
+        )
+    operations: dict[int, tuple[_AttributedServiceDay, ...]] = {}
+    for receipt in receipts:
+        snapshot = receipt.get("result_snapshot")
+        if isinstance(snapshot, (str, bytes)):
+            snapshot = json.loads(snapshot)
+        if not isinstance(snapshot, dict):
+            raise HolidayServiceAttributionError("receipt_snapshot")
+        removed = _receipt_attribution_days(snapshot.get("removed"))
+        inserted = _receipt_attribution_days(snapshot.get("inserted"))
+        sources = []
+        for day in removed:
+            source = ledger.get(day.service_date)
+            if (source is None or source.day.staff_id != day.staff_id
+                    or source.day.hours(hours_per_day) != day.hours(hours_per_day)):
+                raise HolidayServiceAttributionError("receipt_source_financial_pair", day.service_date.isoformat())
+            sources.append(source)
+        tokens = tuple(token for source in sources for token in source.tokens)
+        if sum((token.hours for token in tokens), Decimal(0)) != sum((day.hours(hours_per_day) for day in inserted), Decimal(0)):
+            raise HolidayServiceAttributionError("receipt_conserved_service_hours")
+        reverse_id = receipt.get("reverse_receipt_id")
+        if reverse_id is not None:
+            restored = operations.get(_attribution_integer(reverse_id, "reverse_receipt_id"))
+            if restored is None or {item.day for item in restored} != set(inserted):
+                raise HolidayServiceAttributionError("exact_reverse_financial_pair")
+            replacements = restored
+        elif len(inserted) == 1:
+            replacements = (_AttributedServiceDay(inserted[0], tokens),)
+        else:
+            raise HolidayServiceAttributionError("per_financial_source_to_target_hour_mapping")
+        for day in removed:
+            del ledger[day.service_date]
+        for replacement in replacements:
+            if replacement.day.service_date in ledger:
+                raise HolidayServiceAttributionError("unique_effective_service_date")
+            ledger[replacement.day.service_date] = replacement
+        operations[_attribution_integer(receipt.get("id"), "receipt_id")] = tuple(sources)
+    current = {}
+    for row in effective:
+        day = _attribution_date(row.get("work_date"))
+        override = _attribution_override(row.get("service_hours_override"))
+        if day in current:
+            raise HolidayServiceAttributionError("unique_effective_date_and_hours")
+        current[day] = ServiceDay(day, _attribution_integer(row.get("staff_id"), "effective_staff_binding"), override)
+    if (set(current) != set(ledger) or any(
+        current[day].staff_id != item.day.staff_id
+        or current[day].hours(hours_per_day) != item.day.hours(hours_per_day)
+        for day, item in ledger.items()
+    )):
+        raise HolidayServiceAttributionError("effective_day_to_receipt_chain")
+    segments: dict[int, list[tuple[Decimal, Decimal]]] = {index: [] for index in range(len(financial))}
+    for day, item in ledger.items():
+        if day in enabled_dates:
+            for token in item.tokens:
+                segments[token.financial_row].append((token.offset, token.hours))
+    result = []
+    for index, row in enumerate(financial):
+        parts = tuple(segments[index])
+        result_row: HolidayPricedServiceDate = {
+            "assignment_id": _attribution_integer(row.get("assignment_id"), "financial_assignment"),
+            "work_date": _attribution_date(row.get("work_date")),
+            "holiday_hours": sum((hours for _, hours in parts), Decimal(0)),
+            "holiday_hour_segments": parts,
+        }
+        identity = row.get("financial_assignment_identity")
+        if isinstance(identity, str):
+            result_row["financial_assignment_identity"] = identity
+        result.append(result_row)
+    return tuple(result)
 
 
 def load_unadjusted_service_dates(cursor, generation_id, assignment_ids, service_days, *, lock):

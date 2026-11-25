@@ -3,6 +3,7 @@
  * Description: 嚴格對齊後端 Phase 2B Orders 安全變更端點之 Zod 解碼器，禁止寬鬆型別與預設值。
  */
 import { z } from 'zod';
+import { HolidayCaseRepricingSchema } from '../scheduling/holiday_schemas';
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const HEX_SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -80,6 +81,7 @@ const AdjustableServiceDaySchema = z.object({
 }).strict();
 
 const ServiceDateAdjustmentQuerySchema = z.object({
+  accounting_result: HolidayCaseRepricingSchema.nullable().optional(),
   days: z.array(AdjustableServiceDaySchema),
   staff: z.array(BoundServiceStaffSchema),
   pairs: z.array(z.object({
@@ -103,6 +105,7 @@ export const ServiceDateAdjustmentPreviewSchema = z.object({
 }).strict();
 
 export const ServiceDateAdjustmentReceiptSchema = z.object({
+  case_result: HolidayCaseRepricingSchema.nullable().optional(),
   receipt_id: z.number().int().positive(),
   scheduling_version: z.number().int().nonnegative(),
   confirmed_version: z.number().int().positive().nullable(),
