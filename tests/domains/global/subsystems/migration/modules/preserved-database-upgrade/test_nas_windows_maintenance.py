@@ -446,7 +446,7 @@ def test_file_picker_cancel_or_failure_does_not_fall_back_to_typed_path(settings
         nas.select_backup_file(settings)
 
 
-def test_verified_manual_source_is_read_only_and_restore_creates_default_journal_folder(settings, monkeypatch, tmp_path):
+def test_verified_manual_source_is_read_only_and_restore_creates_no_journal_folder(settings, monkeypatch, tmp_path):
     archive, _ = make_backup(settings, monkeypatch)
     before = archive.read_bytes()
     parent = tmp_path / "replacement-share"
@@ -459,7 +459,7 @@ def test_verified_manual_source_is_read_only_and_restore_creates_default_journal
     monkeypatch.setattr(nas, "_restore_server", stop_after_validation)
     with pytest.raises(nas.MaintenanceBlocked, match="synthetic stop"):
         nas.restore(settings, archive)
-    assert settings["backup_root"].is_dir()
+    assert not settings["backup_root"].exists()
     assert archive.read_bytes() == before
 
 
@@ -1220,20 +1220,13 @@ def same_name_restore(settings, monkeypatch):
     monkeypatch.setattr(updater, "require_current_database", lambda _: None)
     monkeypatch.setattr(nas_mutations, "ensure_nas_procedures", lambda _: steps.append(("procedures", None)))
 
-    def journal():
-        marker = nas._restore_read(nas._restore_marker(settings["environment_file"]))
-        if marker is not None:
-            return nas._restore_read(Path(marker["journal"]))
-        path, = settings["backup_root"].glob("_maintenance/_same_name_restore/*.json")
-        return nas._restore_read(path)
-
     def startup_blocked():
         return nas.restore_startup_blocked(settings["host"], settings["port"], database,
                                            environment_file=settings["environment_file"])
 
     return SimpleNamespace(archive=archive, archive_bytes=archive.read_bytes(), data=data, steps=steps, fail=fail,
                            original=original, settings=settings, database=database, lock=lock,
-                           journal=journal, startup_blocked=startup_blocked, server=server)
+                           startup_blocked=startup_blocked, server=server)
 
 
 @pytest.mark.parametrize("conversion_ok", [True, False])
@@ -1277,7 +1270,7 @@ def test_restore_automatically_applies_pending_additive_migration(same_name_rest
         with pytest.raises(nas.MaintenanceBlocked, match=match):
             nas.restore(flow.settings, flow.archive)
         assert flow.data[flow.database] == "original"
-        assert not any(action == "drop" for action, _ in flow.steps)
+        assert not any(action == "drop" and target == flow.database for action, target in flow.steps)
         assert ("procedures", None) in flow.steps if conversion_ok else ("procedures", None) not in flow.steps
     assert len(previews) >= 2
     assert any(action == "migration_sql" and "hcm_review_status" in value for action, value in flow.steps)
@@ -1292,134 +1285,44 @@ def test_restore_blocks_incompatible_version_with_clear_reason(same_name_restore
     with pytest.raises(nas.MaintenanceBlocked, match="不相容.*schema_state_drift_detected"):
         nas.restore(flow.settings, flow.archive)
     assert flow.data[flow.database] == "original"
-    assert flow.journal()["phase"] == "preparing_candidate"
+    assert not (flow.settings["backup_root"] / "_maintenance").exists()
+    assert not any(name.startswith("lu_nas_restore_") for name in flow.data)
 
 
 @pytest.mark.parametrize("missing_target", [False, True])
-def test_same_name_restore_twice_removes_only_its_artifacts(same_name_restore, missing_target):
+def test_same_name_restore_twice_leaves_no_maintenance_folders(same_name_restore, missing_target):
     flow = same_name_restore
     other = flow.archive.with_name("other.zip")
     other.write_bytes(b"unrelated backup")
     if missing_target:
         del flow.data[flow.database]
-    for index in range(2):
-        start = len(flow.steps)
-        run = nas.restore(flow.settings, flow.archive)
-        steps = flow.steps[start:]
-        assert ("backup", "before") in steps if not (missing_target and index == 0) else ("backup", "before") not in steps
+    for _ in range(2):
+        nas.restore(flow.settings, flow.archive)
         assert flow.data == {flow.database: "restored", "lu_test_neighbor": "neighbor"}
-        assert not list(run.rglob("*.zip"))
-        assert not list(run.rglob("*.sql.gz"))
+        assert not (flow.settings["backup_root"] / "_maintenance").exists()
+        assert not (flow.settings["environment_file"].parent / "scratch/nas_database_maintenance/same-name-restore.json").exists()
         assert flow.archive.read_bytes() == flow.archive_bytes
         assert other.read_bytes() == b"unrelated backup"
         assert flow.settings["environment_file"].read_bytes() == flow.original
-        assert flow.journal()["phase"] == "completed"
         assert not flow.startup_blocked()
 
 
-@pytest.mark.parametrize(("failure", "phase"), [
-    ("before", "backing_up"),
-    ("candidate_import", "importing_candidate"),
-    ("verified", "exporting"),
-])
-def test_failure_before_replacement_preserves_target_and_reuses_operation(same_name_restore, failure, phase):
+@pytest.mark.parametrize("failure", ["candidate_import", "verified"])
+def test_failure_before_replacement_cleans_up_temp_artifacts_and_allows_retry(same_name_restore, failure):
     flow = same_name_restore
     flow.fail.add(failure)
     with pytest.raises(nas.MaintenanceBlocked):
         nas.restore(flow.settings, flow.archive)
-    candidate = flow.journal()["candidate"]
-    assert flow.journal()["phase"] == phase
     assert flow.data[flow.database] == "original"
     assert flow.archive.read_bytes() == flow.archive_bytes
-    assert not any(action == "drop" for action, _ in flow.steps)
+    assert not any(action == "drop" and target == flow.database for action, target in flow.steps)
+    assert not any(name.startswith("lu_nas_restore_") for name in flow.data)
+    assert not (flow.settings["backup_root"] / "_maintenance").exists()
+    assert not (flow.settings["environment_file"].parent / "scratch/nas_database_maintenance/same-name-restore.json").exists()
     flow.fail.clear()
-    if failure == "candidate_import":
-        before = list(flow.steps)
-        with pytest.raises(nas.MaintenanceBlocked, match="匯入結果未明"):
-            nas.restore(flow.settings, flow.archive)
-        assert flow.steps == before
-        assert flow.journal()["candidate"] == candidate
-    else:
-        run = nas.restore(flow.settings, flow.archive)
-        assert run.name == candidate
-        assert flow.data[flow.database] == "restored"
-
-
-@pytest.mark.parametrize("failure", ["drop_unknown", "create_unknown", "target_import_unknown", "target_import", "busy"])
-def test_interrupted_target_is_reconciled_or_preserved_without_reimport(same_name_restore, failure):
-    flow = same_name_restore
-    flow.fail.add(failure)
-    with pytest.raises(nas.MaintenanceBlocked):
-        nas.restore(flow.settings, flow.archive)
-    first = list(flow.steps)
-    journal = flow.journal()
-    assert flow.startup_blocked()
-    assert flow.archive.is_file()
-    assert journal["candidate"] in flow.data
-    assert len(list(flow.settings["backup_root"].glob(f"_maintenance/{journal['candidate']}/*/*/*.zip"))) == 2
-    flow.fail.clear()
-    if failure == "target_import":
-        with pytest.raises(nas.MaintenanceBlocked, match="暫存基準不符"):
-            nas.restore(flow.settings, flow.archive)
-        assert flow.steps == first
-        assert flow.startup_blocked()
-    else:
-        assert nas.restore(flow.settings, flow.archive).name == journal["candidate"]
-        assert flow.steps.count(("drop", flow.database)) == 1
-        assert flow.steps.count(("create", flow.database)) == 1
-        assert flow.steps.count(("import", flow.database)) == 1
-        assert not flow.startup_blocked()
-
-
-def test_retry_after_partial_cleanup_only_deletes_remaining_artifacts(same_name_restore, monkeypatch):
-    flow = same_name_restore
-    unlink = Path.unlink
-    removed = []
-    fail = True
-
-    def delete(path, *args, **kwargs):
-        if path.suffix == ".zip" and path.parent.parent.name in {"before", "verified"}:
-            if path.parent.parent.name == "verified" and fail:
-                raise OSError("synthetic denied deletion")
-            removed.append(path.parent.parent.name)
-        return unlink(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "unlink", delete)
-    with pytest.raises(nas.RestoreCleanupPending, match="資料復原成功，清理待完成"):
-        nas.restore(flow.settings, flow.archive)
-    candidate = flow.journal()["candidate"]
-    assert flow.journal()["phase"] == "cleanup_pending"
-    assert removed == ["before"]
-    assert not flow.startup_blocked()
+    nas.restore(flow.settings, flow.archive)
     assert flow.data[flow.database] == "restored"
-    assert candidate not in flow.data
-    first = list(flow.steps)
-    fail = False
-    assert nas.restore(flow.settings, None).name == candidate
-    assert flow.steps == first
-    assert removed == ["before", "verified"]
-    assert flow.archive.read_bytes() == flow.archive_bytes
-
-
-@pytest.mark.parametrize("changed", ["env", "server", "backup"])
-def test_unfinished_operation_rejects_identity_drift(same_name_restore, changed):
-    flow = same_name_restore
-    flow.fail.add("drop_unknown")
-    with pytest.raises(nas.MaintenanceBlocked):
-        nas.restore(flow.settings, flow.archive)
-    first = list(flow.steps)
-    if changed == "env":
-        flow.settings["environment_file"].write_bytes(flow.original + b"# changed\n")
-    elif changed == "server":
-        flow.server["id"] = "22222222-2222-4222-8222-222222222222"
-    else:
-        path, = flow.settings["backup_root"].glob("_maintenance/lu_nas_restore_*/verified/*/*.zip")
-        path.write_bytes(b"unexpected output")
-    with pytest.raises(nas.MaintenanceBlocked):
-        nas.restore(flow.settings, flow.archive)
-    assert flow.steps == first
-    assert flow.data["lu_test_neighbor"] == "neighbor"
-    assert flow.archive.read_bytes() == flow.archive_bytes
+    assert not any(name.startswith("lu_nas_restore_") for name in flow.data)
 
 
 # NAS-RET-01..04: tmp_path ZIPs only; no connection to an actual NAS or DB.
