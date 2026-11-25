@@ -58,4 +58,4 @@ Reconcile when React shell navigation、session/auth composition、ErrorBoundary
 ## 客戶名冊應付日期接線
 
 - 業務與公開介面依[名冊規格 §4.1](../../../../../requirements/33_案件與月嫂整合名冊正式規格.md#41-客戶名冊與匯出)。`#clients` 的 `ClientRosterPage.tsx` 從 `GET /api/v1/admin/registries/clients` 的 `staff_obligation_dates` 呈現「月嫂義務應付日」，從 `estimated_self_funded_staff_due_date` 呈現「薪資預估日期」。兩欄不在 `client_roster_filter_columns.ts` 綁 `filterField`；不以訂單層日期代填。
-- 讀取邊界：`infrastructure/mysql/client_registry_query_repository.py` 讀有效的 `staff_obligations`，有來源分期時採正額 `staff_obligation_installments.due_date`，未有分期時讀義務本身的 `due_date`。相容篩選 `staff_payment_due_date` 另外讀 `orders.staff_payment_due_date`，不對上述兩個畫面欄位做篩選。此處只記組合查詢與畫面接線；不修改 Orders 或 Payroll 的資料與規則。
+- 讀取邊界：`infrastructure/mysql/client_registry_query_repository.py` 讀有效的 `staff_obligations`，有來源分期時採正額 `staff_obligation_installments.due_date`，完全沒有分期列時才讀義務本身的 `due_date`；有分期列但皆非正額時不回傳該義務的日期，不啟用回填。相容篩選 `staff_payment_due_date` 另外讀 `orders.staff_payment_due_date`，不對上述兩個畫面欄位做篩選。此處只記組合查詢與畫面接線；不修改 Orders 或 Payroll 的資料與規則。
