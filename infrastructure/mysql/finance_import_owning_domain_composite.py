@@ -179,6 +179,23 @@ class MySqlFinanceImportOwningDomainComposite:
             MoneyNTD(total_due - sum(item.amount.amount for item in allocations)), preview.fingerprint,
         )
 
+    def preview_service_end_receipt(self, selection):
+        from domains.finance_import.correction import ServiceEndReceiptQuote
+        from infrastructure.mysql.client_service_end_receipt_preview import preview_client_service_end_receipt
+        from infrastructure.mysql.client_service_end_receipt_writer import terminal_receipt_allocations
+
+        if selection.service_end_case_no is None:
+            raise ValueError("late_service_end_receipt_intent_invalid")
+        result = preview_client_service_end_receipt(
+            self._connection, row_id=_row_id(selection.row_identity), case_no=selection.service_end_case_no,
+        )
+        return ServiceEndReceiptQuote(
+            result.case_no, result.bank_amount_ntd, result.service_due_ntd, result.fee_ntd,
+            result.balance.pending_refund_ntd, result.balance.new_refund_ntd,
+            tuple(CorrectionAllocation(item.identity, MoneyNTD(amount))
+                  for item, amount in terminal_receipt_allocations(result)), result.fingerprint,
+        )
+
     def _preview_client_refund_owner(self, candidate, correlation_id):
         """Preview the planned classification with the same owner as formal posting."""
         selection = (
@@ -286,6 +303,18 @@ class MySqlFinanceImportOwningDomainComposite:
         return _unsupported_result(candidate)
 
     def _post_client_receipt(self, candidate, context):
+        if isinstance(candidate, FinanceImportCorrectionCandidate) and candidate.service_end_receipt is not None:
+            from infrastructure.mysql.client_service_end_receipt_preview import preview_client_service_end_receipt
+            from infrastructure.mysql.client_service_end_receipt_writer import apply_client_service_end_receipt
+            quote = candidate.service_end_receipt
+            expected = preview_client_service_end_receipt(
+                self._connection, row_id=_row_id(candidate.row_identity), case_no=quote.case_no, lock=True,
+            )
+            if expected.fingerprint != quote.fingerprint:
+                raise ValueError("late_service_end_receipt_preview_stale")
+            apply_client_service_end_receipt(self._connection, expected=expected,
+                key=context.idempotency_key, actor=context.actor, reason=context.reason)
+            return 1
         selection = _client_selection(self._connection, candidate)
         repository = MySqlClientReceiptReconciliationRepository(self._connection)
         workflow = ClientReconciliationWorkflow(

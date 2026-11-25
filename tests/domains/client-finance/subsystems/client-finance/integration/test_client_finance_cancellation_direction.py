@@ -761,7 +761,7 @@ def test_late_sinopac_owner_preview_requires_real_case_and_prices_earned_service
     bank = {
         "format_id": "sinopac", "direction": "incoming", "transaction_date": occurred,
         "currency": "TWD", "credit": 5000, "debit": 0, "reconciliation_status": "pending",
-        "canonical_fact_version": 3, "bank_references": {"銷帳編號": "99781699116001"},
+        "canonical_fact_version": 3, "effective_classification_type": "client_receipt", "bank_references": {"銷帳編號": "99781699116001"},
     }
 
     class Cursor:
@@ -811,3 +811,57 @@ def test_late_sinopac_owner_preview_requires_real_case_and_prices_earned_service
     bank["direction"] = "outgoing"
     with pytest.raises(ValueError, match="late_service_end_receipt_requires_sinopac_income"):
         module.preview_client_service_end_receipt(connection, row_id=10, case_no=order["case_no"])
+
+
+@pytest.mark.parametrize("earned", [0, 2000])
+def test_late_receipt_writer_persists_original_credit_and_linked_refund(monkeypatch, earned: int):
+    from infrastructure.mysql import client_service_end_receipt_writer as writer
+    from infrastructure.mysql.client_service_end_receipt_preview import (
+        ClientServiceEndReceiptPreview, LateReceiptOpenBalance,
+    )
+
+    fingerprint = PreviewFingerprint("a" * 64)
+    existing = (LateReceiptOpenBalance("earned-first", "first", "receivable_from_client", earned, 8),) if earned else ()
+    preview = ClientServiceEndReceiptPreview(
+        32, "116000001", date(2026, 10, 1), 5000, earned, 0, 2,
+        build_late_service_end_receipt_balance(
+            service_due=MoneyNTD(earned), authorized_fee=MoneyNTD(0), net_cash_before=MoneyNTD(0),
+            confirmed_bank_receipt=MoneyNTD(5000), existing_pending_refund=MoneyNTD(0),
+        ), existing, fingerprint,
+    )
+    writes = []
+    class Cursor:
+        lastrowid = 15
+        rowcount = 1
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def execute(self, statement, args):
+            writes.append((statement, args))
+    connection = SimpleNamespace(cursor=Cursor)
+    monkeypatch.setattr(writer, "preview_client_service_end_receipt",
+                        lambda *_args, **kwargs: preview if kwargs["lock"] else pytest.fail("missing lock"))
+    monkeypatch.setattr(writer, "_insert_refund_recipient_snapshot", lambda *args, **kwargs: None)
+    result = writer.apply_client_service_end_receipt(
+        connection, expected=preview, key=IdempotencyKey("one-source"), actor=ActorContext("finance"),
+        reason="matched bank reference",
+    )
+    assert result.allocation_count == int(earned > 0)
+    assert writes[0][0].startswith("INSERT INTO client_ledger_entries")
+    assert writes[0][1][1:3] == (32, 5000)
+    refund_event = next(args for sql, args in writes if sql.startswith("INSERT INTO client_obligation_events"))
+    assert refund_event[0:4] == (result.refund_identity, "116000001", 5000 - earned, "sinopac-service-end-ledger:15")
+    pending = [args for sql, args in writes if sql.startswith("INSERT INTO client_obligations")]
+    assert len(pending) == 1 and pending[0][3] == 5000 - earned
+    allocations = [args for sql, args in writes if sql.startswith("INSERT INTO client_ledger_obligation_allocations")]
+    assert allocations == ([(15, "earned-first", earned, 1)] if earned else [])
+    assert len([1 for sql, _ in writes if sql.startswith("INSERT INTO client_ledger_entries")]) == 1
+    assert not any("UPDATE orders" in sql or "staff_schedule" in sql for sql, _ in writes)
+
+    writes.clear()
+    invalid = replace(preview, fingerprint=PreviewFingerprint("b" * 64))
+    with pytest.raises(ValueError, match="late_service_end_receipt_preview_stale"):
+        writer.apply_client_service_end_receipt(connection, expected=invalid, key=IdempotencyKey("stale"),
+                                               actor=ActorContext("finance"), reason="stale")
+    assert writes == []

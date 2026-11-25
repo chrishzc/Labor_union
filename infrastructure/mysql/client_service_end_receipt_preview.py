@@ -67,10 +67,11 @@ def preview_client_service_end_receipt(
             raise ValueError("client_finance_bootstrap_required")
         cursor.execute(
             "SELECT format_id,direction,reconciliation_status,transaction_date,currency,"
-            "credit,debit,bank_references,cancellation_code,"
-            "(SELECT e.canonical_fact_version FROM finance_import_classification_events e "
-            "WHERE e.finance_import_row_id=bank.id ORDER BY e.id DESC LIMIT 1) AS canonical_fact_version "
-            "FROM finance_import_rows bank WHERE bank.id=%s" + suffix,
+            "credit,debit,bank_references,cancellation_code,classification.canonical_fact_version,"
+            "classification.classification_type AS effective_classification_type "
+            "FROM finance_import_rows bank LEFT JOIN finance_import_classification_events classification "
+            "ON classification.id=(SELECT MAX(e.id) FROM finance_import_classification_events e "
+            "WHERE e.finance_import_row_id=bank.id) WHERE bank.id=%s" + suffix,
             (row_id,),
         )
         row = cursor.fetchone()
@@ -89,6 +90,9 @@ def preview_client_service_end_receipt(
         references = row["bank_references"]
         if isinstance(references, (str, bytes)):
             references = json.loads(references)
+        if (row["effective_classification_type"] != "client_receipt"
+                or (isinstance(references, Mapping) and references.get("source") == "manual_supplement")):
+            raise ValueError("late_service_end_receipt_requires_sinopac_income")
         account_code = resolve_finance_cancellation_code({**row, "bank_references": references})["cancellation_code"]
         resolved = resolve_client_virtual_account(cursor, account_code)
         if resolved["result"] != "resolved" or resolved["case_no"] != case_no:

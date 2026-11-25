@@ -910,6 +910,7 @@ def _correction_apply_job_command(job_id, request) -> DurableJobCommand:
             "allow_partial_refund_recovery": selection.allow_partial_refund_recovery,
             "allow_refund_overage_recovery": selection.allow_refund_overage_recovery,
             "allow_client_receipt_overage": selection.allow_client_receipt_overage,
+            **({"service_end_case_no": selection.service_end_case_no} if selection.service_end_case_no is not None else {}),
             "expected_batch_version": request.expected_batch_version.value,
             "expected_canonical_fact_version": request.expected_canonical_fact_version.value,
             "expected_alert_version": request.expected_alert_version.value,
@@ -941,6 +942,7 @@ def _selection(body):
         body.allow_partial_refund_recovery,
         body.allow_refund_overage_recovery,
         body.allow_client_receipt_overage,
+        body.service_end_case_no.strip() if body.service_end_case_no is not None else None,
     )
 
 
@@ -1030,6 +1032,13 @@ def _correction_preview_payload(preview):
             "evidence": list(candidate.evidence),
             "refund_ledger_entry_identity": candidate.refund_ledger_entry_identity,
             "candidate_fingerprint": candidate.fingerprint.value,
+            "service_end_receipt": None if candidate.service_end_receipt is None else {
+                "case_no": candidate.service_end_receipt.case_no,
+                "service_due_ntd": candidate.service_end_receipt.service_due_ntd,
+                "fee_ntd": candidate.service_end_receipt.fee_ntd,
+                "pending_refund_ntd": candidate.service_end_receipt.pending_refund_ntd,
+                "new_refund_ntd": candidate.service_end_receipt.new_refund_ntd,
+            },
             "refund_summary": None if candidate.refund_preview is None else {
                 "transfer_fee_ntd": candidate.refund_preview.transfer_fee.amount,
                 "remaining_ntd": candidate.refund_preview.remaining_amount.amount,

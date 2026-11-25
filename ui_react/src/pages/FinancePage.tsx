@@ -24,6 +24,7 @@ import { financeImportQueryClient } from '../api/finance_import/finance_import_q
 import { bankReconciliationUnavailableReason, bankReviewRoute, financeImportReviewReason, isTaishinStaffSubsidy } from '../adapters/finance/finance_import_query_adapter';
 import { SubsidyPeriodWorkbench } from '../components/SubsidyPeriodWorkbench';
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
+import { FinanceImportCorrectionForm } from '../components/FinanceImportCorrectionForm';
 import { BankTransactionFacts, BankTransactionReviewActions, FinanceBankReconciliationWorkspace, StaffSubsidyBankReview } from '../components/FinanceBankReconciliationWorkspace';
 import { PaymentReceiptNoticeWorkbench } from '../components/PaymentReceiptNoticeWorkbench';
 
@@ -455,7 +456,9 @@ export const FinancePage: React.FC = () => {
   );
 
   const reviewedRow = bankReviewCurrent.kind === 'ready' ? bankReviewCurrent.data : null;
-  const reviewRoute = reviewedRow ? bankReviewRoute(reviewedRow, bankReviewManual) : null;
+  const terminalReceiptCase = reviewedRow?.status === 'pending' ? reviewedRow.service_end_receipt_case_no : null;
+  const reviewRoute = terminalReceiptCase ? { kind: 'service-end' as const }
+    : reviewedRow ? bankReviewRoute(reviewedRow, bankReviewManual) : null;
   const manualReviewRoute = reviewedRow && bankReviewRoute(reviewedRow, true);
   const linkedCaseNo = reviewRoute?.kind === 'case' ? reviewRoute.caseNo
     : reviewedRow?.cases.length === 1 ? reviewedRow.cases[0] : null;
@@ -636,6 +639,10 @@ export const FinancePage: React.FC = () => {
                 <p>{bankReconciliationUnavailableReason(reviewedRow)}</p>
               </section>
             )}
+            {reviewedRow && terminalReceiptCase && <FinanceImportCorrectionForm key={reviewedRow.row_identity}
+              rowIdentity={reviewedRow.row_identity} sourceLabel="永豐對帳單已驗證同案入款" staff={[]}
+              initialCaseNo={terminalReceiptCase} serviceEndCaseNo={terminalReceiptCase} lockedObligations={[]}
+              onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />}
             {reviewedRow && reviewRoute?.kind === 'case' && <FinanceCaseAccounting key={`${reviewedRow.row_id}:${reviewRoute.caseNo}`}
               embedded initialCase={reviewRoute.caseNo}
               bankReconciliation={{ row: reviewedRow, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy,
