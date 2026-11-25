@@ -10,7 +10,7 @@ from domains.finance_import.cancellation_code import extract_sinopac_memo_case_s
 from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account, resolve_client_virtual_account_suffix
 
 
-def build_accounting_workspace(connection):
+def build_accounting_workspace(connection, *, include_staff_availability: bool = True):
     """One composition for the case page, payable export and original owner writers."""
     from functools import partial
     from infrastructure.mysql.case_staff_accounting_repository import (
@@ -31,7 +31,8 @@ def build_accounting_workspace(connection):
         subsidy_plan_preview=partial(preview_manual_subsidy_plan, connection),
         subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection),
         subsidy_detail=partial(query_case_subsidy_amount, connection),
-        staff_availability=partial(query_case_staff_accounting_availability, connection))
+        staff_availability=(partial(query_case_staff_accounting_availability, connection)
+                            if include_staff_availability else None))
 
 
 def query_case_bank_memos(connection, case_no):
@@ -213,7 +214,7 @@ def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None, 
         row = cursor.fetchone()
     if row is None:
         raise LookupError('accounting_case_not_found')
-    case = build_accounting_workspace(connection).query(case_no)
+    case = build_accounting_workspace(connection, include_staff_availability=False).query(case_no)
     funding = case.funding
     status = str(row['status'])
     staff_total = case.staff_receivable_ntd

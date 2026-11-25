@@ -65,6 +65,7 @@ def query_case_staff_accounting_availability(
         sources = tuple(cursor.fetchall())
         cursor.execute(
             "SELECT o.assignment_id,o.staff_id,s.name AS staff_name,o.obligation_identity,o.due_date,"
+            + effective_staff_obligation_amount("o") + " AS expected_ntd,"
             "EXISTS(SELECT 1 FROM staff_obligation_installments part "
             "WHERE part.obligation_identity=o.obligation_identity AND part.amount_ntd>0) AS has_installments,"
             "EXISTS(SELECT 1 FROM staff_obligation_installments part "
@@ -119,7 +120,27 @@ def query_case_staff_accounting_availability(
                 reasons.append("historical_payroll_due_date_missing")
                 recorded_due = _availability_date(root["staff_payment_due_date"])
                 if recorded_due is None:
-                    reasons.append("historical_payroll_funding_source_missing")
+                    funding_known = False
+                    if (len(people) == len(obligations) == 1 and source is not None
+                            and source["assignment_valid"] and end_date is not None
+                            and _positive_number(formal[0].get("expected_ntd"))):
+                        from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
+
+                        handoff = query_subsidy_payable_handoff(connection, case_no)
+                        total = int(formal[0]["expected_ntd"])
+                        subsidy = handoff.subsidy_ntd
+                        if (handoff.staff_subsidy_reason is None
+                                and handoff.scheme in {"split", "advance", "direct"}
+                                and subsidy is not None and 0 <= subsidy <= total):
+                            funding_known = True
+                            if handoff.scheme == "split" and subsidy:
+                                estimated_subsidy = funding_due_date(end_date, directly_subsidized=True).isoformat()
+                            if handoff.scheme != "split" or subsidy < total:
+                                estimated_self_pay = funding_due_date(end_date, directly_subsidized=False).isoformat()
+                    if not funding_known:
+                        reasons.append("historical_payroll_funding_source_missing")
+                        if end_date is None:
+                            reasons.append("historical_payroll_end_date_missing")
             result.append(StaffAccountingAvailability(
                 assignment_id, staff_id, party, tuple(str(row["obligation_identity"]) for row in formal),
                 "formal", tuple(reasons), estimated_self_pay, estimated_subsidy,

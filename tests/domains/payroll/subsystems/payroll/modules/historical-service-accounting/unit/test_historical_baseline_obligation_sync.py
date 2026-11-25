@@ -147,6 +147,113 @@ def test_staff_availability_reads_recorded_single_payment_date_without_replacing
     )
 
 
+@pytest.mark.parametrize("scheme,subsidy,self_pay,subsidy_date", [
+    ("split", 0, "2027-01-15", None),
+    ("split", 12000, None, "2027-02-15"),
+    ("split", 5000, "2027-01-15", "2027-02-15"),
+    ("advance", 5000, "2027-01-15", None),
+    ("direct", 5000, "2027-01-15", None),
+])
+def test_staff_availability_estimates_unique_single_payment_from_formal_funding(
+    monkeypatch, scheme, subsidy, self_pay, subsidy_date,
+):
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+
+    calls = []
+    def handoff(connection, case_no):
+        calls.append(case_no)
+        return SubsidyPayableHandoff(scheme, True, True, subsidy, subsidy == 12000, confirmed=True)
+
+    monkeypatch.setattr("infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff", handoff)
+    original = {"assignment_id": 17, "staff_id": 3, "staff_name": "合成月嫂甲",
+                "obligation_identity": "staff-existing:17", "due_date": None, "expected_ntd": 12000,
+                "has_installments": False, "missing_installment_date": False,
+                "missing_client_date": False, "missing_subsidy_date": False}
+    connection = ReadOnlyConnection(
+        _availability_root(actual_end_date=date(2026, 12, 31)),
+        (_availability_source(source_end_date=date(2026, 12, 31)),), (original,),
+    )
+
+    result = query_case_staff_accounting_availability(connection, "CASE-1")
+
+    assert result[0].estimated_self_pay_date == self_pay
+    assert result[0].estimated_subsidy_date == subsidy_date
+    assert result[0].recorded_due_date is None and original["due_date"] is None
+    assert result[0].pending_reasons == ("historical_payroll_due_date_missing",)
+    assert calls == ["CASE-1"]
+    assert len(connection.selects) == 3
+
+
+@pytest.mark.parametrize("scheme,subsidy,reason,source_end", [
+    ("unknown", 5000, None, date(2026, 12, 31)),
+    ("split", None, None, date(2026, 12, 31)),
+    ("split", 13000, None, date(2026, 12, 31)),
+    ("split", 5000, "formal funding conflict", date(2026, 12, 31)),
+    ("split", 5000, None, None),
+])
+def test_staff_availability_does_not_estimate_incomplete_single_payment_funding(
+    monkeypatch, scheme, subsidy, reason, source_end,
+):
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+
+    calls = []
+    def handoff(connection, case_no):
+        calls.append(case_no)
+        return SubsidyPayableHandoff(scheme, True, True, subsidy, False, staff_subsidy_reason=reason)
+
+    monkeypatch.setattr("infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff", handoff)
+    connection = ReadOnlyConnection(_availability_root(actual_end_date=source_end),
+        (_availability_source(source_end_date=source_end),), ({
+            "assignment_id": 17, "staff_id": 3, "staff_name": "合成月嫂甲",
+            "obligation_identity": "staff-existing:17", "due_date": None, "expected_ntd": 12000,
+            "has_installments": False, "missing_installment_date": False,
+            "missing_client_date": False, "missing_subsidy_date": False,
+        },))
+
+    result = query_case_staff_accounting_availability(connection, "CASE-1")
+
+    assert result[0].estimated_self_pay_date is None and result[0].estimated_subsidy_date is None
+    assert "historical_payroll_funding_source_missing" in result[0].pending_reasons
+    assert calls == ([] if source_end is None else ["CASE-1"])
+
+
+def test_staff_availability_does_not_allocate_whole_case_subsidy_to_multiple_people(monkeypatch):
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+
+    def unexpected_handoff(*args, **kwargs):
+        raise AssertionError("whole-case subsidy cannot be allocated to individual payables by this query")
+    monkeypatch.setattr("infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff", unexpected_handoff)
+    obligation = {"assignment_id": 17, "staff_id": 3, "staff_name": "合成月嫂甲",
+                  "obligation_identity": "staff-existing:17", "due_date": None, "expected_ntd": 12000,
+                  "has_installments": False, "missing_installment_date": False,
+                  "missing_client_date": False, "missing_subsidy_date": False}
+    connection = ReadOnlyConnection(_availability_root(),
+        (_availability_source(), _availability_source(assignment_id=18, staff_id=4)),
+        (obligation, {**obligation, "assignment_id": 18, "staff_id": 4, "obligation_identity": "staff-existing:18"}))
+
+    result = query_case_staff_accounting_availability(connection, "CASE-1")
+
+    assert all(row.estimated_self_pay_date is None and row.estimated_subsidy_date is None for row in result)
+    assert all("historical_payroll_funding_source_missing" in row.pending_reasons for row in result)
+
+
+def test_subsidy_handoff_does_not_recursively_query_staff_availability(monkeypatch):
+    from types import SimpleNamespace
+    from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
+    from subsystems.finance_import.accounting_workspace import CaseAccounting
+
+    configuration = []
+    case = CaseAccounting("CASE-1", "Synthetic", None, None, None, None, 0, (), (), (), ())
+    def build(connection, **kwargs):
+        configuration.append(kwargs)
+        return SimpleNamespace(query=lambda case_no: case)
+    monkeypatch.setattr("infrastructure.mysql.accounting_workspace_repository.build_accounting_workspace", build)
+
+    query_subsidy_payable_handoff(ReadOnlyConnection({"status": "歷史訂單－服務完成", "has_customer_subsidy_payable": False}), "CASE-1")
+
+    assert configuration == [{"include_staff_availability": False}]
+
+
 def test_staff_availability_distinguishes_unestablished_payable_and_missing_rate_per_person():
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
 

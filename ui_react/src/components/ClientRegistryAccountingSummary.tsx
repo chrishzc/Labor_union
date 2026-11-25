@@ -46,7 +46,7 @@ export function ClientRegistryAccountingSummary({caseNo, revision}: {caseNo: str
                 <td>已收 {money(item.actual_ntd)}，待收 {money(item.remaining_ntd)}{item.noncash_ntd!=null&&item.noncash_ntd>0&&<small>非現金結清 {money(item.noncash_ntd)}</small>}</td>
                 <td>{state.data?.transactions.filter(row=>row.item_identity===item.identity).map(row=><p key={row.identity}>{row.occurred_on} · {row.bank?receiptSources[row.bank]??'原來源':'原來源'} · {row.kind==='reversal'||row.amount_ntd<0?'沖正':'入帳'} · {money(row.amount_ntd)}</p>)}
                   {item.payment_evidence==='historical_paid'&&<p>歷史已付證據，非銀行入帳</p>}{item.payment_evidence==='historical_settled'&&<p>歷史結清證據，非銀行入帳</p>}
-                  {item.payment_date&&<p>歷史確認日 {item.payment_date}</p>}
+                  {item.payment_date&&<p>歷史付款證據日期 {item.payment_date}</p>}
                 </td>
               </tr>)}
             </tbody></table>}

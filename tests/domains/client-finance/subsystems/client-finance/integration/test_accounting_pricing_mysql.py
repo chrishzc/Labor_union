@@ -86,10 +86,11 @@ def seed_case(case_no, identity="補助市民"):
         connection.close()
 
 
-def seed_historical_accounting_case(case_no, identity, hours, cap):
+def seed_historical_accounting_case(case_no, identity, hours, cap, *, with_staff=False):
     """Synthetic adopted history with no client obligations, payments or general terms."""
     seed_case(case_no, identity)
     connection = mysql_adapter.get_connection()
+    staff_assignment = None
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -99,6 +100,12 @@ def seed_historical_accounting_case(case_no, identity, hours, cap):
                 "WHERE case_no=%s", (hours // 8, case_no),
             )
             cursor.execute('INSERT INTO client_finance_accounts(case_no) VALUES(%s)', (case_no,))
+            if with_staff:
+                cursor.execute("INSERT INTO staff(name) VALUES('Synthetic Historical Staff')")
+                staff_id = cursor.lastrowid
+                cursor.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,assigned_start_date,"
+                               "assigned_end_date,status) VALUES(%s,%s,1,'2026-10-01','2026-10-20','completed')", (case_no, staff_id))
+                staff_assignment = (staff_id, cursor.lastrowid)
             cursor.execute(
                 "INSERT INTO order_lifecycle_state_events(case_no,trigger_event,before_status,after_status,"
                 "actor,business_date,expected_version,idempotency_key,facts_snapshot) "
@@ -110,11 +117,17 @@ def seed_historical_accounting_case(case_no, identity, hours, cap):
                 "INSERT INTO historical_order_adoption_receipts(idempotency_key,command_fingerprint,"
                 "source_event_identity,source_fingerprint,preview_fingerprint,case_no,outcome,"
                 "expected_version,resulting_version,lifecycle_event_id,assignment_count,result_snapshot,"
-                "actor,reason,correlation_id) VALUES(%s,%s,%s,%s,%s,%s,'adopted',0,1,%s,0,'{}',"
+                "actor,reason,correlation_id) VALUES(%s,%s,%s,%s,%s,%s,'adopted',0,1,%s,%s,'{}',"
                 "'synthetic','historical accounting query fixture',%s)",
                 (case_no + ':adopt', 'a' * 64, case_no + ':source', 'b' * 64, 'c' * 64,
-                 case_no, lifecycle_event, case_no + ':correlation'),
+                 case_no, lifecycle_event, int(with_staff), case_no + ':correlation'),
             )
+            if staff_assignment is not None:
+                staff_id, assignment_id = staff_assignment
+                cursor.execute("INSERT INTO historical_order_pairing_evidence(receipt_id,caregiver_ordinal,staff_name,staff_id,"
+                               "resolution,source_start_date,source_end_date,assignment_id,issue_codes) "
+                               "VALUES(%s,1,'Synthetic Historical Staff',%s,'assignment_candidate','2026-10-01','2026-10-20',%s,'[]')",
+                               (cursor.lastrowid, staff_id, assignment_id))
             if cap is not None:
                 payload = {'identity_name': identity, 'rule': 'social' if identity == '補助市民' else 'citizen',
                            'subsidy_hours': cap, 'client': {'covered': 350, 'excess': 300},
@@ -129,6 +142,7 @@ def seed_historical_accounting_case(case_no, identity, hours, cap):
         connection.commit()
     finally:
         connection.close()
+    return staff_assignment
 
 
 def save_historical_accounting_contract(key, envelope):
@@ -482,6 +496,53 @@ def test_historical_accounting_keeps_pending_bank_candidate_without_calling_it_r
             assert cursor.fetchone()['reconciliation_status'] == 'pending'
             cursor.execute('SELECT COUNT(*) AS n FROM client_ledger_entries WHERE case_no=%s', (case_no,))
             assert cursor.fetchone()['n'] == 0
+    finally:
+        connection.close()
+
+
+def test_historical_accounting_estimates_unique_formal_single_subsidy_payment_without_writes(database):
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+
+    case_no = 'history-single-date-' + uuid4().hex[:10]
+    staff_id, assignment_id = seed_historical_accounting_case(case_no, '補助市民', 80, 120, with_staff=True)
+    connection = mysql_adapter.get_connection()
+    identity = case_no + ':formal-staff'
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('INSERT INTO payroll_case_accounts(case_no,aggregate_version) VALUES(%s,1)', (case_no,))
+            cursor.execute("INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,"
+                           "obligation_kind,direction,event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,"
+                           "expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) "
+                           "VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,28000,NULL,%s,0,1,%s,'synthetic','original unpaid amount')",
+                           (identity, assignment_id, case_no, staff_id, 'd' * 64, identity + ':event'))
+            event_id = cursor.lastrowid
+            cursor.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,"
+                           "direction,amount_due_ntd,due_date,status,current_event_id,payroll_version) "
+                           "VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',28000,NULL,'open',%s,1)",
+                           (identity, assignment_id, case_no, staff_id, event_id))
+        connection.commit()
+
+        def snapshot():
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT * FROM staff_obligations WHERE case_no=%s', (case_no,))
+                obligations = cursor.fetchall()
+                cursor.execute('SELECT * FROM staff_obligation_installments WHERE obligation_identity=%s', (identity,))
+                installments = cursor.fetchall()
+                cursor.execute('SELECT * FROM client_ledger_entries WHERE case_no=%s', (case_no,))
+                return obligations, installments, cursor.fetchall()
+
+        before = snapshot()
+        result = build_accounting_workspace(connection).query(case_no)
+
+        assert result.full_subsidy and result.staff_receivable_ntd == 28000
+        assert len(result.staff_accounting_availability) == 1
+        available = result.staff_accounting_availability[0]
+        assert available.obligation_identities == (identity,)
+        assert available.estimated_subsidy_date == '2026-12-15'
+        assert available.estimated_self_pay_date is None and available.recorded_due_date is None
+        assert available.pending_reasons == ('historical_payroll_due_date_missing',)
+        assert result.staff_items[0].due_date is None
+        assert snapshot() == before and before[1:] == ([], [])
     finally:
         connection.close()
 
