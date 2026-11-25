@@ -66,6 +66,24 @@
 - `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
 - `.arch-map/requirements/12_Global_效能與UX體感架構.md`
 
+### 契約欄位投影與瀏覽器列印 ^signing-current-projection-print
+
+[需求書 §3.2](../../../../../requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#contract-current-projection-print) 定義列印範圍與欄位口徑。此投影使用目前來源，不要求先進入簽約、付款或正式排班。
+
+| 負責角色 | 正式約定與接線 | 去哪查 |
+| --- | --- | --- |
+| Client Finance、Orders／資料來源 | 客戶契約讀客戶時薪、各期預計繳款日與本案虛擬帳號。預計日不讀實際入帳日，不借月嫂費率。 | `infrastructure/mysql/contract_full_preview_repository.py` 的客戶投影 |
+| Scheduling、Payroll／資料來源 | 月嫂契約依精確分段對應同案、同人員的來源，讀各自服務區段與應付；不挪用其他月嫂或整案合計。不唯一時不猜。 | 同一 repository 的 `load_staff_projection` 與月嫂分段解析 |
+| Contract Signing／後端、前端 | `FullContractPreviewApplication` 選用核准模板、驗映射後套入 typed 欄位。缺值是提示，不同於列印技術阻擋。已登入的 A4 HTML 入口依請求重讀同一投影，不快取、不建立檔案版本或簽署狀態；送交的檔期阻擋屬 §3.3。 | `full_contract_preview.py`、`api/routes/contract_external_signing.py`、`contract_full_preview_client.ts` |
+
+驗證定位：`test_full_contract_preview.py` 的 `test_client_contract_uses_planned_due_dates_and_per_case_virtual_account`、`test_real_templates_render_multi_staff_summary_and_personal_service_days`、`test_preview_reports_null_required_owner_fact_without_blocking` 對照客戶日期、多人隔離及缺值。A4 版面另見 `test_browser_contract_renderer.py::test_browser_print_contains_full_approved_wording_and_a4_layout_without_pdf_engine`。此定位不宣稱實際瀏覽器列印或獨立的「訂單資訊－1／2、每週服務時間」三個介面已驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: signing-current-projection-print
+  target: '.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#^contract-current-projection-print'
+```
+
 ### 交接紀錄與直接歸檔分開驗收
 
 - 規格 #21 §3.3 的「記錄已送交」只留下交接回執；不代表拿到已簽 PDF 或 Orders 完約。§3.4 的直接歸檔不要求交接回執或 session；操作人確認簽名及內容，系統檢查檔案、案件與當前目標，不以 PDF 格式驗證代替簽名查核。
