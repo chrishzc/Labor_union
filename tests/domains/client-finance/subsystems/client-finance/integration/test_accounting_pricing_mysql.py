@@ -2232,15 +2232,15 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
         assert current['source'] == 'legacy'
         assert current['impact']['staff_total_amount'] == 13150
         service_path = f'/api/v1/orders/{case_no}/historical-service-accounting/attribution'
-        body = {'caregivers': [{'staff_id': people[0][0], 'actual_service_days': 4}],
-            'evidence': 'confirmed first caregiver four eight-hour days', 'service_facts': [{
+        body = {'caregivers': [{'staff_id': people[0][0], 'actual_service_days': 3}],
+            'evidence': 'confirmed first caregiver three ten-hour days', 'service_facts': [{
                 'assignment_identity': f'assignment:{people[0][1]}', 'staff_id': people[0][0],
-                'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-04',
-                'service_start_time': '09:00:00', 'service_end_time': '17:00:00',
-                'service_hours_per_day': '8', 'service_end_day_offset': 0}]}
+                'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-03',
+                'service_start_time': '09:00:00', 'service_end_time': '19:00:00',
+                'service_hours_per_day': '10', 'service_end_day_offset': 0}]}
         preview = post(client, service_path + '/preview', body, case_no + ':service-preview')
         assert [(person['previous_entitlement_ntd'], person['entitlement_ntd'], person['delta_ntd'])
-            for person in preview['caregivers']] == [(7350, 9750, 2400), (5800, 5800, 0)]
+            for person in preview['caregivers']] == [(7350, 9150, 1800), (5800, 5800, 0)]
         assert historical_completed_immutable_snapshot(case_no) == immutable
         apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed first caregiver hours'}
         post(client, service_path + '/apply', apply, case_no + ':service-apply')
@@ -2255,10 +2255,10 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
             cursor.execute('SELECT i.assignment_id,i.actual_service_days,i.actual_service_hours FROM historical_service_day_items i '
                 'JOIN historical_service_day_projections p ON p.current_event_id=i.event_id WHERE p.case_no=%s ORDER BY i.item_ordinal', (case_no,))
             assert [(row['assignment_id'], row['actual_service_days'], Decimal(str(row['actual_service_hours'])))
-                for row in cursor.fetchall()] == [(people[0][1], 4, Decimal(32)), (people[1][1], 2, Decimal(16))]
+                for row in cursor.fetchall()] == [(people[0][1], 3, Decimal(30)), (people[1][1], 2, Decimal(16))]
         connection.rollback()
         assert historical_completed_immutable_snapshot(case_no) == immutable
-        assert client.get(pricing_path).json()['data']['impact']['staff_total_amount'] == 15550
+        assert client.get(pricing_path).json()['data']['impact']['staff_total_amount'] == 14950
         birth_repository = MySqlBeClassCorrectionRepository(connection)
         birth_workflow = BeClassCorrectionWorkflow(birth_repository, lambda: MySqlUnitOfWork(connection),
             MySqlBeClassFinancialSync(connection))
@@ -2274,19 +2274,19 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
         connection.rollback()
         current = client.get(pricing_path).json()['data']
         assert current['source'] == 'legacy'
-        assert current['impact']['staff_total_amount'] == 15550
+        assert current['impact']['staff_total_amount'] == 14950
         assert blocker in current['accounting_pending']
         with connection.cursor() as cursor:
             cursor.execute(f'SELECT * FROM ({CASE_PRICING_FACTS_SQL}) pricing WHERE case_no=%s', (case_no,))
             assert cursor.fetchone() is None
             cursor.execute('SELECT amount_due_ntd FROM staff_obligations WHERE case_no=%s ORDER BY assignment_id', (case_no,))
-            assert [row['amount_due_ntd'] for row in cursor.fetchall()] == [9750, 5800]
+            assert [row['amount_due_ntd'] for row in cursor.fetchall()] == [9150, 5800]
         connection.rollback()
         candidate = historical_completed_pricing_body(client, case_no, payroll={'covered': 350, 'excess': 350})
         explicit = post(client, pricing_path + '/preview', candidate, case_no + ':price-preview')
-        assert explicit['before']['staff_total_amount'] == 15550
-        assert explicit['after']['staff_total_amount'] == 17150
-        assert [person['after_amount'] for person in explicit['historical_plan']['persons']] == [11350, 5800]
+        assert explicit['before']['staff_total_amount'] == 14950
+        assert explicit['after']['staff_total_amount'] == 16450
+        assert [person['after_amount'] for person in explicit['historical_plan']['persons']] == [10650, 5800]
         assert blocker not in explicit['historical_plan']['pending']
         post(client, pricing_path + '/apply', {**candidate, 'preview_fingerprint': explicit['preview_fingerprint'],
             'reason': 'explicitly apply one case-wide candidate rate'}, case_no + ':price-apply')
@@ -2295,7 +2295,7 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
                 'JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
                 'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
             assert [(row['assignment_id'], row['computed_ntd'], row['effective_ntd']) for row in cursor.fetchall()] == [
-                (people[0][1], 11350, 11350), (people[1][1], 5800, 5800)]
+                (people[0][1], 10650, 10650), (people[1][1], 5800, 5800)]
         connection.rollback()
         assert blocker not in client.get(pricing_path).json()['data']['accounting_pending']
         assert historical_completed_immutable_snapshot(case_no) == immutable

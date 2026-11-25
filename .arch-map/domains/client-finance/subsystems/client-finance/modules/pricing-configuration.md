@@ -18,6 +18,7 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `domains/client_finance/pricing_policy.py`
 - `subsystems/client_finance/pricing_configuration.py`
 - `infrastructure/mysql/pricing_configuration_repository.py` — `CASE_PRICING_FACTS_SQL` 以人工設定優先、綁定政策次之提供唯讀計價投影；新舊政策名稱依綁定版本判別，不修改既有 schema view 或政策版本。
+- `infrastructure/mysql/holiday_repricing.py` — 借用正式計價投影與原帳務 writer；待核對金額維持未知，缺計算依據時沿既有 savepoint 回滾該案。
 - `infrastructure/mysql/case_category_query.py` — read-only category expression from the bound per-case pricing rule, selected policy identity rule and legacy identity fallback; it creates no classification root or mutation.
 - `api/schemas/accounting_pricing.py`
 - `api/dependencies/accounting_pricing.py` — 延遲取得 MySQL 連線，並對唯讀 `GET /api/v1/accounting-pricing` 提供選用 Redis＋L1 TTL 投影快取（`POST /api/v1/accounting-pricing/policies` 提交成功後失效；Preview／Apply 一律走 fresh DB 讀取）。
