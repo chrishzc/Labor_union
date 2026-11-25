@@ -29,7 +29,7 @@
   - 回傳 `rows`（`row_id`、案件、受款人、款項類型、預估／已確定、來源、來源金額、未付款額、付款日、日期是否預估、待確認原因）；分頁的 `next_cursor` 與 `rows` 並列，不放在個別列內。未知金額／日期回 `null`，不輸出銀行帳號或身分證號。
   - 前端須載完所有批次方計算月份小計；部分失敗不顯示殘缺小計。
 - **畫面整併與完成狀態（`payment_status`／`receipt_status`）**：
-  - 預估需求由「進行中案件（WF-01）」與相關查詢承接；已確定十欄 Excel 匯出整併於「每月帳務（WF-06）」專屬出口。
+  - 預估需求由「進行中案件（WF-01）」與相關查詢承接；已確定十欄 Excel 匯出整併於「每月帳務（WF-06）」專屬出口。畫面入口與查詢口徑見[帳務工作台](22B_帳務差額處置與工作台UI正式規格.md#finance-six-surfaces-ui)，清冊納入資格仍由本規格 §3.2 定義。
   - 查詢清單保留已付款與歷史結清項，提供 `payment_status`（`pending | partially_paid | paid | settled`）與 `receipt_status`（`pending | unpaid | partially_received | received | settled`），與 `certainty` 正交；歷史 `paid | settled` 僅於 obligation identity、金額快照與 version 符合目前義務時有效。超付負餘額另列追償提示，不得導致清單查詢失敗。
 
 ### 3.2 已確定款項清冊匯出與歷史漏列查核
