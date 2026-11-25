@@ -1203,9 +1203,13 @@ def _restore_current(config, database, run, *, upgrade=False):
     if upgrade and current.get("status") == "ready" and current.get("pending_releases"):
         current = apply_candidate_additive_migrations(config, database, run, current)
     if current.get("status") != "current":
-        reason = current.get("blocked_reason") or current.get("code")
-        normalized = reason if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{1,95}", reason) else "schema_update_required"
-        raise MaintenanceBlocked(f"備份與目前程式版本不相容（{normalized}），已停止復原。")
+        code = current.get("code")
+        reason = current.get("blocked_reason")
+        detail = code if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{1,95}", code) else (
+            reason if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{1,95}", reason) else "schema_update_required"
+        )
+        extra = f"：{reason}" if isinstance(reason, str) and reason and reason != detail else ""
+        raise MaintenanceBlocked(f"備份與目前程式版本不相容（{detail}{extra}），已停止復原。")
     updater.require_current_database(current)
 
 

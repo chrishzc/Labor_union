@@ -1288,6 +1288,14 @@ def test_restore_blocks_incompatible_version_with_clear_reason(same_name_restore
     assert not (flow.settings["backup_root"] / "_maintenance").exists()
     assert not any(name.startswith("lu_nas_restore_") for name in flow.data)
 
+    monkeypatch.setattr(updater, "build_additive_preview", lambda *_: {
+        "status": "blocked",
+        "code": "baseline_not_exact",
+        "blocked_reason": "approved baseline is not exact: 000_base.sql=partial",
+    })
+    with pytest.raises(nas.MaintenanceBlocked, match=r"baseline_not_exact：approved baseline is not exact"):
+        nas.restore(flow.settings, flow.archive)
+
 
 @pytest.mark.parametrize("missing_target", [False, True])
 def test_same_name_restore_twice_leaves_no_maintenance_folders(same_name_restore, missing_target):
