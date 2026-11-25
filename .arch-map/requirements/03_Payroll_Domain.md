@@ -38,6 +38,8 @@
    - **付款日對照**：若兩筆同口徑案件分別在 2027-01-01、2027-01-31 結束，自費負擔部分都預計 2027-02-15 付款；適用直接轉交的補助部分都預計 2027-03-15 付款。這是按服務結束的月份取十五日，不是從結束日往後加固定天數。已有正式付款日的案件，補助提早或延後入款均不改原日期；日期本身不證明款已收到或已出款。
    - 方案一共同確認時（詳 [Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md#staff-payout-scheme1-and-differences)），Payroll 僅將既有單筆應付 `T` 按正式補助額 `S` 承接缺席的 `T - S`（沿原應付日）與 `S`（服務結束月 `+ 2` 個月之 15 日）來源分期。案件通過服務完成條件後，人工方案確認與銀行明細預檢均優先採 [Orders 的正式服務結束日](01_Orders_Domain.md#32-autocompleteorderservice-與完工後日期更正)，缺值時採訂單結束日，兩者均缺時阻擋新建分期。既有分期、已付款、總額及服務歸屬沿原正式資料。
 
+<a id="payroll-service-pricing"></a>
+
 ### 2.2 薪資計算公式與整數守恆 ^payroll-service-pricing
 
 ```text
