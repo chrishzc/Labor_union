@@ -61,7 +61,7 @@
 - `db/schema_parts/241_finance_case_accounting_markers.sql`、`db/schema_parts/1063_finance_case_accounting_markers.sql`
 
 - shared composition: `infrastructure/mysql/accounting_workspace_repository.py::build_accounting_workspace` — 案件、清冊與原 owner 退款同步共用 Client Finance 正式繳款來源。僅略過確認為零的缺席期款，工作台與補助交接使用同一應繳、實收結果，既有金融歷史衝突保留。
-- 歷史案件由 Client Finance typed payment terms 明示沿原正式期款 grain 彙總應繳與實收，不套一般訂單三期齊備門檻、不補造缺席期款；完全沒有正式期款仍保持未知。相同金額供明細補助建款預檢與收款進度使用。
+- 歷史案件由 Client Finance typed payment terms 明示沿原正式款項身分彙總應繳與實收，不套一般訂單三期齊備門檻、不補造缺席期款。同一期多筆、未知期別、未分配款及歷史付款證據逐筆保留。`full_subsidy_eligibility` 區分不適用與來源未知；免自備僅為唯讀呈現，衝突與缺項由 `accounting_pending_reasons` 明示，不改結清證據或付款紀錄。 完全沒有正式期款時不推算應繳或實收；同一查詢結果供補助預檢與收款進度使用。
 
 - `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — 沿原 append-only 方案事件；伺服器保留 `bank-subsidy:<row-id>:<command-digest>` operation key 記錄銀行確認來源，人工命令不能使用該命名空間。不新增 schema 或回填歷史資料。
 
@@ -79,7 +79,7 @@
 - 驗收：用同一筆合成銀行流水。僅匯入、預覽或留待核對時，「匯出對帳明細」沒有該筆；正式核銷且讀回原帳務模組的成功證據後，匯出恰有一筆原始流水。重新查詢同一筆不會重新入帳或增加匯出列。測試位置見下方 `test_statement_archive_mysql.py`。
 
 - `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` §3（成功明細與匯出）、§4（銀行對帳）、§5（帳務警示）、§6（案件補登）
-- 銀行明細匯出（#22 §3.3）：`GET /api/v1/finance-import/statements/export` 只納入原 owner 正式核銷的銀行流水及正式補登，分銀行保留原欄位，附「款項用途」與「關聯案件」，不顯示內部識別及資料來源欄，也不受畫面篩選限制。`GET /api/v1/finance-import/statements/manual/export` 獨立唯讀匯出舊紀錄，標為「歷史人工備查（不代表已核銷）」，不得混入成功明細。
+- 銀行明細匯出（#22 §3.3）：`GET /api/v1/finance-import/statements/export` 只納入原 owner 正式核銷的銀行流水及正式補登，分銀行保留原欄位，附「款項用途」（包括「訂金+第一期(組合銷帳)」等正式組合銷帳）與「關聯案件」，不顯示內部識別及資料來源欄，也不受畫面篩選限制。`GET /api/v1/finance-import/statements/manual/export` 獨立唯讀匯出舊紀錄，標為「歷史人工備查（不代表已核銷）」，不得混入成功明細。
 - 舊版新增路徑：授權管理員呼叫 `POST /api/v1/finance-import/statements/manual` 回 `410 legacy_manual_statement_retired`，不開寫入交易。React 不提供此新增表單；要新增案件的正式補登，走 #22 §6 的案件抽屜與原款項 owner。`POST statements/duplicates` 保留原判重契約。
 - `bank-transactions` — 顯示正式核銷的銀行流水及符合保留條件的待核對列，包含尚未確認唯一案件的台新月嫂補助及同名客戶補助退款。台新僅六碼定位但用途待確認的來源提供案件入口。案件與對象已確認的待核對列可開核銷子畫面；唯一款項預選，其餘 target 以 `requires_selection` 及同案同對象候選 IDs 要求選款。正式 owner 重驗核銷，不由 Query／UI 寫帳。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
@@ -110,3 +110,16 @@
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_archive_mysql.py` — 隔離MySQL驗證410零寫入、原鍵不重放舊新增成功、成功匯出只含正式核銷、歷史備查唯讀不改資料、三種正式補登仍可匯出。
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/`
+- integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py`，隔離 MySQL 查詢及帳務 API 回應由專項 CI 暫存傳入 `compact_case_drawer.test.tsx`，核對歷史免自備與原款項契約；不以 UI mock 取代後端驗證。
+- `.github/workflows/historical-accounting.yml` 執行本案 Python、隔離 MySQL、React、型別與 lint 專項。
+
+## 國定假日計價接線 ^statement-workspace-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: statement-workspace-holiday-pricing
+  target: ".arch-map/requirements/22A_案件帳務三方案與補助流向正式規格.md#^case-accounting-schemes"
+```
+- 假日對帳接線由下列 owner 實作，驗證見既有測試入口。工作台從 Client Finance 與 Payroll 正式金額投影讀取非市民工會收入差額，不以同額不變量誤報異常。正式銀行核銷／月嫂清償來源由原 owner 判定，假日設定入口借用 fresh facts；全額免自備加成差額交既有對帳結果顯示待決策，不假建交易或更改政府補助。
+
+- 既有案件／對帳查詢承接假日與日期調整回執的逐案結果、未重算原因、重算金額與已入帳金額；依22A區分待人工對帳差額，不把未指定負擔差額列工會收入。設定成功、帳務重算成功與付款／核銷事實各自呈現。
