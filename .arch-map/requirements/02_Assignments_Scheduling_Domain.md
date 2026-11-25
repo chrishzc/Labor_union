@@ -48,9 +48,12 @@
     - **首日代班例**：甲是原開案主責，首日由乙代班。即使之後重建乙的該次代班版本，查詢開案主責仍得到甲，不把代班的乙當成主責。
     - **整案替換例**：案件尚未開工，經辦將整案由甲換為乙。查詢開案主責時應得到乙，不再沿用甲。
 
+<a id="waiting-deposit-lock"></a>
+
 ### 3.2 Waiting Deposit Lock、Assignment Plan 與 Actual Start 重算
 
 - **Waiting Deposit Lock**：支持 Acquire（接受配對＋確認日期齊備時最後條件 Apply 自動執行）、Release-to-unbound、Cancel 與 Convert（首次正式排班必須轉換有效 waiting lock，缺鎖回 `assignment_plan_bootstrap.waiting_lock_required`；訂金逾期不自動釋放）；保留各服務日實際班次（不含週休，buffer 獨立）；等待訂金保留可與他案檔期並列，保留本身不構成正式排班衝突。
+- **鎖轉換入口**：首次正式排班在 Assignment Plan 內承接有效鎖，不另呼叫舊 Convert 端點；人工解除未收款保留，沿現行解除 Preview／Apply。入口與範圍見 [Scheduling 鎖架構](../domains/scheduling/subsystems/scheduling/modules/waiting-deposit-lock.md#waiting-deposit-lock-lifecycle)。
 - **Assignment Plan Query**：唯讀回傳現行版本與各 owner version（Finance／Payroll 未建立時回 `NULL`，禁止填 0）。
 - **Actual Start 已有有效排班重算**：以現行 effective assignments 之順序、月嫂與每段既有 `official-service-day count` 為不變輸入（禁止平移舊日或重分配天數），依序由新 `actual_start_date` 逐日重算各段（保留已核准之請假占用／代班 outcome 與假日事實，任一衝突或 lineage 無法承接回 typed conflict 零寫入，並交 Payroll 搬移 1-to-1 `source_assignment_id` 費率快照）。
 #### 年度假日設定 ^holiday-annual-settings
