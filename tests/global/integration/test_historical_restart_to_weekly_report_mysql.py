@@ -328,7 +328,6 @@ def _establish_commitment_and_lock(
     )
     from subsystems.orders.client_finance_outbox_consumer import consume_client_finance_orders_case_override
     from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
-    from subsystems.scheduling import availability_lock_acquisition_workflow
 
     connect = _connection_factory(database)
     application = StaffContractSigningApplication(
@@ -400,22 +399,25 @@ def _establish_commitment_and_lock(
             assert cursor.fetchone()["total"] == 0
             cursor.execute("SELECT COUNT(*) AS total FROM client_finance_noncash_events WHERE case_no=%s", (case_no,))
             assert cursor.fetchone()["total"] == 0
+            # Customer acceptance already acquires the waiting-deposit lock.
+            # Verify that owner result rather than acquiring a second lock.
+            cursor.execute(
+                "SELECT locks.id,plan.status FROM caregiver_availability_locks locks "
+                "JOIN caregiver_matching_plans plan ON plan.id=locks.plan_id "
+                "WHERE locks.plan_id=%s AND locks.status='active' AND locks.is_active=1",
+                (plan_id,),
+            )
+            lock = cursor.fetchone()
+            assert lock is not None
+            assert lock["status"] == "accepted"
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM caregiver_availability_lock_events "
+                "WHERE lock_id=%s AND event_type='lock_acquired'",
+                (lock["id"],),
+            )
+            assert cursor.fetchone()["total"] == 1
     finally:
         finance_connection.close()
-
-    availability_lock_acquisition_workflow.get_connection = connect
-    lock_preview = availability_lock_acquisition_workflow.preview_caregiver_availability_lock(
-        case_no, plan_id,
-    )
-    assert lock_preview["apply_allowed"] is True
-    lock = availability_lock_acquisition_workflow.acquire_caregiver_availability_lock(
-        case_no,
-        plan_id,
-        f"{case_no}-availability-lock",
-        "test",
-        lock_preview["preview_fingerprint"],
-    )
-    assert lock["result"] == "created"
 
 
 def _restart(connection, case_no: str):
