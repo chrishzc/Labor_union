@@ -136,9 +136,16 @@ def payroll_schedule_sql(monkeypatch):
     raw.executescript("""
         CREATE TABLE staff_schedule(assignment_id INTEGER,generation_id INTEGER,work_date TEXT,
             is_work_day INTEGER,effective_marker INTEGER,service_hours_override INTEGER,
+            staff_id INTEGER,
             id INTEGER GENERATED ALWAYS AS (assignment_id) VIRTUAL);
         CREATE TABLE case_staff_assignments(id INTEGER PRIMARY KEY,generation_id INTEGER,
             case_no TEXT,staff_id INTEGER);
+        CREATE TRIGGER staff_schedule_owner AFTER INSERT ON staff_schedule
+        BEGIN
+            UPDATE staff_schedule SET staff_id=(SELECT staff_id FROM case_staff_assignments
+                WHERE id=NEW.assignment_id AND generation_id=NEW.generation_id)
+            WHERE rowid=NEW.rowid;
+        END;
         CREATE TABLE scheduling_rebuild_lineage(rebuild_event_id INTEGER,new_assignment_id INTEGER,
             old_assignment_identity TEXT,lineage_ordinal INTEGER);
         CREATE TABLE scheduling_command_receipts(rebuild_event_id INTEGER,command_family TEXT);
@@ -198,13 +205,13 @@ def test_date_only_adjustments_preserve_original_payroll_hours_floor_fee_and_tie
     raw, cursor = payroll_schedule_sql
     assignments = ({"id": 9, "staff_id": 17},)
     raw.execute("INSERT INTO case_staff_assignments VALUES (9,1,'CASE-1',17)")
-    raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,1,NULL)",
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,?,1,1,NULL)",
                     [(f"2026-10-0{ordinal}",) for ordinal in range(1, days + 1)])
     baseline = _schedule_payroll(cursor, 1, assignments, days=days, hours=hours, tiered=tiered)
     if operation != "normal":
         raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
         actual = [("2026-10-03", 4), ("2026-10-04", 4)] if operation == "split" else [("2026-10-03", 8)]
-        raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,1,?)", actual)
+        raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,?,1,1,?)", actual)
         if operation == "restore":
             raw.execute("UPDATE staff_schedule SET effective_marker=CASE WHEN service_hours_override IS NULL THEN 1 END")
     changes = raw.total_changes
@@ -219,10 +226,10 @@ def test_cross_caregiver_merge_keeps_both_original_payees_and_floor_allocations(
     raw, cursor = payroll_schedule_sql
     assignments = ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18})
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(9, 17), (10, 18)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,1,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,1,?,1,1,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
     baseline = _schedule_payroll(cursor, 1, assignments)
     raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
-    raw.execute("INSERT INTO staff_schedule VALUES (9,1,'2026-10-03',1,1,8)")
+    raw.execute("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,'2026-10-03',1,1,8)")
     assert _schedule_payroll(cursor, 1, assignments) == baseline
     assert {item.staff_id: item.total_payable.amount for item in baseline[1].assignments} == {17: 1701, 18: 1700}
     raw.execute("UPDATE staff_schedule SET effective_marker=CASE WHEN service_hours_override IS NULL THEN 1 END")
@@ -233,13 +240,13 @@ def test_cross_caregiver_merge_keeps_both_original_payees_and_floor_allocations(
 def test_neutral_actual_start_lineage_preserves_payee_with_zero_actual_dates(payroll_schedule_sql, neutral_hops):
     raw, cursor = payroll_schedule_sql
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(9, 17), (10, 18)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,NULL,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,1,?,1,NULL,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
     baseline = _schedule_payroll(cursor, 1, ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18}))
     for generation in range(2, neutral_hops + 2):
         owner, other = generation * 10 - 1, generation * 10
         raw.executemany("INSERT INTO case_staff_assignments VALUES (?,?,'CASE-1',?)",
                         [(owner, generation, 17), (other, generation, 18)])
-        raw.execute("INSERT INTO staff_schedule VALUES (?,?,'2026-10-05',1,1,8)", (owner, generation))
+        raw.execute("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,?,'2026-10-05',1,1,8)", (owner, generation))
         raw.execute("INSERT INTO scheduling_command_receipts VALUES (?,'orders_actual_start_rebuild')", (generation,))
         raw.executemany("INSERT INTO scheduling_rebuild_lineage VALUES (?,?,?,?)", [
             (generation, owner, f"assignment:{owner - 10}", 1),
@@ -259,8 +266,8 @@ def test_neutral_actual_start_lineage_preserves_payee_with_zero_actual_dates(pay
 def test_financial_rebuild_and_complete_current_basis_do_not_inherit_older_dates(payroll_schedule_sql, family, override):
     raw, cursor = payroll_schedule_sql
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,?,'CASE-1',17)", [(9, 1), (19, 2)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,NULL,NULL)", [("2026-10-01",), ("2026-10-02",)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (19,2,?,1,1,?)", [("2026-10-03", override), ("2026-10-04", override)])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,?,1,NULL,NULL)", [("2026-10-01",), ("2026-10-02",)])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (19,2,?,1,1,?)", [("2026-10-03", override), ("2026-10-04", override)])
     raw.execute("INSERT INTO scheduling_command_receipts VALUES (2,?)", (family,))
     raw.execute("INSERT INTO scheduling_rebuild_lineage VALUES (2,19,'assignment:9',1)")
     facts, result = _schedule_payroll(cursor, 2, ({"id": 19, "staff_id": 17},))
@@ -738,7 +745,7 @@ def test_cancelled_generation_rebuild_retains_preview_floor_recipient(payroll_sc
 
     raw, cursor = payroll_schedule_sql
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(10, 17), (2, 18)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,1,NULL)", [(10, "2026-10-01"), (2, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,1,?,1,1,NULL)", [(10, "2026-10-01"), (2, "2026-10-02")])
     assignments = tuple(AssignmentCandidate(
         f"CASE-1:g2:a{sequence}", source, staff, sequence, day, day, (day,), 4,
     ) for sequence, source, staff, day in (
@@ -755,7 +762,7 @@ def test_cancelled_generation_rebuild_retains_preview_floor_recipient(payroll_sc
     resolved = {assignments[0].candidate_key: 20, assignments[1].candidate_key: 30}
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,2,'CASE-1',?)", [(20, 17), (30, 18)])
     raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,2,?,1,1,NULL)", [(20, "2026-10-01"), (30, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,2,?,1,1,NULL)", [(20, "2026-10-01"), (30, "2026-10-02")])
     raw.execute("INSERT INTO scheduling_command_receipts VALUES (2,'orders_cancellation')")
     raw.executemany("INSERT INTO scheduling_rebuild_lineage VALUES (?,?,?,?)", tuple(
         (event, new, old, ordinal) for event, old, new, _generation, ordinal

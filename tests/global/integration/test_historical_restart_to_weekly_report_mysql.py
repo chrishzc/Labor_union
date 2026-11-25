@@ -1286,6 +1286,8 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
     from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
     from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
     from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
+    from subsystems.payroll.rebuild_workflow import PayrollRebuildWorkflow
+    from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
     from subsystems.scheduling import matching_plan_workflow, availability_lock_acquisition_workflow
 
     monkeypatch.setattr(matching_plan_workflow, "get_connection", matching_plan_workflow.get_connection)
@@ -1319,23 +1321,10 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
                     "due_date,status,current_event_id,projection_version) VALUES (%s,%s,%s,'receivable_from_client',"
                     "2400,%s,'open',%s,1)", (identity, historical, stage, due, int(cursor.lastrowid)),
                 )
-            staff_identity = f"{historical}-original-service-pay"
-            cursor.execute(
-                "INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,"
-                "direction,event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,"
-                "expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) "
-                "VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,4800,'2026-09-18',%s,0,1,%s,'test','historical adoption baseline')",
-                (staff_identity, legacy_assignment, historical, historical_staff, 'a' * 64, staff_identity + ':event'),
-            )
-            cursor.execute(
-                "INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,"
-                "direction,amount_due_ntd,due_date,status,current_event_id,payroll_version,payout_history_exists) "
-                "VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff',4800,'2026-09-18','open',%s,1,0)",
-                (staff_identity, legacy_assignment, historical, historical_staff, int(cursor.lastrowid)),
-            )
             cursor.execute("UPDATE client_finance_accounts SET aggregate_version=1 WHERE case_no=%s", (historical,))
-            cursor.execute("UPDATE payroll_case_accounts SET aggregate_version=1 WHERE case_no=%s", (historical,))
             cursor.execute("INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) VALUES(%s,'Synthetic restart holiday',1)", (holiday,))
+            cursor.execute("SELECT COUNT(*) AS total FROM staff_obligations WHERE case_no=%s", (historical,))
+            assert cursor.fetchone()["total"] == 0
         connection.commit()
 
         restarted = _restart(connection, historical)
@@ -1348,6 +1337,14 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
             assert cursor.fetchone()["trigger_event"] == "orders_historical_precision_restart"
         _confirm_dates(connection, historical)
         _arrange_restarted_dates(connection, historical, historical_staff)
+
+        payroll_workflow = PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(connection),
+            lambda: MySqlUnitOfWork(connection))
+        with MySqlUnitOfWork(connection) as unit:
+            payroll_workflow.synchronize_in_unit_of_work(historical, actor=ActorContext("test"),
+                key=IdempotencyKey("holiday-history-original-payroll"),
+                correlation_id=CorrelationId("holiday-history-original-payroll"))
+            unit.commit()
 
         normal_plan, normal_segment = _create_matching_plan(connection, database, ordinary, ordinary_staff)
         _confirm_dates(connection, ordinary)

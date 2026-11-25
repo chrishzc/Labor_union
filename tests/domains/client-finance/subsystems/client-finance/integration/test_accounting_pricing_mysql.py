@@ -1067,14 +1067,15 @@ def test_holiday_batch_keeps_setting_and_distinguishes_atomic_case_failures(clie
         connection.close()
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, enabled):
+@pytest.mark.parametrize("mode", ["plain", "enabled", "ambiguous", "failed"])
+def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, mode, monkeypatch):
     from domains.scheduling.service_date_adjustment import AdjustmentTarget
     from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
     from infrastructure.mysql.service_date_adjustment_repository import MySqlServiceDateAdjustmentRepository
     from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
     from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentWorkflow, ServiceDateAdjustmentIntent
-    case_no = "holiday-cross-owner-" + str(enabled)
+    enabled = mode in {"enabled", "failed"}
+    case_no = "holiday-cross-owner-" + mode
     first_staff = _holiday_seed_ready(client, case_no)
     connection = mysql_adapter.get_connection()
     target = date(2026, 10, 25)
@@ -1111,16 +1112,31 @@ def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, enabl
         assert _holiday_ledger_totals(connection, case_no) == (2800, {first_staff: 1280, second_staff: 1280})
         workflow = ServiceDateAdjustmentWorkflow(MySqlServiceDateAdjustmentRepository(connection), lambda: MySqlUnitOfWork(connection))
         intent = ServiceDateAdjustmentIntent((date(2026, 10, 1), date(2026, 10, 2)),
-            (AdjustmentTarget(target, first_staff, Decimal(8)),))
+            (AdjustmentTarget(target, first_staff),))
         preview = workflow.preview(case_no, intent)
         connection.rollback()
+        if mode == "failed":
+            from infrastructure.mysql import holiday_repricing
+            original = holiday_repricing.persist_client_finance_terms_impact
+            def fail_after_client_write(cursor, command, **options):
+                original(cursor, command, **options)
+                if command.candidate.case_no == case_no:
+                    raise ValueError("synthetic_date_reprice_failure")
+            monkeypatch.setattr(holiday_repricing, "persist_client_finance_terms_impact", fail_after_client_write)
         receipt = workflow.apply(case_no, intent, versions=preview.facts.versions,
             preview_fingerprint=preview.fingerprint, key=case_no + ":merge", actor="pricing-test")
-        expected = (5600, {first_staff: 2560, second_staff: 2560}) if enabled else (2800, {first_staff: 1280, second_staff: 1280})
+        expected = (5600, {first_staff: 2560, second_staff: 2560}) if enabled and mode != "failed" else (2800, {first_staff: 1280, second_staff: 1280})
         assert _holiday_ledger_totals(connection, case_no) == expected
         result = receipt.accounting_result
-        assert result.outcome in {"repriced", "unchanged"}
-        if enabled:
+        assert result.outcome in ({"failed"} if mode == "failed" else {"repriced", "unchanged"})
+        if mode == "failed":
+            assert result.reason_code == "synthetic_date_reprice_failure"
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT result_snapshot FROM service_date_adjustment_receipts WHERE id=%s", (receipt.receipt_id,))
+                recorded = cursor.fetchone()["result_snapshot"]
+                recorded = json.loads(recorded) if isinstance(recorded, str) else recorded
+                assert recorded["accounting_result"]["reason_code"] == "synthetic_date_reprice_failure"
+        if enabled and mode != "failed":
             assert (result.case_total_amount, result.client_receivable_amount, result.staff_payable_amount,
                     result.case_total_amount - result.staff_payable_amount) == (5600, 5600, 5120, 480)
         replay = workflow.apply(case_no, intent, versions=preview.facts.versions,
@@ -1129,7 +1145,27 @@ def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, enabl
         assert _holiday_ledger_totals(connection, case_no) == expected
         path = f"/api/v1/accounting-pricing/cases/{case_no}"
         impact = client.get(path).json()["data"]["impact"]
-        assert (impact["case_total_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == (
-            (5600, 5120, 480) if enabled else (2800, 2560, 240))
+        if mode != "failed":
+            assert (impact["case_total_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == (
+                (5600, 5120, 480) if enabled else (2800, 2560, 240))
+        if mode == "ambiguous":
+            from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
+            from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE service_date_adjustment_receipts SET result_snapshot=JSON_SET(result_snapshot,"
+                    "'$.removed[1].staff_id',CAST('null' AS JSON)) WHERE id=%s", (receipt.receipt_id,))
+            connection.commit()
+            repricing = MySqlHolidayRepricing(connection)
+            app = HolidayMaintenanceApplication(MySqlSchedulingHolidayQuery(connection), lambda: MySqlUnitOfWork(connection),
+                lambda: None, repricing, repricing.prepare)
+            command = HolidayCommand("upsert", target, "Synthetic cross merge", True, target, target)
+            preview = app.preview(command)
+            applied = app.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+                case_no + ":ambiguous-enable", "pricing-test", "synthetic missing source binding")
+            failure = next(item for item in applied.case_results if item.case_no == case_no)
+            assert failure.outcome == "failed"
+            assert failure.reason_code == "holiday_service_attribution_ambiguous"
+            assert "receipt_staff_binding" in failure.missing_mapping
+            assert _holiday_ledger_totals(connection, case_no) == expected
     finally:
         connection.close()

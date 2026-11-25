@@ -180,6 +180,22 @@ def test_formal_adjustment_pairs_exclude_retired_receipts_even_when_dates_match(
 
 @pytest.mark.parametrize("restore", [False, True])
 def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restore, monkeypatch):
+    from subsystems.scheduling.holiday_maintenance import HolidayCaseRepricingResult
+
+    accounting_calls: list[tuple[str, str]] = []
+
+    class UnchangedRepricing:
+        def __init__(self, _connection: object) -> None:
+            pass
+
+        def prepare_case(self, case_no: str) -> None:
+            accounting_calls.append(("prepare", case_no))
+
+        def reprice_case(self, case_no: str, key: str, actor: str) -> HolidayCaseRepricingResult:
+            accounting_calls.append(("reprice", case_no))
+            return HolidayCaseRepricingResult(case_no, "unchanged", reason_code="pricing_amounts_unchanged")
+
+    monkeypatch.setattr("infrastructure.mysql.holiday_repricing.MySqlHolidayRepricing", UnchangedRepricing)
     first, second, target = date(2026, 11, 1), date(2026, 11, 2), date(2026, 12, 3)
     original = (ServiceDay(first, 3, None), ServiceDay(second, 3, None))
     merged = plan_service_date_adjustment(original, Decimal(4), (first, second), (AdjustmentTarget(target, 3),))
@@ -208,6 +224,10 @@ def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restor
     assert values == (second if restore else target, "CASE-1", 3)
     assert "actual_end_date=%s,lifecycle_version=lifecycle_version+1" in sql
     assert receipt.scheduling_version == 5
+    assert accounting_calls == [("prepare", "CASE-1"), ("reprice", "CASE-1")]
+    assert receipt.case_result == HolidayCaseRepricingResult(
+        "CASE-1", "unchanged", reason_code="pricing_amounts_unchanged",
+    )
     assert all(token not in sql for token in ("status=", "actual_start_date=", "staff_payment_due_date="))
 
 
