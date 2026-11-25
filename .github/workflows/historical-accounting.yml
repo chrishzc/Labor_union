@@ -81,9 +81,26 @@ jobs:
           LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_late_${{ github.run_id }}_${{ github.run_attempt }}
           LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
           LABOR_UNION_TEST_MYSQL_PORT: "3307"
-          LABOR_UNION_TEST_MYSQL_USER: root
-          LABOR_UNION_TEST_MYSQL_PASSWORD: ""
-        run: python -m pytest -vv tests/domains/finance-import/subsystems/finance-import/integration/test_accounting_event_matrix_mysql.py -k terminal_sinopac_receipt
+          LABOR_UNION_TEST_MYSQL_USER: lu_late_fixture
+          DB_USER: lu_late_fixture
+          DB_DATABASE: lu_test_late_${{ github.run_id }}_${{ github.run_attempt }}
+        run: |
+          password="$(python -c 'import secrets; print(secrets.token_hex(24))')"
+          echo "::add-mask::$password"
+          export LABOR_UNION_TEST_MYSQL_PASSWORD="$password" DB_PASSWORD="$password"
+          python - <<'PYSETUP'
+          import os
+          import pymysql
+
+          database = os.environ['LABOR_UNION_TEST_MYSQL_DATABASE']
+          assert database.startswith('lu_test_late_')
+          with pymysql.connect(host='127.0.0.1', port=3307, user='root', password='', autocommit=True) as connection:
+              with connection.cursor() as cursor:
+                  cursor.execute("CREATE USER 'lu_late_fixture'@'%%' IDENTIFIED BY %s",
+                                 (os.environ['LABOR_UNION_TEST_MYSQL_PASSWORD'],))
+                  cursor.execute(f"GRANT ALL PRIVILEGES ON `{database}_event_matrix`.* TO 'lu_late_fixture'@'%'")
+          PYSETUP
+          python -m pytest -vv tests/domains/finance-import/subsystems/finance-import/integration/test_accounting_event_matrix_mysql.py -k terminal_sinopac_receipt
       - name: Verify bank review through isolated money owners
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
