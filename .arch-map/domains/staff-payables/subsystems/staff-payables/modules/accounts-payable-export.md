@@ -34,6 +34,11 @@
 - `api/routes/finance_reports.py` — 歷史月嫂款可用案號、月嫂完整姓名或公會編號查未列入原因，讀取同一案件應付查核來源。
 - `api/routes/finance_reports.py` — authenticated bounded `/accounts-payable/cash-requirements` GET；既有 query/export 與付款入口不變。
 
+### 受款資料缺失的畫面與匯出交接
+- 依 #16A §3.1–3.3，缺受款資料不是款項消失，也不代表金額變成預估。資金需求 Query 保留正式未付款項並回待確認原因；`CashRequirementsPanel.tsx` 在「待確認原因」顯示，查詢不回銀行帳號或身分證號。月嫂主要帳戶的缺失、重複或不完整由人員名冊查核；客戶退款受款資料由 Client Finance 核對原義務的正式快照。
+- 十欄 XLSX 只列可出款且無異常的正式款項。沒有必要受款資料的義務不進 XLSX；匯出不代填、不寫收款快照、不以其他帳戶替代。既有銀行對帳若不驗退款帳號，不代表此匯出可以省略受款快照。
+- **正反例**：同一月底有兩筆其餘條件均符合的正式未退餘額，其中一筆缺受款資料。查詢保留兩筆並對缺件列附待確認原因；匯出只列另一筆，缺件的原義務與餘額均保留。
+
 ## Dependencies
 - outbound: `payroll/payroll/module:payroll-adjustment` — 缺義務或正式未付款項更正轉介原 Payroll 流程。清冊查詢不代算或代寫。
 - outbound: `payroll/historical-service-accounting` — 報表只讀既有正式義務。歷史逐案查核可用該 owner 的唯讀同步預覽取得目前缺件或歸屬待核對原因，預覽不填入清冊金額或日期。
