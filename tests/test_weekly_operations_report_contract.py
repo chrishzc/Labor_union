@@ -857,3 +857,26 @@ def test_weekly_staff_union_number_survives_typed_service_and_subsidy_views():
     assert view.service_rows[0].staff_union_no == "A002"
     assert view.subsidy_partitions[0].rows[0].staff_union_no == "A010"
     assert view.service_rows[0].staff_name == "陳月嫂"
+
+
+def test_weekly_export_handles_service_row_with_missing_period_dates():
+    from subsystems.reporting.weekly_operations_report_export import export_weekly_operations_report
+
+    report = WeeklyOperationsReportQuery(_Facts(), lambda: datetime(2026, 8, 26, 12, tzinfo=TAIPEI_TIME_ZONE)).query(
+        date(2026, 8, 20), date(2026, 8, 26),
+    )
+    missing_period_row = replace(
+        report.service_rows[0],
+        period_start_date=None,
+        period_end_date=None,
+        data_quality_codes=("service_period_missing",),
+    )
+    workbook = load_workbook(
+        BytesIO(export_weekly_operations_report(replace(report, service_rows=(missing_period_row,))))
+    )
+    worksheet = workbook["每周服務中說明"]
+    assert worksheet.cell(row=3, column=1).value in (None, "")
+    assert worksheet.cell(row=3, column=3).value == missing_period_row.case_no
+    assert worksheet.cell(row=3, column=6).value in (None, "")
+    assert worksheet.cell(row=3, column=7).value in (None, "")
+    assert "正式服務期間缺值" in worksheet.cell(row=3, column=3).comment.text

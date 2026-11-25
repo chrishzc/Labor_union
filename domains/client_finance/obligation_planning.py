@@ -937,9 +937,9 @@ def _daily_charge(facts: ClientFinanceTermsFacts, charge_day: ClientChargeDay) -
                         + calculate_holiday_premium(facts.pricing, premium_inputs))
     if normalize_subsidy_policy_identity(facts.identity_status or '') == '補助市民':
         index = facts.charge_days.index(charge_day)
-        remaining = max(0,120-index*facts.service_hours_per_day)
-        billed = max(0,facts.service_hours_per_day-remaining)
-        return MoneyNTD(_whole_ntd((billed + premium)*facts.payment_terms.client_hourly_rate.amount))
+        remaining = max(Decimal(0), Decimal(120) - index * hours)
+        billed = max(Decimal(0), hours - remaining)
+        return MoneyNTD(_whole_ntd((billed + premium) * facts.payment_terms.client_hourly_rate.amount))
     if facts.client_service_charge_waived:
         return MoneyNTD(0)
     return (
@@ -950,7 +950,11 @@ def _daily_charge(facts: ClientFinanceTermsFacts, charge_day: ClientChargeDay) -
     )
 
 
-def _whole_ntd(value: float | int) -> int:
+def _whole_ntd(value: Decimal | float | int) -> int:
+    if isinstance(value, Decimal):
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError("half-hour charge must resolve to whole NTD")
+        return int(value)
     if isinstance(value, float) and not value.is_integer():
         raise ValueError("half-hour charge must resolve to whole NTD")
     return int(value)
