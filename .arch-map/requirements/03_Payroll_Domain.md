@@ -22,7 +22,7 @@
 
 ### 2.1 核心計價與費率政策
 
-1. **案件總額守恆**：月嫂帳面應付合計等於案件總額 `T`（`服務費 + 樓層費／其他費用`）。工會不抽成、不收取平台手續費；政府補助轉交月嫂包含於 `T` 內，不得額外新增補助薪資或重複應付（三方案關係見 [案件帳務三方案與補助流向](22A_案件帳務三方案與補助流向正式規格.md)）。
+1. **案件金額關係**：市民月嫂帳面應付與案件總額、非市民獨立定價及工會收入依 [22A §2.1](22A_案件帳務三方案與補助流向正式規格.md#case-accounting-schemes)；政府補助轉交月嫂包含於 `T` 內，不得額外新增補助薪資或重複應付（三方案關係見 [案件帳務三方案與補助流向](22A_案件帳務三方案與補助流向正式規格.md)）。
 2. **基礎身分時薪預設（未綁定個案新兩段政策時）**：
    - 一般市民：`300` 元／小時
    - 補助市民（含低收入戶／中低收入戶）：`350` 元／小時
@@ -37,21 +37,21 @@
    - 客戶自費負擔部分預計付款日為「服務結束月 `+ 1` 個月之 15 日」；直接補助轉交部分為「服務結束月 `+ 2` 個月之 15 日」。已形成的 `staff_payment_due_date` 與各期到期日保留，不因方案、取消、更正或政府入款時間而覆寫。
    - 方案一共同確認時（詳 [Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md#staff-payout-scheme1-and-differences)），Payroll 僅將既有單筆應付 `T` 按正式補助額 `S` 承接缺席的 `T - S`（沿原應付日）與 `S`（服務結束月 `+ 2` 個月之 15 日）來源分期。案件通過服務完成條件後，人工方案確認與銀行明細預檢均優先採 Orders 實際服務結束日，缺值時採訂單結束日，兩者均缺時阻擋新建分期。既有分期、已付款、總額及服務歸屬沿原正式資料。
 
-### 2.2 薪資計算公式與整數守恆
+### 2.2 薪資計算公式與整數守恆 ^payroll-service-pricing
 
 ```text
 actual_hours     = official_work_day_count × service_hours_per_day
-service_salary   = actual_hours × hourly_rate
+service_salary   = sum(effective_day_hours × applicable_staff_hourly_rate × holiday_multiplier)
 total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 ```
 
-- 正式服務日的工時依服務歸屬與適用費率計算，國定假日出勤與其他正式服務日使用相同的工時及費率規則。此計算口徑也適用於改約、取消、代班／換人及應付重建。
+- 一般訂單的國定假日服務費加成日期與有效時數取 [PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing) 同一來源，月嫂各自使用不可變快照中的適用時薪，跨原財務指派的合併按 Scheduling 保存的來源／結果配對承接各人的完整時數及原受款歸屬，不按目前當日排班人員或資料列順序轉移應付；配對不唯一時不改帳並留下原因。雙倍日服務薪資為有效時數 × 月嫂適用時薪 × 2。歷史案各計算入口均不套用，含依規格27 §8 精準重啟後狀態已回到「訂單成立」的案件；沿既有 `orders_historical_precision_restart` 來源紀錄判斷，不只檢查狀態字首。樓層費、其他津貼、付款日及原月嫂帳務歸屬維持既有規則。兩邊重算或保留原帳依 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)，不因一般重建路徑可追加調整就為已有正式收付的假日異動自動調帳。未收付全額免自備的重算金額、已入帳金額及待對帳差額依22A §2.3分開表達，不以差額負擔未定跳過重算。
 - 中途取消案件的樓層費先以 `ROUND_HALF_UP` 計算全案整數，再以最大餘數法按有效 assignment 服務日數分配（同餘數時依 `assignment_id` 升冪決定）。完整履約後取消一律拒絕，不得縮減薪資。
 - 正式服務日數、`service_hours_per_day`、hourly rate、樓層費與 adjustment 皆須為整數 NTD。非整數異常輸入須進 [Anomalies Domain](06_Anomalies_Domain.md)，不得在每日或 assignment 層私自四捨五入。
 
 計薪前先確認服務量來源：一般訂單、尚未採用服務量更正的歷史已完成訂單，以及已有正式採用版本的歷史多人案件，分別依下列規則取數。
 
-- **一般訂單服務量**：按月嫂歸屬加總正式排班的有效服務工時。[純日期合併、分裂及復原](02_Assignments_Scheduling_Domain.md#service-date-merge-split) 只改實際服務安排，Payroll 仍使用 Scheduling 保存的原財務服務日期及原受款歸屬，按原每日時數、指派費率與樓層費規則計算。完整未覆寫工作日原列包含已退出生效的來源日；純 Actual Start 重排若只承接調整後班次，沿同月嫂的 `orders_actual_start_rebuild` lineage 讀取最近完整原基準並映射至 current assignment，不把零實際班次的原受款人排除。完整 current generation 原基準優先，真正條款或服務歸屬財務更正不跨代凍結舊基準，保留其 current effective 口徑。純 Actual Start 重排承接原財務指派身分處理樓層費同餘數排序，結果映回目前指派，避免換指派 ID 改變各人的整數分配。本例外亦適用於完工同步及付款日計算使用的服務量，不新增帳務 writer 或修改實際班次。
+- **一般訂單服務量**：按月嫂歸屬加總正式排班的有效服務工時。[純日期合併、分裂及復原](02_Assignments_Scheduling_Domain.md#service-date-merge-split) 只改實際服務安排，除上述國定假日加成使用調整後實際有效日期及當日時數外，Payroll 仍使用 Scheduling 保存的原財務服務日期及原受款歸屬，按原每日時數、指派費率與樓層費規則計算。完整未覆寫工作日原列包含已退出生效的來源日；純 Actual Start 重排若只承接調整後班次，沿同月嫂的 `orders_actual_start_rebuild` lineage 讀取最近完整原基準並映射至 current assignment，不把零實際班次的原受款人排除。完整 current generation 原基準優先，真正條款或服務歸屬財務更正不跨代凍結舊基準，保留其 current effective 口徑。純 Actual Start 重排承接原財務指派身分處理樓層費同餘數排序，結果映回目前指派，避免換指派 ID 改變各人的整數分配。本例外亦適用於完工同步及付款日計算使用的服務量，不新增帳務 writer 或修改實際班次。
 - **歷史已完成訂單基準服務量**。尚無採用的服務量更正時，基準總工時取 HCM 匯入的 `orders.service_days × orders.service_hours_per_day`，以已採納的唯一歷史指派確認月嫂。月嫂時薪先取 `assignment_payroll_rate_snapshots.hourly_rate_ntd`，缺指派快照時取 `case_payroll_rate_policy_snapshots.hourly_rate_ntd`。基準計算直接使用登記服務量。
 - **已採用的歷史多人服務量**。有 [歷史服務歸屬更正](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-service-attribution-correction) 時，以該版本的各人服務量為計薪依據，按各人的可證實費率及本節樓層費規則計算。原登記總量只供基準比較。
 
@@ -119,3 +119,7 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 3. 完整履約後取消申請被拒絕且薪資不變；未核銷義務重算更新、已付款義務僅追加差額事件，全部新義務為整數 NTD。
 4. 雙胞胎更正、`staff-handover:` 換人差額、兩段時薪與方案一 `T - S`／`S` 分期拆分於同一 UoW 原子成立；0～100 元轉帳手續費由 Staff Payables 核銷結清，不竄改 Payroll 原始義務總額。
 5. 歷史服務完成案件未採用服務量更正、缺可證實的原應付且具備 §3.2 資料時，匯入後應讀回依 HCM 登記工時與 Payroll 費率建立的可核銷應付，依自費及直接補助來源形成各自付款日；再次匯入不會重複入帳。已有可證實原應付則依 §3.2 承接。無正式班表或人工服務天數紀錄仍可計薪。
+
+| ID | S：情境與前提 | T：任務 | A：操作 | R：結果 |
+|---|---|---|---|---|
+| HOLIDAY-PAYROLL-01 | 非市民客戶時薪350、月嫂320，雙倍日有效8小時且未收付 | 核對獨立費率 | 開啟後查正式兩邊金額 | 客戶服務費5600、月嫂應付5120、工會收入480，非金額異常；關閉後回2800、2560、240，服務量仍8小時 |
