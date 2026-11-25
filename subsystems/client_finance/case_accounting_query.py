@@ -27,6 +27,10 @@ class ClientCasePaymentTerms:
     zero_stages: frozenset[PaymentStage] = frozenset()
     historical_stages: bool = False
     service_end_date: date | None = None
+    full_subsidy_eligibility: bool | None = None
+    pending_reasons: tuple[str, ...] = ()
+    stale_payment_evidence_identities: tuple[str, ...] = ()
+    pending_bank_row_identities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,9 @@ class ClientAccountingItem:
     recognized_ntd: int = 0
     payment_stage: str | None = None
     obligation_type: str | None = None
+    source_event_identity: str | None = None
+    payment_evidence: str | None = None
+    payment_date: str | None = None
 
     @property
     def remaining_ntd(self):

@@ -71,6 +71,7 @@
 - Client registry case mapping enters through canonical `orders.case_no -> clients.id`; Client Profile remains the only writer.
 
 ## Verification
+- `ClientRegistryAccountingSummary` 沿案件帳務 strict client 讀取歷史免自備、原款項身分／日期／餘額、逐人應付缺項與待核對來源，與 `FinanceCaseAccounting` 共用 `case_accounting_presentation.ts` 的唯讀文字。`client_registry_accounting_summary.test.tsx` 與帳務專項 CI 核對同一 API 契約，摘要不計算金額或寫入帳務。
 - layout_status: `custom_current`
 - layout_basis: Backend contract tests own Client Profile and BeClass query/mutation boundaries; the mirrored React root owns the case-centered registry editing and bounded read-only roster interaction.
 - test_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/`

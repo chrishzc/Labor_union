@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Callable, Protocol
 from domains.client_finance.obligation_planning import ClientSubsidyReturnPlan
+from domains.client_finance.subsidy_coverage import is_full_subsidy_case
 from domains.payroll.installments import PayrollInstallment
 from shared_kernel.fingerprints import PreviewFingerprint
 
@@ -15,7 +16,7 @@ from domains.finance_import.statement_archive import CollectionProgress, Collect
 from subsystems.client_finance.case_accounting_query import (
     ClientAccountingItem, ClientAccountingTransaction, ClientCancellationAccounting, ClientCaseFunding, ClientCasePaymentTerms,
 )
-from subsystems.staff_payables.case_accounting_query import StaffAccountingItem, StaffAccountingTransaction
+from subsystems.staff_payables.case_accounting_query import StaffAccountingAvailability, StaffAccountingItem, StaffAccountingTransaction
 
 
 @dataclass(frozen=True)
@@ -165,6 +166,13 @@ class CaseAccounting:
     zero_stages: tuple[str, ...] = ()
     full_subsidy: bool = False
     unallocated_service_difference_ntd: int | None = None
+    stale_payment_evidence_identities: tuple[str, ...] = ()
+    pending_bank_row_identities: tuple[str, ...] = ()
+    historical_stages: bool = False
+    full_subsidy_eligibility: bool | None = None
+    accounting_pending_reasons: tuple[str, ...] = ()
+    subsidy_pending_reason: str | None = None
+    staff_accounting_availability: tuple[StaffAccountingAvailability, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -216,7 +224,7 @@ class StaffAccountingPort(Protocol):
 class AccountingWorkspace:
     def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort,
                  bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None, bank_memos=None,
-                 subsidy_plan_preview=None, subsidy_plan_apply=None,
+                 subsidy_plan_preview=None, subsidy_plan_apply=None, subsidy_detail=None, staff_availability=None,
                  case_total: Callable[[str], int | None] | None = None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
@@ -228,6 +236,8 @@ class AccountingWorkspace:
         self.subsidy_plan_preview = subsidy_plan_preview
         self.subsidy_plan_apply = subsidy_plan_apply
         self.case_total = case_total
+        self.subsidy_detail = subsidy_detail
+        self.staff_availability = staff_availability
 
     def subsidy_plan_history(self, case_no: str):
         self.state.case_client(case_no)
@@ -377,25 +387,37 @@ class AccountingWorkspace:
         banks = self.bank(case_no) if include_sources and self.bank is not None else ()
         stages = [item for item in client_items if item.payment_stage in {"deposit", "first", "second"}]
         terms = self.payment_terms(case_no) if include_sources and self.payment_terms is not None else ClientCasePaymentTerms()
+        customer_items = [item for item in client_items if item.direction == 'receivable'] if terms.historical_stages else stages
         recorded_stages = {item.payment_stage for item in stages}
         collection_sources = (
             *(CollectionStageSource(item.payment_stage, item.expected_ntd, item.actual_ntd, item.due_date) for item in stages),
             *(CollectionStageSource(stage.value, 0, 0, None) for stage in terms.zero_stages if stage not in recorded_stages),
         )
-        complete_terms = bool(stages) if terms.historical_stages else (
+        complete_terms = bool(customer_items) if terms.historical_stages else (
             len(collection_sources) == 3 and {item.stage for item in collection_sources} == {"deposit", "first", "second"})
-        customer_amount = sum(item.expected_ntd for item in collection_sources) if complete_terms else None
-        customer_paid = sum(item.received_ntd for item in collection_sources) if complete_terms else None
-        fully_received = all(item.received_ntd >= item.expected_ntd for item in collection_sources) if complete_terms else None
+        if terms.historical_stages:
+            customer_amount = sum(item.expected_ntd for item in customer_items) if complete_terms else None
+            customer_paid = sum(item.actual_ntd for item in customer_items) if complete_terms else None
+            fully_received = all(item.remaining_ntd == 0 for item in customer_items) if complete_terms else None
+        else:
+            customer_amount = sum(item.expected_ntd for item in collection_sources) if complete_terms else None
+            customer_paid = sum(item.received_ntd for item in collection_sources) if complete_terms else None
+            fully_received = all(item.received_ntd >= item.expected_ntd for item in collection_sources) if complete_terms else None
         staff_due = [item for item in staff_items if item.direction == "payable" and item.summary_included]
         staff_total = sum(item.expected_ntd for item in staff_due) if staff_due else None
-        subsidy = self.subsidy(case_no) if include_sources and self.subsidy is not None else None
+        subsidy_detail = self.subsidy_detail(case_no) if include_sources and self.subsidy_detail is not None else None
+        subsidy = (subsidy_detail.amount_ntd if subsidy_detail is not None else
+                   self.subsidy(case_no) if include_sources and self.subsidy is not None else None)
         funding = terms.funding
-        full_subsidy = bool(funding and funding.full_subsidy)
+        eligibility = terms.full_subsidy_eligibility
+        if eligibility is None and funding is not None:
+            eligibility = is_full_subsidy_case(funding.identity_status, funding.service_hours, funding.subsidy_limit)
+        full_subsidy = eligibility is True and funding is not None
+        pending_reasons = list(terms.pending_reasons)
         funding_conflict = False
         service_difference = None
-        gross_total = self.case_total(case_no) if full_subsidy and self.case_total is not None else None
-        holiday_funding_difference = bool(full_subsidy and gross_total is not None
+        gross_total = self.case_total(case_no) if full_subsidy and not terms.historical_stages and self.case_total is not None else None
+        holiday_funding_difference = bool(full_subsidy and not terms.historical_stages and gross_total is not None
             and subsidy is not None and gross_total > subsidy
             and subsidy == funding.total_ntd
             and not funding.has_subsidy_return
@@ -403,13 +425,26 @@ class AccountingWorkspace:
         if full_subsidy and gross_total is not None and subsidy is not None:
             service_difference = max(0, gross_total - (customer_amount or 0) - subsidy)
         if full_subsidy:
-            funding_conflict = (funding.has_subsidy_return or any(item.expected_ntd or item.actual_ntd or item.noncash_ntd for item in stages)
+            funding_conflict = (any(reason.endswith('requires_review') or reason == 'historical_client_payment_evidence_stale'
+                                    for reason in pending_reasons) or funding.has_subsidy_return
+                or any(item.expected_ntd or item.actual_ntd or item.noncash_ntd or item.payment_evidence for item in client_items)
+                or any(row.amount_ntd for row in client_transactions)
                 or (staff_total is not None and staff_total != funding.total_ntd and not holiday_funding_difference)
                 or (subsidy is not None and subsidy != funding.total_ntd))
-            if not funding_conflict:
-                staff_total = staff_total if holiday_funding_difference else funding.total_ntd
+            if any(item.expected_ntd or item.actual_ntd or item.noncash_ntd or item.payment_evidence for item in client_items):
+                pending_reasons.append('historical_original_client_amount_requires_review' if terms.historical_stages else 'original_client_amount_requires_review')
+            if any(row.amount_ntd for row in client_transactions):
+                pending_reasons.append('historical_client_cash_requires_review' if terms.historical_stages else 'client_cash_requires_review')
+            if subsidy is not None and subsidy != funding.total_ntd:
+                pending_reasons.append('subsidy_amount_conflict')
+            if staff_total is not None and staff_total != funding.total_ntd and not holiday_funding_difference:
+                pending_reasons.append('staff_total_amount_conflict')
+            if not funding_conflict and not pending_reasons:
+                if not terms.historical_stages and not holiday_funding_difference:
+                    staff_total = funding.total_ntd
                 customer_amount, subsidy, fully_received = 0, funding.total_ntd, True
                 customer_paid = 0
+        full_subsidy = full_subsidy and not pending_reasons
         government = sum(bank.amount_ntd for bank in banks if bank.cash_flow == "G" and bank.cases == (case_no,))
         cash_flows = None
         if include_sources and self.bank is not None and all(bank.cash_flow in {"C", "G", "PS", "PT", "RS", "RT"} and bank.cases == (case_no,) for bank in banks):
@@ -424,7 +459,9 @@ class AccountingWorkspace:
             direct_confirmed=direct, bank_sources_complete=cash_flows is not None, direct_conflict=conflict,
             full_subsidy=full_subsidy)
         plan = self.plan(case_no) if include_sources and self.plan is not None else None
-        if full_subsidy and not conflict:
+        if conflict:
+            scheme = "unknown"
+        elif full_subsidy:
             scheme = "split"
         elif plan is not None and plan.selected_scheme is not None:
             scheme = plan.selected_scheme
@@ -446,7 +483,8 @@ class AccountingWorkspace:
             sum(item.remaining_ntd for item in incoming) if incoming else None,
             sum(item.remaining_ntd for item in outgoing) if outgoing else None,
             staff_total, customer_amount, fully_received, subsidy, scheme, cash_flows, cash_net,
-            0 if full_subsidy and not funding_conflict else staff_total - subsidy if staff_total is not None and subsidy is not None else None,
+            0 if full_subsidy and not conflict else (
+                staff_total - subsidy if staff_total is not None and subsidy is not None else None),
             arrangement, conflict, direct_arrangement_ready(staff_total, customer_amount, subsidy, fully_received, cash_flows),
             CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(collection_sources, historical=terms.historical_stages),
             plan, ongoing_case_completed(fully_received, plan) and not (
@@ -462,6 +500,13 @@ class AccountingWorkspace:
             zero_stages=tuple(stage.value for stage in terms.zero_stages if stage.value not in recorded_stages) if not conflict else (),
             full_subsidy=full_subsidy and not conflict,
             unallocated_service_difference_ntd=service_difference,
+            stale_payment_evidence_identities=terms.stale_payment_evidence_identities,
+            pending_bank_row_identities=terms.pending_bank_row_identities,
+            historical_stages=terms.historical_stages,
+            full_subsidy_eligibility=eligibility,
+            accounting_pending_reasons=tuple(dict.fromkeys(pending_reasons)),
+            subsidy_pending_reason=subsidy_detail.unavailable_reason if subsidy_detail is not None else None,
+            staff_accounting_availability=self.staff_availability(case_no) if include_sources and self.staff_availability is not None else (),
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

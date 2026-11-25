@@ -37,6 +37,7 @@ import { AccountingParametersCard } from './AccountingParametersCard';
 import { AccountingParametersBar } from './AccountingParametersBar';
 import { AccountingParametersDrawer } from './AccountingParametersDrawer';
 import { accountingPricingClient, type CasePricing } from '../api/client_finance/accounting_pricing_client';
+import {accountingReason,unallocatedPaymentLabel} from './case_accounting_presentation';
 import './FinanceCaseAccounting.css';
 import { OrderAttributionFundingReview } from './OrderAttributionFundingReview';
 import './FinanceCompactCase.css';
@@ -65,6 +66,10 @@ const money=(value:number|bigint|null|undefined)=>value==null?'待確認':financ
 type Stage='deposit'|'first'|'second';
 const stageNames:Record<Stage,string>={deposit:'訂金',first:'第一期',second:'第二期'};
 const stages:Stage[]=['deposit','first','second'];
+function receiptSource(bank:string|null):string {
+ return bank==='manual'?'人工補登':bank==='sinopac'?'永豐':bank==='taishin'?'台新':bank==='legacy'?'歷史來源':'原來源';
+}
+
 export function AccountingWarningList({ data, onChange }: { data: CaseAccounting; onChange: (data: CaseAccounting) => void }) {
   const [showDismissed, setShowDismissed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -599,6 +604,14 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  if(!initialCase)return <p>請從案件清單選擇案件。</p>;
  const planConfirmed=Boolean(data?.subsidy_plan?.events.length)&&(!data?.full_subsidy||data.subsidy_plan?.events.at(-1)?.scheme==='split');
  const selected=data?.full_subsidy&&!data.scheme_conflict?'split':planConfirmed&&(data?.scheme==='split'||data?.scheme==='advance'||data?.scheme==='direct')?data.scheme:undefined;
+ const clientRows: {item: CaseAccounting['client_items'][number]|undefined;stage:Stage|null}[] =
+  data?.historical_stages
+   ? data.client_items.filter(row=>row.direction==='receivable').map(item=>({item,stage:item.payment_stage??null}))
+   : stages.flatMap(stage=>{
+      const items=data?.client_items.filter(row=>row.direction==='receivable'&&row.payment_stage===stage)??[];
+      return (items.length?items:[undefined]).map(item=>({item,stage}));
+     });
+ const unallocatedClientTransactions=data?.transactions.filter(row=>row.item_identity==='unallocated')??[];
  const staff=data?[...new Set(data.staff_items.filter(row=>row.direction==='payable').map(row=>row.party))].join('、'):'';
  const staffItems=data?.staff_items.filter(row=>row.direction==='payable')??[];
  const pricingTotal=state.pricing?.case_no===initialCase ? state.pricing.impact.case_total_amount : null;
@@ -618,7 +631,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 
  const subsidyKnown=data?.subsidy_ntd!=null;
  const standaloneSubsidyPayments = data?.subsidy_payments?.filter(
-  payment => payment.recipient === 'staff' || payment.source === 'estimate',
+  payment => payment.recipient === 'staff',
  ) ?? [];
  const subsidyTotal=data?.subsidy_ntd??0;
  const orderStatus=state.order?.order_status;
@@ -626,11 +639,11 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const serviceEnded=orderStatus==='訂單完成'||orderStatus==='歷史訂單－服務完成'||orderStatus==='歷史訂單－帳務完成';
  const unconfirmedPaymentStatus=serviceInProgress?'服務中，金額尚未確認'
   :serviceEnded?'服務已結束，金額待核對':'金額待確認';
- const subsidyRefundPending=(selected??data?.scheme)==='advance'&&subsidyTotal>0;
+ const subsidyRefundPending=planConfirmed&&selected==='advance'&&subsidyTotal>0;
  const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
  const govReceivedNtd=data?.cash_by_flow?.G??null;
  const governmentConflict=data?.scheme_conflict===true;
- const governmentDirect=!governmentConflict&&data?.scheme==='direct'&&data.arrangement?.events.at(-1)?.action==='confirm_direct';
+ const governmentDirect=!governmentConflict&&data?.scheme==='direct'&&(data.arrangement?.events.at(-1)?.action==='confirm_direct'||planConfirmed&&selected==='direct');
  const governmentInapplicable=!governmentConflict&&(governmentDirect||data?.subsidy_ntd===0);
  const currentCoverage=coverage?.case_no===initialCase?coverage:null;
 
@@ -784,25 +797,54 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      onClose={() => setShowSupplement(false)}
    />
  )}
- <details className="finance-case-block" open><summary>01　客戶繳款</summary><div className="finance-case-block-body"><div className="finance-table-container" tabIndex={0} role="region" aria-label="各期繳款與通知，可左右捲動"><table className="finance-table finance-case-periods"><thead><tr><th>期款</th><th>原到期日</th><th>應繳</th><th>已收／待收</th><th>入帳資訊</th><th>通知時間</th><th>通知</th></tr></thead><tbody>{stages.flatMap(stage=>{
- const sources=data.client_items.filter(row=>row.direction==='receivable'&&row.payment_stage===stage);
- return (sources.length?sources:[undefined]).map(item=>{
- const exempt=!data.scheme_conflict&&(data.full_subsidy===true||data.zero_stages?.includes(stage)===true);
- const expected=item?.expected_ntd??(exempt?0:null),actual=item?.actual_ntd??(exempt?0:null),remaining=item?.remaining_ntd??(exempt?0:null);
- const notice=state.notices?.find(row=>row.payment_stage===stage),last=lastNotification(notice);
+ <details className="finance-case-block" open><summary>01　客戶繳款</summary><div className="finance-case-block-body">
+ {data.historical_stages&&<>
+  {data.full_subsidy&&!data.scheme_conflict&&<p>全額補助／免自備，客戶應付 {money(data.customer_amount_ntd)}</p>}
+  {data.accounting_pending_reasons?.map(reason=><p key={reason} role="status">{accountingReason(reason)}</p>)}
+  {!!data.pending_bank_row_identities?.length&&<section aria-label="本案銀行收付款待核對"><p>原銀行來源待核對，尚未認列本案實收或實付。</p><ul>{data.pending_bank_row_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
+  {!!data.stale_payment_evidence_identities?.length&&<section aria-label="歷史付款證據待核對"><p>歷史付款證據已過期待核對</p><ul>{data.stale_payment_evidence_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
+  {clientRows.length===0&&<p>{data.full_subsidy&&!data.scheme_conflict?'沒有原期款證據；免自備判定不代表原款已付或帳務結清。':'沒有原期款證據；整案總額僅供查閱，原期款與收付仍待核對。'}</p>}
+ </>}
+ <div className="finance-table-container" tabIndex={0} role="region" aria-label="各期繳款與通知，可左右捲動"><table className="finance-table finance-case-periods"><thead><tr><th>期款</th><th>原到期日</th><th>應繳</th><th>已收／待收</th><th>入帳資訊</th><th>通知時間</th><th>通知</th></tr></thead><tbody>{clientRows.map(({item,stage})=>{
+ const exempt=stage!==null&&!data.scheme_conflict&&(data.full_subsidy===true||data.zero_stages?.includes(stage)===true);
+ const expected=item?.expected_ntd??(exempt?0:null),actual=item?.actual_ntd??(exempt?0:null),remaining=item?item.remaining_ntd:exempt?0:null;
+ const stageNotice=stage===null?undefined:state.notices?.find(row=>row.payment_stage===stage);
+ const notice=data.historical_stages&&stageNotice?.payment?.obligation_identity!==item?.identity?undefined:stageNotice;
+ const last=lastNotification(notice);
  const receipts=item?data.transactions.filter(row=>row.item_identity===item.identity).slice().sort((a,b)=>b.occurred_on.localeCompare(a.occurred_on)):[];
-  return <tr key={item?.identity??stage} data-payment-stage={stage} className={data.collection_progress?.stage===stage?'is-current':''}><td><strong>{stageNames[stage]}</strong>{stage==='deposit'&&<small>含樓層／其他費用</small>}</td><td>{item?.due_date??(expected===0?'不需繳納':'日期待確認')}{remaining!=null&&remaining>0&&item?.due_date&&<small>{item.due_date>today?'未到期':item.due_date===today?'今日到期':'逾期'}</small>}</td><td>{money(expected)}</td><td><span>已收 {money(actual)}</span>{remaining===0?<small className="finance-paid">{expected===0?'免繳':'已繳齊'}</small>:<small>待收 {money(remaining)}</small>}</td><td>{receipts.length?<><span>{receipts[0].occurred_on} · {receipts[0].bank==='manual'?'人工補登':receipts[0].bank==='sinopac'?'永豐':receipts[0].bank==='taishin'?'台新':receipts[0].bank==='legacy'?'歷史來源':'原來源'}</span>{receipts.length===1&&(receipts[0].kind==='reversal'||receipts[0].amount_ntd<0)&&<small>沖正 · {money(receipts[0].amount_ntd)}</small>}{receipts.length>1&&<details><summary>{receipts.length} 筆入帳</summary>{receipts.map(row=><p key={row.identity}>{row.occurred_on} · {row.kind==='reversal'||row.amount_ntd<0?'沖正':row.bank==='manual'?'人工補登':'入帳'} · {money(row.amount_ntd)}</p>)}</details>}</>:<span>{item||exempt?'尚無已核銷入帳':'來源待確認'}</span>}</td><td>{last?notificationTime(last):notice?(notice.history.length?'尚無成功通知':'尚未通知'):'待確認'}{notice&&notificationStatus(notice)&&<small>{notificationStatus(notice)}</small>}</td><td><div className="finance-case-period-actions"><button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'查看'+stageNames[stage]+'通知'} disabled={!!state.loading} title="查看本期通知內容、紀錄與寄送條件" onClick={()=>open(stage)}>查看通知</button></div></td></tr>;
-  });})}</tbody></table></div>{state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}
-</div></details>
- <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {data.subsidy_ntd==null?'金額待確認':money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'補助金額先計算，對象可由人工或符合條件的銀行明細確認。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{planConfirmed?'修改補助退款方案':'設定補助退款方案'}</button></div>{data.full_subsidy&&!data.scheme_conflict&&<p>全額補助，三期免繳</p>}<FinanceCaseBankMemos notes={data.bank_memos??[]}/><p>可在服務結束前先確認補助方案。符合給付條件時，儲存前會顯示給付金額。</p>{planConfirmed&&data.subsidy_plan?.events.at(-1)?.source==='bank'&&<p>依銀行明細確認方案</p>}{selected&&planConfirmed&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
+ const name=stage===null?item?.label??'期別待確認':stageNames[stage];
+ return <tr key={item?.identity??stage} data-payment-stage={stage??undefined} data-payment-identity={item?.identity} className={stage!==null&&data.collection_progress?.stage===stage?'is-current':''}>
+  <td><strong>{name}</strong>{stage==='deposit'&&<small>含樓層／其他費用</small>}{data.historical_stages&&item&&<><small>{item.identity}</small>{stage===null&&<small>期別待確認</small>}{item.source_event_identity&&<small>原事件 {item.source_event_identity}</small>}</>}</td>
+  <td>{item?.due_date??(!data.historical_stages&&expected===0?'不需繳納':'日期待確認')}{remaining!=null&&remaining>0&&item?.due_date&&<small>{item.due_date>today?'未到期':item.due_date===today?'今日到期':'逾期'}</small>}</td>
+  <td>{money(expected)}</td><td><span>已收 {money(actual)}</span>{remaining===0?<small className="finance-paid">{expected===0?'免繳':item?.payment_evidence?'依歷史證據結清':'已繳齊'}</small>:<small>待收 {money(remaining)}</small>}{item?.noncash_ntd!=null&&item.noncash_ntd>0&&<small>非現金結清 {money(item.noncash_ntd)}</small>}</td>
+  <td>{receipts.length?<>{receipts.map(row=><p key={row.identity}><span>{row.occurred_on} · {receiptSource(row.bank)}</span> · {row.kind==='reversal'||row.amount_ntd<0?'沖正':'入帳'} · {money(row.amount_ntd)}</p>)}</>:<span>{item?.payment_evidence==='historical_paid'?'歷史已付證據，非銀行入帳':item?.payment_evidence==='historical_settled'?'歷史結清證據，非銀行入帳':item||exempt?'尚無已核銷入帳':'來源待確認'}</span>}{item?.payment_date&&<small>歷史付款證據日期 {item.payment_date}</small>}</td>
+  <td>{last?notificationTime(last):notice?(notice.history.length?'尚無成功通知':'尚未通知'):data.historical_stages?'未提供本款通知來源':'待確認'}{notice&&notificationStatus(notice)&&<small>{notificationStatus(notice)}</small>}</td>
+  <td>{stage!==null&&(!data.historical_stages||notice)?<div className="finance-case-period-actions"><button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'查看'+stageNames[stage]+'通知'} disabled={!!state.loading} title="查看本期通知內容、紀錄與寄送條件" onClick={()=>open(stage)}>查看通知</button></div>:'—'}</td>
+ </tr>;
+ })}</tbody></table></div>
+ {unallocatedClientTransactions.length>0&&<section aria-label="期別待確認的原收付款"><p>以下原收付款尚未分配到期款，保留原來源供核對。</p>{unallocatedClientTransactions.map(row=><p key={row.identity}>{row.occurred_on} · {receiptSource(row.bank)} · {unallocatedPaymentLabel(row.kind)} · {money(row.amount_ntd)} · {row.identity}</p>)}</section>}
+ {state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}
+ </div></details>
+ <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {data.subsidy_ntd==null?'金額待確認':money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'補助金額先計算，對象可由人工或符合條件的銀行明細確認。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{planConfirmed?'修改補助退款方案':'設定補助退款方案'}</button></div>{data.full_subsidy&&!data.scheme_conflict&&!data.historical_stages&&<p>全額補助，三期免繳</p>}<FinanceCaseBankMemos notes={data.bank_memos??[]}/><p>可在服務結束前先確認補助方案。符合給付條件時，儲存前會顯示給付金額。</p>{planConfirmed&&data.subsidy_plan?.events.at(-1)?.source==='bank'&&<p>依銀行明細確認方案</p>}{selected&&planConfirmed&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
  {data.unallocated_service_difference_ntd != null && <p className="finance-unallocated-service-difference">待人工對帳服務費差額 {money(data.unallocated_service_difference_ntd)}，負擔歸屬待確認。</p>}
  <details className="finance-case-block" open><summary>03　月嫂薪資</summary><div className="finance-case-block-body">
+  {data.staff_accounting_availability&&data.staff_accounting_availability.length>0&&<section aria-label="歷史月嫂應付依據">
+    {data.staff_accounting_availability.map((item,index)=><div key={`${item.assignment_id??'unknown'}:${item.staff_id??'unknown'}:${index}`}>
+      <strong>{item.party||'月嫂歸屬待確認'}</strong>
+      <p>{item.status==='formal'?'已有正式應付':item.status==='not_established'?'尚未建立正式應付':'應付來源待核對'}</p>
+      {item.pending_reasons.map(reason=><p key={reason}>{accountingReason(reason)}</p>)}
+      {item.estimated_self_pay_date&&<p>自備款預計付款日 {item.estimated_self_pay_date}</p>}
+      {item.estimated_subsidy_date&&<p>補助款預計付款日 {item.estimated_subsidy_date}</p>}
+      {item.recorded_due_date&&<p>原已保存付款日 {item.recorded_due_date}</p>}
+    </div>)}
+  </section>}
+
   {onPayableReview && state.order?.order_status.startsWith('歷史訂單－') &&
     <HistoricalPayableLookup caseNo={initialCase} month={today.slice(0, 7)} revision={revision} onCase={onPayableReview} />}
   <div className="finance-staff-summary-cards" aria-label="月嫂薪資匯總">
     <div className="finance-staff-summary-card">
       <small>{staffItems.length ? '應付月嫂總額' : '月嫂薪資金額'}</small>
-      <strong>{money(staffItems.length ? staffPayableTotal : caseTotal)}</strong>
+      <strong>{money(staffItems.length ? staffPayableTotal : data.historical_stages ? null : caseTotal)}</strong>
     </div>
     <div className="finance-staff-summary-card">
       <small>已核銷金額（含內扣手續費）</small>
@@ -938,7 +980,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
   {subsidyRefundPending && !refundClientItems.some(item => item.obligation_type === 'subsidy_return') &&
     <p role="status">已確認先墊後退，正式補助退款尚未建立。可開啟補助退款方案查看給付預檢。</p>}
-  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : refundClientItems.length ? '已結清' : subsidyRefundPending ? unconfirmedPaymentStatus : '目前無退款'}</strong></span><span>政府款待入：<strong>{governmentConflict?'衝突待核對':governmentInapplicable?'不適用':!subsidyKnown||govReceivedNtd===null?'金額待確認':money(Math.max(0,subsidyTotal-govReceivedNtd))}</strong></span></div>
+  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : refundClientItems.length ? '已結清' : subsidyRefundPending ? '尚無正式退款' : '目前無退款'}</strong></span><span>政府款待入：<strong>{governmentConflict?'衝突待核對':governmentInapplicable?'不適用':!subsidyKnown||govReceivedNtd===null?'金額待確認':money(Math.max(0,subsidyTotal-govReceivedNtd))}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">
       <thead>
@@ -1039,10 +1081,10 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
             {(data.scheme==='waiting'||data.scheme==='unknown')&&data.estimated_subsidy_payment_date&&!orderStatus?.includes('取消')&&<small>補助給付預估：{data.estimated_subsidy_payment_date}</small>}
           </td>
           <td>{governmentInapplicable?'不適用':'依市府審查期程'}</td>
-          <td>{money(data.subsidy_ntd)}</td>
+          <td>{money(data.subsidy_ntd)}{data.subsidy_pending_reason&&<small>{accountingReason(data.subsidy_pending_reason)}</small>}</td>
           <td>{governmentDirect?'工會不經手':governmentInapplicable?'不適用':!subsidyKnown?'補助金額待確認':govReceivedNtd===null?'逐案實收待確認':<span>逐案實收 {money(govReceivedNtd)}</span>}</td>
           <td>{govBankFacts.length?govBankFacts.map(fact=><p key={fact.identity}>{fact.occurred_on} · {fact.bank==='taishin'?'台新':fact.bank==='sinopac'?'永豐':fact.bank??'銀行待確認'} · {fact.cases.length!==1||fact.cases[0]!==data.case_no?'整期流水，非逐案實收':'本案流水'} · {money(fact.amount_ntd)}</p>):governmentInapplicable?'不適用':'入款來源待確認'}</td>
-          <td>{governmentConflict?'衝突待核對':governmentInapplicable?'不適用':!subsidyKnown?'補助金額待確認':currentCoverage?currentCoverage.coverage.length?currentCoverage.coverage.map(receipt=><p key={receipt.receipt_id}>{receipt.label} · 整期 · {receipt.settled===true?'已核銷':receipt.settled===false?'已納入本期':'核銷狀態待確認'}</p>):'尚未納入整期':'核銷狀態待確認'}</td>
+          <td>{governmentConflict?'衝突待核對':governmentInapplicable?'不適用':!subsidyKnown?'補助金額待確認':currentCoverage?currentCoverage.coverage.length?currentCoverage.coverage.map(receipt=><p key={receipt.receipt_id}>{receipt.label} · 整期 · {receipt.settled===true?'整期已核銷，非本案核銷':receipt.settled===false?'已納入本期，非本案核銷':'整期核銷狀態待確認'}</p>):'尚未納入整期':'核銷狀態待確認'}</td>
           <td><button type="button" className="finance-btn-secondary" onClick={()=>open('plan')} title="修改補助款歸屬方案">{planConfirmed?'修改方案':'設定方案'}</button></td>
         </tr>
       </tbody>

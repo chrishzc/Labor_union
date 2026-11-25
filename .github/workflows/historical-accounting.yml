@@ -1,0 +1,114 @@
+name: Historical accounting contracts
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-accounting-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Historical accounting Python and MySQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports: ["127.0.0.1:3307:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      APP_ENV: development
+      ACCESS_CONTROL_PROFILE: local_auth
+      ENABLE_ADMIN_AUTH: "true"
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3307"
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_SSL_MODE: disabled
+      DB_DATABASE: lu_test_historical_${{ github.run_id }}_${{ github.run_attempt }}
+      PRICING_MYSQL: "1"
+      HISTORICAL_ACCOUNTING_CONTRACT_PATH: scratch/historical-accounting-drawer/api-contract.json
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install declared test dependencies
+        id: dependencies
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 ruff pyright
+      - name: Verify historical funding and original payment contracts
+        run: >-
+          python -m pytest -vv
+          tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py
+          tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_source_projection.py
+          tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_baseline_obligation_sync.py
+          tests/domains/staff-payables/subsystems/staff-payables/modules/historical-payment-settlement/contract/test_historical_completion_read_adapter.py
+          tests/domains/orders/subsystems/orders/modules/historical-service-accounting/unit/test_historical_service_accounting_mysql_repository.py
+          tests/domains/orders/subsystems/orders/modules/historical-precision-restart/unit/test_historical_precision_restart_repository_contract.py
+      - name: Verify isolated MySQL query to accounting API and read-only snapshots
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          python -m pytest -vv
+          tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
+          -k historical_accounting
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install strict drawer test dependencies
+        working-directory: ui_react
+        run: npm ci --ignore-scripts
+      - name: Render actual synthetic MySQL API responses through the strict client
+        working-directory: ui_react
+        env:
+          HISTORICAL_ACCOUNTING_CONTRACT_PATH: ${{ github.workspace }}/scratch/historical-accounting-drawer/api-contract.json
+        run: >-
+          npm test --
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          -t 隔離
+      - name: Check Python types and lint at the affected boundaries
+        run: |
+          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py api/schemas/finance_import.py api/routes/finance_statement_workspace.py
+          pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py
+      - name: Check the owning specification and whitespace
+        run: |
+          python scripts/validate_spec_hygiene.py --path .arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md
+          git diff --check ${{ github.event.pull_request.base.sha || 'HEAD^' }} HEAD
+
+  frontend:
+    name: Historical accounting React
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ui_react
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: npm ci --ignore-scripts
+      - name: Verify historical drawer and normal order regressions
+        run: >-
+          npm test --
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_pricing.test.tsx
+          src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_parameters_components.test.tsx
+          src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx
+      - run: npm run lint
+      - run: npm run build

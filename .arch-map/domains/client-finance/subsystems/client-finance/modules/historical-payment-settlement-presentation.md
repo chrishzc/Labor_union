@@ -21,6 +21,8 @@
 - shared case subsidy detail: `ui_react/src/components/CaseSubsidyDetailDrawer.tsx` — exact-case 補助金額、整期涵蓋與目前應退／實付；不提供逐案銷帳；支援嵌入同一案件抽屜，不堆疊可操作彈窗。
 - immutable history: `ui_react/src/components/FinanceCaseHistory.tsx`、`ui_react/src/api/client_finance/client_finance_history_client.ts` — strict 解碼既有 `/api/v1/client-payments` 摘要／同案根事實與 immutable ledger，拒絕重複及跨案回應。
 - history adapter: `infrastructure/mysql/client_payments_query_repository.py`、`api/schemas/client_payments.py` — 既有 read model 接受已存在的 subsidy_return／subsidy_advance 類型，不改 writer 或歷史資料。
+  - 案件帳務 Query 以本案有效費率、已採納未截斷服務量及正式身分判定歷史免自備。先保護原客戶義務、未分配收款、核銷／沖正、有效更正及歷史證據；缺正式來源不推定無收付。抽屜沿原款項身分顯示，歷史已付證據與銀行入帳分開。
+  - 待核對銀行列依最新正式分類的明確案號歸屬本案；同客戶的其他案件不得承接該列。僅命中客戶而未唯一定位案件的來源留在原人工查核候選，不列本案來源、不影響其他案件免自備，亦不計本案實收或實付。共用人工歷史付款查核仍保留按客戶擴找候選的用途。
   - 摘要 `receipt_status` 組合 canonical receipt／reversal 淨額及 exact current historical payment overlay，分開呈現待收、部分收款、已收款、已結清；有效歷史 overlay 從未收／未付餘額扣除，不改 canonical receipt 計數。
 - receipt filter contract: `subsystems/client_finance/client_payments_query.py` → `api/routes/client_payments.py` → strict history client；摘要 `receipt_entry_count` 只計 canonical receipt，收款頁「已收款」依 `receipt_status` 包含已收／部分收款，其他 ledger 類型不作收款證據。跨層驗證：`tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_summary_query.py`。
 - government read client: `ui_react/src/api/government_subsidy/period_reconciliation_client.ts` — current period query／receipt／case coverage；舊 Orders batch projection 僅歷史能力。
@@ -42,6 +44,7 @@
 - test_root: `ui_react/src/tests/finance_query_transport_identity.test.ts`
 - test_root: `ui_react/src/tests/finance_query_clients.test.ts`
 - test_root: `ui_react/src/tests/finance_request_lifecycle.test.tsx`
+- integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py`，歷史補助事實經實際查詢與帳務 API；原結清 read adapter 門檻維持。
 - integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/`
 - cross-workspace verification: parent subsystem integration_root `ui_react/src/tests/domains/client-finance/subsystems/client-finance/integration/finance_workspaces.test.tsx`
 

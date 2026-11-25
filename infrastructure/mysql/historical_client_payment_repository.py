@@ -271,7 +271,8 @@ def _cursor(connection):
 
 
 _CLIENT_BANK_CANDIDATES_SQL = (
-    "SELECT fir.id FROM finance_import_rows fir "
+    "SELECT fir.id,JSON_CONTAINS(classification.target_identities,"
+    "JSON_QUOTE(selected_order.case_no)) AS matches_selected_case FROM finance_import_rows fir "
     "JOIN orders selected_order ON selected_order.case_no=%s "
     "JOIN finance_import_classification_events classification ON classification.id=("
     "SELECT MAX(latest.id) FROM finance_import_classification_events latest "

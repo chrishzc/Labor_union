@@ -7,6 +7,7 @@ from typing import Dict, Any, List
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 import json
+from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.current_projection import StaffUnavailabilityCurrentFact
 from infrastructure.mysql.scheduling_occupancy_facts import load_historical_reservation_rows
@@ -218,6 +219,7 @@ def get_staff_monthly_calendar_schedule(
                 JOIN clients c ON c.id=o.client_id
                 JOIN staff s ON s.id=csa.staff_id
                 WHERE csa.staff_id=%s AND csa.status='completed'
+                  AND o.status NOT IN (%s, %s)
                   AND csa.assigned_start_date<=%s AND csa.assigned_end_date>=%s
                   AND NOT EXISTS (
                     SELECT 1 FROM staff_schedule daily
@@ -235,7 +237,8 @@ def get_staff_monthly_calendar_schedule(
                   )
                 ORDER BY csa.assigned_start_date,csa.id
                 """,
-                (staff_id, month_end, service_window_start),
+                (staff_id, OrderLifecycleStatus.CANCELLED.value, OrderLifecycleStatus.ESTABLISHED_UNSERVED.value,
+                 month_end, service_window_start),
             )
             for row in cursor.fetchall():
                 assigned_start = _as_date(row["assigned_start_date"])
