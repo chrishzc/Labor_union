@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from domains.payroll.calculation import AssignmentRateSnapshot, PayrollPolicyKind, PayrollTerms
 from domains.payroll.historical_calculation import (
@@ -85,7 +85,7 @@ def sync_historical_staff_baseline_obligations(connection, case_no=None, *, dry_
     }
 
 
-def synchronize_historical_payroll(connection, case_no, *, dry_run=False, actor=None):
+def synchronize_historical_payroll(connection, case_no, *, dry_run=False, actor=None) -> dict[str, Any]:
     """Borrow the caller's transaction. The order lock serializes first establishment."""
     with connection.cursor() as cursor:
         cursor.execute(
@@ -554,7 +554,7 @@ def _persist_historical_batch(
         )
     preview = build_source_preview(case_no, version, payroll, actions)
     key = f"historical-payroll:{case_no}:{version}"
-    PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(connection), None).persist_source_preview(
+    PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(connection), cast(Any, None)).persist_source_preview(
         case_no,
         preview,
         actor=actor or ActorContext("system:historical-payroll"),
@@ -592,7 +592,7 @@ def _preserved_existing_result(original):
     return None
 
 
-def _already_synced_pending(funding: HistoricalFundingSchedule) -> dict[str, object]:
+def _already_synced_pending(funding: HistoricalFundingSchedule) -> dict[str, Any]:
     result = _skipped("already_synced", funding.pending_detail)
     result["payment_arrangement_pending"] = True
     if funding.pending_reason:
@@ -606,8 +606,8 @@ def _single_sync_outcome(
     staff_id: int,
     amount_ntd: int,
     funding: HistoricalFundingSchedule,
-) -> dict[str, object]:
-    result: dict[str, object] = {
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "action": action_name,
         "staff_id": staff_id,
         "amount_ntd": amount_ntd,
@@ -693,6 +693,8 @@ def _funding_schedule(
 def _positive_int_or_zero(value: object) -> int:
     if value is None or isinstance(value, bool):
         return 0
+    if not isinstance(value, (int, float, Decimal, str)):
+        return 0
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -710,8 +712,8 @@ def _positive_decimal(value: object) -> bool:
     return parsed.is_finite() and parsed > 0
 
 
-def _skipped(reason, detail=None):
-    result = {"action": "skipped", "reason": reason}
+def _skipped(reason, detail=None) -> dict[str, Any]:
+    result: dict[str, Any] = {"action": "skipped", "reason": reason}
     explanation = detail or _SKIP_DETAILS.get(reason)
     if explanation:
         result["detail"] = explanation
