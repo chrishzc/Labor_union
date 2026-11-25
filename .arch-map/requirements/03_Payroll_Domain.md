@@ -42,12 +42,15 @@
 
 ```text
 base_payroll_hours = financial_work_day_count × terms_service_hours_per_day
-service_salary   = sum(effective_day_hours × applicable_staff_hourly_rate × holiday_multiplier)
-total_payable    = service_salary + floor_fee_allocated + effective_adjustments
+base_service_salary = 按受款人的計薪基礎工時與其適用費率計算
+holiday_salary_addition = 按配回該受款人的有效雙倍假日時數與其適用費率另加一份薪資
+service_salary = base_service_salary + holiday_salary_addition
+total_payable = service_salary + floor_fee_allocated + effective_adjustments
 ```
 
 - `financial_work_day_count` 是本次計薪採用的服務日數，不是調整後班表的可見列數。例：原兩天各 4 小時，純日期合併成一天 8 小時，計薪基礎仍為 8 小時，不是 4 小時；若合併日適用國定假日加成，另按實際有效 8 小時與原受款歸屬算加成。歷史訂單的服務量另見下列兩種來源。
-- 一般訂單的國定假日服務費加成日期與有效時數取 [PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing) 同一來源，月嫂各自使用不可變快照中的適用時薪，跨原財務指派的合併按 Scheduling 保存的來源／結果配對承接各人的完整時數及原受款歸屬，不按目前當日排班人員或資料列順序轉移應付；配對不唯一時不改帳並留下原因。雙倍日服務薪資為有效時數 × 月嫂適用時薪 × 2。歷史案各計算入口均不套用，含依規格27 §8 精準重啟後狀態已回到「訂單成立」的案件；沿既有 `orders_historical_precision_restart` 來源紀錄判斷，不只檢查狀態字首。樓層費、其他津貼、付款日及原月嫂帳務歸屬維持既有規則。兩邊重算或保留原帳依 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)，不因一般重建路徑可追加調整就為已有正式收付的假日異動自動調帳。未收付全額免自備的重算金額、已入帳金額及待對帳差額依22A §2.3分開表達，不以差額負擔未定跳過重算。
+- 一般訂單的國定假日服務費加成日期與有效時數取 [PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing) 同一來源，月嫂各自使用不可變快照中的適用時薪，跨原財務指派的合併按 Scheduling 保存的來源／結果配對承接各人的完整時數及原受款歸屬，不按目前當日排班人員或資料列順序轉移應付；配對不唯一時不改帳並留下原因。單一時薪可直接乘工時；分段費率沿原補助級距及每段起點計價，假日只加計已配回原受款人的時段。歷史案各計算入口均不套用，含依規格27 §8 精準重啟後狀態已回到「訂單成立」的案件；沿既有 `orders_historical_precision_restart` 來源紀錄判斷，不只檢查狀態字首。樓層費、其他津貼、付款日及原月嫂帳務歸屬維持既有規則。兩邊重算或保留原帳依 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)，不因一般重建路徑可追加調整就為已有正式收付的假日異動自動調帳。未收付全額免自備的重算金額、已入帳金額及待對帳差額依22A §2.3分開表達，不以差額負擔未定跳過重算。
+- **跨月嫂反例**：兩位原受款人各 4 小時、時薪各 320 元，合併後同一位月嫂在該日排班 8 小時。未啟用雙倍時，兩人各計 1,280 元服務薪資；符合雙倍重算條件時，兩人各計 2,560 元服務薪資（未含樓層費與調整）。不能把 8 小時的薪資都付給當日排班者。
 - 中途取消案件的樓層費先以 `ROUND_HALF_UP` 計算全案整數，再以最大餘數法按有效 assignment 服務日數分配（同餘數時依 `assignment_id` 升冪決定）。完整履約後取消一律拒絕，不得縮減薪資。
 - 正式服務日數、`service_hours_per_day`、hourly rate、樓層費與 adjustment 皆須為整數 NTD。非整數異常輸入須進 [Anomalies Domain](06_Anomalies_Domain.md)，不得在每日或 assignment 層私自四捨五入。
 
