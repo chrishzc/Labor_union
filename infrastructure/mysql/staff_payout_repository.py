@@ -393,7 +393,8 @@ class MySqlStaffPayoutRepository:
                 if any(p.remaining_ntd is None for p in portions):
                     raise ValueError('staff_installment_funding_unconfirmed')
                 _verify_taishin_subsidy_month(self._connection, bank_rows, row['case_no'],
-                    tuple(p.due_date for p in portions if p.funding_kind == 'subsidy' and p.remaining_ntd > 0))
+                    tuple(p.due_date for p in portions if p.funding_kind == 'subsidy'
+                        and p.remaining_ntd is not None and p.remaining_ntd > 0))
                 limits[str(row['obligation_identity'])] = sum(p.remaining_ntd for p in portions if p.funding_kind == funding)
             if limits:
                 obligations = tuple(replace(item, installment_limit=MoneyNTD(limits[item.obligation_identity]))
