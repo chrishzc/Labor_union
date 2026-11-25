@@ -72,8 +72,8 @@
 
 ## Contracts
 - Preview／Apply 依工作簿日期、月嫂與每日時段區分實際重疊與缺少證據。標準六欄的時段按案號取自 Orders 完整起訖與跨日標記，既有附時段來源沿用明示時段。當次 `row_issues` 顯示雙方 Excel 列號與案件。檔內排除列保留案號，避免被列為檔外取消。
-- Workbook Apply 只回傳當次結果。同檔重匯依目前版本重新判定，業務資料已一致的列避免重複寫入。整份結果快照與整批 claim 已停止讀寫。
-- 現行逐筆採納資料仍承載可採納時段、指派及帳務的正式引用。`27` §12.1 定義搬遷至 owner 資料及轉接查詢與外鍵後的清除條件。
+- [01A §4.1](../../../../../requirements/01A_訂單看板與事前日期及歷史採納規格.md#41-六欄來源與同檔重匯檔外取消hist-import-0104) 定義當次匯入結果：`import_counts` 區分成功寫入、資料已一致、未匯入；檔外取消另計。不要將 `adopted_count` 當成此次新增寫入數。同檔重匯依目前版本重新判定，不持久化整份結果快照或整批 claim。
+- 正式逐筆採納證據不是當次工作簿暫存。既有正式引用及舊資料清除依 [27 §10.2](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#102-資料遷移與舊匯入清除邊界)：先轉接 owner 讀寫來源並核對搬遷；若仍有未轉接的外鍵、查詢或未對應事件，不清除。
 - MySQL 3819 沿 `historical_order_database_check_<constraint>` 保留 bounded、去 schema 的規則識別，不辨識時回 `check_rejected`；不以規則失敗直接推定 migration 或來源修正。
 - 歷史工作簿資料庫錯誤以 `historical_order_database_*` 區分連線、權限、結構、資料鎖及指令／資料限制，保留數字與 correlation，不回傳或記錄 raw SQL／provider message；資料鎖與死結不觸發自動重送。
 - `.arch-map/requirements/01_Orders_Domain.md` — historical adoption semantics and Orders ownership.
