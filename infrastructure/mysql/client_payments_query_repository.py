@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import date, datetime
-from typing import Iterator
+from decimal import Decimal
+from typing import Any, Iterator
 
 from pymysql.err import OperationalError
 from infrastructure.mysql.case_category_query import CASE_CATEGORY_SQL
 from subsystems.client_finance.client_payments_query import FinanceCaseCategory
+from subsystems.client_finance.case_accounting_query import ClientCasePaymentTerms
 
 from subsystems.client_finance.client_payments_query import (
     ClientFinanceAllocationFact,
@@ -43,7 +45,7 @@ def query_case_payment_terms(connection, case_no):
         if status.startswith('歷史'):
             # Historical obligations retain their original legal period grain;
             # do not require or manufacture the normal three-period schedule.
-            return ClientCasePaymentTerms(historical_stages=True, service_end_date=service_end_date)
+            return _historical_payment_terms(cursor, order, service_end_date)
         if any(order.get(key) is None for key in
                 ('start_date', 'service_days', 'service_hours_per_day', 'floor_fee', 'client_identity_status')):
             return ClientCasePaymentTerms(service_end_date=service_end_date)
@@ -72,6 +74,73 @@ def query_case_payment_terms(connection, case_no):
     if status == '訂單取消' or len(facts.charge_days) != int(order['service_days']):
         return ClientCasePaymentTerms(funding, service_end_date=service_end_date)
     return ClientCasePaymentTerms(funding, confirmed_zero_payment_stages(facts), service_end_date=service_end_date)
+
+
+def _historical_payment_terms(cursor: Any, order: dict[str, Any], service_end_date: date | None) -> ClientCasePaymentTerms:
+    from domains.client_finance.pricing_policy import calculate_case_total_amount
+    from domains.client_finance.subsidy_coverage import is_full_subsidy_case, normalize_subsidy_policy_identity
+    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding, ClientCasePaymentTerms
+
+    case_no = str(order['case_no'])
+    pending: list[str] = []
+    pricing = load_case_pricing(cursor, order, lock=False)
+    identity = pricing.identity_name if pricing is not None else order.get('client_identity_status')
+    limit = pricing.subsidy_hours if pricing is not None else None
+    cursor.execute(
+        'SELECT p.total_actual_service_hours,p.total_actual_service_days,e.historical_floor_fee_ntd '
+        'FROM historical_service_day_projections p '
+        'JOIN historical_service_day_events e ON e.id=p.current_event_id AND e.case_no=p.case_no '
+        'WHERE p.case_no=%s', (case_no,),
+    )
+    adopted_volume = cursor.fetchone()
+    cursor.execute(
+        "SELECT id FROM historical_order_adoption_receipts WHERE case_no=%s AND outcome='adopted' "
+        'ORDER BY id DESC LIMIT 1', (case_no,),
+    )
+    adoption = cursor.fetchone()
+    hours = None
+    floor = None
+    if adopted_volume is not None:
+        hours = Decimal(str(adopted_volume['total_actual_service_hours']))
+        floor = int(adopted_volume['historical_floor_fee_ntd'])
+    elif adoption is not None and order.get('service_days') is not None and order.get('service_hours_per_day') is not None:
+        hours = Decimal(str(order['service_days'])) * Decimal(str(order['service_hours_per_day']))
+        floor = int(order['floor_fee']) if order.get('floor_fee') is not None else None
+    if identity is None or normalize_subsidy_policy_identity(str(identity)) not in {'一般市民', '補助市民', '原住民', '非市民'}:
+        identity = None
+        pending.append('historical_client_identity_missing')
+    if hours is None:
+        pending.append('historical_service_hours_missing')
+    if limit is None:
+        pending.append('historical_subsidy_limit_missing')
+    eligibility = pricing.is_full_subsidy(hours) if pricing is not None else is_full_subsidy_case(identity, hours, limit)
+    cursor.execute('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s', (case_no,))
+    if cursor.fetchone() is None:
+        pending.append('historical_client_finance_source_missing')
+    cursor.execute(
+        'SELECT COUNT(*) AS entry_count FROM client_ledger_entries WHERE case_no=%s', (case_no,),
+    )
+    if int(cursor.fetchone()['entry_count']):
+        pending.append('historical_client_cash_requires_review')
+    cursor.execute(
+        'SELECT COUNT(*) AS evidence_count FROM historical_client_payment_projections p '
+        'JOIN client_obligations o ON o.obligation_identity=p.obligation_identity '
+        'AND o.case_no=p.case_no AND o.projection_version=p.obligation_projection_version '
+        'AND o.amount_due_ntd=p.amount_snapshot_ntd WHERE p.case_no=%s', (case_no,),
+    )
+    if int(cursor.fetchone()['evidence_count']):
+        pending.append('historical_client_payment_evidence_requires_review')
+    funding = None
+    if pricing is not None and hours is not None and floor is not None and identity is not None:
+        total = calculate_case_total_amount(pricing, ((hours, False),), floor)
+        funding = ClientCaseFunding(case_no, identity, hours, pricing.subsidy_hours, total)
+    elif eligibility is True:
+        pending.append('historical_total_amount_missing')
+    return ClientCasePaymentTerms(
+        funding, historical_stages=True, service_end_date=service_end_date,
+        full_subsidy_eligibility=eligibility, pending_reasons=tuple(pending),
+    )
 
 
 class MySqlClientFinanceQueryRepository:
@@ -457,16 +526,17 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             cursor.fetchall()
         cursor.execute(
             "SELECT o.obligation_identity,o.obligation_type,o.direction,o.due_date,o.status,"
-            "o.amount_due_ntd,o.projection_version,e.after_amount_ntd,"
+            "o.amount_due_ntd,o.projection_version,e.after_amount_ntd,e.source_event_identity,"
             "COALESCE(a.aggregate_version,0) AS account_version,c.name AS client_name,"
             "h.confirmation_kind,h.amount_snapshot_ntd,"
-            "h.current_event_id AS historical_event,"
+            "h.current_event_id AS historical_event,he.payment_date AS historical_payment_date,"
             "COALESCE((SELECT SUM(n.amount_ntd) FROM client_finance_noncash_events n WHERE n.target_identity=o.obligation_identity),0) AS recognized_ntd "
             "FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id "
             "JOIN orders r ON r.case_no=o.case_no JOIN clients c ON c.id=r.client_id "
             "LEFT JOIN client_finance_accounts a ON a.case_no=o.case_no "
             "LEFT JOIN historical_client_payment_projections h ON h.obligation_identity=o.obligation_identity "
             "AND h.amount_snapshot_ntd=o.amount_due_ntd AND h.obligation_projection_version=o.projection_version "
+            "LEFT JOIN historical_client_payment_events he ON he.id=h.current_event_id AND he.case_no=o.case_no "
             "WHERE o.case_no=%s AND o.status<>'cancelled' ORDER BY o.obligation_identity" + lock, (case_no,),
         )
         obligations = cursor.fetchall()
@@ -483,6 +553,18 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             "WHERE l.case_no=%s ORDER BY l.id,x.allocation_ordinal" + lock, (case_no,),
         )
         allocations = cursor.fetchall()
+        cursor.execute(
+            'SELECT l.id,l.entry_type,l.occurred_on,l.amount_ntd-COALESCE(SUM(x.amount_ntd),0) AS unallocated_ntd,'
+            'base.entry_type AS reversed_type,b.format_id,l.reconciliation_reference,b.summary '
+            'FROM client_ledger_entries l '
+            'LEFT JOIN client_ledger_obligation_allocations x ON x.ledger_entry_id=l.id '
+            'LEFT JOIN client_ledger_entries base ON base.id=l.reversal_of_entry_id '
+            'LEFT JOIN finance_import_rows b ON b.id=l.finance_import_row_id '
+            "WHERE l.case_no=%s AND l.entry_type IN ('receipt','refund','reversal','refund_reversal') "
+            'GROUP BY l.id,l.entry_type,l.occurred_on,l.amount_ntd,base.entry_type,b.format_id,'
+            'l.reconciliation_reference,b.summary HAVING unallocated_ntd>0 ORDER BY l.id' + lock, (case_no,),
+        )
+        unallocated_rows = cursor.fetchall()
         cursor.execute(
             "SELECT d.receivable_obligation_identity,d.overage_amount_ntd "
             "FROM client_receipt_overage_dispositions d WHERE d.case_no=%s "
@@ -512,14 +594,22 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             "WHERE r.case_no=%s AND e.event_type='collected' ORDER BY e.id",(case_no,))
         recovery_transactions=cursor.fetchall()
     sums, transactions = {}, []
+    for row in unallocated_rows:
+        kind = row['entry_type']
+        amount = int(row['unallocated_ntd']) * (-1 if kind in {'reversal', 'refund_reversal'} else 1)
+        bank = 'manual' if ((row.get('reconciliation_reference') or '').startswith('manual')
+                            or row.get('summary') == '人工補登') else row['format_id']
+        transactions.append(ClientAccountingTransaction(
+            f"client-entry:{row['id']}:unallocated", 'unallocated', str(row['occurred_on']), kind, amount, bank,
+        ))
     for row in allocations:
         kind = row["entry_type"]
-        if kind not in {"receipt", "refund", "subsidy_return", "subsidy_advance", "reversal", "subsidy_return_reversal"}:
+        if kind not in {"receipt", "refund", "subsidy_return", "subsidy_advance", "reversal", "refund_reversal", "subsidy_return_reversal"}:
             continue
-        if kind in {"reversal", "subsidy_return_reversal"} and row["reversed_type"] not in {"receipt", "refund", "subsidy_return", "subsidy_advance"}:
+        if kind in {"reversal", "refund_reversal", "subsidy_return_reversal"} and row["reversed_type"] not in {"receipt", "refund", "subsidy_return", "subsidy_advance"}:
             continue
         identity = row["obligation_identity"]
-        amount = int(row["amount_ntd"]) * (-1 if kind in {"reversal", "subsidy_return_reversal"} else 1)
+        amount = int(row["amount_ntd"]) * (-1 if kind in {"reversal", "refund_reversal", "subsidy_return_reversal"} else 1)
         sums[identity] = sums.get(identity, 0) + amount
         bank = "manual" if ((row.get("reconciliation_reference") or "").startswith("manual") or row.get("summary") == "人工補登") else row["format_id"]
         transactions.append(ClientAccountingTransaction(
@@ -559,6 +649,9 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             recognized_ntd=recognized,
             payment_stage=row["obligation_type"] if row["obligation_type"] in {"deposit", "first", "second"} else None,
             obligation_type=row["obligation_type"],
+            source_event_identity=row.get('source_event_identity'),
+            payment_evidence=('historical_' + row['confirmation_kind']) if row.get('confirmation_kind') else None,
+            payment_date=str(row['historical_payment_date']) if row.get('historical_payment_date') else None,
         ))
     valid = {item.identity for item in items}
     for row in recovery_rows:
@@ -566,4 +659,4 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             f"recovery:{row['projection_version']}",None,settled=row['status'] in ('recovered','adjusted','settled','cancelled'),recognized_ntd=int(row['recognized'])))
     transactions.extend(ClientAccountingTransaction(f"client-recovery:{r['id']}",r['recovery_identity'],str(r['occurred_on']),'receipt',int(r['amount']),r['format_id']) for r in recovery_transactions)
     valid.update(row['recovery_identity'] for row in recovery_rows)
-    return tuple(items), tuple(row for row in transactions if row.item_identity in valid)
+    return tuple(items), tuple(row for row in transactions if row.item_identity in valid or row.item_identity == 'unallocated')

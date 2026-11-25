@@ -3,6 +3,7 @@
 from argparse import Namespace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 import os
 import json
 from uuid import uuid4
@@ -81,6 +82,223 @@ def seed_case(case_no, identity="補助市民"):
             cursor.execute("INSERT INTO beclass_records(bound_case_no,record_origin,survey_details) VALUES(%s,'admin_manual',%s)", (case_no, '{"特殊計費:胎數":"單胞胎"}'))
             bind_initial_pricing(cursor, case_no)
         connection.commit()
+    finally:
+        connection.close()
+
+
+def seed_historical_accounting_case(case_no, identity, hours, cap):
+    """Synthetic adopted history with no client obligations, payments or general terms."""
+    seed_case(case_no, identity)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET status='歷史訂單－服務完成',service_days=%s,"
+                "actual_end_date='2026-10-20',end_date='2026-10-20',lifecycle_version=1,"
+                "pricing_policy_id=NULL,pricing_override_event_id=NULL "
+                "WHERE case_no=%s", (hours // 8, case_no),
+            )
+            cursor.execute('INSERT INTO client_finance_accounts(case_no) VALUES(%s)', (case_no,))
+            cursor.execute(
+                "INSERT INTO order_lifecycle_state_events(case_no,trigger_event,before_status,after_status,"
+                "actor,business_date,expected_version,idempotency_key,facts_snapshot) "
+                "VALUES(%s,'historical_order_adoption','洽談中','歷史訂單－服務完成',"
+                "'synthetic','2026-10-20',0,%s,'{}')", (case_no, case_no + ':lifecycle'),
+            )
+            lifecycle_event = cursor.lastrowid
+            cursor.execute(
+                "INSERT INTO historical_order_adoption_receipts(idempotency_key,command_fingerprint,"
+                "source_event_identity,source_fingerprint,preview_fingerprint,case_no,outcome,"
+                "expected_version,resulting_version,lifecycle_event_id,assignment_count,result_snapshot,"
+                "actor,reason,correlation_id) VALUES(%s,%s,%s,%s,%s,%s,'adopted',0,1,%s,0,'{}',"
+                "'synthetic','historical accounting query fixture',%s)",
+                (case_no + ':adopt', 'a' * 64, case_no + ':source', 'b' * 64, 'c' * 64,
+                 case_no, lifecycle_event, case_no + ':correlation'),
+            )
+            if cap is not None:
+                payload = {'identity_name': identity, 'rule': 'social' if identity == '補助市民' else 'citizen',
+                           'subsidy_hours': cap, 'client': {'covered': 350, 'excess': 300},
+                           'payroll': {'covered': 350, 'excess': 300}}
+                cursor.execute(
+                    "INSERT INTO case_pricing_events(case_no,resulting_revision,pricing_json,actor,reason,created_at_utc) "
+                    "VALUES(%s,1,%s,'synthetic','bound historical limit',UTC_TIMESTAMP(6))",
+                    (case_no, json.dumps(payload)),
+                )
+                cursor.execute('UPDATE orders SET pricing_override_event_id=%s,pricing_revision=1 WHERE case_no=%s',
+                               (cursor.lastrowid, case_no))
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def save_historical_accounting_contract(key, envelope):
+    destination = os.getenv('HISTORICAL_ACCOUNTING_CONTRACT_PATH')
+    if not destination:
+        return
+    path = Path(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+    payload[key] = envelope
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+@pytest.mark.parametrize('identity,hours,cap,eligibility', [
+    ('補助市民', 80, 120, True), ('原住民', 80, 80, True),
+    ('補助市民', 128, 120, False), ('補助市民', 80, None, None),
+    ('一般市民', 80, 120, False),
+])
+def test_historical_accounting_query_http_reads_real_eligibility_without_writing(database, identity, hours, cap, eligibility):
+    from api.dependencies.admin_auth import require_admin
+    from api.dependencies.finance_import import get_accounting_workspace
+    from api.routes.finance_statement_workspace import router as accounting_router
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.client_payments_query_repository import query_case_payment_terms
+
+    case_no = 'history-read-' + uuid4().hex[:12]
+    seed_historical_accounting_case(case_no, identity, hours, cap)
+    connection = mysql_adapter.get_connection()
+    try:
+        def snapshot():
+            with connection.cursor() as cursor:
+                result = {}
+                for table in ('client_obligations', 'client_ledger_entries', 'client_obligation_events',
+                              'staff_obligations', 'staff_obligation_events', 'order_lifecycle_state_events',
+                              'historical_order_adoption_receipts', 'client_payment_terms'):
+                    cursor.execute(f'SELECT * FROM {table} WHERE case_no=%s', (case_no,))
+                    result[table] = cursor.fetchall()
+                return result
+
+        before = snapshot()
+        terms = query_case_payment_terms(connection, case_no)
+        assert terms.full_subsidy_eligibility is eligibility
+        assert terms.historical_stages and not terms.zero_stages
+        app = FastAPI()
+        app.include_router(accounting_router)
+        app.dependency_overrides[require_admin] = lambda: object()
+        app.dependency_overrides[get_accounting_workspace] = lambda: build_accounting_workspace(connection)
+        with TestClient(app) as http:
+            response = http.get(f'/cases/{case_no}/accounting')
+        assert response.status_code == 200, response.text
+        data = response.json()['data']
+        assert data['historical_stages'] is True
+        assert data['full_subsidy_eligibility'] is eligibility
+        assert data['full_subsidy'] is (eligibility is True)
+        assert data['client_items'] == [] and data['zero_stages'] == []
+        assert data['staff_items'] == [] and data['staff_receivable_ntd'] is None
+        assert data['customer_amount_ntd'] == (0 if eligibility is True else None)
+        assert data['receivable_ntd'] is None and data['payable_ntd'] is None
+        if cap is None:
+            assert 'historical_subsidy_limit_missing' in data['accounting_pending_reasons']
+        if eligibility is True:
+            save_historical_accounting_contract('main_case' if identity == '補助市民' else 'exact_cap', response.json())
+        assert snapshot() == before
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize('source', ['unknown_period', 'same_period_multiple', 'unallocated', 'partial_reversal', 'manual_subsidy'])
+def test_historical_accounting_conflicts_preserve_original_identity_cash_dates_and_balances(database, source):
+    from api.dependencies.admin_auth import require_admin
+    from api.dependencies.finance_import import get_accounting_workspace
+    from api.routes.finance_statement_workspace import router as accounting_router
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+
+    case_no = 'history-money-' + uuid4().hex[:12]
+    seed_historical_accounting_case(case_no, '補助市民', 80, 120)
+    connection = mysql_adapter.get_connection()
+    identities = []
+    try:
+        with connection.cursor() as cursor:
+            if source == 'manual_subsidy':
+                cursor.execute("INSERT INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) "
+                               "VALUES(%s,2026,'manual',28000,27000)", (case_no,))
+            elif source != 'unallocated':
+                for ordinal in range(2 if source == 'same_period_multiple' else 1):
+                    identity = f'{case_no}:original:{ordinal}'
+                    identities.append(identity)
+                    stage = 'first' if source == 'same_period_multiple' else 'adjustment'
+                    cursor.execute(
+                        "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,"
+                        "before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,"
+                        "idempotency_key,actor,reason) VALUES(%s,%s,%s,'receivable_from_client','established',0,1000,"
+                        "'2025-12-31',%s,0,%s,'synthetic','original historical amount')",
+                        (identity, case_no, stage, identity + ':source', identity + ':establish'),
+                    )
+                    event = cursor.lastrowid
+                    cursor.execute(
+                        "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,"
+                        "due_date,status,current_event_id,projection_version) VALUES(%s,%s,%s,'receivable_from_client',"
+                        "1000,'2025-12-31','open',%s,0)", (identity, case_no, stage, event),
+                    )
+            if source in {'unallocated', 'partial_reversal'}:
+                cursor.execute(
+                    "INSERT INTO client_ledger_entries(case_no,entry_type,amount_ntd,occurred_on,reconciliation_reference,"
+                    "idempotency_key,actor,reason) VALUES(%s,'receipt',400,'2025-12-20',%s,%s,'synthetic','original receipt')",
+                    (case_no, case_no + ':receipt', case_no + ':receipt'),
+                )
+                entry = cursor.lastrowid
+                if source == 'partial_reversal':
+                    cursor.execute('INSERT INTO client_ledger_obligation_allocations(ledger_entry_id,obligation_identity,amount_ntd,allocation_ordinal) '
+                                   'VALUES(%s,%s,400,1)', (entry, identities[0]))
+                    cursor.execute(
+                        "INSERT INTO client_ledger_entries(case_no,entry_type,amount_ntd,occurred_on,reconciliation_reference,"
+                        "idempotency_key,actor,reason,reversal_of_entry_id) VALUES(%s,'reversal',100,'2025-12-21',"
+                        "%s,%s,'synthetic','partial receipt reversal',%s)",
+                        (case_no, case_no + ':reverse', case_no + ':reverse', entry),
+                    )
+                    cursor.execute('INSERT INTO client_ledger_obligation_allocations(ledger_entry_id,obligation_identity,amount_ntd,allocation_ordinal) '
+                                   'VALUES(%s,%s,100,1)', (cursor.lastrowid, identities[0]))
+                    cursor.execute('UPDATE client_obligations SET amount_due_ntd=700 WHERE obligation_identity=%s', (identities[0],))
+        connection.commit()
+
+        def snapshot():
+            with connection.cursor() as cursor:
+                result = {}
+                for table in ('client_obligations', 'client_obligation_events', 'client_ledger_entries', 'staff_obligations',
+                              'order_lifecycle_state_events', 'government_subsidy_amount_controls'):
+                    cursor.execute(f'SELECT * FROM {table} WHERE case_no=%s', (case_no,))
+                    result[table] = cursor.fetchall()
+                cursor.execute('SELECT x.* FROM client_ledger_obligation_allocations x JOIN client_ledger_entries l '
+                               'ON l.id=x.ledger_entry_id WHERE l.case_no=%s ORDER BY l.id,x.allocation_ordinal', (case_no,))
+                result['allocations'] = cursor.fetchall()
+                return result
+
+        before = snapshot()
+        app = FastAPI()
+        app.include_router(accounting_router)
+        app.dependency_overrides[require_admin] = lambda: object()
+        app.dependency_overrides[get_accounting_workspace] = lambda: build_accounting_workspace(connection)
+        with TestClient(app) as http:
+            response = http.get(f'/cases/{case_no}/accounting')
+        assert response.status_code == 200, response.text
+        data = response.json()['data']
+        assert data['full_subsidy_eligibility'] is True
+        assert data['full_subsidy'] is False and data['scheme_conflict'] is True
+        assert data['scheme'] == 'unknown' and data['accounting_pending_reasons']
+        assert [item['identity'] for item in data['client_items']] == identities
+        for item in data['client_items']:
+            assert item['due_date'] == '2025-12-31'
+            assert item['expected_ntd'] == 1000
+            assert item['source_event_identity'] == item['identity'] + ':source'
+        if source == 'same_period_multiple':
+            assert [item['payment_stage'] for item in data['client_items']] == ['first', 'first']
+            assert data['customer_amount_ntd'] == 2000
+        elif source == 'unknown_period':
+            assert data['client_items'][0]['payment_stage'] is None
+        elif source == 'unallocated':
+            assert data['client_items'] == []
+            assert data['transactions'][0]['item_identity'] == 'unallocated'
+            assert data['transactions'][0]['amount_ntd'] == 400
+            assert data['transactions'][0]['occurred_on'] == '2025-12-20'
+        elif source == 'partial_reversal':
+            assert data['client_items'][0]['actual_ntd'] == 300
+            assert data['client_items'][0]['remaining_ntd'] == 700
+            assert [row['amount_ntd'] for row in data['transactions']] == [400, -100]
+        else:
+            assert data['subsidy_ntd'] == 27000
+        if source == 'partial_reversal':
+            save_historical_accounting_contract('conflict', response.json())
+        assert snapshot() == before
     finally:
         connection.close()
 

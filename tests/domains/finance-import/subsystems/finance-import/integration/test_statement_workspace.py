@@ -190,6 +190,8 @@ def test_client_accounting_uses_remaining_and_effective_allocations_after_date_o
         def execute(self, sql, _):
             if "FROM client_obligations o" in sql:
                 self.rows = [{"obligation_identity": "deposit:case", "obligation_type": obligation_type, "direction": direction, "due_date": None, "status": "settled", "amount_due_ntd": 0, "projection_version": 2, "after_amount_ntd": 0, "account_version": 3, "client_name": "Synthetic", "confirmation_kind": None, "historical_event": None}]
+            elif 'HAVING unallocated_ntd>0' in sql:
+                self.rows = []
             elif "FROM client_ledger_entries l" in sql:
                 self.rows = [{"id": 1, "entry_type": entry_type, "occurred_on": "2026-10-29", "reversal_of_entry_id": None, "reversed_type": None, "obligation_identity": "deposit:case", "amount_ntd": 10000, "format_id": "sinopac"}]
             else:
@@ -613,7 +615,8 @@ def test_historical_full_subsidy_keeps_nonperiod_money_and_unknown_sources(kind)
         def dismissed(self, _, **kwargs): return {}
 
     item = ClientAccountingItem('original', 'receivable', '原款項', 'Synthetic', 600, 200,
-                                True, '1', '2025-01-10', obligation_type='adjustment')
+                                True, '1', '2025-01-10', obligation_type='adjustment',
+                                payment_evidence='historical_paid' if kind == 'historical_paid' else None)
     transaction = ClientAccountingTransaction('receipt:1', 'unallocated', '2025-01-09',
                                                'receipt', 200, 'sinopac')
     funding = ClientCaseFunding('CASE-HISTORY', '補助市民', Decimal(80), Decimal(120), 28000)
@@ -657,6 +660,76 @@ def test_historical_full_subsidy_without_formal_payable_does_not_invent_staff_de
     assert result.staff_receivable_ntd is None
     assert result.payable_ntd is None and result.paid_ntd is None
     assert result.historical_stages is True
+
+
+@pytest.mark.parametrize('identity,expected', [(None, None), ('', None), ('來源未知', None),
+                                             ('一般市民', False), ('非市民', False),
+                                             ('補助市民', True), ('原民', True)])
+def test_full_subsidy_unknown_identity_remains_distinct_from_inapplicable(identity, expected):
+    from decimal import Decimal
+    from domains.client_finance.subsidy_coverage import is_full_subsidy_case
+    assert is_full_subsidy_case(identity, Decimal(80), Decimal(120)) is expected
+
+
+@pytest.mark.parametrize('identity,cap,adopted_hours,has_account,expected,reason', [
+    ('補助市民', 120, None, True, True, None),
+    ('原住民', 80, None, True, True, None),
+    ('補助市民', 120, 128, True, False, None),
+    ('補助市民', None, None, True, None, 'historical_subsidy_limit_missing'),
+    (None, None, None, True, None, 'historical_client_identity_missing'),
+    ('一般市民', None, None, True, False, 'historical_subsidy_limit_missing'),
+    ('補助市民', 120, None, False, True, 'historical_client_finance_source_missing'),
+])
+def test_historical_terms_use_effective_case_limit_and_adopted_uncapped_volume(
+        monkeypatch, identity, cap, adopted_hours, has_account, expected, reason):
+    from datetime import date
+    from decimal import Decimal
+    from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
+    from infrastructure.mysql.client_payments_query_repository import query_case_payment_terms
+    from infrastructure.mysql import order_terms_read_model, pricing_configuration_repository
+
+    order = dict(case_no='CASE-HISTORY', status='歷史訂單－服務完成', actual_end_date=date(2026, 11, 20),
+                 end_date=None, service_days=10, service_hours_per_day=8, floor_fee=0,
+                 client_identity_status=identity)
+    pricing = (CasePricingTerms(identity, IdentityRule.SOCIAL if identity == '補助市民' else IdentityRule.CITIZEN,
+                                Decimal(cap), HourlyRates(350, 300), HourlyRates(350, 300))
+               if cap is not None else None)
+    monkeypatch.setattr(order_terms_read_model, 'select_order', lambda *args, **kwargs: order)
+    monkeypatch.setattr(pricing_configuration_repository, 'load_case_pricing', lambda *args, **kwargs: pricing)
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, sql, params):
+            assert sql.startswith('SELECT') and params == ('CASE-HISTORY',)
+            if 'FROM historical_service_day_projections' in sql:
+                self.row = ({'total_actual_service_hours': adopted_hours,
+                             'total_actual_service_days': 16, 'historical_floor_fee_ntd': 0}
+                            if adopted_hours is not None else None)
+            elif 'FROM historical_order_adoption_receipts' in sql:
+                self.row = {'id': 1}
+            elif 'FROM client_finance_accounts' in sql:
+                self.row = {'aggregate_version': 0} if has_account else None
+            elif 'FROM client_ledger_entries' in sql:
+                self.row = {'entry_count': 0}
+            else:
+                assert 'FROM historical_client_payment_projections' in sql
+                self.row = {'evidence_count': 0}
+        def fetchone(self): return self.row
+
+    class Connection:
+        def cursor(self): return Cursor()
+
+    terms = query_case_payment_terms(Connection(), 'CASE-HISTORY')
+    assert terms.full_subsidy_eligibility is expected
+    assert terms.historical_stages and not terms.zero_stages
+    if reason:
+        assert reason in terms.pending_reasons
+    else:
+        assert not terms.pending_reasons
+    if terms.funding is not None:
+        assert terms.funding.service_hours == Decimal(adopted_hours if adopted_hours is not None else 80)
+        assert terms.funding.subsidy_limit == Decimal(cap)
 
 
 def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_distinct():

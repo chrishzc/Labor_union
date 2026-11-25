@@ -13,7 +13,9 @@ from subsystems.client_finance.virtual_account_resolution import resolve_case_vi
 def build_accounting_workspace(connection):
     """One composition for the case page, payable export and original owner writers."""
     from functools import partial
-    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
+    from infrastructure.mysql.case_staff_accounting_repository import (
+        query_case_staff_accounting, query_case_staff_accounting_availability,
+    )
     from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting, query_case_accounting, query_case_payment_terms
     from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
     from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
@@ -27,7 +29,9 @@ def build_accounting_workspace(connection):
         cancellation=partial(query_cancellation_accounting, connection),
         bank_memos=partial(query_case_bank_memos, connection),
         subsidy_plan_preview=partial(preview_manual_subsidy_plan, connection),
-        subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection))
+        subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection),
+        subsidy_detail=partial(query_case_subsidy_amount, connection),
+        staff_availability=partial(query_case_staff_accounting_availability, connection))
 
 
 def query_case_bank_memos(connection, case_no):

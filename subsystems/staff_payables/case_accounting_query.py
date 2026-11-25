@@ -1,6 +1,19 @@
 """Bounded Staff Payables accounting facts without a month filter."""
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class StaffAccountingAvailability:
+    assignment_id: int | None
+    staff_id: int | None
+    party: str
+    obligation_identities: tuple[str, ...]
+    status: Literal["formal", "not_established", "needs_review"]
+    pending_reasons: tuple[str, ...]
+    estimated_self_pay_date: str | None = None
+    estimated_subsidy_date: str | None = None
 
 
 @dataclass(frozen=True)

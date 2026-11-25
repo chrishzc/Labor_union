@@ -30,6 +30,15 @@ const detail = z.strictObject({ bank_memos:z.array(bankMemoSchema).optional(), c
 const caseDetail = detail.extend({
   zero_stages: z.array(z.enum(["deposit", "first", "second"])).optional(),
   full_subsidy: z.boolean().optional(),
+  historical_stages: z.boolean().optional(),
+  full_subsidy_eligibility: z.boolean().nullable().optional(),
+  accounting_pending_reasons: z.array(z.string()).optional(),
+  subsidy_pending_reason: z.string().nullable().optional(),
+  staff_accounting_availability: z.array(z.strictObject({
+    assignment_id: z.number().int().nullable(), staff_id: z.number().int().nullable(), party: z.string(),
+    obligation_identities: z.array(z.string()), status: z.enum(['formal','not_established','needs_review']),
+    pending_reasons: z.array(z.string()), estimated_self_pay_date: z.string().nullable(), estimated_subsidy_date: z.string().nullable(),
+  })).optional(),
   estimated_subsidy_payment_date: z.string().nullable().optional(),
   subsidy_payments: z.array(z.strictObject({
     recipient: z.enum(['staff', 'client']), party: z.string(), amount_ntd: exactNtd,
@@ -41,6 +50,9 @@ const caseDetail = detail.extend({
   remaining_in_ntd: exactNtd.nullable().optional(), remaining_out_ntd: exactNtd.nullable().optional(),
   client_items: z.array(item.extend({
     obligation_type: z.string().nullable().optional(),
+    source_event_identity: z.string().nullable().optional(),
+    payment_evidence: z.enum(['historical_paid', 'historical_settled']).nullable().optional(),
+    payment_date: z.string().nullable().optional(),
     expected_ntd: exactNtd, actual_ntd: exactNtd, remaining_ntd: exactNtd.nullable().optional(),
     noncash_ntd: exactNtd.optional(), recognized_ntd: exactNtd.optional(), unallocated_surplus_ntd: exactNtd.optional(),
   })),
