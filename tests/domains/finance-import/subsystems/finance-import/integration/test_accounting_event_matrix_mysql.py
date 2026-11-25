@@ -102,7 +102,7 @@ def stage(case, amount, sequence, *, account=None, incoming=False, government=Fa
         reference = refund_account or account
         memo = f'HC{virtual[-6:]} 客戶退款' if refund_account else 'synthetic'
         row = ['1' * 12, day + f' 09:08:{sequence:02d}', day, day, '轉帳', 'TWD', None if incoming else amount, amount if incoming else None, 300000 + int(case[3:]) * 100 + sequence, None if reference else virtual, reference or f'{case}:{sequence}', memo, None, 'fixture']
-    if refund_account:
+    if refund_account or (incoming and not government):
         from domains.finance_import.statement_archive import STATEMENT_COLUMNS
         headers = list(STATEMENT_COLUMNS)
         row.insert(9, None)  # 票據號碼
