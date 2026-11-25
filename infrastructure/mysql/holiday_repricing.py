@@ -6,7 +6,7 @@ import json
 from pymysql.connections import Connection
 from pymysql.cursors import DictCursor
 
-from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, _full_subsidy
+from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, _holiday_funding_pending
 from infrastructure.mysql.client_finance_terms_writer import persist_client_finance_terms_impact
 from infrastructure.mysql.order_terms_read_model import (
     _select_client_obligations, load_calculable_client_finance_facts, select_order,
@@ -116,7 +116,7 @@ class MySqlHolidayRepricing:
             if facts is None:
                 return HolidayCaseRepricingResult(case_no, "unchanged")
             premium_exists = any(day.is_double_pay or day.holiday_hours for day in facts.charge_days)
-            if premium_exists and _full_subsidy(facts):
+            if premium_exists and _holiday_funding_pending(facts):
                 return HolidayCaseRepricingResult(case_no, "funding_decision_pending")
             child = fingerprint_payload({"holiday": key, "case": case_no}).value
             candidate = build_client_finance_terms_candidate(facts, f"holiday:{child}")

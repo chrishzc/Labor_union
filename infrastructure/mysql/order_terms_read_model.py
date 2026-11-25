@@ -1017,6 +1017,7 @@ def _payroll_source(
         ),
         staff_payment_due_date=order_row["staff_payment_due_date"],
         case_policy=effective_case_policy,
+        identity_status=str(order_row["client_identity_status"]),
     )
 
 

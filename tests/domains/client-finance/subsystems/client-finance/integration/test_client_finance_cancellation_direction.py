@@ -663,10 +663,20 @@ def test_general_terms_source_borrows_enabled_holidays_with_matching_lock_mode(l
 
 
 
-def test_legacy_partial_social_service_prices_covered_holiday_premium():
+def test_legacy_social_without_effective_limit_defers_holiday_premium():
     from domains.client_finance.obligation_planning import ClientChargeDay, ClientFinanceTermsFacts, _daily_charge
     day = date(2026, 1, 1)
     facts = ClientFinanceTermsFacts("legacy-social", 0, 8, MoneyNTD(0),
         (ClientChargeDay(day, True),), ClientPaymentTerms(0, MoneyNTD(350), day, day, None), (),
         identity_status="社福")
-    assert _daily_charge(facts, facts.charge_days[0]) == MoneyNTD(2800)
+    assert _daily_charge(facts, facts.charge_days[0]) == MoneyNTD(0)
+
+
+@pytest.mark.parametrize("identity", ["補助市民", "原住民"])
+def test_legacy_holiday_funding_with_floor_fee_does_not_invent_effective_limit(identity):
+    from domains.client_finance.obligation_planning import ClientChargeDay, ClientFinanceTermsFacts, _holiday_funding_pending
+    day = date(2026, 1, 1)
+    facts = ClientFinanceTermsFacts("legacy-limit-missing", 0, 8, MoneyNTD(500),
+        (ClientChargeDay(day, True),), ClientPaymentTerms(0, MoneyNTD(350), day, day, None), (),
+        identity_status=identity)
+    assert _holiday_funding_pending(facts) is True

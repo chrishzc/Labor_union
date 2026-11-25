@@ -65,3 +65,5 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `holiday_repricing.py` 在設定寫入前鎖定並取得有正式收付案件的原 `case_total_amount`，保存於既有假日／日期調整 receipt JSON；讀取優先使用此原定價快照，不把人工應收當案件總額。正式應收及應付各讀原義務，工會收入由後端投影。已凍結案件缺少正式費率級距分解時，分解欄位回 null，不從新日曆捏造。
 
 - 正式 Query 的月嫂應付取 Payroll 現有義務有效金額合計，工會收入以該結果及案件服務定價投影，不以個案政策的月嫂基準費率覆蓋各指派自己的正式結果。個案改價 Preview 仍計算候選影響，與正式 Query 分開。
+
+- 未綁政策／個案覆寫的補助案件沒有另一個正式有效上限來源。假日資金子項沿 22A 的 L 未知契約保留待決策，原應收與應付不變；不把讀取相容用的預設 120／80 視為已確認上限。

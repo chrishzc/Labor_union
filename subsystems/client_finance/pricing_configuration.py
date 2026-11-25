@@ -9,6 +9,7 @@ from typing import Callable, ContextManager, Protocol
 from domains.client_finance.pricing_policy import CasePricingTerms, PricingPolicy, calculate_case_total_amount, calculate_holiday_premium, whole_ntd
 from domains.payroll.tiered_rates import TieredPayrollRate, price_hours
 from domains.government_subsidy.pricing import subsidy_claim_amount
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from shared_kernel.fingerprints import fingerprint_payload
 
 
@@ -281,6 +282,10 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
 
 def current_pricing_impact(facts: CasePricingFacts) -> PricingImpact:
     result = pricing_impact(facts.terms, facts)
+    if (facts.source == "legacy"
+            and normalize_subsidy_policy_identity(facts.terms.identity_name) in {"補助市民", "原住民"}
+            and any(day.double_pay or day.holiday_hours for day in facts.days)):
+        result = replace(result, union_income_amount=None)
     if facts.formal_staff_amount is not None:
         result = replace(result, staff_total_amount=facts.formal_staff_amount,
             staff_covered_amount=None, staff_excess_amount=None,

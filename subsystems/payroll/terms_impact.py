@@ -22,6 +22,7 @@ from domains.payroll.calculation import (
     rate_snapshot,
 )
 from domains.payroll.tiered_rates import TieredPayrollRate
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -120,6 +121,7 @@ class PayrollTermsSourceFacts:
     case_policy: CasePayrollPolicyTerms | None = None
     recovery_balances: tuple["PayrollRecoveryBalance", ...] = ()
     double_pay_dates: tuple[date, ...] = ()
+    identity_status: str | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _IDENTITY_MAXIMUM_LENGTH)
@@ -451,7 +453,8 @@ def _holiday_funding_pending(source: PayrollTermsSourceFacts, order_terms: Order
     tiers = tuple(item.tiered for item in policies if item.tiered is not None)
     if tiers:
         return all(rate.directly_subsidized and hours <= rate.subsidy_hours for rate in tiers)
-    return bool(policies) and all(item.policy_kind is PayrollPolicyKind.SUBSIDIZED_CITIZEN for item in policies) and hours <= Decimal(120)
+    return (normalize_subsidy_policy_identity(source.identity_status or "") in {"補助市民", "原住民"}
+        or bool(policies) and all(item.policy_kind is PayrollPolicyKind.SUBSIDIZED_CITIZEN for item in policies))
 
 
 def _impact_facts(source: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms) -> PayrollTermsImpactFacts:

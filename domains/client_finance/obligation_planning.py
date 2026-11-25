@@ -916,9 +916,18 @@ def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
     return facts.pricing.is_full_subsidy(hours) is True
 
 
+def _holiday_funding_pending(facts: ClientFinanceTermsFacts) -> bool:
+    if facts.pricing is not None:
+        return _full_subsidy(facts)
+    # No immutable case binding means the effective subsidy limit is unknown.
+    return normalize_subsidy_policy_identity(facts.identity_status or "") in {"補助市民", "原住民"}
+
+
 def _daily_charge(facts: ClientFinanceTermsFacts, charge_day: ClientChargeDay) -> MoneyNTD:
     hours = Decimal(str(facts.service_hours_per_day))
     premium = hours if charge_day.is_double_pay else charge_day.holiday_hours
+    if facts.pricing is None and _holiday_funding_pending(facts):
+        premium = Decimal(0)
     if facts.pricing is not None:
         consumed = Decimal(facts.charge_days.index(charge_day)) * hours
         segments = charge_day.holiday_hour_segments or ((Decimal(0), premium),)

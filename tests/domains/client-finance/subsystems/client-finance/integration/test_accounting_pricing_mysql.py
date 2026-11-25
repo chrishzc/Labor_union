@@ -862,14 +862,37 @@ def test_holiday_merge_and_restore_use_effective_eight_hours_and_preserve_paid_t
 
 
 @pytest.mark.parametrize("profile", ["citizen", "historical", "full_subsidy"])
-def test_holiday_identity_scope_and_pending_funding_preserve_real_ledgers(client, profile):
+def test_holiday_identity_scope_and_pending_funding_preserve_real_ledgers(client, profile, monkeypatch):
     from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
     from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
     from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
     from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
     identity = "一般市民" if profile == "citizen" else "補助市民" if profile == "full_subsidy" else "非市民"
     case_no = "holiday-scope-" + profile
+    if profile == "full_subsidy":
+        from subsystems.bootstrap.case_architecture_workflow import CaseArchitectureBootstrapWorkflow
+        import traceback
+        original_ensure = CaseArchitectureBootstrapWorkflow.ensure
+        def observed_ensure(workflow, command):
+            try:
+                return original_ensure(workflow, command)
+            except Exception:
+                traceback.print_exc()
+                raise
+        monkeypatch.setattr(CaseArchitectureBootstrapWorkflow, "ensure", observed_ensure)
+        catalog = client.get("/api/v1/accounting-pricing").json()["data"]
+        configured = {**policy(), "effective_on": "2026-01-01"}
+        post(client, "/api/v1/accounting-pricing/policies",
+             {"policy": configured, "expected_revision": catalog["revision"]}, case_no + ":policy")
     seed_case(case_no, identity=identity)
+    if profile == "full_subsidy":
+        connection = mysql_adapter.get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE orders SET service_hours_per_day=4,service_end_time='13:00:00' WHERE case_no=%s", (case_no,))
+            connection.commit()
+        finally:
+            connection.close()
     bootstrap_case(client, case_no)
     seed_assignment(case_no)
     connection = mysql_adapter.get_connection()
@@ -888,8 +911,6 @@ def test_holiday_identity_scope_and_pending_funding_preserve_real_ledgers(client
         with connection.cursor() as cursor:
             cursor.execute("INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) VALUES(%s,'Synthetic scope',0) "
                 "ON DUPLICATE KEY UPDATE is_double_pay_default=0", (day,))
-            if profile == "full_subsidy":
-                cursor.execute("UPDATE orders SET service_hours_per_day=4,service_end_time='13:00:00' WHERE case_no=%s", (case_no,))
         connection.commit()
         with MySqlUnitOfWork(connection) as unit:
             MySqlHolidayRepricing(connection).reprice_case(case_no, case_no + ":initial", "pricing-test")
@@ -900,6 +921,8 @@ def test_holiday_identity_scope_and_pending_funding_preserve_real_ledgers(client
             connection.commit()
         current = client.get(f"/api/v1/accounting-pricing/cases/{case_no}").json()["data"] if profile == "citizen" else None
         before = amounts()
+        if profile == "full_subsidy":
+            assert before == (0, 28000)
         reprice = MySqlHolidayRepricing(connection)
         application = HolidayMaintenanceApplication(MySqlSchedulingHolidayQuery(connection),
             lambda: MySqlUnitOfWork(connection), lambda: None, reprice, reprice.prepare)

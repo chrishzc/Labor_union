@@ -30,7 +30,7 @@ from domains.payroll.monthly_aggregation import (
 from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
-from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, is_full_subsidy_case
+from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, is_full_subsidy_case, normalize_subsidy_policy_identity
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
@@ -319,7 +319,7 @@ def _rebuild_facts(
     )
     service_hours = Decimal(str(root["service_hours_per_day"])) * sum(len(item.service_dates) for item in service_facts)
     funding_pending = (pricing.is_full_subsidy(service_hours) is True if pricing is not None else
-        bool(root.get("identity_status")) and derive_subsidy_coverage(str(root["identity_status"]), service_hours, Decimal(root["floor_fee"])).is_full_subsidy_order)
+        normalize_subsidy_policy_identity(str(root.get("identity_status") or "")) in {"補助市民", "原住民"})
     if funding_pending:
         service_facts = tuple(replace(item, double_pay_dates=(), holiday_hour_segments=()) for item in service_facts)
     return PayrollRebuildFacts(

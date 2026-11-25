@@ -154,3 +154,11 @@ def test_full_subsidy_initial_holiday_keeps_base_payroll_until_funding_decision(
     candidate = build_payroll_handover_impact(source, _scheduling(), _terms(), "full-holiday-pending")
     assert sum(action.amount.amount for action in candidate.actions) == 6600
     assert candidate.resulting_payroll_version == candidate.expected_payroll_version + 1
+
+
+@pytest.mark.parametrize("identity", ["補助市民", "原住民"])
+def test_legacy_initial_holiday_with_missing_limit_stays_pending_regardless_floor(identity):
+    from dataclasses import replace
+    from subsystems.payroll.terms_impact import _holiday_funding_pending
+    source = replace(_source_facts(), identity_status=identity)
+    assert _holiday_funding_pending(source, replace(_terms(), floor_fee=MoneyNTD(500))) is True

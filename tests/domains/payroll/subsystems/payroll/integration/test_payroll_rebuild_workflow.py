@@ -778,7 +778,8 @@ def test_historical_schedule_loader_does_not_read_holiday_pricing(monkeypatch):
 
 
 
-def test_completed_full_subsidy_rebuild_does_not_post_pending_holiday_premium(monkeypatch):
+@pytest.mark.parametrize("bound,identity,floor", [(True, "補助市民", 0), (False, "補助市民", 500), (False, "原住民", 500)])
+def test_completed_full_subsidy_rebuild_does_not_post_pending_holiday_premium(monkeypatch, bound, identity, floor):
     from decimal import Decimal
     from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
     from domains.payroll.calculation import build_case_payroll_candidate
@@ -794,6 +795,6 @@ def test_completed_full_subsidy_rebuild_does_not_post_pending_holiday_premium(mo
     monkeypatch.setattr(mysql_rebuild, "_payment_due_date", lambda *args: day)
     pricing = CasePricingTerms("補助市民", IdentityRule.SOCIAL, Decimal(120), HourlyRates(350, 350), HourlyRates(350, 350))
     facts = mysql_rebuild._rebuild_facts({"case_no": "CASE-1", "aggregate_version": 0,
-        "service_days": 1, "service_hours_per_day": 8, "floor_fee": 0}, (), (), (), (), (), pricing)
+        "service_days": 1, "service_hours_per_day": 8, "floor_fee": floor, "identity_status": identity}, (), (), (), (), (), pricing if bound else None)
     candidate = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)
-    assert candidate.total_payable == MoneyNTD(2800)
+    assert candidate.total_payable == MoneyNTD(2800 + floor)
