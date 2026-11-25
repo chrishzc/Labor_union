@@ -1182,6 +1182,80 @@ def _restore_evidence(config, database, *, source=None, check_tables=False):
     }
 
 
+def _restore_evidence_parts(config, database, equivalent=()):
+    inventory = schema_inventory(config, database, equivalent, reject_source_references=False)
+    snapshot = migration._schema_snapshot(config, database)
+    snapshot.pop("sha256", None)
+    programs = migration._restored_schema_program_evidence(snapshot, database)
+    snapshot["triggers"] = [
+        {**item, "action_statement": item["action_statement"].replace("\r\n", "\n").replace("\r", "\n")}
+        for item in programs["triggers"]
+    ]
+    snapshot["views"] = [
+        {**item, "view_definition": item["view_definition"].replace("\r\n", "\n").replace("\r", "\n")}
+        for item in programs["views"]
+    ]
+    snapshot["show_create_tables"] = {
+        name: re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", migration._normalize_database_qualifiers(sql, (database,))).replace("\r\n", "\n").replace("\r", "\n")
+        for name, sql in snapshot["show_create_tables"].items()
+    }
+    return inventory, snapshot
+
+
+def _format_restore_evidence_mismatch(config, target_db, candidate_db, actual_ev, expected_ev, *, source_db=None):
+    parts = []
+    if actual_ev.get("schema_sha256") != expected_ev.get("schema_sha256"):
+        try:
+            tgt_inv, tgt_snap = _restore_evidence_parts(config, target_db, (candidate_db,))
+            cand_inv, cand_snap = _restore_evidence_parts(config, candidate_db, (source_db,) if source_db else ())
+            inv_diffs = [k for k in cand_inv if tgt_inv.get(k) != cand_inv.get(k)]
+            snap_diffs = [k for k in cand_snap if tgt_snap.get(k) != cand_snap.get(k)]
+            if inv_diffs:
+                parts.append("inventory=" + ",".join(inv_diffs[:6]))
+            if snap_diffs:
+                snap_detail = []
+                for k in snap_diffs[:6]:
+                    a, b = tgt_snap.get(k), cand_snap.get(k)
+                    if isinstance(a, dict) and isinstance(b, dict):
+                        sub = sorted(x for x in set(a) | set(b) if a.get(x) != b.get(x))
+                        snap_detail.append(f"{k}[{','.join(sub[:4])}]")
+                    elif isinstance(a, list) and isinstance(b, list):
+                        names = []
+                        for x, y in zip(a, b):
+                            if x != y and isinstance(x, dict):
+                                names.append(str(x.get("trigger_name") or x.get("table_name") or x.get("constraint_name") or ""))
+                        names = [n for n in names if n]
+                        if len(a) != len(b):
+                            snap_detail.append(f"{k}(len:{len(a)}!={len(b)})")
+                        elif names:
+                            snap_detail.append(f"{k}[{','.join(names[:4])}]")
+                        else:
+                            snap_detail.append(k)
+                    else:
+                        snap_detail.append(k)
+                parts.append("snapshot=" + ",".join(snap_detail))
+        except Exception as exc:
+            parts.append(f"schema_sha256(inspect_err={type(exc).__name__})")
+    actual_rows = actual_ev.get("rows") or {}
+    expected_rows = expected_ev.get("rows") or {}
+    if actual_rows != expected_rows:
+        missing = sorted(set(expected_rows) - set(actual_rows))
+        extra = sorted(set(actual_rows) - set(expected_rows))
+        changed = []
+        for t in sorted(set(actual_rows) & set(expected_rows)):
+            if actual_rows[t] != expected_rows[t]:
+                fields = [f for f in ("count", "primary_key_sha256", "full_row_sha256")
+                          if actual_rows[t].get(f) != expected_rows[t].get(f)]
+                changed.append(f"{t}({'/'.join(fields)})")
+        if missing:
+            parts.append("missing_tables=" + ",".join(missing[:5]))
+        if extra:
+            parts.append("extra_tables=" + ",".join(extra[:5]))
+        if changed:
+            parts.append("rows=" + ",".join(changed[:5]))
+    return "; ".join(parts) or "unknown_diff"
+
+
 def _restore_check_tables(config, database, tables):
     connection = config.connect(database)
     try:
@@ -1329,8 +1403,12 @@ def _restore_locked(settings, archive, info, config, connection):
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS n FROM information_schema.processlist WHERE db=%s", (target.database,))
             require(not cursor.fetchone()["n"], "目標庫仍有連線，尚無法核對復原結果。")
-        require(_restore_evidence(config, target.database, source=candidate, check_tables=True) == evidence,
-                "同名目標庫結構或資料與暫存基準不符。")
+        target_evidence = _restore_evidence(config, target.database, source=candidate, check_tables=True)
+        if target_evidence != evidence:
+            detail = _format_restore_evidence_mismatch(
+                config, target.database, candidate, target_evidence, evidence, source_db=info["database"]
+            )
+            raise MaintenanceBlocked(f"同名目標庫結構或資料與暫存基準不符（{detail}）。")
         _restore_check_credentials(settings, target.database, server_uuid)
         _restore_current(config, target.database, temp_root)
     finally:
