@@ -18,6 +18,8 @@
 - 規格22 §19人工補登另以Finance Import命令收據綁定的同案exact obligations確認月嫂，投影manual_confirmed_staff_id；不要求交易帳號，不改一般銀行來源的帳號／備註驗證。核銷金額、fee、difference、projection、receipt及outbox仍由本owner原workflow負責。
 - Finance Import 的永豐薪資及台新月嫂補助候選，在宣稱可自動核銷前委派本 owner 的同一 Preview；台新先重新驗證原始備註姓名且不要求帳戶，永豐沿原帳戶規則。正式 Apply 仍重驗原版本、來源及分配，不新增核銷 writer 或 transaction owner。
 
+**目標接線**：選定正式應付後，已發生出款依原銀行流水及款項歸屬核對；只有待確認的資金路由會影響本次分配時才阻擋該款。清冊／未來出款判斷與歷史核銷分開；不共享單一「全部就緒」旗標。不得將此目標視為目前實作。
+
 ## Contracts
 - 台新原始備註的唯一月嫂姓名與正式案件／指派關聯，可於原 Preview 投影方案一分期，選填六碼須與該案一致。交易月份由 Finance Import 自動配對檢查；六碼指定案件的跨月流水可走單筆人工核對，沿原 Preview／Apply 重驗對象、案件及款項。Apply 沿原 outer UoW 鎖來源、確認銀行方案及原 Payroll 分期，再核銷原月嫂義務。一般／歷史訂單同用資格，無方案或分期不直接視為無款；未達資格明示阻擋，方案不得使月嫂總應收增加。既有永豐自備款限制保留。
 - `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3。

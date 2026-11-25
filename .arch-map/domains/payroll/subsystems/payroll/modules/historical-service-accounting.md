@@ -16,6 +16,8 @@
 - `infrastructure/mysql/case_staff_accounting_repository.py::query_case_staff_accounting_availability` — 逐人唯讀查核正式應付、原日期與歷史計薪來源，分開呈現已建帳缺日期、來源齊全尚未建立及具體缺項。既有應付不因他人缺件消失，無逐日班表不構成歷史計薪缺項；查詢不呼叫同步 writer。
   - 預計付款日須有適用該應付的唯一、可證實服務結束日及資金來源。採納或服務量投影的指派來源缺失／歧義時，不以整案結束日補推日期；保留正式金額、原到期日與原已保存付款日期，並按人回傳具體缺項。唯一來源的正例僅補原缺席的唯讀預計日，不改已形成日期。
 
+**目標接線**：基準同步逐指派處理，區分應付成立與資金／日期成形。重用 Payroll 及 Staff Payables 既有 writer；正式金額可確認時不因其他指派或補助流向待查而回傳整案跳過。不得將此目標視為目前實作。
+
 ## Contracts
 - `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md`
 - `.arch-map/requirements/03_Payroll_Domain.md` §2.2、§3.2
