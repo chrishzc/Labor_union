@@ -536,29 +536,43 @@ def _confirm_matching(connection, case_no: str, plan_id: int) -> None:
     assert workflow.query(case_no, plan_id)["gate_passed"] is True
 
 
-def _apply_assignment(connection, case_no: str, staff_id: int):
+def _arrange_ordinary_dates(connection, case_no: str, staff_id: int):
     from api.dependencies.assignment_plan import build_assignment_plan_application
-    from domains.scheduling.assignment_plan import AssignmentPlanIntent, AssignmentPlanSegmentIntent
-    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
-    from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanApplyRequest, AssignmentPlanPreviewRequest
+    from infrastructure.db.external_staff_completion_port import MySqlExternalStaffCompletionPort
+    from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
+    from infrastructure.mysql.service_start_arrangement import preview_office_schedule, save_office_schedule
+    from subsystems.orders.historical_restart_arrangement import ArrangementSegmentIntent
 
-    intent = AssignmentPlanIntent((AssignmentPlanSegmentIntent(
-        staff_id, date(2026, 9, 3), date(2026, 9, 4),
-        (date(2026, 9, 3), date(2026, 9, 4)),
-    ),))
-    app = build_assignment_plan_application(connection)
-    try:
-        preview = app.preview(AssignmentPlanPreviewRequest(case_no, intent, CorrelationId(f"{case_no}-preview")))
-    except Exception as error:
-        typed = getattr(error, "error", None)
-        blockers = getattr(typed, "domain_blockers", ())
-        raise AssertionError(f"assignment plan preview blocked: {blockers}") from error
-    return app.apply(AssignmentPlanApplyRequest(
-        case_no, intent, ExpectedVersion(preview.order_version), ExpectedVersion(preview.scheduling_version),
-        ExpectedVersion(preview.client_finance_version), ExpectedVersion(preview.payroll_version),
-        preview.fingerprint, IdempotencyKey(f"{case_no}-assignment"),
-        ActorContext("test"), "canonical assignment acceptance", CorrelationId(f"{case_no}-apply"),
-    ))
+    # Use the same first-schedule coordinator as the admin office-schedule API.
+    # A raw AssignmentPlan command has no explicit service-start execution result.
+    segments = (ArrangementSegmentIntent(staff_id, (date(2026, 9, 3), date(2026, 9, 4))),)
+    commitments = MySqlExternalStaffCompletionPort(connection)
+    preview = preview_office_schedule(
+        connection, case_no, segments, actual_start_date=date(2026, 9, 3),
+        reason="", commitments=commitments,
+    )
+    facts = MySqlServiceDateConfirmationRepository(connection).load(case_no, lock=False)
+    arguments = dict(
+        actual_start_date=date(2026, 9, 3),
+        expected_order_version=facts.order_version,
+        expected_scheduling_version=facts.scheduling_version,
+        expected_confirmed_version=facts.current_version,
+        idempotency_key=f"{case_no}-office-schedule",
+        actor="test", reason="", correlation_id=f"{case_no}-office-schedule",
+        preview_fingerprint=preview["preview_fingerprint"], commitments=commitments,
+    )
+    receipt = save_office_schedule(
+        connection, build_assignment_plan_application, case_no, segments, **arguments,
+    )
+    assert save_office_schedule(
+        connection, build_assignment_plan_application, case_no, segments, **arguments,
+    ) == receipt
+    observed = build_assignment_plan_application(connection).query(case_no).assignment_plan
+    assert {day: assignment.staff_id for assignment in observed.effective_assignments
+            for day in assignment.official_service_dates} == {
+        date(2026, 9, 3): staff_id, date(2026, 9, 4): staff_id,
+    }
+    return receipt
 
 
 def _confirm_actual_start(connection, case_no: str):
@@ -1421,7 +1435,7 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
             unit.commit()
 
         _confirm_matching(connection, ordinary, normal_plan)
-        _apply_assignment(connection, ordinary, ordinary_staff)
+        _arrange_ordinary_dates(connection, ordinary, ordinary_staff)
 
         def amounts(case_no: str) -> tuple[int, int]:
             with connection.cursor() as cursor:
