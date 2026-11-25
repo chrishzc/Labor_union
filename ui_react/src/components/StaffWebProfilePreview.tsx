@@ -36,7 +36,6 @@ function PublishedPhoto({ path, photo }: {
     {image.kind === 'ready' ? <img src={image.url} alt={photo.item_name} /> : <p className="staff-web-image-message" role="status">
       {image.kind === 'loading' ? '讀取圖片中…' : '無法載入圖片'}
     </p>}
-    <figcaption>{photo.item_name}</figcaption>
   </figure>;
 }
 

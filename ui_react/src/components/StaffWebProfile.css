@@ -17,7 +17,6 @@
 .staff-web-slider figure { flex: 0 0 min(80%, 15rem); margin: 0; min-width: 0; scroll-snap-align: start; }
 .staff-web-slider img, .staff-web-image-message { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--surface-muted, #f8f5f2); border-radius: .5rem; }
 .staff-web-image-message { margin: 0; display: grid; place-items: center; }
-.staff-web-slider figcaption { margin-top: .25rem; overflow-wrap: anywhere; }
 .staff-web-review-photo { border-top: 1px solid var(--border-color, #e3e0de); margin-top: 1rem; padding-top: .75rem; }
 .staff-web-review-photo h4 { margin: 0 0 .35rem; }
 .staff-web-crop-image { position: relative; display: inline-block; vertical-align: top; max-width: 100%; line-height: 0; margin: .75rem 0; }
