@@ -38,7 +38,15 @@
 - `historical_reservation` — 工會月曆以共用檔期資料呈現歷史未服務案的唯讀預定區段，涵蓋重啟後待排班期間。
 - `SchedulingPage` 對日曆、案件選項及資格投影分別最多同時查詢 3 位人員；日曆每列完成即顯示，兩個 projection 同時接收成功／失敗，避免無上限 fan-out 及未處理的 rejected Promise，不自動重送失敗列。
 
-### 年度時間軸的唯讀邊界
+### 年度時間軸的唯讀邊界 ^staff-calendar-visible-month
+
+**交接定位**：Scheduling 供正式班次與補充歷史讀取，前端負責可視月份、部分失敗呈現及重試。此流程不新增 DB 寫入；資料來源與既有查詢見本節，前端驗收位置見下方 Verification。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: staff-calendar-visible-month
+  target: .arch-map/requirements/31_MultiCaregiver_Admin_UI正式規格.md#^admin-ui-staff-calendar
+```
 - 載入由可視月份驅動，快取鍵為人員、年、月；切月不寫入。每個人員月份讀取 [正式班次與占用](current-service-projection.md)（`GET /api/v1/scheduling/staff/{staff_id}/current-calendar`，`range_start`／`range_end` 含首末日）及補充檔期與歷史（`GET /api/v1/staff/{staff_id}/monthly-schedule`，`year`／`month`），沿用最多三列並行。合法空月仍依正式契約回傳完整日期範圍，不以缺頁／失敗代替空月。
 - 補充資料只有歷史指派或歷史保留含非空案號時，才按案號去重，查 `GET /api/v1/orders/{case_no}` 取得唯讀整案日期。歷史指派依各端實際日期優先，缺值才用同端預定日期；歷史保留用預定日期。起訖缺失或逆序時，只不顯示整案期間，月內資料仍可保留；讀取或解碼失敗才是可重試的補充支線錯誤。
 - 兩支線均有結果（成功或失敗）後提交當月列，區分未查、載入、完整空結果、失敗與部分失敗。預設「全部」可保留成功支線的資料；歷史不能替代正式狀態來通過其他篩選。重試同人員同月份的失敗支線，補充月資料與其適用的 Orders 明細可能一併重讀；已成功且仍有效的正式支線不要求重讀。回到仍有效月份不重查，跨年與中斷請求不得寫回其他月份。
