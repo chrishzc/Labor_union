@@ -123,11 +123,14 @@ def test_funding_projection_uses_settlement_links_by_bank_including_fee_and_reop
     ('taishin', date(2026, 11, 15), '合成月嫂甲', date(2026, 10, 15), None, 'outgoing_staff_payout_month_no_match'),
     ('taishin', date(2026, 10, 15), '合成月嫂甲 HC115808', date(2026, 10, 15), None, 'staff_memo_case_mismatch'),
     ('taishin', date(2026, 11, 15), '合成月嫂甲', None, 12000, None),
+    ('taishin', date(2026, 10, 15), '合成月嫂甲', date(2026, 10, 15), None, 'subsidy_direct_arrangement_active'),
 ])
 def test_owner_load_checks_taishin_memo_case_and_month_and_limits_each_bank_installment(
     monkeypatch, bank, occurred_on, memo, subsidy_due, expected, error,
 ):
     from types import SimpleNamespace
+    from domains.finance_import.statement_archive import ArrangementEvent, CaseArrangement
+    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
     from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
     import infrastructure.mysql.manual_supplement_evidence as evidence
     import infrastructure.mysql.staff_payout_repository as module
@@ -146,6 +149,16 @@ def test_owner_load_checks_taishin_memo_case_and_month_and_limits_each_bank_inst
 
     cursor = Cursor({})
     repository = MySqlStaffPayoutRepository(object())
+
+    def read_arrangement(state, selected_case, *, for_update=False):
+        assert selected_case == case_no and for_update
+        if error == 'subsidy_direct_arrangement_active':
+            return CaseArrangement(case_no, 1, (
+                ArrangementEvent(1, 'confirm_direct', '政府直付', 'synthetic', '2026-10-15T00:00:00+00:00'),
+            ))
+        return CaseArrangement(case_no)
+
+    monkeypatch.setattr(MySqlAccountingWorkspaceState, 'arrangement', read_arrangement)
     monkeypatch.setattr(cursor, 'fetchone', lambda: None, raising=False)
     selection = SimpleNamespace(event_type=StaffPayoutEventType.PAYOUT, difference_mode=None, obligation_identities=('obligation:1',))
     monkeypatch.setattr(evidence, 'manual_source_matches', lambda *_args, **_kwargs: False)
