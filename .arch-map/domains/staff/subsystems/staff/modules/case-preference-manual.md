@@ -1,7 +1,7 @@
 # Module: case-preference-manual
 
 ## Responsibility
-Staff owner Query／Preview／Apply for the six canonical service-capability relations: regions, time slots, cooking skills, holiday availability, weekly rest, and baby types. Transportation remains the existing read-only source_not_ready fact.
+Staff owner Query／Preview／Apply for the six canonical service-capability relations: regions, time slots, cooking skills, holiday availability, weekly rest, and baby types. 此 manual 入口不寫交通方式；既有交通選項由 [Staff Qualification](staff-qualification-master.md#contracts) 編輯。`source_not_ready` 只適用交通補充說明，不影響已保存選項的唯讀摘要。
 
 ## Implementation
 - primary:

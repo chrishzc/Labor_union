@@ -31,7 +31,7 @@
 | 特殊節日可接案 | `staff_holiday_availability` | `[其它].5` | `holiday_availability_other_detail` |
 | 交通方式／其他交通方式 | `staff_transportation` | 無 `[其它]` 來源採納 | `transportation_other_detail`（回 `source_not_ready`） |
 
-`staff_cooking_skills` 的 `[其它]` 屬料理能力母題，嚴禁借填 `transportation_other_detail`。在 `staff_transportation` 補齊 persistence 前，`transportation_other_detail` 必須回 `source_not_ready`，不得猜測或顯示為「未填」。
+`staff_cooking_skills` 的 `[其它]` 屬料理能力母題，嚴禁借填 `transportation_other_detail`。沒有交通補充說明的正式來源時，只有 `transportation.other_detail` 必須維持 `null`、`other_detail_status=source_not_ready`；既有 `staff_transportation.vehicle_type` 值照常顯示，不得猜測或把補充說明顯示為「未填」。
 
 ## 3. Canonical read model
 
@@ -74,10 +74,11 @@ PreferenceTopicSummary {
 ## 5. Read / Write 邊界與敏感欄位排除
 
 - `case-preference-summary` 只讀，沒有同入口的 `POST`／`PUT`／`PATCH`。它和既有 `/api/v1/staff/case-preference-manual` 寫入流程是不同入口。摘要的六母題包含交通，不含料理；寫入流程的六類既有關聯包含料理，不含交通，不能用摘要直接組成 Apply payload。管理端可編輯範圍依 [#24](24_Staff_Matching_Preferences與不可服務期間正式規格.md)，實作與驗證位置見 [Staff 接案偏好](../domains/staff/subsystems/staff/modules/case-preference-manual.md#read-write-boundary)。其他資料與銀行修改依 [案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md) 及各 root owner 辦理。
+- 交通方式選項由 [Staff Qualification](../domains/staff/subsystems/staff/modules/staff-qualification-master.md#contracts) 的 `/{staff_id}/qualification-editing` Query／Preview／Apply 編輯。寫入與摘要共用 `staff_transportation.vehicle_type`；此入口只維護選項值，不補寫其他交通方式說明。
 - `StaffCasePreferenceSummary` 嚴禁包含：`identity_card`、銀行帳號／分行、IP address、credential／password／token／secret／key、`emergency_contact_name`/`phone`、`admin_notes`、raw workbook row／raw JSON／fingerprint／idempotency key。
 
 ## 6. 驗收標準
 
 1. 六母題與 `PreferenceTopicSummary` shape 具確定性且 bounded；`values` 與六組 `[其它]` 各自隔離不合併。
-2. `transportation` 在無正式來源前穩定回傳 `other_detail_status=source_not_ready`、`other_detail=null`，禁止挪用料理能力 `[其它]`。
+2. 有已保存的交通方式選項但無正式補充說明來源時，`transportation.values` 正常回傳；`other_detail_status=source_not_ready`、`other_detail=null`。反例：不能隱藏已有的交通方式，也不能挪用料理能力 `[其它]`。
 3. Read projection 零敏感欄位洩漏、零寫入能力、UI 不直接 join relation tables。
