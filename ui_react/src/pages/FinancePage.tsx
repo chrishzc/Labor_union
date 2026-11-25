@@ -639,16 +639,16 @@ export const FinancePage: React.FC = () => {
                 <p>{bankReconciliationUnavailableReason(reviewedRow)}</p>
               </section>
             )}
-            {reviewedRow && terminalReceiptCase && <FinanceImportCorrectionForm key={reviewedRow.row_identity}
+            {reviewedRow && reviewRoute?.kind === 'service-end' && terminalReceiptCase && <FinanceImportCorrectionForm key={`service-end:${reviewedRow.row_identity}`}
               rowIdentity={reviewedRow.row_identity} sourceLabel="永豐對帳單已驗證同案入款" staff={[]}
               initialCaseNo={terminalReceiptCase} serviceEndCaseNo={terminalReceiptCase} lockedObligations={[]}
               onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />}
-            {reviewedRow && reviewRoute?.kind === 'case' && <FinanceCaseAccounting key={`${reviewedRow.row_id}:${reviewRoute.caseNo}`}
+            {reviewedRow && reviewRoute?.kind === 'case' && <FinanceCaseAccounting key={`case-review:${reviewedRow.row_identity}:${reviewRoute.caseNo}`}
               embedded initialCase={reviewRoute.caseNo}
               bankReconciliation={{ row: reviewedRow, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy,
                 onViewCase: () => setBankCaseView(reviewRoute.caseNo), externalPurposeReview: true, previewRefundOnMount: bankReviewReturning }}
               onChanged={() => setReload(value => value + 1)} />}
-            {reviewedRow && reviewRoute?.kind === 'government' && <SubsidyPeriodWorkbench key={reviewedRow.row_identity}
+            {reviewedRow && reviewRoute?.kind === 'government' && <SubsidyPeriodWorkbench key={`subsidy-period:${reviewedRow.row_identity}`}
               bankSource={{ id: reviewedRow.row_id, direction: reviewRoute.direction, amountNtd: reviewedRow.amount_ntd }}
               onOpenCase={caseNo => requestLeave(() => setBankCaseView(caseNo))}
               onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />}
@@ -668,8 +668,8 @@ export const FinancePage: React.FC = () => {
             )}
             {linkedCaseNo && reviewRoute?.kind !== 'case' && <button type="button" className="finance-btn-secondary"
               disabled={bankDrawerBusy} onClick={() => requestLeave(() => setBankCaseView(linkedCaseNo))}>查看本案帳務</button>}
-            {reviewedRow?.status === 'pending' && <BankTransactionReviewActions key={reviewedRow.row_identity} row={reviewedRow}
-              offerPairing={reviewRoute?.kind !== 'case' && reviewedRow.disposition !== 'blocked'}
+            {reviewedRow?.status === 'pending' && <BankTransactionReviewActions key={`bank-row-actions:${reviewedRow.row_identity}`} row={reviewedRow}
+              offerPairing={reviewRoute?.kind !== 'case' && reviewRoute?.kind !== 'service-end' && reviewedRow.disposition !== 'blocked'}
               disabled={bankDrawerBusy} onBusyChange={setBankRowActionBusy}
               onPaired={() => { refreshReviewedRow(); setReload(value => value + 1); }}
               onExcluded={() => { closeCase(); setReload(value => value + 1); }} />}
