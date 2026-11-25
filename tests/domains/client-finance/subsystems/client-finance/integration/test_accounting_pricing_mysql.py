@@ -1962,6 +1962,22 @@ def seed_historical_completed_pricing_people(case_no, *, mixed_legacy_rates=Fals
             cursor.execute('INSERT INTO payroll_case_accounts(case_no) VALUES(%s)', (case_no,))
             cursor.execute("INSERT INTO order_service_data_locks(case_no,lifecycle_event_id,client_settlement_fingerprint,created_by) SELECT case_no,lifecycle_event_id,%s,'synthetic' FROM historical_order_adoption_receipts WHERE case_no=%s", ('e' * 64, case_no))
             cursor.execute("UPDATE orders SET actual_start_date='2026-10-01',staff_payment_due_date='2026-12-15' WHERE case_no=%s", (case_no,))
+            if mixed_legacy_rates:
+                terms_source = case_no + ':client-terms'
+                cursor.execute(
+                    "INSERT INTO client_payment_terms_events(case_no,policy_version,client_hourly_rate_ntd,"
+                    "deposit_service_days,deposit_due_date,first_payment_due_date,expected_account_version,"
+                    "source_event_identity,idempotency_key,actor,reason) "
+                    "VALUES(%s,'historical-fixture-v1',350,0,'2026-09-29','2026-09-30',0,%s,%s,"
+                    "'synthetic','original client payment terms')",
+                    (case_no, terms_source, terms_source),
+                )
+                cursor.execute(
+                    "INSERT INTO client_payment_terms(case_no,policy_version,client_hourly_rate_ntd,"
+                    "deposit_service_days,deposit_due_date,first_payment_due_date,current_event_id) "
+                    "VALUES(%s,'historical-fixture-v1',350,0,'2026-09-29','2026-09-30',%s)",
+                    (case_no, cursor.lastrowid),
+                )
             for staff in (first_staff, second_staff):
                 cursor.execute('INSERT INTO staff_payable_accounts(staff_id) VALUES(%s)', (staff,))
             for index, assignment in enumerate((first_assignment, second_assignment)):
@@ -2266,7 +2282,7 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
             cursor.execute('SELECT amount_due_ntd FROM staff_obligations WHERE case_no=%s ORDER BY assignment_id', (case_no,))
             assert [row['amount_due_ntd'] for row in cursor.fetchall()] == [9750, 5800]
         connection.rollback()
-        candidate = historical_completed_pricing_body(client, case_no)
+        candidate = historical_completed_pricing_body(client, case_no, payroll={'covered': 350, 'excess': 350})
         explicit = post(client, pricing_path + '/preview', candidate, case_no + ':price-preview')
         assert explicit['before']['staff_total_amount'] == 15550
         assert explicit['after']['staff_total_amount'] == 17150
@@ -2471,32 +2487,33 @@ def test_historical_accounting_completed_birth_forward_reverse_uses_bound_policy
     revision = client.get('/api/v1/accounting-pricing').json()['data']['revision']
     bound = post(client, '/api/v1/accounting-pricing/policies', {'policy': policy(), 'expected_revision': revision}, 'hist-birth-policy-' + uuid4().hex)['revision']
     case_no = 'hist-birth-' + uuid4().hex[:12]
-    seed_historical_completed_pricing_people(case_no)
+    people = seed_historical_completed_pricing_people(case_no)
+    original_identities = tuple(f'{case_no}:original:{assignment}' for _, assignment in people)
+    paid_staff, paid_assignment = people[0]
+    paid_identity = original_identities[0]
     connection = mysql_adapter.get_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute('UPDATE orders SET pricing_policy_id=%s WHERE case_no=%s', (bound if bound_policy else None, case_no))
             if not explicit_manual:
                 cursor.execute('UPDATE orders SET pricing_override_event_id=NULL WHERE case_no=%s', (case_no,))
-            cursor.execute('SELECT staff_id,obligation_identity FROM staff_obligations WHERE case_no=%s ORDER BY assignment_id LIMIT 1', (case_no,))
-            original = cursor.fetchone()
             cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,debit,direction,"
                            "currency,classification_type,bank_references,warnings,raw_payload) "
                            "VALUES(%s,'taishin','2026-11-15',14000,'outgoing','TWD','staff_payout','{}','[]','{}')", (uuid4().hex * 2,))
             bank_id = cursor.lastrowid
             cursor.execute("INSERT INTO staff_payout_events(staff_id,finance_import_row_id,event_type,amount_ntd,occurred_on,bank_account_identity_hash,"
                            "reconciliation_reference,idempotency_key,actor,reason) VALUES(%s,%s,'payout',14000,'2026-11-15',%s,%s,%s,'synthetic','original immutable payment')",
-                           (original['staff_id'], bank_id, 'a' * 64, case_no + ':paid', case_no + ':paid'))
+                           (paid_staff, bank_id, 'a' * 64, case_no + ':paid', case_no + ':paid'))
             cursor.execute('INSERT INTO staff_payout_obligation_links(payout_event_id,obligation_identity,allocated_amount_ntd,allocation_ordinal) VALUES(%s,%s,14000,1)',
-                           (cursor.lastrowid, original['obligation_identity']))
+                           (cursor.lastrowid, paid_identity))
             from infrastructure.mysql.staff_payout_repository import _projection_rows, _upsert_projection
-            cursor.execute('SELECT aggregate_version FROM staff_payable_accounts WHERE staff_id=%s FOR UPDATE', (original['staff_id'],))
+            cursor.execute('SELECT aggregate_version FROM staff_payable_accounts WHERE staff_id=%s FOR UPDATE', (paid_staff,))
             payable_version = int(cursor.fetchone()['aggregate_version']) + 1
-            _upsert_projection(cursor, _projection_rows(cursor, (original['obligation_identity'],))[0], payable_version)
+            _upsert_projection(cursor, _projection_rows(cursor, (paid_identity,))[0], payable_version)
             cursor.execute('UPDATE staff_payable_accounts SET aggregate_version=%s WHERE staff_id=%s',
-                           (payable_version, original['staff_id']))
+                           (payable_version, paid_staff))
             cursor.execute('UPDATE staff_obligations SET payout_history_exists=1 WHERE obligation_identity=%s',
-                           (original['obligation_identity'],))
+                           (paid_identity,))
             cursor.execute("INSERT INTO client_ledger_entries(case_no,entry_type,amount_ntd,occurred_on,reconciliation_reference,idempotency_key,actor,reason) "
                            "VALUES(%s,'receipt',1000,'2026-10-01',%s,%s,'synthetic','original unallocated receipt')", (case_no, case_no + ':cash', case_no + ':cash'))
         connection.commit()
@@ -2517,15 +2534,44 @@ def test_historical_accounting_completed_birth_forward_reverse_uses_bound_policy
             assert repository.load(case_no, for_update=False)['corrections']['multi_birth_count'] == birth_count
             connection.rollback()
             with connection.cursor() as cursor:
-                cursor.execute('SELECT COALESCE(c.computed_ntd,e.after_amount_ntd) computed_ntd,'
+                cursor.execute('SELECT o.obligation_identity,COALESCE(c.computed_ntd,e.after_amount_ntd) computed_ntd,'
                     'COALESCE(c.effective_ntd,e.after_amount_ntd) effective_ntd FROM staff_obligations o '
                     'JOIN staff_obligation_events e ON e.id=o.current_event_id '
                     'LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
-                    'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
-                assert [(row['computed_ntd'], row['effective_ntd']) for row in cursor.fetchall()] == [(amount, amount)] * 2
+                    'WHERE o.case_no=%s AND o.obligation_identity IN (%s,%s)', (case_no, *original_identities))
+                assert {row['obligation_identity']: (row['computed_ntd'], row['effective_ntd'])
+                        for row in cursor.fetchall()} == dict.fromkeys(original_identities, (amount, amount))
+                cursor.execute(
+                    'SELECT obligation_amount_ntd,net_paid_ntd,balance_ntd FROM staff_payable_projections '
+                    'WHERE obligation_identity=%s', (paid_identity,),
+                )
+                assert cursor.fetchone() == {'obligation_amount_ntd': 14000, 'net_paid_ntd': 14000, 'balance_ntd': 0}
+                cursor.execute(
+                    'SELECT e.source_obligation_identity,e.staff_id,e.assignment_id,e.event_type,e.direction,'
+                    'e.before_amount_ntd,e.after_amount_ntd,o.amount_due_ntd '
+                    'FROM staff_obligation_events e LEFT JOIN staff_obligations o '
+                    'ON o.current_event_id=e.id AND o.obligation_identity=e.obligation_identity '
+                    'AND o.case_no=e.case_no AND o.staff_id=e.staff_id AND o.assignment_id=e.assignment_id '
+                    'AND o.source_obligation_identity=e.source_obligation_identity '
+                    'AND o.obligation_kind=e.obligation_kind AND o.direction=e.direction '
+                    'WHERE e.case_no=%s AND e.obligation_identity NOT IN (%s,%s) ORDER BY e.id',
+                    (case_no, *original_identities),
+                )
+                corrections = [
+                    (row['source_obligation_identity'], row['staff_id'], row['assignment_id'], row['event_type'],
+                     row['direction'], row['before_amount_ntd'], row['after_amount_ntd'], row['amount_due_ntd'])
+                    for row in cursor.fetchall()
+                ]
+                expected_corrections = []
+                if not explicit_manual:
+                    expected_corrections.append((paid_identity, paid_staff, paid_assignment, 'adjustment', 'payable_to_staff', 0, 4000, 4000))
+                    if version == 1:
+                        expected_corrections.append((paid_identity, paid_staff, paid_assignment, 'reversal', 'receivable_from_staff', 0, 4000, 4000))
+                assert corrections == expected_corrections
             connection.rollback()
-            assert client.get(f'/api/v1/accounting-pricing/cases/{case_no}').json()['data']['source'] == (
-                'manual' if explicit_manual else 'policy')
+            current = client.get(f'/api/v1/accounting-pricing/cases/{case_no}').json()['data']
+            assert current['source'] == ('manual' if explicit_manual else 'policy')
+            assert current['impact']['staff_total_amount'] == amount * 2
             assert historical_completed_immutable_snapshot(case_no) == immutable
     finally:
         connection.close()

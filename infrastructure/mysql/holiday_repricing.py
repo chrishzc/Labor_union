@@ -92,7 +92,8 @@ class MySqlHolidayRepricing:
                 if previous is None:
                     facts = MySqlPricingConfigurationRepository(self._connection).case(case_no, lock=True)
                     previous = case_total_amount(replace(facts, frozen_amounts=None))
-                self._before_totals[case_no] = previous
+                if previous is not None:
+                    self._before_totals[case_no] = previous
                 return previous
         except ValueError as error:
             self._prepare_errors[case_no] = HolidayCaseRepricingResult(case_no, "failed",
@@ -179,6 +180,8 @@ class MySqlHolidayRepricing:
         if case_no in self._before_totals:
             facts = replace(facts, frozen_case_total=self._before_totals[case_no])
         impact = current_pricing_impact(facts)
+        if impact.case_total_amount is None or impact.client_amount is None:
+            raise ValueError("service_facts_unavailable")
         subsidy = query_case_subsidy_amount(self._connection, case_no, lock=True).amount_ntd
         unallocated = (max(0, impact.case_total_amount - impact.client_amount - subsidy)
                        if subsidy is not None else None)
