@@ -10,7 +10,8 @@
 ## Implementation
 - primary: `ui_react/src/components/StaffPayoutRemediationWorkbench.tsx`
 - transport: `ui_react/src/api/staff_payables/staff_payout_remediation_client.ts`、`ui_react/src/api/staff_payables/staff_payout_remediation_schemas.ts`
-- 原銀行入口帶入日期、實付、對象及摘要；共用 Query 的 `funding_portions` 顯示自備款／補助款各自待付。確認前以正式 Preview 顯示手續費及剩餘款，成功後回讀未清補助，不由畫面推斷整案結清。
+- 從單筆銀行更正開啟差額核銷時，`FinanceImportCorrectionForm` 以 `financeImportRowId` 鎖定原流水；這條接線不傳 `bankSource`，缺少日期、對象或摘要顯示「未提供」，缺少實付顯示「待確認」，不代表銀行尚未出款。其他入口若提供 `bankSource`，畫面才顯示其原值。手填流水編號只是引用原有紀錄，不建立已付證據；UI 不得把待確認改成已核銷。
+- 共用 Query 的 `funding_portions` 顯示自備款／補助款各自待付。確認前以正式 Preview 顯示手續費及剩餘款，成功後回讀未清補助，不由畫面推斷整案結清。
 - 永豐核銷方式可明選「補助方案一：核銷自備款，補助款保留待付」；帶 `confirm_subsidy_split` 至原 payout endpoint，必須取得含正式 T／S／兩來源待付及日期的預覽後再確認。方案／分期與付款一起成功才回讀並提示已保存；未知結果保留原背景命令，不拆成前端兩次儲存。
 
 <a id="contracts"></a>
