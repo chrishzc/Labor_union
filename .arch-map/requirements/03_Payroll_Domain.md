@@ -32,7 +32,7 @@
 3. **補助內與用盡後兩段時薪**：綁定政策或個案人工設定之案件，依 [Client Finance](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 兩段計價契約設定補助內與用盡後月嫂時薪；有補助時數時，補助內月嫂時薪必須等於客戶時薪且為正整數，用盡後可獨立調整。
 4. **雙胞胎快照更正與保護**：
    - 既有雙胞胎案件的不可變 Case／assignment 費率快照不得原地覆寫；資料修復僅能由已確認為 `twins / 450` 的 Case 快照補齊缺少的 assignment 快照，來源不符或歧義時阻擋。
-   - 服務尚未開始時，管理員以正式 BeClass effective 胎數更正將單胞胎改為雙胞胎時，同一 outer UoW 以 `450` 重算未核銷 Payroll obligation；原已付款事件及快照保持不可變，差額沿既有 adjustment／replacement 表達。正式服務開始後不得變更胎數。
+   - 服務尚未開始時，管理員以正式 BeClass effective 胎數更正將單胞胎改為雙胞胎時，同一 outer UoW 以 `450` 重算未核銷 Payroll obligation；原已付款事件及快照保持不可變，差額沿既有 adjustment／replacement 表達。服務開始後保留原鎖；[歷史服務完成後更正](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)按各人歷史服務量處理薪資差額，不改原付款、核銷及費率快照。
 5. **資金來源分期與到期日**：
    - 客戶自費負擔部分預計付款日為「服務結束月 `+ 1` 個月之 15 日」；直接補助轉交部分為「服務結束月 `+ 2` 個月之 15 日」。已形成的 `staff_payment_due_date` 與各期到期日保留，不因方案、取消、更正或政府入款時間而覆寫。
    - 方案一共同確認時（詳 [Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md#staff-payout-scheme1-and-differences)），Payroll 僅將既有單筆應付 `T` 按正式補助額 `S` 承接缺席的 `T - S`（沿原應付日）與 `S`（服務結束月 `+ 2` 個月之 15 日）來源分期。案件通過服務完成條件後，人工方案確認與銀行明細預檢均優先採 Orders 實際服務結束日，缺值時採訂單結束日，兩者均缺時阻擋新建分期。既有分期、已付款、總額及服務歸屬沿原正式資料。

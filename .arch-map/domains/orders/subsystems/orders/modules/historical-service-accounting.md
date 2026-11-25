@@ -28,6 +28,10 @@
   - `db/schema_parts/1046_client_zero_obligation_establishment.sql` — legacy schema history for zero baseline obligations.
   - `db/migration_releases/labor_union_2026_09_01_historical_service_accounting_v1.json`
 
+## 目標接線：歷史服務完成後更正
+
+沿既有歷史服務歸屬的 Query／Preview／Apply 擴充實際起訖、時段及每日時數。以已採用的歷史指派識別為單位，由 Orders 驗證資料並委派原帳務 owner 計算差額；禁止轉呼一般班表替換或重啟。沿既有外層交易保存更正及帳務結果；待核對分支保留可獨立確認的資料，不更改已完成服務的狀態。此段是目標接線，非目前實作。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
+
 ## Dependencies
 - outbound: `client-finance/historical-service-accounting` — 計算客戶端比較金額。
 - outbound: `payroll/historical-service-accounting` — 計算逐指派比較金額。

@@ -32,6 +32,10 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `ui_react/src/components/AccountingParametersDrawer.tsx`
 - `ui_react/src/components/AccountingParameters.css`
 
+## 目標接線：歷史服務完成後更正
+
+保留個案計價入口。替換歷史計價目前「唯一指派／唯一月嫂原應付」的整體前置判斷，改用按指派的正式服務量與各 owner 的可計算結果。Preview 分開回傳可確認差額與待核對原因；已證實無客戶義務為無須處理，不是缺原期款。Apply 沿既有數額更正流程處理可確認部分，保留原款身分、現金及核銷。此段是目標接線，非目前實作。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
+
 ## Contracts
 - Reporting borrows read-only `case_total_amount` from complete current `CasePricingFacts`; Domain `calculate_case_total_amount` retains covered service before funding and one fixed floor fee. It does not reuse salary or receipt totals — `15` §15.4 / `04` §0 Reporting 唯讀投影.
 - `.arch-map/requirements/04_Client_Finance_Domain.md` §0 PRICE-01..09.
