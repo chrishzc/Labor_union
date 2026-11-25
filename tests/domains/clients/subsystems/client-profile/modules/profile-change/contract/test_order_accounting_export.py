@@ -264,3 +264,188 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
     assert rows[0].staff_payment_due_date is None
     assert rows[0].estimated_staff_payment_due_date == date(2026, 11, 15)
     assert (rows[0].claim_application_year, rows[0].claim_application_month) == (2027, 1)
+
+
+def test_subsidized_citizen_over_120_hours_with_float_hours_per_day_computes_without_type_error():
+    from datetime import timedelta
+    from domains.client_finance.obligation_planning import (
+        ClientChargeDay,
+        ClientFinanceTermsFacts,
+        ClientPaymentTerms,
+        build_client_finance_terms_candidate,
+    )
+    from shared_kernel.money import MoneyNTD
+
+    start = date(2026, 10, 1)
+    facts = ClientFinanceTermsFacts(
+        case_no="115000099",
+        account_version=1,
+        service_hours_per_day=7.5,
+        floor_fee=MoneyNTD(0),
+        charge_days=tuple(
+            ClientChargeDay(service_date=start + timedelta(days=offset), is_double_pay=False)
+            for offset in range(20)
+        ),
+        payment_terms=ClientPaymentTerms(
+            deposit_service_days=1,
+            client_hourly_rate=MoneyNTD(400),
+            deposit_due_date=date(2026, 9, 20),
+            first_payment_due_date=date(2026, 10, 1),
+            second_payment_due_date=date(2026, 10, 31),
+        ),
+        existing_obligations=(),
+        identity_status="補助市民",
+    )
+
+    candidate = build_client_finance_terms_candidate(facts, "client-registry:115000099")
+    assert sum(plan.amount.amount for plan in candidate.stage_plans) == 12000
+
+
+def test_mysql_export_isolates_incomplete_subsidy_cases_and_handles_indigenous_and_cancelled_zero_payable(monkeypatch):
+    def base_row(case_no: str, identity_status: str, order_status: str) -> dict[str, object]:
+        return {
+            "seq_num": 1,
+            "case_no": case_no,
+            "name": "測試客戶",
+            "identity_status": identity_status,
+            "service_time": "09:00-17:00 8小時",
+            "due_month": "2026/10",
+            "service_start_date": "2026/10/01",
+            "multi_birth_count": "單胞胎",
+            "order_status": order_status,
+            "service_days": 10,
+            "service_hours_per_day": 8,
+            "requires_cooking": False,
+            "floor_fee": 0,
+            "planned_start_date": date(2026, 10, 1),
+            "planned_end_date": date(2026, 10, 10),
+            "actual_start_date": None,
+            "actual_end_date": None,
+            "staff_payment_due_date": None,
+            "deposit_due_date": date(2026, 9, 20),
+            "first_payment_due_date": date(2026, 10, 1),
+            "second_payment_due_date": date(2026, 10, 10),
+            "deposit_settled_on": None,
+        }
+
+    connection = _Connection((
+        base_row("115000001", "原住民", "服務完成"),
+        base_row("115000002", "一般市民", "訂單取消"),
+        base_row("115000003", "補助市民", "成立後未服務"),
+    ))
+    zero_finance = {
+        "service_hours": 80,
+        "service_unit_price_ntd": 450,
+        "customer_payable_total_ntd": 0,
+        "deposit_amount_ntd": 0,
+        "first_payment_amount_ntd": 0,
+        "second_payment_amount_ntd": 0,
+        "received_total_ntd": 0,
+        "customer_balance_ntd": 0,
+        "subsidy_return_amount_ntd": None,
+        "subsidy_return_due_date": None,
+        "subsidy_return_status": None,
+    }
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository._finance_values",
+        lambda _connection, _case_no: ("ready", None, zero_finance),
+    )
+
+    def loader(case_nos, _connection):
+        if "115000002" in case_nos:
+            raise ValueError("pricing_policy_source_missing")
+        return {
+            case_no: {"市府訂單號碼": case_no, "服務結束": date(2026, 10, 10)}
+            for case_no in case_nos
+        }
+
+    rows = MySqlClientRegistryQueryRepository(
+        connection,
+        subsidy_projection_loader=loader,
+    ).query_order_accounting_rows(OrderAccountingExportQuery())
+
+    by_case = {row.case_no: row for row in rows}
+    assert set(by_case) == {"115000001", "115000002", "115000003"}
+    assert by_case["115000001"].estimated_staff_payment_due_date == date(2026, 12, 15)
+    assert by_case["115000002"].estimated_staff_payment_due_date is None
+    assert by_case["115000003"].estimated_staff_payment_due_date is None
+
+
+def test_order_accounting_workbook_forces_string_data_type_on_formula_prefix_text():
+    from dataclasses import replace
+    from subsystems.client_profile.order_accounting_export import build_order_accounting_workbook
+
+    row = replace(_row(), case_no="=CASE1", name="=SUM(A1:A2)")
+    content = build_order_accounting_workbook((row,))
+    worksheet = load_workbook(BytesIO(content))["訂單帳務"]
+    assert worksheet["B2"].value == "=CASE1"
+    assert worksheet["B2"].data_type == "s"
+    assert worksheet["C2"].value == "=SUM(A1:A2)"
+    assert worksheet["C2"].data_type == "s"
+
+
+def test_registry_export_routes_distinguish_input_422_from_repository_500():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies.admin_auth import require_registry_reader
+    from api.dependencies.client_registry import (
+        get_client_registry_case_inspection_export_application,
+        get_client_registry_order_accounting_export_application,
+    )
+    from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
+    from api.routes import client_registry
+
+    class _FailingOrderRepo:
+        def query_order_accounting_rows(self, _selection):
+            raise ValueError("zero client payable requires a full subsidy order")
+
+    class _FailingInspectionRepo:
+        def query_case_inspection(self, _selection):
+            raise ValueError("pricing_policy_source_missing")
+
+    from subsystems.client_profile.case_inspection_export import (
+        ClientRegistryCaseInspectionExportApplication,
+    )
+
+    app = FastAPI()
+    app.include_router(client_registry.router)
+    app.add_middleware(CorrelationBoundaryMiddleware)
+    install_typed_error_handlers(app)
+    app.dependency_overrides[require_registry_reader] = lambda: AdminPrincipal(
+        9, "registry-reader", "Registry Reader", "system_admin"
+    )
+    app.dependency_overrides[get_client_registry_order_accounting_export_application] = (
+        lambda: ClientRegistryOrderAccountingExportApplication(_FailingOrderRepo())
+    )
+    app.dependency_overrides[get_client_registry_case_inspection_export_application] = (
+        lambda: ClientRegistryCaseInspectionExportApplication(_FailingInspectionRepo())
+    )
+    client = TestClient(app)
+
+    bad_filter = client.get(
+        "/api/v1/admin/registries/clients/export/order-accounting",
+        params={"column_filters": "not-json"},
+    )
+    assert bad_filter.status_code == 422
+    assert bad_filter.json()["detail"]["error"]["code"] == "client_registry_column_filters_invalid"
+
+    repo_fail_order = client.get("/api/v1/admin/registries/clients/export/order-accounting")
+    assert repo_fail_order.status_code == 500
+    assert (
+        repo_fail_order.json()["detail"]["error"]["code"]
+        == "client_registry_order_accounting_export_internal_error"
+    )
+
+    bad_inspection_filter = client.get(
+        "/api/v1/admin/registries/clients/export/case-inspection",
+        params={"column_filters": "not-json"},
+    )
+    assert bad_inspection_filter.status_code == 422
+    assert bad_inspection_filter.json()["detail"]["error"]["code"] == "client_registry_column_filters_invalid"
+
+    repo_fail_inspection = client.get("/api/v1/admin/registries/clients/export/case-inspection")
+    assert repo_fail_inspection.status_code == 500
+    assert (
+        repo_fail_inspection.json()["detail"]["error"]["code"]
+        == "client_registry_case_inspection_export_internal_error"
+    )

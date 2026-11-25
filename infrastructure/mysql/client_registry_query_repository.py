@@ -213,10 +213,15 @@ class MySqlClientRegistryQueryRepository:
             case_nos = tuple(str(row["case_no"]) for row in base_rows)
             imported_virtual_accounts = _load_imported_virtual_accounts(cursor, case_nos)
             formula_accounts = _load_registry_formula_accounts(cursor, case_nos)
-        subsidy_rows = self._subsidy_projection_loader(
-            tuple(str(row["case_no"]) for row in base_rows),
-            self._connection,
-        )
+        try:
+            subsidy_rows = self._subsidy_projection_loader(case_nos, self._connection)
+        except ValueError:
+            subsidy_rows = {}
+            for case_no in case_nos:
+                try:
+                    subsidy_rows.update(self._subsidy_projection_loader((case_no,), self._connection))
+                except ValueError:
+                    continue
         return tuple(
             self._order_accounting_row(
                 row,
@@ -242,21 +247,32 @@ class MySqlClientRegistryQueryRepository:
         subsidy_service_end = (
             subsidy_row.get("服務結束") if subsidy_row is not None else None
         )
+        order_status_text = str(row.get("order_status") or "")
+        cancelled_or_unserved = (
+            "取消" in order_status_text
+            or order_status_text in {"成立後未服務", "歷史訂單－未服務"}
+        )
         staff_payment_due_date = row.get("staff_payment_due_date")
         estimated_staff_payment_due_date = None
         customer_payable = values.get("customer_payable_total_ntd")
         if (
-            staff_payment_due_date is None
+            not cancelled_or_unserved
+            and staff_payment_due_date is None
             and isinstance(subsidy_service_end, date)
             and customer_payable is not None
         ):
-            estimated_staff_payment_due_date = calculate_staff_payment_due_date(
-                subsidy_service_end,
-                customer_payable,
-                normalize_subsidy_policy_identity(
-                    str(row.get("identity_status") or "")
-                ) == "補助市民" and Decimal(str(customer_payable)) == 0,
+            payable_amount = Decimal(str(customer_payable))
+            is_full_subsidy = (
+                normalize_subsidy_policy_identity(str(row.get("identity_status") or ""))
+                in {"補助市民", "原住民"}
+                and payable_amount == 0
             )
+            if payable_amount > 0 or is_full_subsidy:
+                estimated_staff_payment_due_date = calculate_staff_payment_due_date(
+                    subsidy_service_end,
+                    customer_payable,
+                    is_full_subsidy,
+                )
         claim = _claim_application_month(row)
         return OrderAccountingExportRow(
             seq_num=row.get("seq_num"),

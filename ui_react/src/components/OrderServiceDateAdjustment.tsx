@@ -6,6 +6,7 @@ import type {
 import { coordinatedServiceTime, OrderServiceDateCalendar } from './OrderServiceDateCalendar';
 import { useUnsavedDraft } from './UnsavedChanges';
 import './OrderServiceDateAdjustment.css';
+import { HolidayRepricingResults } from './HolidayRepricingResults';
 
 interface Props {
   caseNo: string;
@@ -244,6 +245,7 @@ export function OrderServiceDateAdjustment({ caseNo, query, initialDates, onCanc
     </fieldset> : !observation && <p className="service-date-adjustment-empty">
       目前沒有可合併的 4 小時日期或可分裂的 8 小時日期。
     </p>}
+    {observation?.receipt.case_result && <HolidayRepricingResults results={[observation.receipt.case_result]} />}
     {error && <p role="alert">{error}</p>}
     {(operation || observation) && <div className="service-date-adjustment-footer">
       <button type="button" disabled={!ready && observation === null} onClick={() => void save()}>

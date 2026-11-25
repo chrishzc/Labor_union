@@ -18,6 +18,8 @@ import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_direct
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import type { SchedulingCurrentAssignment, SchedulingCurrentProjection } from '../api/scheduling/scheduling_current_schemas';
 import { holidayClient } from '../api/scheduling/holiday_client';
+import type { HolidayCaseRepricing } from '../api/scheduling/holiday_schemas';
+import { HolidayRepricingResults } from '../components/HolidayRepricingResults';
 import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
 import { coordinatedServiceTime } from '../components/OrderServiceDateCalendar';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
@@ -289,16 +291,34 @@ function flowStateLabel(state: string): string {
 }
 
 function HolidayPolicyWorkspace() {
-  const year = taipeiCalendarDate(new Date()).year;
+  const [year, setYear] = useState(() => taipeiCalendarDate(new Date()).year);
   const [fromDate, setFromDate] = useState(`${year}-01-01`);
   const [toDate, setToDate] = useState(`${year}-12-31`);
   const [action, setAction] = useState<HolidayAction>('upsert');
   const [holidayDate, setHolidayDate] = useState(todayIsoDate());
   const [holidayName, setHolidayName] = useState('');
+  const [doublePay, setDoublePay] = useState(false);
   const [reason, setReason] = useState('');
   const submittingRef = useRef(false);
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
   const [, setStoreRevision] = useState(0);
+  const rowRequests = useRef(new Map<string, { request: HolidayApplyRequest; key: string; committed: boolean }>());
+  const rowSubmitting = useRef(new Set<string>());
+  const [rowPending, setRowPending] = useState<ReadonlySet<string>>(new Set());
+  const [rowErrors, setRowErrors] = useState<Readonly<Record<string, string>>>({});
+  const [observedRows, setObservedRows] = useState<Readonly<Record<string, HolidayRow>>>({});
+  const [accountingResults, setAccountingResults] = useState<Readonly<Record<string, readonly HolidayCaseRepricing[]>>>({});
+  const [accountingReadError, setAccountingReadError] = useState('');
+  const [accountingReload, setAccountingReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setAccountingResults({});
+    setAccountingReadError('');
+    void holidayClient.accountingResults({ from_date: fromDate, to_date: toDate }).then(receipts => {
+      if (active) setAccountingResults(previous => ({ ...Object.fromEntries(receipts.map(item => [item.holiday_date, item.case_results])), ...previous }));
+    }).catch(() => { if (active) setAccountingReadError('帳務處理紀錄讀取失敗，請重新查詢。'); });
+    return () => { active = false; };
+  }, [fromDate, toDate, accountingReload]);
 
   useEffect(() => {
     const unsubscribe = holidayFlowStore.subscribe(() => setStoreRevision((value) => value + 1));
@@ -312,6 +332,45 @@ function HolidayPolicyWorkspace() {
   const draft = holidayFlowStore.get();
   const machine = resolveHolidayMachineState(draft);
   const calendar = draft?.calendar ?? null;
+  useEffect(() => { setObservedRows({}); }, [calendar]);
+  const toggleDoublePay = async (holiday: HolidayRow): Promise<void> => {
+    const date = holiday.holiday_date;
+    if (rowSubmitting.current.has(date)) return;
+    rowSubmitting.current.add(date);
+    setRowPending(new Set(rowSubmitting.current));
+    setRowErrors(previous => { const next = { ...previous }; delete next[date]; return next; });
+    const horizon = { from_date: fromDate, to_date: toDate };
+    try {
+      let pending = rowRequests.current.get(date);
+      if (!pending) {
+        const fresh = await holidayClient.query(horizon);
+        const current = fresh.holidays.find(item => item.holiday_date === date);
+        if (!current) throw new Error('該日假日資料已變更，請重新查詢。');
+        const command: HolidayPreviewRequest = { ...horizon, action: 'upsert', holiday_date: date,
+          holiday_name: current.holiday_name, is_double_pay_default: !holiday.is_double_pay_default };
+        const prepared = await holidayClient.preview(command);
+        pending = { request: { ...command, expected_calendar_version: prepared.command.expected_calendar_version,
+          preview_fingerprint: prepared.preview_fingerprint, reason: '' }, key: crypto.randomUUID(), committed: false };
+        rowRequests.current.set(date, pending);
+      }
+      if (!pending.committed) {
+        const receipt = await holidayClient.apply(pending.request, { idempotencyKey: pending.key });
+        setAccountingResults(previous => ({ ...previous, [date]: receipt.case_results ?? [] }));
+        pending.committed = true;
+      }
+      const readback = await holidayClient.query(horizon);
+      const result = readback.holidays.find(item => item.holiday_date === date);
+      if (!result) throw new Error('無法讀回該日的假日設定，請重試。');
+      setObservedRows(previous => ({ ...previous, [date]: result }));
+      rowRequests.current.delete(date);
+    } catch (error) {
+      if (error instanceof Error && 'status' in error && error.status === 409) rowRequests.current.delete(date);
+      setRowErrors(previous => ({ ...previous, [date]: error instanceof Error ? error.message : '儲存失敗，請重試。' }));
+    } finally {
+      rowSubmitting.current.delete(date);
+      setRowPending(new Set(rowSubmitting.current));
+    }
+  };
   const calendarMatchesHorizon = calendar?.planning_horizon.from_date === fromDate
     && calendar.planning_horizon.to_date === toDate;
   const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
@@ -324,7 +383,7 @@ function HolidayPolicyWorkspace() {
       action,
       holiday_date: holidayDate,
       holiday_name: action === 'upsert' ? holidayName.trim() || null : null,
-      is_double_pay_default: false,
+      is_double_pay_default: doublePay,
       from_date: fromDate,
       to_date: toDate,
       ...overrides,
@@ -340,7 +399,7 @@ function HolidayPolicyWorkspace() {
     if (!draft?.preview) return;
     const request = buildPreviewRequest();
     if (request) setHolidayDraft(request);
-  }, [action, fromDate, holidayDate, holidayName, toDate]);
+  }, [action, doublePay, fromDate, holidayDate, holidayName, toDate]);
 
   const query = () => {
     if (!fromDate || !toDate || fromDate > toDate || busy) return;
@@ -351,6 +410,7 @@ function HolidayPolicyWorkspace() {
     setAction('upsert');
     setHolidayDate(holiday.holiday_date);
     setHolidayName(holiday.holiday_name);
+    setDoublePay(holiday.is_double_pay_default);
     setReason('');
     setHolidayDrawerOpen(true);
   };
@@ -359,12 +419,12 @@ function HolidayPolicyWorkspace() {
     setAction('upsert');
     setHolidayDate(todayIsoDate());
     setHolidayName('');
+    setDoublePay(false);
     setReason('');
     setHolidayDrawerOpen(true);
   };
 
-  const apply = async () => {
-    const previewRequest = buildPreviewRequest();
+  const apply = async (previewRequest = buildPreviewRequest()): Promise<void> => {
     if (!previewRequest || busy || submittingRef.current) return;
     submittingRef.current = true;
     try {
@@ -388,7 +448,7 @@ function HolidayPolicyWorkspace() {
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
-  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '雙倍': doublePay ? '開' : '關', '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
 
 
   return (
@@ -414,10 +474,31 @@ function HolidayPolicyWorkspace() {
       </header>
 
       <OfficialHolidayCsvImport disabled={busy} onImported={importYear => {
+        setYear(importYear);
         setFromDate(`${importYear}-01-01`);
         setToDate(`${importYear}-12-31`);
       }} />
 
+      <label>
+        年度
+        <input
+          aria-label="國定假日年度"
+          type="number"
+          min={1900}
+          max={9999}
+          value={year}
+          disabled={busy}
+          onChange={event => {
+            const selected = Number(event.target.value);
+            if (!Number.isInteger(selected) || selected < 1900 || selected > 9999) return;
+            setYear(selected);
+            const horizon = { from_date: `${selected}-01-01`, to_date: `${selected}-12-31` };
+            setFromDate(horizon.from_date);
+            setToDate(horizon.to_date);
+            void queryHolidayFlow(horizon).catch(() => undefined);
+          }}
+        />
+      </label>
       <div className="holiday-policy-horizon">
         <label>
           查詢起日
@@ -454,7 +535,9 @@ function HolidayPolicyWorkspace() {
             <p className="holiday-policy-notice">此期間沒有國定假日資料。</p>
           ) : (
             <ul className="holiday-policy-list" style={{ display: 'grid', gap: '10px' }}>
-              {calendar.holidays.map((holiday) => (
+              {calendar.holidays.map(sourceHoliday => {
+                const holiday = observedRows[sourceHoliday.holiday_date] ?? sourceHoliday;
+                return (
                 <li
                   key={holiday.holiday_date}
                   style={{
@@ -480,6 +563,15 @@ function HolidayPolicyWorkspace() {
                   </div>
 
                   <div>
+                    <span>{holiday.is_double_pay_default ? '雙倍已啟用' : '雙倍未啟用'}</span>
+                    {accountingResults[holiday.holiday_date] && <HolidayRepricingResults results={accountingResults[holiday.holiday_date]} />}
+                    {accountingReadError && !accountingResults[holiday.holiday_date] && <p>{accountingReadError} <button type="button" onClick={() => setAccountingReload(value => value + 1)}>重新讀取帳務紀錄</button></p>}
+                    <button type="button" aria-label={`${holiday.holiday_date} ${holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}`}
+                      disabled={rowPending.has(holiday.holiday_date)} onClick={() => void toggleDoublePay(holiday)}>
+                      {holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}
+                    </button>
+                    {rowErrors[holiday.holiday_date] && <p role="alert">{rowErrors[holiday.holiday_date]} <button type="button"
+                      disabled={rowPending.has(holiday.holiday_date)} onClick={() => void toggleDoublePay(holiday)}>重試</button></p>}
                     <button
                       type="button"
                       className="scheduling-action"
@@ -501,7 +593,7 @@ function HolidayPolicyWorkspace() {
                     </button>
                   </div>
                 </li>
-              ))}
+              ); })}
             </ul>
           )}
         </section>
@@ -564,6 +656,7 @@ function HolidayPolicyWorkspace() {
                 />
               </label>
             </div>
+
 
             <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
               變更原因與審核註記（選填）

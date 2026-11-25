@@ -127,7 +127,7 @@ def test_mysql_service_facts_crossing_decimal_id_boundary_can_be_calculated():
 
 
 @pytest.fixture
-def payroll_schedule_sql():
+def payroll_schedule_sql(monkeypatch):
     import sqlite3
 
     raw = sqlite3.connect(":memory:")
@@ -135,15 +135,31 @@ def payroll_schedule_sql():
     raw.create_function("CONCAT", 2, lambda left, right: str(left) + str(right))
     raw.executescript("""
         CREATE TABLE staff_schedule(assignment_id INTEGER,generation_id INTEGER,work_date TEXT,
-            is_work_day INTEGER,effective_marker INTEGER,service_hours_override INTEGER);
+            is_work_day INTEGER,effective_marker INTEGER,service_hours_override INTEGER,
+            staff_id INTEGER,
+            id INTEGER GENERATED ALWAYS AS (assignment_id) VIRTUAL);
         CREATE TABLE case_staff_assignments(id INTEGER PRIMARY KEY,generation_id INTEGER,
             case_no TEXT,staff_id INTEGER);
+        CREATE TRIGGER staff_schedule_owner AFTER INSERT ON staff_schedule
+        BEGIN
+            UPDATE staff_schedule SET staff_id=(SELECT staff_id FROM case_staff_assignments
+                WHERE id=NEW.assignment_id AND generation_id=NEW.generation_id)
+            WHERE rowid=NEW.rowid;
+        END;
         CREATE TABLE scheduling_rebuild_lineage(rebuild_event_id INTEGER,new_assignment_id INTEGER,
             old_assignment_identity TEXT,lineage_ordinal INTEGER);
         CREATE TABLE scheduling_command_receipts(rebuild_event_id INTEGER,command_family TEXT);
+        CREATE TABLE order_lifecycle_state_events(id INTEGER,case_no TEXT,trigger_event TEXT,after_status TEXT);
     """)
 
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from subsystems.scheduling.holiday_calendar_query import HolidayCalendarFacts
+    monkeypatch.setattr(MySqlSchedulingHolidayQuery, "query", lambda self, start, end, *, lock:
+                        HolidayCalendarFacts("sqlite-fixture", "empty", ()))
+
     class Cursor:
+        connection = raw
+
         def execute(self, statement, parameters):
             assert statement.startswith("SELECT ")
             self.result = raw.execute(statement.replace("%s", "?").replace(" FOR UPDATE", ""), parameters)
@@ -151,6 +167,10 @@ def payroll_schedule_sql():
         def fetchall(self):
             return tuple({key: date.fromisoformat(row[key]) if key == "work_date" else row[key]
                           for key in row.keys()} for row in self.result.fetchall())
+
+        def fetchone(self):
+            row = self.result.fetchone()
+            return dict(row) if row is not None else None
 
     try:
         yield raw, Cursor()
@@ -164,7 +184,7 @@ def _schedule_payroll(cursor, generation, assignments, *, days=2, hours=4, tiere
     from domains.payroll.tiered_rates import TieredPayrollRate
 
     schedules = mysql_rebuild._load_schedules(
-        cursor, {"effective_generation_id": generation, "service_days": days}, assignments, True,
+        cursor, {"case_no": "schedule-fixture", "effective_generation_id": generation, "service_days": days, "service_hours_per_day": hours}, assignments, True,
     )
     facts = mysql_rebuild._service_facts(assignments, mysql_rebuild._schedule_index(assignments, schedules))
     rates = tuple(AssignmentRateSnapshot(
@@ -185,13 +205,13 @@ def test_date_only_adjustments_preserve_original_payroll_hours_floor_fee_and_tie
     raw, cursor = payroll_schedule_sql
     assignments = ({"id": 9, "staff_id": 17},)
     raw.execute("INSERT INTO case_staff_assignments VALUES (9,1,'CASE-1',17)")
-    raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,1,NULL)",
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,?,1,1,NULL)",
                     [(f"2026-10-0{ordinal}",) for ordinal in range(1, days + 1)])
     baseline = _schedule_payroll(cursor, 1, assignments, days=days, hours=hours, tiered=tiered)
     if operation != "normal":
         raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
         actual = [("2026-10-03", 4), ("2026-10-04", 4)] if operation == "split" else [("2026-10-03", 8)]
-        raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,1,?)", actual)
+        raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,?,1,1,?)", actual)
         if operation == "restore":
             raw.execute("UPDATE staff_schedule SET effective_marker=CASE WHEN service_hours_override IS NULL THEN 1 END")
     changes = raw.total_changes
@@ -206,10 +226,10 @@ def test_cross_caregiver_merge_keeps_both_original_payees_and_floor_allocations(
     raw, cursor = payroll_schedule_sql
     assignments = ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18})
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(9, 17), (10, 18)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,1,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,1,?,1,1,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
     baseline = _schedule_payroll(cursor, 1, assignments)
     raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
-    raw.execute("INSERT INTO staff_schedule VALUES (9,1,'2026-10-03',1,1,8)")
+    raw.execute("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,'2026-10-03',1,1,8)")
     assert _schedule_payroll(cursor, 1, assignments) == baseline
     assert {item.staff_id: item.total_payable.amount for item in baseline[1].assignments} == {17: 1701, 18: 1700}
     raw.execute("UPDATE staff_schedule SET effective_marker=CASE WHEN service_hours_override IS NULL THEN 1 END")
@@ -220,13 +240,13 @@ def test_cross_caregiver_merge_keeps_both_original_payees_and_floor_allocations(
 def test_neutral_actual_start_lineage_preserves_payee_with_zero_actual_dates(payroll_schedule_sql, neutral_hops):
     raw, cursor = payroll_schedule_sql
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(9, 17), (10, 18)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,NULL,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,1,?,1,NULL,NULL)", [(9, "2026-10-01"), (10, "2026-10-02")])
     baseline = _schedule_payroll(cursor, 1, ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18}))
     for generation in range(2, neutral_hops + 2):
         owner, other = generation * 10 - 1, generation * 10
         raw.executemany("INSERT INTO case_staff_assignments VALUES (?,?,'CASE-1',?)",
                         [(owner, generation, 17), (other, generation, 18)])
-        raw.execute("INSERT INTO staff_schedule VALUES (?,?,'2026-10-05',1,1,8)", (owner, generation))
+        raw.execute("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,?,'2026-10-05',1,1,8)", (owner, generation))
         raw.execute("INSERT INTO scheduling_command_receipts VALUES (?,'orders_actual_start_rebuild')", (generation,))
         raw.executemany("INSERT INTO scheduling_rebuild_lineage VALUES (?,?,?,?)", [
             (generation, owner, f"assignment:{owner - 10}", 1),
@@ -246,8 +266,8 @@ def test_neutral_actual_start_lineage_preserves_payee_with_zero_actual_dates(pay
 def test_financial_rebuild_and_complete_current_basis_do_not_inherit_older_dates(payroll_schedule_sql, family, override):
     raw, cursor = payroll_schedule_sql
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,?,'CASE-1',17)", [(9, 1), (19, 2)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (9,1,?,1,NULL,NULL)", [("2026-10-01",), ("2026-10-02",)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (19,2,?,1,1,?)", [("2026-10-03", override), ("2026-10-04", override)])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (9,1,?,1,NULL,NULL)", [("2026-10-01",), ("2026-10-02",)])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (19,2,?,1,1,?)", [("2026-10-03", override), ("2026-10-04", override)])
     raw.execute("INSERT INTO scheduling_command_receipts VALUES (2,?)", (family,))
     raw.execute("INSERT INTO scheduling_rebuild_lineage VALUES (2,19,'assignment:9',1)")
     facts, result = _schedule_payroll(cursor, 2, ({"id": 19, "staff_id": 17},))
@@ -725,7 +745,7 @@ def test_cancelled_generation_rebuild_retains_preview_floor_recipient(payroll_sc
 
     raw, cursor = payroll_schedule_sql
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,1,'CASE-1',?)", [(10, 17), (2, 18)])
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,1,?,1,1,NULL)", [(10, "2026-10-01"), (2, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,1,?,1,1,NULL)", [(10, "2026-10-01"), (2, "2026-10-02")])
     assignments = tuple(AssignmentCandidate(
         f"CASE-1:g2:a{sequence}", source, staff, sequence, day, day, (day,), 4,
     ) for sequence, source, staff, day in (
@@ -742,7 +762,7 @@ def test_cancelled_generation_rebuild_retains_preview_floor_recipient(payroll_sc
     resolved = {assignments[0].candidate_key: 20, assignments[1].candidate_key: 30}
     raw.executemany("INSERT INTO case_staff_assignments VALUES (?,2,'CASE-1',?)", [(20, 17), (30, 18)])
     raw.execute("UPDATE staff_schedule SET effective_marker=NULL")
-    raw.executemany("INSERT INTO staff_schedule VALUES (?,2,?,1,1,NULL)", [(20, "2026-10-01"), (30, "2026-10-02")])
+    raw.executemany("INSERT INTO staff_schedule(assignment_id,generation_id,work_date,is_work_day,effective_marker,service_hours_override) VALUES (?,2,?,1,1,NULL)", [(20, "2026-10-01"), (30, "2026-10-02")])
     raw.execute("INSERT INTO scheduling_command_receipts VALUES (2,'orders_cancellation')")
     raw.executemany("INSERT INTO scheduling_rebuild_lineage VALUES (?,?,?,?)", tuple(
         (event, new, old, ordinal) for event, old, new, _generation, ordinal
@@ -755,3 +775,38 @@ def test_cancelled_generation_rebuild_retains_preview_floor_recipient(payroll_sc
     assert {item.staff_id: item.floor_fee_allocated.amount for item in preview.assignments} == {17: 0, 18: 1}
     assert {item.staff_id: item.floor_fee_allocated.amount for item in formal.assignments} == {17: 0, 18: 1}
     assert formal.total_payable == preview.total_payable
+
+
+def test_historical_schedule_loader_does_not_read_holiday_pricing(monkeypatch):
+    rows = ({"assignment_id": 1, "work_date": date(2026, 10, 10)},)
+    monkeypatch.setattr(mysql_rebuild, "load_payroll_service_dates", lambda *args, **kwargs: rows)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("historical orders must not consult holiday pricing")
+    monkeypatch.setattr(mysql_rebuild, "load_holiday_priced_service_dates", forbidden)
+    assert mysql_rebuild._load_schedules(None, {
+        "case_no": "historical-fixture", "effective_generation_id": 1, "service_days": 1, "service_hours_per_day": 8,
+        "order_status": "歷史訂單－服務完成",
+    }, ({"id": 1},), False) == rows
+
+
+
+@pytest.mark.parametrize("bound,identity,floor", [(True, "補助市民", 0), (False, "補助市民", 500), (False, "原住民", 500)])
+def test_completed_full_subsidy_rebuild_updates_entitlement_without_funding_assignment(monkeypatch, bound, identity, floor):
+    from decimal import Decimal
+    from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
+    from domains.payroll.calculation import build_case_payroll_candidate
+    day = date(2026, 8, 1)
+    service = OfficialAssignmentServiceFacts("assignment:8", 17, (day,),
+        holiday_hour_segments=((day, Decimal(0), Decimal(8)),))
+    monkeypatch.setattr(mysql_rebuild, "_service_facts", lambda *args: (service,))
+    monkeypatch.setattr(mysql_rebuild, "_schedule_index", lambda *args: {})
+    monkeypatch.setattr(mysql_rebuild, "_amount_index", lambda *args: {})
+    monkeypatch.setattr(mysql_rebuild, "_rate_snapshots", lambda *args: (rate_snapshot("assignment:8", "v1", PayrollPolicyKind.SUBSIDIZED_CITIZEN),))
+    monkeypatch.setattr(mysql_rebuild, "_existing_obligations", lambda *args: ())
+    monkeypatch.setattr(mysql_rebuild, "_payroll_adjustments", lambda *args: ())
+    monkeypatch.setattr(mysql_rebuild, "_payment_due_date", lambda *args: day)
+    pricing = CasePricingTerms("補助市民", IdentityRule.SOCIAL, Decimal(120), HourlyRates(350, 350), HourlyRates(350, 350))
+    facts = mysql_rebuild._rebuild_facts({"case_no": "CASE-1", "aggregate_version": 0,
+        "service_days": 1, "service_hours_per_day": 8, "floor_fee": floor, "identity_status": identity}, (), (), (), (), (), pricing if bound else None)
+    candidate = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)
+    assert candidate.total_payable == MoneyNTD(5600 + floor)

@@ -39,3 +39,14 @@
 
 ## Change triggers
 Reconcile when Client Finance direction mapping、open obligation replacement、Actual Start projection handoff或focused test location changes。
+
+## 國定假日計價接線 ^obligation-planning-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: obligation-planning-holiday-pricing
+  target: ".arch-map/requirements/04_Client_Finance_Domain.md#^holiday-service-pricing"
+```
+- 假日計價接線由下列 owner 實作，驗證見既有測試入口。`CasePricingFacts`／`pricing_policy.py` 提供客戶適用費率與條款，Scheduling 提供實際有效日時數及假日旗標，`obligation_planning.py` 與 `order_amount_calculation.py` 共用服務費結果。`automatic_client_accounting.py` 沿 caller UoW 交既有 writer，同步總額與各期。正式 ledger／allocation 與月嫂正式付款來源由兩方 owner 鎖定重讀，雙邊保護引用22A，不以 UI 狀態代替。
+
+- 調整後有效時數的財務配對與缺少來源處理由 Scheduling 提供。Client Finance 與 Payroll 共用同一逐案重算結果；精準重啟來源由 `order_terms_read_model.py` 既有 `orders_historical_precision_restart` 查詢提供，假日 writer 與正式 Query 使用一致來源，不只看目前狀態。

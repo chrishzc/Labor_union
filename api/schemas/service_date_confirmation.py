@@ -3,6 +3,7 @@
 from datetime import date
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
+from api.schemas.holidays import HolidayCaseRepricingView
 
 
 class ServiceWeekView(BaseModel):
@@ -34,6 +35,7 @@ class ServiceDateAdjustmentPairView(BaseModel):
 
 
 class ServiceDateAdjustmentQueryView(BaseModel):
+    accounting_result: HolidayCaseRepricingView | None = None
     days: list[AdjustableServiceDayView]
     staff: list[BoundServiceStaffView]
     pairs: list[ServiceDateAdjustmentPairView]
@@ -52,6 +54,7 @@ class ServiceDateAdjustmentPreviewView(BaseModel):
 
 
 class ServiceDateAdjustmentReceiptView(BaseModel):
+    case_result: HolidayCaseRepricingView | None = None
     receipt_id: int = Field(gt=0)
     scheduling_version: int
     confirmed_version: int | None

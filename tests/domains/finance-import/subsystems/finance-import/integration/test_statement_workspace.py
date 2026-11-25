@@ -640,27 +640,44 @@ def test_historical_full_subsidy_keeps_nonperiod_money_and_unknown_sources(kind)
         assert result.client_items[0].remaining_ntd == 400
 
 
-def test_historical_full_subsidy_without_formal_payable_does_not_invent_staff_debt():
+@pytest.mark.parametrize('staff_amount', [None, 5600])
+def test_historical_full_subsidy_does_not_invent_or_hide_staff_debt(staff_amount: int | None) -> None:
+    """STAR: query historical roots without inventing debt or treating a mismatch as holiday pay."""
     from decimal import Decimal
     from subsystems.client_finance.case_accounting_query import ClientCaseFunding, ClientCasePaymentTerms
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    from subsystems.staff_payables.case_accounting_query import StaffAccountingItem
 
     class State:
         def case_client(self, _): return 'Synthetic'
         def dismissed(self, _, **kwargs): return {}
 
     terms = ClientCasePaymentTerms(
-        ClientCaseFunding('CASE-HISTORY', '原住民', Decimal(80), Decimal(80), 28000),
+        ClientCaseFunding('CASE-HISTORY', '原住民', Decimal(80), Decimal(80), 2800),
         historical_stages=True,
     )
-    result = AccountingWorkspace(State(), lambda *a, **kw: ((), ()), lambda *a, **kw: ((), ()),
-                                 payment_terms=lambda _: terms).query('CASE-HISTORY')
-    assert result.full_subsidy is True
-    assert result.customer_amount_ntd == 0
+    staff_items = () if staff_amount is None else (
+        StaffAccountingItem('original-service', 'payable', '月嫂服務費', 'Synthetic',
+                            staff_amount, 0, False, '1', None),
+    )
+    def historical_case_total_must_not_be_repriced(_: str) -> int | None:
+        raise AssertionError('historical accounting must not require ordinary holiday pricing facts')
+
+    result = AccountingWorkspace(
+        State(), lambda *a, **kw: ((), ()), lambda *a, **kw: (staff_items, ()),
+        payment_terms=lambda _: terms, subsidy=lambda _: 2800,
+        case_total=historical_case_total_must_not_be_repriced,
+    ).query('CASE-HISTORY')
+    assert result.full_subsidy is (staff_amount is None)
+    assert result.customer_amount_ntd == (0 if staff_amount is None else None)
     assert result.client_items == () and result.zero_stages == ()
-    assert result.staff_receivable_ntd is None
-    assert result.customer_burden_ntd == 0
-    assert result.payable_ntd is None and result.paid_ntd is None
+    assert result.staff_receivable_ntd == staff_amount
+    assert result.scheme_conflict is (staff_amount is not None)
+    assert ('staff_total_amount_conflict' in result.accounting_pending_reasons) is (staff_amount is not None)
+    assert result.staff_items == staff_items
+    if staff_amount is None:
+        assert result.customer_burden_ntd == 0
+        assert result.payable_ntd is None and result.paid_ntd is None
     assert result.historical_stages is True
 
 

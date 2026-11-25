@@ -180,4 +180,22 @@ describe('holiday client', () => {
       publicCode: 'stale_preview',
     });
   });
+  it('逐案帳務紀錄走有界唯讀查詢並嚴格解碼失敗原因', async () => {
+    const result = { holiday_date: '2026-02-17', receipt_key: 'record-1', case_results: [
+      { case_no: 'CASE-FAIL', outcome: 'failed', case_total_amount: null,
+        reason_code: 'holiday_service_attribution_ambiguous', missing_mapping: ['financial B -> actual date'] },
+    ] };
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ success: true, message: 'ok', data: [result], error: null }));
+    const client = createHolidayClient();
+    expect(await client.accountingResults(HOLIDAY_QUERY)).toEqual([result]);
+    const [url, options] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(String(url)).toContain('/api/v1/holidays/accounting-results');
+    expect(String(url)).toContain('from_date=2026-01-01');
+    expect(options?.method).toBe('GET');
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ success: true, message: 'ok', data: [
+      { ...result, case_results: [{ ...result.case_results[0], unexpected: true }] },
+    ] }));
+    await expect(client.accountingResults(HOLIDAY_QUERY)).rejects.toBeInstanceOf(HolidayContractError);
+  });
+
 });

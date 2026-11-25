@@ -88,9 +88,8 @@ class _Repository:
         }
 
     def upsert_holiday(self, holiday_date, holiday_name, double_pay):
-        existing = self.holidays.get(holiday_date)
         self.holidays[holiday_date] = HolidayFact(
-            holiday_date, holiday_name, existing.is_double_pay_default if existing else False,
+            holiday_date, holiday_name, double_pay,
         )
 
     def delete_holiday(self, holiday_date):
@@ -300,3 +299,98 @@ def test_holiday_query_reuses_projection_cache_without_opening_db_until_apply_in
     finally:
         configure_holiday_query_cache_backend(route.default_redis_cache_backend)
         invalidate_holiday_query_cache()
+
+
+def test_holiday_toggle_reprices_once_and_omitted_import_preserves_manual_setting():
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand
+    repository = _Repository()
+    connection = _Connection()
+    repriced: list[bool | None] = []
+    application = HolidayMaintenanceApplication(repository, lambda: _UnitOfWork(connection), lambda: None,
+        lambda command, _key, _actor: repriced.append(command.is_double_pay_default))
+    day = date(2026, 1, 1)
+    def save(value, key):
+        command = HolidayCommand("upsert", day, "元旦", value, day, day)
+        preview = application.preview(command)
+        return command, preview, application.apply(command, preview.calendar.holiday_version,
+            preview.preview_fingerprint, key, "tester", "年度設定")
+    command, preview, _ = save(True, "enable")
+    assert route._preview_payload(preview)["payroll_impact"] == "reprice_unpaid_cases"
+    application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+        "enable", "tester", "年度設定")
+    assert repository.holidays[day].is_double_pay_default is True
+    assert repriced == [True]
+    _, _, imported = save(None, "reimport")
+    assert imported.changed is False
+    assert repository.holidays[day].is_double_pay_default is True
+    save(False, "disable")
+    assert repository.holidays[day].is_double_pay_default is False
+    assert repriced == [True, False]
+
+
+def test_holiday_new_import_defaults_off():
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand
+    repository = _Repository()
+    application = HolidayMaintenanceApplication(repository, lambda: _UnitOfWork(_Connection()), lambda: None)
+    day = date(2026, 1, 1)
+    command = HolidayCommand("upsert", day, "元旦", None, day, day)
+    preview = application.preview(command)
+    application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint, "new", "tester", "匯入")
+    assert repository.holidays[day].is_double_pay_default is False
+
+
+def test_holiday_accounting_results_return_saved_mixed_outcomes_after_reload(monkeypatch):
+    from infrastructure.mysql import holiday_accounting_results as stored
+    from subsystems.scheduling.holiday_accounting_results import HolidayAccountingReceipt
+    from subsystems.scheduling.holiday_maintenance import HolidayCaseRepricingResult
+    client, connection, _ = _client(monkeypatch)
+    rows = (HolidayAccountingReceipt(date(2026, 1, 1), "saved-operation", (
+        HolidayCaseRepricingResult("unpaid", "repriced", 5600, client_receivable_amount=5600, staff_payable_amount=5120),
+        HolidayCaseRepricingResult("paid", "preserved_cash_history", 2800, reason_code="formal_cash_history"),
+        HolidayCaseRepricingResult("failed", "failed", reason_code="holiday_service_attribution_ambiguous"),
+    )),)
+    observed = []
+    def query(actual_connection, start, end):
+        observed.append((actual_connection, start, end))
+        return rows
+    monkeypatch.setattr(stored, "query_holiday_accounting_results", query)
+    url = "/api/v1/holidays/accounting-results?from_date=2026-01-01&to_date=2026-12-31"
+    first, reloaded = client.get(url), client.get(url)
+    assert first.status_code == reloaded.status_code == 200
+    assert first.json() == reloaded.json()
+    results = first.json()["data"][0]["case_results"]
+    assert [item["outcome"] for item in results] == ["repriced", "preserved_cash_history", "failed"]
+    assert results[2]["reason_code"] == "holiday_service_attribution_ambiguous"
+    assert observed == [(connection, date(2026, 1, 1), date(2026, 12, 31))] * 2
+
+
+def test_holiday_accounting_results_failure_is_not_an_empty_success(monkeypatch):
+    from infrastructure.mysql import holiday_accounting_results as stored
+    client, _, _ = _client(monkeypatch)
+    def unavailable(*_args):
+        raise RuntimeError("fixture unavailable")
+    monkeypatch.setattr(stored, "query_holiday_accounting_results", unavailable)
+    response = client.get("/api/v1/holidays/accounting-results?from_date=2026-01-01&to_date=2026-12-31")
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "holiday_accounting_results_failed"
+
+
+def test_transaction_failure_before_flag_change_never_commits_setting_or_receipt():
+    import pytest
+    from pymysql.err import OperationalError
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand
+    repository = _Repository()
+    connection = _Connection()
+    def deadlock(_command):
+        raise OperationalError(1213, "synthetic deadlock")
+    application = HolidayMaintenanceApplication(repository, lambda: _UnitOfWork(connection), lambda: None,
+        before_change=deadlock)
+    day = date(2026, 1, 1)
+    command = HolidayCommand("upsert", day, "元旦", True, day, day)
+    preview = application.preview(command)
+    with pytest.raises(OperationalError):
+        application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+            "transaction-failed", "tester", "年度設定")
+    assert repository.holidays == {}
+    assert repository.receipts == {}
+    assert connection.commits == 0

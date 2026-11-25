@@ -433,7 +433,7 @@ def _build_service_sheet(ws, report: WeeklyOperationsReport) -> None:
             p_start_str = _service_date(r.period_start_date) if r.period_start_date else ""
             p_end_str = _service_date(r.period_end_date) if r.period_end_date else ""
             ws.append([
-                _service_week_number(r.period_start_date),
+                _service_week_number(r.period_start_date) if r.period_start_date else "",
                 idx,
                 r.case_no,
                 r.client_name,

@@ -49,6 +49,18 @@ def persist_payroll_installments(cursor, case_no, candidate, identities=None, *,
                    and (staff_ids is None or item.staff_id in staff_ids))
     if not tiered:
         return
+    if any(item.covered_holiday_salary for item in tiered):
+        from decimal import Decimal
+        from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+        from infrastructure.mysql.order_terms_read_model import select_order
+        from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+        order = select_order(cursor, case_no, lock=True)
+        pricing = load_case_pricing(cursor, order, lock=True)
+        hours = sum((Decimal(str(item.actual_hours)) for item in candidate.assignments), Decimal(0))
+        funding_pending = (pricing.is_full_subsidy(hours) is True if pricing is not None else
+            normalize_subsidy_policy_identity(str(order["client_identity_status"])) in {"補助市民", "原住民"})
+        if funding_pending:
+            return
     # Scheduling has already saved this generation; Orders' end-date projection
     # is persisted later in the same outer transaction.
     cursor.execute("SELECT COALESCE((SELECT MAX(day.work_date) FROM scheduling_aggregates schedule "

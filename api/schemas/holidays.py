@@ -41,7 +41,7 @@ class HolidayPreviewRequest(BaseModel):
     action: Literal["upsert", "delete"]
     holiday_date: date
     holiday_name: str | None = Field(default=None, max_length=100)
-    is_double_pay_default: Literal[False] = False
+    is_double_pay_default: bool | None = None
     from_date: date | None = None
     to_date: date | None = None
 
@@ -95,7 +95,7 @@ class HolidayPreviewCommandView(BaseModel):
     action: Literal["upsert", "delete"]
     holiday_date: date
     holiday_name: str | None
-    is_double_pay_default: bool
+    is_double_pay_default: bool | None
     from_date: date
     to_date: date
     expected_calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -110,13 +110,26 @@ class HolidayPreviewView(BaseModel):
     source_identity: str
     calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     schedule_impact: Literal["none"]
-    payroll_impact: Literal["none"]
+    payroll_impact: Literal["none", "reprice_unpaid_cases"]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HolidayCaseRepricingView(BaseModel):
+    case_total_amount: int | None = None
+    missing_mapping: list[str] = Field(default_factory=list)
+    reason_code: str | None = None
+    client_receivable_amount: int | None = None
+    staff_payable_amount: int | None = None
+    subsidy_amount: int | None = None
+    unallocated_amount: int | None = None
+    case_no: str
+    outcome: Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "unchanged", "blocked", "repriced_funding_pending", "failed"]
 
 
 class HolidayReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    case_results: list[HolidayCaseRepricingView] = Field(default_factory=list)
     receipt_key: str = Field(min_length=1, max_length=191)
     action: Literal["upsert", "delete"]
     holiday_date: date
@@ -126,3 +139,9 @@ class HolidayReceiptView(BaseModel):
     previous_calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     resulting_calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HolidayAccountingReceiptView(BaseModel):
+    holiday_date: date
+    receipt_key: str
+    case_results: list[HolidayCaseRepricingView]

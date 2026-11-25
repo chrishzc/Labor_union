@@ -208,11 +208,35 @@ export const HolidayPreviewSchema = z.strictObject({
   source_identity: z.string().min(1),
   calendar_version: HolidayFingerprintSchema,
   schedule_impact: z.literal('none'),
-  payroll_impact: z.literal('none'),
+  payroll_impact: z.enum(['none', 'reprice_unpaid_cases']),
   preview_fingerprint: HolidayFingerprintSchema,
 });
 
+export const HolidayCaseRepricingSchema = z.strictObject({
+  case_no: z.string().min(1),
+  outcome: z.enum(['repriced', 'preserved_cash_history', 'historical_excluded', 'funding_decision_pending', 'unchanged', 'blocked', 'repriced_funding_pending', 'failed']),
+  case_total_amount: z.number().int().nullable(),
+  reason_code: z.string().nullable().optional(),
+  missing_mapping: z.array(z.string()).optional(),
+  client_receivable_amount: z.number().int().nullable().optional(),
+  staff_payable_amount: z.number().int().nullable().optional(),
+  subsidy_amount: z.number().int().nullable().optional(),
+  unallocated_amount: z.number().int().nullable().optional(),
+});
+export type HolidayCaseRepricing = z.infer<typeof HolidayCaseRepricingSchema>;
+export const HolidayAccountingReceiptSchema = z.strictObject({
+  holiday_date: HolidayDateSchema,
+  receipt_key: z.string().min(1),
+  case_results: z.array(HolidayCaseRepricingSchema),
+});
+export type HolidayAccountingReceipt = z.infer<typeof HolidayAccountingReceiptSchema>;
+export const HolidayAccountingResultsResponseSchema = z.strictObject({
+  success: z.boolean(), message: z.string(), error: z.string().nullable().optional(),
+  data: z.array(HolidayAccountingReceiptSchema).nullable(),
+});
+
 export const HolidayReceiptSchema = z.strictObject({
+  case_results: z.array(HolidayCaseRepricingSchema).optional(),
   receipt_key: z.string().min(1).max(191),
   action: HolidayActionSchema,
   holiday_date: HolidayDateSchema,

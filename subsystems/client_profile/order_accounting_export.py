@@ -189,6 +189,12 @@ def build_order_accounting_workbook(
     for column, width in enumerate(widths, start=1):
         worksheet.column_dimensions[get_column_letter(column)].width = width
 
+    # DB text is data, including values beginning with '='. Never create formulas.
+    for cells in worksheet.iter_rows():
+        for cell in cells:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
+
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
