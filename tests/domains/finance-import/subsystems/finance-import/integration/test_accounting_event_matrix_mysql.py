@@ -223,9 +223,11 @@ def government():
     current=runpy.run_path('tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_period_reconciliation_mysql.py')
     current['test_real_bank_workbook_government_receipt_stays_pending_until_period_selected'](http)
 
-def cancel(case, days):
+def cancel(case, days, *, fee=0):
     url = f'/api/v1/orders/{case}/cancellation'
     body = {'confirmed_service_days': days}
+    if fee:
+        body.update(fee_ntd=fee, fee_reason='synthetic agreed cancellation fee')
     before = snapshot(case)
     plan = checked(http.post(url + '/preview', json=body))
     assert snapshot(case) == before
@@ -685,12 +687,13 @@ def test_ordinary_completion_materializes_confirmed_customer_subsidy_after_payro
     assert [row['due_date'] for row in item.client_obligation_dates if row['obligation_type'] == 'subsidy_return'] == [date(2026, 12, 15)]
 
 
-@pytest.mark.parametrize("import_before_cancellation", [True, False])
-def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_before_cancellation):
+@pytest.mark.parametrize("import_before_cancellation,fee", [(True, 0), (False, 0), (False, 1000)])
+def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_before_cancellation, fee):
     case, _ = new_case()
     if import_before_cancellation:
         row, _ = stage(case, 5000, 13, incoming=True)
-    cancel(case, [])
+    cancel(case, [], fee=fee)
+    refund_due = 5000 - fee
     if not import_before_cancellation:
         row, _ = stage(case, 5000, 13, incoming=True)
     before = snapshot(case)
@@ -701,11 +704,17 @@ def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_be
         'target_obligation_identities': [], 'service_end_case_no': case,
         'reason': 'confirmed same-case bank receipt', 'evidence': ['synthetic original Sinopac statement'],
     }
-    review_list = checked(http.get(f'/api/v1/finance-import/bank-transactions?row_id={row}&transaction_status=all'))
-    assert review_list['items'][0]['service_end_receipt_case_no'] == case
+    if import_before_cancellation:
+        other_case, _ = new_case()
+        cancel(other_case, [])
+        other_before = snapshot(other_case)
+        assert http.post(url + '/preview', json={**selection, 'service_end_case_no': other_case}).status_code == 409
+        assert snapshot(other_case) == other_before
     preview = checked(http.post(url + '/preview', json=selection))
     assert preview['candidate']['allocations'] == []
-    assert preview['candidate']['service_end_receipt']['new_refund_ntd'] == 5000
+    assert preview['candidate']['service_end_receipt']['new_refund_ntd'] == refund_due
+    review_list = checked(http.get(f'/api/v1/finance-import/bank-transactions?row_id={row}&transaction_status=all'))
+    assert review_list['items'][0]['service_end_receipt_case_no'] == case, review_list
     assert snapshot(case) == before
     body = {**selection, **{f'expected_{key}_version': preview[f'{key}_version'] for key in
                             ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
@@ -717,10 +726,18 @@ def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_be
     after = snapshot(case)
     assert after['order'] == before['order'] and after['schedule'] == before['schedule']
     assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', 5000)]
-    assert [item for item in after['client'] if item['direction'] == 'receivable_from_client'] == [
-        item for item in before['client'] if item['direction'] == 'receivable_from_client']
+    previous_receivables = {item['obligation_identity']: item for item in before['client']
+                            if item['direction'] == 'receivable_from_client'}
+    current_receivables = {item['obligation_identity']: item for item in after['client']
+                           if item['direction'] == 'receivable_from_client'}
+    assert previous_receivables.keys() == current_receivables.keys()
+    if fee:
+        adjustment, = [i for i in current_receivables.values() if i['obligation_type'] == 'adjustment']
+        assert adjustment['status'] == 'settled' and adjustment['amount_due_ntd'] == 0
+    else:
+        assert current_receivables == previous_receivables
     assert [(item['status'], item['amount_due_ntd']) for item in after['client']
-            if item['obligation_type'] == 'refund'] == [('open', 5000)]
+            if item['obligation_type'] == 'refund'] == [('open', refund_due)]
     assert checked(http.post(url + '/apply', json=body, headers=key), 202)['replayed'] is True
     assert http.post(url + '/preview', json=selection).status_code == 409
     from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting
@@ -728,24 +745,36 @@ def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_be
     try:
         readback = query_cancellation_accounting(connection, case)
         assert readback is not None and readback.net_received_ntd == 5000
-        assert readback.refund_due_ntd == 5000 and readback.bank_refunded_ntd == 0
+        assert readback.refund_due_ntd == refund_due and readback.bank_refunded_ntd == 0
+        if fee:
+            from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
+            cash = rows('SELECT UNIX_TIMESTAMP(created_at) AS epoch FROM client_ledger_entries WHERE case_no=%s',
+                        (case,))[0]
+            from datetime import datetime
+            from shared_kernel.clock import TAIPEI_TIME_ZONE
+            apply_date = datetime.fromtimestamp(int(cash['epoch']), TAIPEI_TIME_ZONE).date()
+            month = apply_date.replace(day=1)
+            recognition, = [i for i in MySqlMonthlyAccountingSource(connection).recognitions(month, month)
+                            if i.cases == (case,)]
+            assert recognition.action == 'cancellation_fee_revenue'
+            assert recognition.amount_ntd == fee and recognition.confirmed_on == apply_date.isoformat()
     finally:
         connection.close()
     assert snapshot(case) == after
 
 
 def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation():
-    case, _ = new_case(days=3)
-    seed_service(case, 3)
-    bid, _ = stage(case, 5000, 14, incoming=True)
+    case, _ = new_case()
+    seed_service(case)
+    bid, _ = stage(case, 50000, 14, incoming=True)
     terms_url = f'/api/v1/orders/{case}/terms'
     initial = checked(http.get(terms_url))
     assignment = rows('SELECT id FROM case_staff_assignments WHERE case_no=%s', (case,))[0]['id']
-    service_date = '2026-10-01'
+    service_dates = [f'2026-10-{day:02d}' for day in range(1, 16)]
     terms = {
-        'proposed_terms': {**initial['terms'], 'service_days': 1},
-        'replacement_service_dates': [service_date],
-        'replacement_allocations': [{'assignment_id': assignment, 'service_days': 1, 'service_dates': [service_date]}],
+        'proposed_terms': {**initial['terms'], 'service_days': 15},
+        'replacement_service_dates': service_dates,
+        'replacement_allocations': [{'assignment_id': assignment, 'service_days': 15, 'service_dates': service_dates}],
         'allow_started_service_change': True,
     }
     plan = checked(http.post(terms_url + '/preview', json=terms))
@@ -758,22 +787,22 @@ def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancel
         complete(case)
     before = snapshot(case)
     assert before['order'][0]['status'] == '訂單完成'
-    assert [str(row['work_date']) for row in before['schedule']] == [service_date]
+    assert [str(row['work_date']) for row in before['schedule']] == service_dates
     assert not rows('SELECT id FROM order_cancellation_apply_receipts WHERE case_no=%s', (case,))
     url = '/api/v1/finance-import/corrections'
     selection = {'row_identity': f'finance-import-row:{bid}', 'classification_type': 'client_receipt',
                  'target_obligation_identities': [], 'service_end_case_no': case,
                  'evidence': ['synthetic bank receipt after actual service'], 'reason': 'confirmed exact case'}
     preview = checked(http.post(url + '/preview', json=selection))
-    # This fixture's standard rate is NT$300/h, one verified eight-hour day.
+    # This fixture's standard rate is NT$300/h, fifteen verified eight-hour days.
     summary = preview['candidate']['service_end_receipt']
-    assert summary['service_due_ntd'] == 2400 and summary['new_refund_ntd'] == 2600
+    assert summary['service_due_ntd'] == 36000 and summary['new_refund_ntd'] == 14000
     assert snapshot(case) == before
     body = {**selection, **{f'expected_{k}_version': preview[f'{k}_version'] for k in
                             ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
     jobs(checked(http.post(url + '/apply', json=body, headers={'Idempotency-Key': case + ':late-early-end'}), 202))
     after = snapshot(case)
     assert after['order'] == before['order'] and after['schedule'] == before['schedule']
-    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', 5000)]
+    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', 50000)]
     assert [(item['status'], item['amount_due_ntd']) for item in after['client']
-            if item['obligation_type'] == 'refund'] == [('open', 2600)]
+            if item['obligation_type'] == 'refund'] == [('open', 14000)]
