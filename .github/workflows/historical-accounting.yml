@@ -99,10 +99,12 @@ jobs:
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
           -t 隔離
       - name: Check Python types and lint at the affected boundaries
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/subsidy_confirmation_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py subsystems/finance_import/query.py api/schemas/finance_import.py api/dependencies/finance_import.py api/routes/finance_statement_workspace.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/finance_import_owning_domain_composite.py infrastructure/mysql/accounts_payable_export_sources.py infrastructure/mysql/payroll_rebuild_repository.py infrastructure/mysql/finance_import_repository.py infrastructure/mysql/historical_staff_payout_repository.py subsystems/orders/historical_adoption_workflow.py
           pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/query.py infrastructure/mysql/subsidy_confirmation_repository.py infrastructure/mysql/staff_payout_repository.py api/dependencies/finance_import.py api/schemas/finance_import.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/accounts_payable_export_sources.py
       - name: Check the owning specification and whitespace
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           python scripts/validate_spec_hygiene.py
           python scripts/validate_spec_hygiene.py --path .arch-map/requirements/22B_帳務差額處置與工作台UI正式規格.md

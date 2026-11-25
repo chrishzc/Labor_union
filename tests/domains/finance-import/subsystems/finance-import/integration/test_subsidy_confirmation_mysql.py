@@ -487,21 +487,52 @@ def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(co
         workflow.apply(request)
     assert error.value.error.code == 'outgoing_staff_payout_month_no_match'
     assert snapshot(connection, case) == unchanged
+    classification_history_sql = (
+        'SELECT * FROM finance_import_classification_events WHERE finance_import_row_id=%s ORDER BY id'
+    )
+    append_classification_sql = (
+        'INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,'
+        'canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,'
+        'evidence,available_actions,actor,reason) '
+        'SELECT batch_id,finance_import_row_id,classification_version+1,canonical_fact_version,%s,disposition,'
+        'decision_facts_fingerprint,target_identities,evidence,available_actions,%s,%s '
+        'FROM finance_import_classification_events WHERE id=%s'
+    )
     with connection.cursor() as cursor:
         cursor.execute('UPDATE finance_import_rows SET memo=%s WHERE id=%s', (memo, row_id))
-        cursor.execute("UPDATE finance_import_classification_events SET classification_type='client_subsidy_return' WHERE finance_import_row_id=%s", (row_id,))
+        cursor.execute(classification_history_sql, (row_id,))
+        original_classifications = cursor.fetchall()
+        assert original_classifications[-1]['classification_type'] == 'staff_payout'
+        cursor.execute(append_classification_sql, ('client_subsidy_return', 'synthetic',
+            'Counterfactual wrong-purpose fixture', original_classifications[-1]['id']))
     connection.commit()
+    with connection.cursor() as cursor:
+        cursor.execute(classification_history_sql, (row_id,))
+        wrong_classifications = cursor.fetchall()
+    assert wrong_classifications[:-1] == original_classifications
+    assert wrong_classifications[-1]['classification_type'] == 'client_subsidy_return'
+    assert wrong_classifications[-1]['classification_version'] == original_classifications[-1]['classification_version'] + 1
     with pytest.raises(StaffPayoutReconciliationError):
         workflow.apply(request)
     assert snapshot(connection, case) == unchanged
     with connection.cursor() as cursor:
-        cursor.execute("UPDATE finance_import_classification_events SET classification_type='staff_payout' WHERE finance_import_row_id=%s", (row_id,))
+        cursor.execute(append_classification_sql, ('staff_payout', 'synthetic',
+            'Restore staff-purpose fixture with a new event', wrong_classifications[-1]['id']))
     connection.commit()
+    with connection.cursor() as cursor:
+        cursor.execute(classification_history_sql, (row_id,))
+        restored_classifications = cursor.fetchall()
+    assert restored_classifications[:-1] == wrong_classifications
+    assert restored_classifications[-1]['classification_type'] == 'staff_payout'
+    assert restored_classifications[-1]['classification_version'] == wrong_classifications[-1]['classification_version'] + 1
     checked = workflow.preview(selection, correlation)
     request = replace(request, expected_staff_payables_version=ExpectedVersion(checked.staff_payables_version),
         expected_bank_facts_version=ExpectedVersion(checked.bank_facts_version), preview_fingerprint=checked.fingerprint)
     receipt = workflow.apply(request)
     assert workflow.apply(request) == receipt
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT COUNT(*) n FROM staff_payout_events WHERE finance_import_row_id=%s', (row_id,))
+        assert cursor.fetchone()['n'] == 1
     payment, = [item for item in workspace.query(case).staff_items if item.identity == identity]
     assert payment.actual_ntd == 12000
     assert app.preview_batch(batch, correlation).rows[0].disposition.value == 'existing'
