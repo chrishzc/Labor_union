@@ -16,7 +16,9 @@
 - **銀行月嫂出款對象**：永豐 `P永` 自動核銷依匯入辨識的對象與配對義務，人工核銷依經操作者確認的應付義務。兩者均免驗交易收款帳號與月嫂主要帳戶。台新 `P台` 依原始備註辨識唯一月嫂姓名並比對所選義務。
 - `staff_monthly_settlements`、`staff_monthly_settlement_details`、`staff_actual_transfers`、`staff_payment_transactions`、`staff_transfer_allocations` 僅供歷史唯讀查詢或明確 backfill；`staff_payments` 僅唯讀相容投影。
 
-### 2.2 Payout Reconciliation Preview／Apply
+<a id="22-payout-reconciliation-previewapply"></a>
+
+### 2.2 Payout Reconciliation Preview／Apply ^staff-payout-reconciliation
 
 - **Commands**：`PreviewStaffPayout`、`ApplyStaffPayout`、`PreviewStaffPayoutReturn`、`ApplyStaffPayoutReturn`、`PreviewStaffPayoutReversal`、`ApplyStaffPayoutReversal`、`PreviewStaffPayoutDifference`、`ApplyStaffPayoutDifference`、`PreviewStaffOverpaymentRecovery`、`ApplyStaffOverpaymentRecovery`。
 - **Apply 共用交易步驟**：依 canonical staff mutex order 加鎖 → 鎖定 version、bank facts、該流水適用的帳號快照與義務（`P永` 不以帳號覆核已確認對象） → 重建並驗證 fingerprint 與 expected version → 依事件別 guard 驗證 → append ledger event 與 links → 更新 projection、version、outbox 與 receipt → outer UoW 單次提交（`202 JobAccepted` 只代表排入 durable command。經辦用工作識別查 job 結果，取得成功收據，並重新讀取正式根資料（root）確認已核銷，才算完成；待處理或結果未明不得顯示已核銷）。

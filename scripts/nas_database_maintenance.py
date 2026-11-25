@@ -480,6 +480,7 @@ def schema_inventory(config, database, equivalent_databases=(), *, reject_source
                         if original != database:
                             require(not re.search(rf"(?:`{re.escape(original)}`|\b{re.escape(original)})\s*\.", sql, re.I),
                                     "副本定義仍參照原資料庫，未切換；請維護人員檢查跨庫相依。")
+                sql = sql.replace("\r\n", "\n").replace("\r", "\n")
                 sql = re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", sql)
                 sql = re.sub(r"\bCHARACTER SET\s+([A-Za-z0-9_]+)\s+COLLATE\s+", "COLLATE ", sql)
                 definitions.append(migration._normalize_database_qualifiers(sql, (database, *equivalent_databases)))
@@ -1153,10 +1154,16 @@ def _restore_evidence(config, database, *, source=None, check_tables=False):
     snapshot = migration._schema_snapshot(config, database)
     snapshot.pop("sha256", None)
     programs = migration._restored_schema_program_evidence(snapshot, database)
-    snapshot["triggers"] = programs["triggers"]
-    snapshot["views"] = programs["views"]
+    snapshot["triggers"] = [
+        {**item, "action_statement": item["action_statement"].replace("\r\n", "\n").replace("\r", "\n")}
+        for item in programs["triggers"]
+    ]
+    snapshot["views"] = [
+        {**item, "view_definition": item["view_definition"].replace("\r\n", "\n").replace("\r", "\n")}
+        for item in programs["views"]
+    ]
     snapshot["show_create_tables"] = {
-        name: re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", migration._normalize_database_qualifiers(sql, (database,)))
+        name: re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", migration._normalize_database_qualifiers(sql, (database,))).replace("\r\n", "\n").replace("\r", "\n")
         for name, sql in snapshot["show_create_tables"].items()
     }
     tables = [item["name"] for item in inventory["tables"] if item["kind"] == "BASE TABLE"]

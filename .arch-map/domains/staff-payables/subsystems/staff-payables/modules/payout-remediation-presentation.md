@@ -13,7 +13,15 @@
 - 原銀行入口帶入日期、實付、對象及摘要；共用 Query 的 `funding_portions` 顯示自備款／補助款各自待付。確認前以正式 Preview 顯示手續費及剩餘款，成功後回讀未清補助，不由畫面推斷整案結清。
 - 永豐核銷方式可明選「補助方案一：核銷自備款，補助款保留待付」；帶 `confirm_subsidy_split` 至原 payout endpoint，必須取得含正式 T／S／兩來源待付及日期的預覽後再確認。方案／分期與付款一起成功才回讀並提示已保存；未知結果保留原背景命令，不拆成前端兩次儲存。
 
-## Contracts
+<a id="contracts"></a>
+
+## Contracts ^staff-payout-owner-ui
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: staff-payout-owner-ui
+  target: .arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md#^staff-payout-reconciliation
+```
 - `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables owner workflow與結清條件。
 - 依 #16 §2.2–2.3，送出後將受理、背景結果與正式回讀分開：`202` 不顯示已核銷，成功結果須指回同一月嫂帳戶，再重查原選定款項。回讀結果未明不得顯示完成；若只部分核銷，保留未清餘額與警示。只有正式回讀證實選定款項皆結清時，才通知可解除異常。
 - `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
