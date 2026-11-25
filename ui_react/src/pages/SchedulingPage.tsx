@@ -18,6 +18,8 @@ import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_direct
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import type { SchedulingCurrentAssignment, SchedulingCurrentProjection } from '../api/scheduling/scheduling_current_schemas';
 import { holidayClient } from '../api/scheduling/holiday_client';
+import type { HolidayCaseRepricing } from '../api/scheduling/holiday_schemas';
+import { HolidayRepricingResults } from '../components/HolidayRepricingResults';
 import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
 import { coordinatedServiceTime } from '../components/OrderServiceDateCalendar';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
@@ -305,6 +307,18 @@ function HolidayPolicyWorkspace() {
   const [rowPending, setRowPending] = useState<ReadonlySet<string>>(new Set());
   const [rowErrors, setRowErrors] = useState<Readonly<Record<string, string>>>({});
   const [observedRows, setObservedRows] = useState<Readonly<Record<string, HolidayRow>>>({});
+  const [accountingResults, setAccountingResults] = useState<Readonly<Record<string, readonly HolidayCaseRepricing[]>>>({});
+  const [accountingReadError, setAccountingReadError] = useState('');
+  const [accountingReload, setAccountingReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setAccountingResults({});
+    setAccountingReadError('');
+    void holidayClient.accountingResults({ from_date: fromDate, to_date: toDate }).then(receipts => {
+      if (active) setAccountingResults(previous => ({ ...Object.fromEntries(receipts.map(item => [item.holiday_date, item.case_results])), ...previous }));
+    }).catch(() => { if (active) setAccountingReadError('帳務處理紀錄讀取失敗，請重新查詢。'); });
+    return () => { active = false; };
+  }, [fromDate, toDate, accountingReload]);
 
   useEffect(() => {
     const unsubscribe = holidayFlowStore.subscribe(() => setStoreRevision((value) => value + 1));
@@ -340,7 +354,8 @@ function HolidayPolicyWorkspace() {
         rowRequests.current.set(date, pending);
       }
       if (!pending.committed) {
-        await holidayClient.apply(pending.request, { idempotencyKey: pending.key });
+        const receipt = await holidayClient.apply(pending.request, { idempotencyKey: pending.key });
+        setAccountingResults(previous => ({ ...previous, [date]: receipt.case_results ?? [] }));
         pending.committed = true;
       }
       const readback = await holidayClient.query(horizon);
@@ -549,6 +564,8 @@ function HolidayPolicyWorkspace() {
 
                   <div>
                     <span>{holiday.is_double_pay_default ? '雙倍已啟用' : '雙倍未啟用'}</span>
+                    {accountingResults[holiday.holiday_date] && <HolidayRepricingResults results={accountingResults[holiday.holiday_date]} />}
+                    {accountingReadError && !accountingResults[holiday.holiday_date] && <p>{accountingReadError} <button type="button" onClick={() => setAccountingReload(value => value + 1)}>重新讀取帳務紀錄</button></p>}
                     <button type="button" aria-label={`${holiday.holiday_date} ${holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}`}
                       disabled={rowPending.has(holiday.holiday_date)} onClick={() => void toggleDoublePay(holiday)}>
                       {holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}

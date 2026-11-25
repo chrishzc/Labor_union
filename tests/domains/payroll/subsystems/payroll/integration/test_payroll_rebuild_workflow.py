@@ -142,6 +142,7 @@ def payroll_schedule_sql(monkeypatch):
         CREATE TABLE scheduling_rebuild_lineage(rebuild_event_id INTEGER,new_assignment_id INTEGER,
             old_assignment_identity TEXT,lineage_ordinal INTEGER);
         CREATE TABLE scheduling_command_receipts(rebuild_event_id INTEGER,command_family TEXT);
+        CREATE TABLE order_lifecycle_state_events(id INTEGER,case_no TEXT,trigger_event TEXT,after_status TEXT);
     """)
 
     from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
@@ -160,6 +161,10 @@ def payroll_schedule_sql(monkeypatch):
             return tuple({key: date.fromisoformat(row[key]) if key == "work_date" else row[key]
                           for key in row.keys()} for row in self.result.fetchall())
 
+        def fetchone(self):
+            row = self.result.fetchone()
+            return dict(row) if row is not None else None
+
     try:
         yield raw, Cursor()
     finally:
@@ -172,7 +177,7 @@ def _schedule_payroll(cursor, generation, assignments, *, days=2, hours=4, tiere
     from domains.payroll.tiered_rates import TieredPayrollRate
 
     schedules = mysql_rebuild._load_schedules(
-        cursor, {"effective_generation_id": generation, "service_days": days, "service_hours_per_day": hours}, assignments, True,
+        cursor, {"case_no": "schedule-fixture", "effective_generation_id": generation, "service_days": days, "service_hours_per_day": hours}, assignments, True,
     )
     facts = mysql_rebuild._service_facts(assignments, mysql_rebuild._schedule_index(assignments, schedules))
     rates = tuple(AssignmentRateSnapshot(
@@ -772,14 +777,14 @@ def test_historical_schedule_loader_does_not_read_holiday_pricing(monkeypatch):
         raise AssertionError("historical orders must not consult holiday pricing")
     monkeypatch.setattr(mysql_rebuild, "load_holiday_priced_service_dates", forbidden)
     assert mysql_rebuild._load_schedules(None, {
-        "effective_generation_id": 1, "service_days": 1, "service_hours_per_day": 8,
+        "case_no": "historical-fixture", "effective_generation_id": 1, "service_days": 1, "service_hours_per_day": 8,
         "order_status": "歷史訂單－服務完成",
     }, ({"id": 1},), False) == rows
 
 
 
 @pytest.mark.parametrize("bound,identity,floor", [(True, "補助市民", 0), (False, "補助市民", 500), (False, "原住民", 500)])
-def test_completed_full_subsidy_rebuild_does_not_post_pending_holiday_premium(monkeypatch, bound, identity, floor):
+def test_completed_full_subsidy_rebuild_updates_entitlement_without_funding_assignment(monkeypatch, bound, identity, floor):
     from decimal import Decimal
     from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
     from domains.payroll.calculation import build_case_payroll_candidate
@@ -797,4 +802,4 @@ def test_completed_full_subsidy_rebuild_does_not_post_pending_holiday_premium(mo
     facts = mysql_rebuild._rebuild_facts({"case_no": "CASE-1", "aggregate_version": 0,
         "service_days": 1, "service_hours_per_day": 8, "floor_fee": floor, "identity_status": identity}, (), (), (), (), (), pricing if bound else None)
     candidate = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)
-    assert candidate.total_payable == MoneyNTD(2800 + floor)
+    assert candidate.total_payable == MoneyNTD(5600 + floor)

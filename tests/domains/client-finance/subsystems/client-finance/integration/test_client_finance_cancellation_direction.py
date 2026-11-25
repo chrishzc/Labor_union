@@ -645,7 +645,9 @@ def test_historical_terms_source_does_not_consume_current_holiday_calendar(statu
 @pytest.mark.parametrize("lock", [False, True])
 def test_general_terms_source_borrows_enabled_holidays_with_matching_lock_mode(lock, monkeypatch):
     from infrastructure.mysql.order_terms_read_model import _enabled_holiday_dates
+    import infrastructure.mysql.order_terms_read_model as read_model
     import infrastructure.mysql.scheduling_holiday_query as holiday_adapter
+    monkeypatch.setattr(read_model, "_historical_precision_restarted", lambda cursor, case_no, lock: False)
     calls = []
     enabled, disabled = date(2026, 1, 1), date(2027, 1, 1)
     class CalendarQuery:
@@ -658,9 +660,32 @@ def test_general_terms_source_borrows_enabled_holidays_with_matching_lock_mode(l
                 SimpleNamespace(holiday_date=disabled, is_double_pay_default=False),
             ))
     monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", CalendarQuery)
-    assert _enabled_holiday_dates(SimpleNamespace(connection=object()), {"status": "訂單成立"}, lock) == (enabled,)
+    assert _enabled_holiday_dates(SimpleNamespace(connection=object()), {"case_no": "ordinary-holiday", "status": "訂單成立"}, lock) == (enabled,)
     assert calls == [lock]
 
+
+
+@pytest.mark.parametrize("lock", [False, True])
+def test_precision_restart_source_excludes_holidays_after_establishment(lock, monkeypatch):
+    from infrastructure.mysql.order_terms_read_model import _enabled_holiday_dates
+    import infrastructure.mysql.scheduling_holiday_query as holiday_adapter
+
+    class Cursor:
+        connection = object()
+
+        def execute(self, statement, parameters):
+            assert "orders_historical_precision_restart" in statement
+            assert ("FOR UPDATE" in statement) is lock
+            assert parameters == ("restarted-history", "訂單成立")
+
+        def fetchone(self):
+            return {"id": 17}
+
+    def forbidden(connection):
+        raise AssertionError("precisely restarted historical source must not query holiday flags")
+
+    monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", forbidden)
+    assert _enabled_holiday_dates(Cursor(), {"case_no": "restarted-history", "status": "訂單成立"}, lock) == ()
 
 
 def test_legacy_social_without_effective_limit_defers_holiday_premium():

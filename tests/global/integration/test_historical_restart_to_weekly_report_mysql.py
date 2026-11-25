@@ -56,7 +56,7 @@ def _arguments(database: str) -> Namespace:
     )
 
 
-def _seed_owner_roots(cursor, case_no: str, lifecycle_status: str) -> tuple[int, int]:
+def _seed_owner_roots(cursor, case_no: str, lifecycle_status: str, *, historical_evidence: bool = True) -> tuple[int, int | None]:
     cursor.execute(
         "INSERT INTO clients(case_no,name,identity_status,city,address,service_time,service_type) "
         "VALUES (%s,%s,'一般市民','新竹市','東區','09:00-17:00','連續服務')",
@@ -134,6 +134,8 @@ def _seed_owner_roots(cursor, case_no: str, lifecycle_status: str) -> tuple[int,
         "VALUES (%s,%s,'contract_completed','test','fixture',%s)",
         (case_no, f"{case_no}-contract", f"{case_no}-contract-key"),
     )
+    if not historical_evidence:
+        return staff_id, None
     cursor.execute(
         "INSERT INTO order_lifecycle_state_events(case_no,trigger_event,before_status,after_status,actor,"
         "business_date,expected_version,idempotency_key,facts_snapshot) "
@@ -1272,4 +1274,133 @@ def test_actual_start_preserves_approved_substitution_and_leave_occupancy_mysql(
         assert second[3:] == before[3:]
     finally:
         connection.rollback()
+        connection.close()
+
+
+def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path, monkeypatch) -> None:
+    """STAR: real precision restart and ordinary Apply share a holiday, never pricing origin."""
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+    from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+    from infrastructure.mysql.order_terms_read_model import load_calculable_client_finance_facts, select_order
+    from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
+    from subsystems.scheduling import matching_plan_workflow, availability_lock_acquisition_workflow
+
+    monkeypatch.setattr(matching_plan_workflow, "get_connection", matching_plan_workflow.get_connection)
+    monkeypatch.setattr(availability_lock_acquisition_workflow, "get_connection", availability_lock_acquisition_workflow.get_connection)
+
+    database = f"{DATABASE}_holiday_restart"
+    arguments = _arguments(database)
+    assert arguments.host in {"localhost", "127.0.0.1", "::1"}
+    assert database.startswith("lu_test_")
+    bootstrap(arguments)
+    connection = _connection_factory(database)()
+    historical, ordinary = "HOLIDAY-PRECISE-HISTORY", "HOLIDAY-ORDINARY"
+    holiday = date(2026, 9, 3)
+    try:
+        ensure_nas_procedures(connection)
+        with connection.cursor() as cursor:
+            historical_staff, legacy_assignment = _seed_owner_roots(cursor, historical, "歷史訂單－未服務")
+            assert legacy_assignment is not None
+            ordinary_staff, _ = _seed_owner_roots(cursor, ordinary, "訂單成立", historical_evidence=False)
+            for stage, due in (("deposit", "2026-09-01"), ("first", "2026-09-03")):
+                identity = f"{historical}-{stage}"
+                cursor.execute(
+                    "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,"
+                    "before_amount_ntd,after_amount_ntd,before_due_date,after_due_date,source_event_identity,"
+                    "expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,'receivable_from_client',"
+                    "'established',0,2400,NULL,%s,%s,0,%s,'test','historical adoption baseline')",
+                    (identity, historical, stage, due, identity + ':source', identity + ':event'),
+                )
+                cursor.execute(
+                    "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,"
+                    "due_date,status,current_event_id,projection_version) VALUES (%s,%s,%s,'receivable_from_client',"
+                    "2400,%s,'open',%s,1)", (identity, historical, stage, due, int(cursor.lastrowid)),
+                )
+            staff_identity = f"{historical}-original-service-pay"
+            cursor.execute(
+                "INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,"
+                "direction,event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,"
+                "expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) "
+                "VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,4800,'2026-09-18',%s,0,1,%s,'test','historical adoption baseline')",
+                (staff_identity, legacy_assignment, historical, historical_staff, 'a' * 64, staff_identity + ':event'),
+            )
+            cursor.execute(
+                "INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,"
+                "direction,amount_due_ntd,due_date,status,current_event_id,payroll_version,payout_history_exists) "
+                "VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff',4800,'2026-09-18','open',%s,1,0)",
+                (staff_identity, legacy_assignment, historical, historical_staff, int(cursor.lastrowid)),
+            )
+            cursor.execute("UPDATE client_finance_accounts SET aggregate_version=1 WHERE case_no=%s", (historical,))
+            cursor.execute("UPDATE payroll_case_accounts SET aggregate_version=1 WHERE case_no=%s", (historical,))
+            cursor.execute("INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) VALUES(%s,'Synthetic restart holiday',1)", (holiday,))
+        connection.commit()
+
+        restarted = _restart(connection, historical)
+        assert restarted.lifecycle_status == "訂單成立"
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT status FROM orders WHERE case_no=%s", (historical,))
+            assert cursor.fetchone()["status"] == "訂單成立"
+            cursor.execute("SELECT trigger_event FROM order_lifecycle_state_events WHERE case_no=%s "
+                           "AND trigger_event='orders_historical_precision_restart'", (historical,))
+            assert cursor.fetchone()["trigger_event"] == "orders_historical_precision_restart"
+        _confirm_dates(connection, historical)
+        _arrange_restarted_dates(connection, historical, historical_staff)
+
+        normal_plan, normal_segment = _create_matching_plan(connection, database, ordinary, ordinary_staff)
+        _confirm_dates(connection, ordinary)
+        _record_matching_acceptance(database, ordinary, normal_plan, normal_segment)
+        _establish_commitment_and_lock(database, str(tmp_path / 'contracts'), ordinary, normal_plan, normal_segment)
+        _confirm_matching(connection, ordinary, normal_plan)
+        _apply_assignment(connection, ordinary, ordinary_staff)
+
+        def amounts(case_no: str) -> tuple[int, int]:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT COALESCE(SUM(e.after_amount_ntd),0) AS total FROM client_obligations o "
+                    "JOIN client_obligation_events e ON e.id=o.current_event_id WHERE o.case_no=%s "
+                    "AND o.obligation_type IN ('deposit','first','second') AND o.status<>'cancelled'", (case_no,))
+                client_total = int(cursor.fetchone()["total"])
+                cursor.execute("SELECT COALESCE(SUM(e.after_amount_ntd),0) AS total FROM staff_obligations o "
+                    "JOIN staff_obligation_events e ON e.id=o.current_event_id WHERE o.case_no=%s "
+                    "AND o.obligation_kind='service_pay' AND o.status<>'cancelled'", (case_no,))
+                return client_total, int(cursor.fetchone()["total"])
+
+        assert amounts(historical) == (4800, 4800)
+        assert amounts(ordinary) == (7200, 7200)
+        for case_no, expected in ((historical, 0), (ordinary, 8)):
+            with connection.cursor() as cursor:
+                order = select_order(cursor, case_no, lock=False)
+                facts, _ = load_calculable_client_finance_facts(cursor, order, lock=False, allow_planned=False)
+                assert facts is not None
+                assert sum(day.holiday_hours for day in facts.charge_days) == expected
+            payroll = MySqlPayrollRebuildRepository(connection).load(case_no, for_update=False)
+            assert sum(hours for assignment in payroll.service_facts for _, _, hours in assignment.holiday_hour_segments) == expected
+
+        reprice = MySqlHolidayRepricing(connection)
+        application = HolidayMaintenanceApplication(MySqlSchedulingHolidayQuery(connection),
+            lambda: MySqlUnitOfWork(connection), lambda: None, reprice, before_change=reprice.prepare)
+        def toggle(enabled: bool, key: str):
+            command = HolidayCommand("upsert", holiday, "Synthetic restart holiday", enabled, holiday, holiday)
+            preview = application.preview(command)
+            return application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+                key, "test", "restart holiday acceptance")
+        disabled = toggle(False, "holiday-restart-off")
+        assert amounts(historical) == (4800, 4800)
+        assert amounts(ordinary) == (4800, 4800)
+        enabled = toggle(True, "holiday-restart-on")
+        results = {item.case_no: item for item in enabled.case_results}
+        assert results[historical].outcome == "historical_excluded"
+        assert results[ordinary].outcome == "repriced"
+        assert amounts(historical) == (4800, 4800)
+        assert amounts(ordinary) == (7200, 7200)
+        assert disabled.receipt_key != enabled.receipt_key
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total FROM client_ledger_entries WHERE case_no IN (%s,%s)", (historical, ordinary))
+            assert cursor.fetchone()["total"] == 0
+            cursor.execute("SELECT COUNT(*) AS total FROM staff_payout_obligation_links l JOIN staff_obligations o "
+                           "ON o.obligation_identity=l.obligation_identity WHERE o.case_no IN (%s,%s)", (historical, ordinary))
+            assert cursor.fetchone()["total"] == 0
+    finally:
         connection.close()

@@ -11,6 +11,8 @@ from datetime import date, time, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 
+from pymysql.cursors import DictCursor
+
 from domains.client_finance.obligation_planning import (
     ClientChargeDay,
     ClientFinanceTermsFacts,
@@ -232,7 +234,7 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
                 raise ValueError("order_terms_service_days_required")
             dates = tuple(start_date + timedelta(days=i) for i in range(int(service_days)))
         days = tuple(ClientChargeDay(value, False) for value in dates)
-    if generation is not None and not str(order_row.get("status", "")).startswith("歷史"):
+    if generation is not None and not is_holiday_pricing_excluded(cursor, order_row, lock=lock):
         from infrastructure.mysql.service_date_adjustment_repository import load_holiday_priced_service_dates
         assignments = _select_assignments(cursor, generation, lock)
         financial_days = load_holiday_priced_service_dates(
@@ -731,7 +733,7 @@ def _load_client_finance(cursor, order_row, lock, *, historical_registry=False):
 
 
 def _enabled_holiday_dates(cursor: Any, order_row: Mapping[str, object], lock: bool) -> tuple[date, ...]:
-    if str(order_row.get("status", "")).startswith("歷史"):
+    if is_holiday_pricing_excluded(cursor, order_row, lock=lock):
         return ()
     from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
     calendar = MySqlSchedulingHolidayQuery(cursor.connection).query(date(1000, 1, 1), date.max, lock=lock)
@@ -1108,6 +1110,15 @@ def _contract_completed(cursor, case_no, lock):
         (case_no,),
     )
     return cursor.fetchone() is not None
+
+
+def is_holiday_pricing_excluded(
+    cursor: DictCursor, order_row: Mapping[str, object], *, lock: bool,
+) -> bool:
+    """A precise restart keeps its historical pricing provenance after establishment."""
+    return str(order_row.get("status", "")).startswith("歷史") or _historical_precision_restarted(
+        cursor, str(order_row["case_no"]), lock,
+    )
 
 
 def _historical_precision_restarted(cursor, case_no, lock):

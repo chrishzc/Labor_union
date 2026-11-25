@@ -22,7 +22,6 @@ from domains.payroll.calculation import (
     rate_snapshot,
 )
 from domains.payroll.tiered_rates import TieredPayrollRate
-from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -447,18 +446,8 @@ def _handover_root_actions(facts, root, total, key, children, change_identity, a
         MoneyNTD(previous), total, root.paid_net_amount, MoneyNTD(recovery_delta), key))
 
 
-def _holiday_funding_pending(source: PayrollTermsSourceFacts, order_terms: OrderTerms) -> bool:
-    hours = Decimal(str(order_terms.service_days)) * Decimal(str(order_terms.service_hours_per_day))
-    policies = tuple(item for item in (source.case_policy, *source.source_terms) if item is not None)
-    tiers = tuple(item.tiered for item in policies if item.tiered is not None)
-    if tiers:
-        return all(rate.directly_subsidized and hours <= rate.subsidy_hours for rate in tiers)
-    return (normalize_subsidy_policy_identity(source.identity_status or "") in {"補助市民", "原住民"}
-        or bool(policies) and all(item.policy_kind is PayrollPolicyKind.SUBSIDIZED_CITIZEN for item in policies))
-
-
 def _impact_facts(source: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms) -> PayrollTermsImpactFacts:
-    enabled_dates = () if _holiday_funding_pending(source, order_terms) else source.double_pay_dates
+    enabled_dates = source.double_pay_dates
     scheduling = replace(scheduling, assignments=tuple(
         replace(item, double_pay_dates=tuple(day for day in item.service_dates if day in enabled_dates))
         for item in scheduling.assignments

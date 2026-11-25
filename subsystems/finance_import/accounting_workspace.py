@@ -1,7 +1,7 @@
 """Compose typed owner queries; display warnings never change accounting facts."""
 from __future__ import annotations
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Callable, Protocol
 from domains.client_finance.obligation_planning import ClientSubsidyReturnPlan
 from domains.payroll.installments import PayrollInstallment
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -164,6 +164,7 @@ class CaseAccounting:
     estimated_subsidy_payment_date: str | None = None
     zero_stages: tuple[str, ...] = ()
     full_subsidy: bool = False
+    unallocated_service_difference_ntd: int | None = None
 
 
 @dataclass(frozen=True)
@@ -215,7 +216,8 @@ class StaffAccountingPort(Protocol):
 class AccountingWorkspace:
     def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort,
                  bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None, bank_memos=None,
-                 subsidy_plan_preview=None, subsidy_plan_apply=None):
+                 subsidy_plan_preview=None, subsidy_plan_apply=None,
+                 case_total: Callable[[str], int | None] | None = None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
         self.subsidy = subsidy
@@ -225,6 +227,7 @@ class AccountingWorkspace:
         self.bank_memos = bank_memos
         self.subsidy_plan_preview = subsidy_plan_preview
         self.subsidy_plan_apply = subsidy_plan_apply
+        self.case_total = case_total
 
     def subsidy_plan_history(self, case_no: str):
         self.state.case_client(case_no)
@@ -390,12 +393,22 @@ class AccountingWorkspace:
         funding = terms.funding
         full_subsidy = bool(funding and funding.full_subsidy)
         funding_conflict = False
+        service_difference = None
+        gross_total = self.case_total(case_no) if full_subsidy and self.case_total is not None else None
+        holiday_funding_difference = bool(full_subsidy and gross_total is not None
+            and subsidy is not None and gross_total > subsidy
+            and subsidy == funding.total_ntd
+            and not funding.has_subsidy_return
+            and not any(item.expected_ntd or item.actual_ntd or item.noncash_ntd for item in stages))
+        if full_subsidy and gross_total is not None and subsidy is not None:
+            service_difference = max(0, gross_total - (customer_amount or 0) - subsidy)
         if full_subsidy:
             funding_conflict = (funding.has_subsidy_return or any(item.expected_ntd or item.actual_ntd or item.noncash_ntd for item in stages)
-                or (staff_total is not None and staff_total != funding.total_ntd)
+                or (staff_total is not None and staff_total != funding.total_ntd and not holiday_funding_difference)
                 or (subsidy is not None and subsidy != funding.total_ntd))
             if not funding_conflict:
-                staff_total, customer_amount, subsidy, fully_received = funding.total_ntd, 0, funding.total_ntd, True
+                staff_total = staff_total if holiday_funding_difference else funding.total_ntd
+                customer_amount, subsidy, fully_received = 0, funding.total_ntd, True
                 customer_paid = 0
         government = sum(bank.amount_ntd for bank in banks if bank.cash_flow == "G" and bank.cases == (case_no,))
         cash_flows = None
@@ -433,7 +446,7 @@ class AccountingWorkspace:
             sum(item.remaining_ntd for item in incoming) if incoming else None,
             sum(item.remaining_ntd for item in outgoing) if outgoing else None,
             staff_total, customer_amount, fully_received, subsidy, scheme, cash_flows, cash_net,
-            staff_total - subsidy if staff_total is not None and subsidy is not None else None,
+            0 if full_subsidy and not funding_conflict else staff_total - subsidy if staff_total is not None and subsidy is not None else None,
             arrangement, conflict, direct_arrangement_ready(staff_total, customer_amount, subsidy, fully_received, cash_flows),
             CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(collection_sources, historical=terms.historical_stages),
             plan, ongoing_case_completed(fully_received, plan) and not (
@@ -448,6 +461,7 @@ class AccountingWorkspace:
             estimated_subsidy_payment_date=estimated_subsidy_payment_date,
             zero_stages=tuple(stage.value for stage in terms.zero_stages if stage.value not in recorded_stages) if not conflict else (),
             full_subsidy=full_subsidy and not conflict,
+            unallocated_service_difference_ntd=service_difference,
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

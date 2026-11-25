@@ -30,7 +30,7 @@ from domains.payroll.monthly_aggregation import (
 from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
-from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, is_full_subsidy_case, normalize_subsidy_policy_identity
+from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, is_full_subsidy_case
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
@@ -221,7 +221,8 @@ def _load_schedules(cursor, root, assignments, lock):
     generation_id = root["effective_generation_id"]
     if generation_id is None:
         return ()
-    if str(root.get("order_status", "")).startswith("歷史"):
+    from infrastructure.mysql.order_terms_read_model import is_holiday_pricing_excluded
+    if is_holiday_pricing_excluded(cursor, {"case_no": root["case_no"], "status": root.get("order_status")}, lock=lock):
         return load_payroll_service_dates(
             cursor, generation_id, assignments, int(root["service_days"]), lock=lock,
         )
@@ -317,11 +318,6 @@ def _rebuild_facts(
         assignments,
         schedules_by_assignment,
     )
-    service_hours = Decimal(str(root["service_hours_per_day"])) * sum(len(item.service_dates) for item in service_facts)
-    funding_pending = (pricing.is_full_subsidy(service_hours) is True if pricing is not None else
-        normalize_subsidy_policy_identity(str(root.get("identity_status") or "")) in {"補助市民", "原住民"})
-    if funding_pending:
-        service_facts = tuple(replace(item, double_pay_dates=(), holiday_hour_segments=()) for item in service_facts)
     return PayrollRebuildFacts(
         case_no=str(root["case_no"]),
         payroll_version=int(root["aggregate_version"]),

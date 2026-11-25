@@ -6,7 +6,7 @@ Description: 協調國定假日 horizon 的零寫入預覽、fresh-lock Apply �
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Callable, Literal, Protocol
 
@@ -38,11 +38,20 @@ class HolidayPreview:
     preview_fingerprint: str
 
 
+HolidayRepricingOutcome = Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "repriced_funding_pending", "unchanged", "blocked", "failed"]
+
+
 @dataclass(frozen=True, slots=True)
 class HolidayCaseRepricingResult:
     case_no: str
-    outcome: Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "unchanged", "blocked"]
+    outcome: HolidayRepricingOutcome
     case_total_amount: int | None = None
+    reason_code: str | None = None
+    client_receivable_amount: int | None = None
+    staff_payable_amount: int | None = None
+    subsidy_amount: int | None = None
+    unallocated_amount: int | None = None
+    missing_mapping: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,7 +286,7 @@ def _fact_payload(fact: HolidayFact | None) -> dict[str, object] | None:
 
 def _receipt_payload(receipt: HolidayReceipt) -> dict[str, object]:
     return {
-        "case_results": [{"case_no": result.case_no, "outcome": result.outcome, "case_total_amount": result.case_total_amount} for result in receipt.case_results],
+        "case_results": [asdict(result) for result in receipt.case_results],
         "receipt_key": receipt.receipt_key,
         "action": receipt.action,
         "holiday_date": receipt.holiday_date.isoformat(),
@@ -304,5 +313,5 @@ def _receipt_from_snapshot(snapshot) -> HolidayReceipt:
         payload["previous_calendar_version"],
         payload["resulting_calendar_version"],
         payload["preview_fingerprint"],
-        tuple(HolidayCaseRepricingResult(item["case_no"], item["outcome"], item.get("case_total_amount")) for item in payload.get("case_results", ())),
+        tuple(HolidayCaseRepricingResult(**{**item, "missing_mapping": tuple(item.get("missing_mapping", ()))}) for item in payload.get("case_results", ())),
     )

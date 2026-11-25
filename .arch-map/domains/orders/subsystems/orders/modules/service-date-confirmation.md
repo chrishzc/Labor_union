@@ -85,4 +85,8 @@
   source: service-date-confirmation-holiday-pricing
   target: ".arch-map/requirements/02_Assignments_Scheduling_Domain.md#^service-date-merge-split"
 ```
-- 假日計價接線接線由下列 owner 實作，驗證見既有測試入口。`service_date_adjustment_repository.py` 提供 current effective generation 的有效服務日及 `service_hours_override`，供兩方帳務 owner 取得實際日期與當日時數；原財務日期仍供既有非假日計算、受款人及付款日政策使用。日期調整沿同一 caller UoW 接續計價，不另建帳務 writer。
+- 假日計價接線由下列 owner 實作，驗證見既有測試入口。`service_date_adjustment_repository.py` 提供 current effective generation 的有效服務日及 `service_hours_override`，供兩方帳務 owner 取得實際日期與當日時數；原財務日期仍供既有非假日計算、受款人及付款日政策使用。日期調整沿同一 caller UoW 接續計價，不另建帳務 writer。
+
+- 日期調整 adapter 以保存的來源／結果配對將有效時數對回原財務指派，不能以 current assignment 或資料列順序分攤。既有日期調整 receipt 承接同次計價結果與原因，Query／API 不丟棄該結果；業務判準引用 Scheduling §3.4.2 與22A，不在 adapter 另定歸屬。
+
+- 日期調整 Apply 將重算 `case_result` 保存於原日期調整 receipt JSON；同鍵重送回原結果，Query 的 `date_adjustment.accounting_result` 讀最新紀錄，讓關閉編輯器或重載後仍可在常駐日期卡查核。結果欄與假日設定的逐案結果使用同一型別，不另建狀態 owner。

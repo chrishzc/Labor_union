@@ -45,7 +45,7 @@ service_salary   = sum(effective_day_hours × applicable_staff_hourly_rate × ho
 total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 ```
 
-- 一般訂單的國定假日服務費加成日期與有效時數取 [PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing) 同一來源，月嫂各自使用不可變快照中的適用時薪，雙倍日服務薪資為有效時數 × 月嫂適用時薪 × 2。歷史案各計算入口均不套用。樓層費、其他津貼、付款日及原月嫂帳務歸屬維持既有規則。兩邊重算或保留原帳依 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)，不因一般重建路徑可追加調整就為假日異動自動調帳。
+- 一般訂單的國定假日服務費加成日期與有效時數取 [PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing) 同一來源，月嫂各自使用不可變快照中的適用時薪，跨原財務指派的合併按 Scheduling 保存的來源／結果配對承接各人的完整時數及原受款歸屬，不按目前當日排班人員或資料列順序轉移應付；配對不唯一時不改帳並留下原因。雙倍日服務薪資為有效時數 × 月嫂適用時薪 × 2。歷史案各計算入口均不套用，含依規格27 §8 精準重啟後狀態已回到「訂單成立」的案件；沿既有 `orders_historical_precision_restart` 來源紀錄判斷，不只檢查狀態字首。樓層費、其他津貼、付款日及原月嫂帳務歸屬維持既有規則。兩邊重算或保留原帳依 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)，不因一般重建路徑可追加調整就為已有正式收付的假日異動自動調帳。未收付全額免自備的重算金額、已入帳金額及待對帳差額依22A §2.3分開表達，不以差額負擔未定跳過重算。
 - 中途取消案件的樓層費先以 `ROUND_HALF_UP` 計算全案整數，再以最大餘數法按有效 assignment 服務日數分配（同餘數時依 `assignment_id` 升冪決定）。完整履約後取消一律拒絕，不得縮減薪資。
 - 正式服務日數、`service_hours_per_day`、hourly rate、樓層費與 adjustment 皆須為整數 NTD。非整數異常輸入須進 [Anomalies Domain](06_Anomalies_Domain.md)，不得在每日或 assignment 層私自四捨五入。
 

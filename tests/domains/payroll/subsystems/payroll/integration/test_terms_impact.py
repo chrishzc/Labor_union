@@ -141,7 +141,7 @@ def test_first_formal_candidate_includes_enabled_holiday_without_extra_writer(ki
 
 
 @pytest.mark.parametrize("bound_policy", [False, True])
-def test_full_subsidy_initial_holiday_keeps_base_payroll_until_funding_decision(bound_policy):
+def test_full_subsidy_initial_holiday_recomputes_entitlement_without_assigning_funding(bound_policy):
     from dataclasses import replace
     from decimal import Decimal
     from domains.payroll.tiered_rates import TieredPayrollRate
@@ -152,13 +152,16 @@ def test_full_subsidy_initial_holiday_keeps_base_payroll_until_funding_decision(
             tiered=TieredPayrollRate(350, 350, Decimal(120), True))
     source = replace(_source_facts(), source_terms=(item,), double_pay_dates=(date(2026, 1, 1),))
     candidate = build_payroll_handover_impact(source, _scheduling(), _terms(), "full-holiday-pending")
-    assert sum(action.amount.amount for action in candidate.actions) == 6600
+    assert sum(action.amount.amount for action in candidate.actions) == 9400
     assert candidate.resulting_payroll_version == candidate.expected_payroll_version + 1
 
 
 @pytest.mark.parametrize("identity", ["補助市民", "原住民"])
-def test_legacy_initial_holiday_with_missing_limit_stays_pending_regardless_floor(identity):
+def test_legacy_initial_holiday_recomputes_entitlement_even_when_funding_limit_is_missing(identity):
     from dataclasses import replace
-    from subsystems.payroll.terms_impact import _holiday_funding_pending
-    source = replace(_source_facts(), identity_status=identity)
-    assert _holiday_funding_pending(source, replace(_terms(), floor_fee=MoneyNTD(500))) is True
+    from subsystems.payroll.terms_impact import build_payroll_handover_impact
+    source = replace(_source_facts(), identity_status=identity, double_pay_dates=(date(2026, 1, 1),))
+    candidate = build_payroll_handover_impact(source, _scheduling(), replace(_terms(), floor_fee=MoneyNTD(500)), "unknown-limit")
+    assert sum(action.amount.amount for action in candidate.actions) == 7700
+    assert candidate.resulting_payroll_version == candidate.expected_payroll_version + 1
+

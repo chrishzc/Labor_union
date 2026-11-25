@@ -1,3 +1,4 @@
+import { HolidayRepricingResults } from './HolidayRepricingResults';
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
@@ -171,6 +172,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
     <div className="service-date-heading"><p className="service-date-instruction">請在原有月曆調整已完成的服務日期。更正會保留原完工紀錄，並更新有效排班與週報。</p></div>
     {datesView && (adjustmentDays.length > 0 || facts?.assignments.some(item => item.service_dates.length > 0)) &&
       <button type="button" disabled={busy || adjustmentBusy || adjustmentEditing} onClick={() => void openAdjustment()}>合併或分裂日期</button>}
+    {!adjustmentEditing && adjustment?.accounting_result && <HolidayRepricingResults results={[adjustment.accounting_result]} />}
     {datesView && adjustment && adjustmentDays.length > 0 && <>
       {adjustmentEditing && <OrderServiceDateAdjustment key={caseNo} caseNo={caseNo} query={adjustment}
         onBusyChange={setAdjustmentBusy} onCancel={() => setAdjustmentCase(null)} onSaved={async observation => {

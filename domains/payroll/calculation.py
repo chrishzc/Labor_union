@@ -135,6 +135,7 @@ class AssignmentPayrollCandidate:
     excess_salary: int = 0
     directly_subsidized: bool = False
     tiered_pricing: bool = False
+    covered_holiday_salary: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,7 +271,7 @@ def _build_assignment_candidate(
     service_salary = MoneyNTD(_whole_ntd(
         (Decimal(str(actual_hours)) + double_pay_hours) * rate.hourly_rate.amount
     ))
-    covered_salary = excess_salary = 0
+    covered_salary = excess_salary = covered_holiday_salary = 0
     if rate.tiered is not None:
         consumed = consumed_by_date or {}
         for day in facts.service_dates:
@@ -279,6 +280,7 @@ def _build_assignment_candidate(
             excess_salary += excess
         for day, offset, hours in segments:
             covered, excess = price_hours(((hours, False),), rate.tiered, consumed.get(day, Decimal(0)) + offset)
+            covered_holiday_salary += covered
             covered_salary += covered
             excess_salary += excess
         service_salary = MoneyNTD(covered_salary + excess_salary)
@@ -295,6 +297,7 @@ def _build_assignment_candidate(
         effective_adjustments=adjustments,
         total_payable=total_payable,
         covered_salary=covered_salary,
+        covered_holiday_salary=covered_holiday_salary,
         excess_salary=excess_salary,
         directly_subsidized=bool(rate.tiered and rate.tiered.directly_subsidized),
         tiered_pricing=rate.tiered is not None,
@@ -348,6 +351,8 @@ def _assignment_payload(item) -> dict[str, object]:
         "effective_adjustments_ntd": item.effective_adjustments.amount,
         "total_payable_ntd": item.total_payable.amount,
     }
+    if item.covered_holiday_salary:
+        payload["covered_holiday_salary"] = item.covered_holiday_salary
     if item.tiered_pricing:
         payload.update(covered_salary=item.covered_salary, excess_salary=item.excess_salary,
             directly_subsidized=item.directly_subsidized)

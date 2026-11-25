@@ -24,6 +24,7 @@ describe('SchedulingPage holiday no fake mutation', () => {
     vi.spyOn(schedulingCurrentClient, 'queryCurrentCalendar').mockResolvedValue(
       SCHEDULING_PROJECTION_READY,
     );
+    vi.spyOn(holidayClient, 'accountingResults').mockResolvedValue([]);
     vi.spyOn(holidayClient, 'query').mockResolvedValue({
       planning_horizon: { from_date: '2026-01-01', to_date: '2026-12-31' },
       source_identity: 'holiday-test-source',

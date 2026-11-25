@@ -1185,3 +1185,12 @@ it.each(['zero','unknown','pending'] as const)('通知%s即使can_send true也�
  const source=notice('first');source.can_send=true;if(mode==='zero'&&source.payment)source.payment.remaining_amount_ntd=0;if(mode==='unknown')source.payment=null;if(mode==='pending')source.history=[{task_id:1,requested_at:'2026-11-01T00:00:00Z',sent_at:null,status:'pending',content:'通知',actor:'synthetic'},{task_id:2,requested_at:'2026-10-01T00:00:00Z',sent_at:'2026-10-01T00:01:00Z',status:'sent',content:'舊通知',actor:'synthetic'}];
  wrapper(<FinanceCaseNotice item={source} onBack={vi.fn()} onChanged={vi.fn()}/>);expect(screen.getByRole('button',{name:'發送通知'})).toBeDisabled();
 });
+
+
+it('對帳顯示後端服務費差額而不增加客戶應收或推定負擔人',async()=>{
+ const data:CaseAccounting={...facts(),unallocated_service_difference_ntd:2800,customer_amount_ntd:0,subsidy_ntd:2800};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ expect(await screen.findByText('待人工對帳服務費差額 NT$ 2,800，負擔歸屬待確認。')).toBeInTheDocument();
+ expect(vi.mocked(financeAccountingClient.query)).toHaveBeenCalled();
+});

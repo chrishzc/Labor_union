@@ -139,8 +139,8 @@ jobs:
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
         run: >-
           python -m pytest -q
-          tests/global/integration/test_historical_restart_to_weekly_report_mysql.py
-          -k test_historical_restart_reenters_canonical_scheduling_and_weekly_report
+          tests/global/integration/test_historical_restart_to_weekly_report_mysql.py::test_historical_restart_reenters_canonical_scheduling_and_weekly_report
+          tests/global/integration/test_historical_restart_to_weekly_report_mysql.py::test_holiday_precise_restart_keeps_historical_origin_excluded_mysql
 
       - name: Run disposable MySQL holiday repricing and payment protection
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
@@ -204,11 +204,12 @@ jobs:
       - name: Lint and type-check holiday pricing boundaries
         run: |
           ruff check --select E9,F63,F7,F82 domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py subsystems/client_finance/pricing_configuration.py
-          pyright domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py
+          pyright domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py infrastructure/mysql/holiday_accounting_results.py
       - name: Verify holiday pricing and historical exclusions
         run: >-
           python -m pytest -q
           tests/domains/scheduling/subsystems/scheduling/integration/test_holiday_router.py
+          tests/domains/scheduling/subsystems/scheduling/modules/schedule-generation/test_service_date_adjustment.py
           tests/domains/payroll/subsystems/payroll/modules/tiered-payroll/test_tiered_payroll.py
           tests/domains/payroll/subsystems/payroll/integration/test_payroll_rebuild_workflow.py
           tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_payroll_calculation.py
@@ -237,6 +238,8 @@ jobs:
         run: >-
           npm test --
           src/tests/scheduling_holiday_flow.test.tsx
+          src/tests/holiday_client.test.ts
+          src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/service_date_adjustment_selection.test.tsx
           src/tests/official_holiday_csv.test.ts
           src/tests/domains/scheduling/subsystems/scheduling/modules/holiday-maintenance/holiday_csv.test.tsx
           src/tests/scheduling_no_fake_mutation.test.tsx

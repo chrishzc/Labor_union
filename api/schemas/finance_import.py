@@ -308,6 +308,7 @@ class CaseAccountingView(_StrictModel):
     customer_burden_ntd: int | None = None
     arrangement: CaseArrangementView | None = None
     scheme_conflict: bool = False
+    unallocated_service_difference_ntd: int | None = None
     can_confirm_direct: bool = False
     collection_progress: CollectionProgressView | None = None
     subsidy_plan: CaseSubsidyPlanView | None = None

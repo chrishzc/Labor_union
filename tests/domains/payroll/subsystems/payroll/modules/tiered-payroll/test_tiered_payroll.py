@@ -146,3 +146,16 @@ def test_tiered_double_pay_multiplier_does_not_consume_extra_subsidy_hours():
     from domains.payroll.tiered_rates import price_hours
     tier = TieredPayrollRate(300, 500, Decimal(8), False)
     assert price_hours(((Decimal(4), True), (Decimal(8), False)), tier) == (3600, 2000)
+
+
+def test_holiday_covered_premium_does_not_increase_government_funding_portion():
+    from domains.payroll.installments import payroll_installments
+    days = (date(2026, 10, 1), date(2026, 10, 2))
+    facts = OfficialAssignmentServiceFacts("a", 1, days, (days[0],))
+    rate = AssignmentRateSnapshot("a", "policy", PayrollPolicyKind.SUBSIDIZED_CITIZEN, MoneyNTD(350),
+        TieredPayrollRate(350, 350, Decimal(8), True))
+    result = build_case_payroll_candidate((facts,), (rate,), PayrollTerms(2, 8, MoneyNTD(0))).assignments[0]
+    portions = {item.funding_kind: item.amount for item in payroll_installments(result, days[-1])}
+    assert result.total_payable.amount == 8400
+    assert result.covered_holiday_salary == 2800
+    assert portions == {"client": 5600, "subsidy": 2800}

@@ -29,6 +29,7 @@ describe('SchedulingPage holiday policy flow', () => {
     vi.spyOn(schedulingCurrentClient, 'queryCurrentCalendar').mockResolvedValue(
       SCHEDULING_PROJECTION_READY,
     );
+    vi.spyOn(holidayClient, 'accountingResults').mockResolvedValue([]);
     vi.spyOn(holidayClient, 'query').mockResolvedValue(HOLIDAY_CALENDAR);
     vi.spyOn(holidayClient, 'preview').mockResolvedValue(HOLIDAY_PREVIEW);
     vi.spyOn(holidayClient, 'apply').mockResolvedValue(HOLIDAY_RECEIPT);
@@ -216,4 +217,38 @@ describe('SchedulingPage holiday policy flow', () => {
     expect(holidayClient.apply).toHaveBeenCalledWith(expect.objectContaining({ is_double_pay_default: true }), expect.anything());
   });
 
+});
+
+
+describe('國定假日逐案帳務處理結果', () => {
+  it('設定成功仍區分重算、正式收付保留及失敗，重載讀回同一紀錄', async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(schedulingCurrentClient, 'queryCurrentCalendar').mockResolvedValue(SCHEDULING_PROJECTION_READY);
+    const cases = [
+      { case_no: 'REPRICE-OK', outcome: 'repriced', case_total_amount: 5600, staff_payable_amount: 5120 },
+      { case_no: 'REPRICE-PAID', outcome: 'preserved_cash_history', case_total_amount: 2800, reason_code: 'formal_settlement_exists' },
+      { case_no: 'REPRICE-FAIL', outcome: 'failed', case_total_amount: null, reason_code: 'holiday_service_attribution_ambiguous' },
+    ] satisfies import('../api/scheduling/holiday_schemas').HolidayCaseRepricing[];
+    vi.spyOn(transport, 'get').mockRejectedValue(new Error('無其他資料'));
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
+    vi.spyOn(holidayClient, 'accountingResults').mockResolvedValue([]);
+    vi.spyOn(holidayClient, 'query').mockResolvedValue(HOLIDAY_CALENDAR);
+    vi.spyOn(holidayClient, 'preview').mockResolvedValue(HOLIDAY_PREVIEW);
+    vi.spyOn(holidayClient, 'apply').mockResolvedValue({ ...HOLIDAY_RECEIPT, case_results: cases });
+    const view = render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '2026-02-17 啟用雙倍' }));
+    await screen.findByText('REPRICE-FAIL');
+    expect(screen.getByText(/有案件未重算/)).toBeInTheDocument();
+    expect(screen.getByText(/已有正式收付，保留原帳/)).toBeInTheDocument();
+    expect(screen.getByText(/holiday_service_attribution_ambiguous/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    vi.mocked(holidayClient.accountingResults).mockResolvedValue([
+      { holiday_date: '2026-02-17', receipt_key: 'same-receipt', case_results: cases },
+    ]);
+    view.unmount();
+    render(<SchedulingPage />);
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    expect(await screen.findByText('REPRICE-FAIL')).toBeInTheDocument();
+  });
 });

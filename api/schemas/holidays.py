@@ -116,8 +116,14 @@ class HolidayPreviewView(BaseModel):
 
 class HolidayCaseRepricingView(BaseModel):
     case_total_amount: int | None = None
+    missing_mapping: list[str] = Field(default_factory=list)
+    reason_code: str | None = None
+    client_receivable_amount: int | None = None
+    staff_payable_amount: int | None = None
+    subsidy_amount: int | None = None
+    unallocated_amount: int | None = None
     case_no: str
-    outcome: Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "unchanged", "blocked"]
+    outcome: Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "unchanged", "blocked", "repriced_funding_pending", "failed"]
 
 
 class HolidayReceiptView(BaseModel):
@@ -133,3 +139,9 @@ class HolidayReceiptView(BaseModel):
     previous_calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     resulting_calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HolidayAccountingReceiptView(BaseModel):
+    holiday_date: date
+    receipt_key: str
+    case_results: list[HolidayCaseRepricingView]
