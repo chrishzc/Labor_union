@@ -179,7 +179,7 @@ lock canonical bank fact + active finance alert + selected obligations
 
 ## 5. pytest 分層
 
-每個 Global scenario 的完整完成證據，必須對應現行 source hash 的 isolated-MySQL E2E 實測，程式或測試來源變動後須重新執行並更新證據。
+日常 PR 從最低受影響邊界驗證，不因 Module、Subsystem、Domain 或 Global 的分類名稱而要求 MySQL。只驗改動觸及的契約；跨 Domain 的業務規則可透過替身 port 實測，不必把相同業務案例在 MySQL 重跑一遍。需要引用真實環境證據時，須標明受測版本、入口及範圍；未跑的環境不宣稱通過。
 
 ### 5.1 Module
 
@@ -198,11 +198,13 @@ lock canonical bank fact + active finance alert + selected obligations
 
 ### 5.3 Domain
 
-責任：完整業務場景與 Domain SSOT 是否可運作。Domain 測試使用隔離的正式 MySQL schema，驗證 FK、unique constraint、row lock、transaction、rollback 及 append-only。Mock 不能作為 Domain 完成證據。
+責任：驗證完整業務場景與 Domain 的正式資料來源。業務規則及交接用替身 port／repository 驗證，可覆蓋計算、資格、狀態、指令參數與預期副作用；替身不證明實際 SQL 或資料庫行為。
+
+**MySQL 驗證邊界**：只有變更觸及 SQL、欄位映射、schema／migration，或依賴 MySQL 保證的交易行為時，才跑對應的隔離案例。只驗受影響的讀寫契約，例如型別、NULL、精度、FK／唯一性、鎖、交易原子性、rollback 或重送防重。不把套用規則、畫面顯示等與資料庫實作無關的場景重跑一遍。跨域重送若需確認資料庫真的只留一筆，就保留一個從受影響入口讀回實際結果的案例。
 
 ### 5.4 Global
 
-只保留高價值跨 Domain 場景：
+以下保留高價值跨 Domain 場景，作為依風險選測的目錄，**不是每次 PR 的必跑清單**。跨 Domain 業務流程先用替身隔離驗證；若改到共享交易、正式接線或 schema，且最低層案例無法覆蓋，才新增或執行受影響的整合／端到端案例。發布或遷移若另有正式驗收契約，照該契約執行，不因本節省略。
 
 1. Terms change → Scheduling rebuild → Client Finance／Payroll → lifecycle 一致；若重建後存在 coverage 風險，由 Scheduling coverage scan 建立後續處理，Terms Apply 不直接寫入 alert。
 2. Actual Start 更正全鏈原子性。
@@ -226,6 +228,7 @@ lock canonical bank fact + active finance alert + selected obligations
 
 - 同一已確認 contract 下，production module 與其 pytest 可平行撰寫。
 - 不同實體 Source、無相依的 Modules 才能平行；共用 aggregate、transaction owner 或同一 Source 的工作串行。
+- 交付列出業務測試、MySQL 契約測試與未執行項目。若擴大到整套 MySQL，交代理由與受影響的持久化邊界；不以全跑代替選測。
 - 依失敗層級定位修復：Module fail 修正 Module；Subsystem fail 修正狀態機／ports／replay／transaction；Domain fail 回查該 Domain SSOT；Global fail 回查跨 Domain 不變量與 transaction，不在 UI 或 repository 打補丁。
 
 ## 7. 已定案技術架構原則
