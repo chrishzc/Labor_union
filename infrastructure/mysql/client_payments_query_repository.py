@@ -142,7 +142,7 @@ def _historical_payment_terms(cursor: Any, order: Mapping[str, Any], service_end
     if stale_evidence:
         pending.append('historical_client_payment_evidence_stale')
     cursor.execute(_CLIENT_BANK_CANDIDATES_SQL, (case_no,))
-    bank_candidates = tuple(str(row['id']) for row in cursor.fetchall())
+    bank_candidates = tuple(str(row['id']) for row in cursor.fetchall() if row['matches_selected_case'])
     if bank_candidates:
         pending.append('historical_client_bank_reconciliation_required')
     funding = None

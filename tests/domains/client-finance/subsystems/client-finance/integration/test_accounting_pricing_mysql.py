@@ -626,6 +626,7 @@ def test_historical_accounting_requires_unique_assignment_end_for_missing_instal
         assert ('historical_payroll_assignment_source_ambiguous' in available['pending_reasons']) is ambiguous_end_source
         assert snapshot() == before
         assert before['orders'][0]['staff_payment_due_date'] == date(2027, 4, 7)
+        save_historical_accounting_contract('date_ambiguous' if ambiguous_end_source else 'date_unique', response.json())
     finally:
         connection.close()
 

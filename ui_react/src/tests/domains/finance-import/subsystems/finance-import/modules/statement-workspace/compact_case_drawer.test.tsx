@@ -1330,7 +1330,7 @@ it.each([false,true])('兩入口對唯一結束日來源 %s 保留正式應付�
   }
  }
  const drawer=within(screen.getByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'}));
- expect(drawer.getByRole('row',{name:/來源待核對月嫂/})).toHaveTextContent('2027-03-08');
+ expect(drawer.getByRole('row',{name:/來源待核對月嫂/})).toHaveTextContent('2027-04-08');
  expect(drawer.getByRole('row',{name:/來源待核對月嫂/})).toHaveTextContent('NT$ 30,000');
  expect(drawer.getByRole('row',{name:/其他正式月嫂/})).toHaveTextContent('2027-05-08');
  const registry=within(screen.getByRole('region',{name:'補助及退款方案摘要（唯讀）'}));
@@ -1338,6 +1338,7 @@ it.each([false,true])('兩入口對唯一結束日來源 %s 保留正式應付�
  expect(registry.getByText(/其他正式月嫂／服務費：4,000 元，應付日 2027-05-08/)).toBeVisible();
  expect(payable.funding_portions[0].due_date).toBe('2027-04-08');
  expect(payable.funding_portions[1].due_date).toBeNull();
+ expect(payable.due_date).toBe('2027-03-08');
  expect(differenceResolutionClient.syncHistoricalBaseline).not.toHaveBeenCalled();
 });
 
@@ -1377,7 +1378,8 @@ it('兩入口保留待核對銀行與過期付款來源，不能視為沒有收�
 });
 it.skipIf(!historicalContractPath)('隔離 MySQL 帳務 API 原回應經 strict client 呈現歷史免自備、上限與舊帳衝突',async()=>{
  if(!historicalContractPath)throw new Error('缺少 HISTORICAL_ACCOUNTING_CONTRACT_PATH');
- const contracts=z.strictObject({main_case:z.unknown(),exact_cap:z.unknown(),conflict:z.unknown()}).parse(
+ const contracts=z.strictObject({main_case:z.unknown(),exact_cap:z.unknown(),conflict:z.unknown(),
+  date_ambiguous:z.unknown(),date_unique:z.unknown()}).parse(
   JSON.parse(readFileSync(historicalContractPath,'utf8')),
  );
  const actual=await vi.importActual<typeof import('../../../../../../../api/finance_import/finance_accounting_client')>(
@@ -1405,7 +1407,26 @@ it.skipIf(!historicalContractPath)('隔離 MySQL 帳務 API 原回應經 strict 
     if(item.due_date)expect(original).toHaveTextContent(item.due_date);
     if(item.remaining_ntd!=null)expect(original).toHaveTextContent(`${item.remaining_ntd.toLocaleString('zh-TW')} 元`);
    }
-   if(scenario==='conflict'){
+   if(scenario.startsWith('date_')){
+    const formal=decoded.staff_items[0];
+    if(!formal)throw new Error('缺少歷史正式應付契約');
+    expect(formal.expected_ntd).toBe(28000);
+    expect(formal.due_date).toBe('2026-11-05');
+    const drawer=within(screen.getByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'}));
+    const original=drawer.getByRole('row',{name:new RegExp(formal.party)});
+    expect(original).toHaveTextContent('NT$ 28,000');
+    expect(original).toHaveTextContent('2026-11-03');
+    expect(registry.getByText(`${formal.party}／${formal.label}：28,000 元，應付日 2026-11-05`)).toBeVisible();
+    await waitFor(()=>expect(screen.getAllByRole('region',{name:'歷史月嫂應付依據'})).toHaveLength(2));
+    for(const region of screen.getAllByRole('region',{name:'歷史月嫂應付依據'})){
+     const source=within(region);
+     expect(source.queryByText(/自備款預計付款日/)).not.toBeInTheDocument();
+     if(scenario==='date_ambiguous'){
+      expect(source.getByText('歷史月嫂指派來源不唯一，請核對歸屬。')).toBeVisible();
+      expect(source.queryByText(/補助款預計付款日/)).not.toBeInTheDocument();
+     }else expect(source.getByText('補助款預計付款日 2026-12-15')).toBeVisible();
+    }
+   }else if(scenario==='conflict'){
     expect(decoded.scheme_conflict).toBe(true);
     expect(screen.queryByText('全額補助／免自備，客戶應付 NT$ 0')).not.toBeInTheDocument();
     for(const item of incoming){
