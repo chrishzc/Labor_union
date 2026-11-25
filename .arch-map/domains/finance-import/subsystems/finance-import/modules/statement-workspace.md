@@ -66,6 +66,18 @@
 - `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — 沿原 append-only 方案事件；伺服器保留 `bank-subsidy:<row-id>:<command-digest>` operation key 記錄銀行確認來源，人工命令不能使用該命名空間。不新增 schema 或回填歷史資料。
 
 ## Contracts
+
+### 從銀行匯入到成功明細匯出 ^statement-export-admission
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: statement-export-admission
+  target: '.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md#^bank-statement-export-admission'
+```
+
+- Finance Import 保存原始銀行流水及去重識別；預覽、202 受理和待核對都不是入帳。客戶與月嫂實際收付、政府整期入款，分別由原帳務模組重驗及提交。此工作台只組合讀回，不以畫面狀態補寫帳本。
+- 驗收：用同一筆合成銀行流水。僅匯入、預覽或留待核對時，「匯出對帳明細」沒有該筆；正式核銷且讀回原帳務模組的成功證據後，匯出恰有一筆原始流水。重新查詢同一筆不會重新入帳或增加匯出列。測試位置見下方 `test_statement_archive_mysql.py`。
+
 - `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` §3（成功明細與匯出）、§4（銀行對帳）、§5（帳務警示）、§6（案件補登）
 - 銀行明細匯出（#22 §3.3）：`GET /api/v1/finance-import/statements/export` 只納入原 owner 正式核銷的銀行流水及正式補登，分銀行保留原欄位，附「款項用途」與「關聯案件」，不顯示內部識別及資料來源欄，也不受畫面篩選限制。`GET /api/v1/finance-import/statements/manual/export` 獨立唯讀匯出舊紀錄，標為「歷史人工備查（不代表已核銷）」，不得混入成功明細。
 - 舊版新增路徑：授權管理員呼叫 `POST /api/v1/finance-import/statements/manual` 回 `410 legacy_manual_statement_retired`，不開寫入交易。React 不提供此新增表單；要新增案件的正式補登，走 #22 §6 的案件抽屜與原款項 owner。`POST statements/duplicates` 保留原判重契約。
