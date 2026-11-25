@@ -760,6 +760,52 @@ describe('Client registry owner editing', () => {
     expect(information).not.toHaveTextContent('survey_details');
   });
 
+  it('requires confirmation of historical birth impact and refreshes the registered value', async () => {
+    const historical = ClientRegistryDetailSchema.parse({
+      ...detail,
+      beclass: { ...detail.beclass, birth_count_correction_mode: 'historical_service_completed' },
+    });
+    const changes = { multi_birth_count: '單胞胎' };
+    const pending = ['historical_pricing_original_payable_required:assignment:81'];
+    mocks.preview.mockResolvedValue({
+      owner: 'client_beclass', aggregate_identity: 'CASE-001', current_version: 3,
+      before: { multi_birth_count: '雙胞胎' }, after: changes, preview_fingerprint: 'b'.repeat(64),
+      historical_impact: {
+        client_updates: [], staff_updates: [], client_delta: 0, subsidy_delta: 0, client_exempt: false, pending,
+        persons: [{
+          assignment_identity: 'assignment:81', staff_id: 1, staff_name: '合成月嫂',
+          hours: 8, before_amount: 3600, after_amount: 2400, delta: -1200,
+        }],
+      },
+    });
+    mocks.apply.mockResolvedValue({ accounting_pending: pending, readback: changes });
+    const readback = vi.fn(async () => ({
+      ...historical,
+      beclass: { ...historical.beclass, version: 4, values: { ...detail.beclass.values, ...changes } },
+    }));
+    render(<ClientRegistryDetailEditor detail={historical} onRefresh={readback} onStateChange={vi.fn()} />);
+    const form = within(screen.getByRole('region', { name: '報名問卷資料（BeClass）' }));
+    fireEvent.change(form.getByLabelText('報名註記'), { target: { value: '未儲存的註記' } });
+    fireEvent.change(form.getByLabelText('胎數（單胞胎／雙胞胎）'), { target: { value: changes.multi_birth_count } });
+    fireEvent.click(form.getByRole('button', { name: '預覽歷史胎數更正' }));
+
+    const confirmation = await form.findByRole('button', { name: '確認歷史胎數更正' });
+    const impact = within(form.getByRole('region', { name: '帳務影響' }));
+    expect(impact.getByRole('row', { name: /合成月嫂.*3,600.*2,400.*-1,200/ })).toBeVisible();
+    expect(impact.getByText(/缺少可唯一辨識的原月嫂應付/)).toBeVisible();
+    expect(mocks.preview).toHaveBeenCalledExactlyOnceWith('CASE-001', 'beclass', changes, 3);
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(readback).not.toHaveBeenCalled();
+
+    fireEvent.click(confirmation);
+    expect(await form.findByText('正式胎數已更新為單胞胎。')).toBeVisible();
+    expect(form.getByText('待核對帳務')).toBeVisible();
+    expect(form.getByLabelText('報名註記')).toHaveValue('未儲存的註記');
+    expect(readback).toHaveBeenCalledOnce();
+    expect(mocks.apply).toHaveBeenCalledExactlyOnceWith('CASE-001', 'beclass', changes, 3,
+      'b'.repeat(64), '', expect.any(String));
+  });
+
   it('disables a financially locked BeClass field before it can produce a 409 preview', async () => {
     mocks.query.mockResolvedValue({
       ...detail,

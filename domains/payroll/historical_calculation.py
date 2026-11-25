@@ -25,12 +25,19 @@ class HistoricalAssignmentServiceFacts:
     assignment_identity: str
     staff_id: int
     actual_service_days: int
+    actual_service_hours: Decimal | None = None
 
     def __post_init__(self) -> None:
         if not str(self.assignment_identity).strip():
             raise ValueError("historical_actual_service_days_assignment_mismatch")
         require_positive_integer(self.staff_id, "staff id")
         require_positive_integer(self.actual_service_days, "actual service days")
+        if self.actual_service_hours is not None and (
+            not isinstance(self.actual_service_hours, Decimal)
+            or not self.actual_service_hours.is_finite() or self.actual_service_hours <= 0
+            or self.actual_service_hours % Decimal("0.5")
+        ):
+            raise ValueError("historical_completed_service_hours_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,11 +136,14 @@ def build_historical_case_payroll_candidate(
     )
 
 
-def _assignment_candidate(facts, rate, terms, floor_fee, adjustments):
-    actual_hours = facts.actual_service_days * terms.service_hours_per_day
-    service_salary = MoneyNTD(
-        _whole_ntd(actual_hours * rate.hourly_rate.amount)
-    )
+def _assignment_candidate(
+    facts: HistoricalAssignmentServiceFacts, rate: AssignmentRateSnapshot,
+    terms: PayrollTerms, floor_fee: MoneyNTD, adjustments: MoneyNTD,
+) -> HistoricalAssignmentPayrollCandidate:
+    actual_hours = (facts.actual_service_hours if facts.actual_service_hours is not None
+                    else facts.actual_service_days * terms.service_hours_per_day)
+    actual_hours = float(actual_hours)
+    service_salary = historical_service_salary(actual_hours, rate.hourly_rate)
     return HistoricalAssignmentPayrollCandidate(
         assignment_identity=facts.assignment_identity,
         staff_id=facts.staff_id,
@@ -148,6 +158,10 @@ def _assignment_candidate(facts, rate, terms, floor_fee, adjustments):
     )
 
 
+def historical_service_salary(hours: Decimal | float | int, hourly_rate: MoneyNTD) -> MoneyNTD:
+    return MoneyNTD(_whole_ntd(float(hours) * hourly_rate.amount))
+
+
 def _whole_ntd(value: Decimal | float | int) -> int:
     if value != int(value):
         raise ValueError("half-hour payroll amount must resolve to whole NTD")
@@ -159,4 +173,5 @@ __all__ = [
     "HistoricalAssignmentServiceFacts",
     "HistoricalCasePayrollCandidate",
     "build_historical_case_payroll_candidate",
+    "historical_service_salary",
 ]

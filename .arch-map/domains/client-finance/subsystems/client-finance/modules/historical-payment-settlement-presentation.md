@@ -44,7 +44,7 @@
 - test_root: `ui_react/src/tests/finance_query_transport_identity.test.ts`
 - test_root: `ui_react/src/tests/finance_query_clients.test.ts`
 - test_root: `ui_react/src/tests/finance_request_lifecycle.test.tsx`
-- integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py`，歷史補助事實經實際查詢與帳務 API；原結清 read adapter 門檻維持。
+- cross-owner evidence: [pricing-configuration 的 MySQL 整合驗證](pricing-configuration.md#verification)，歷史補助事實經實際查詢與帳務 API；原結清 read adapter 門檻維持。
 - integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/`
 - cross-workspace verification: parent subsystem integration_root `ui_react/src/tests/domains/client-finance/subsystems/client-finance/integration/finance_workspaces.test.tsx`
 

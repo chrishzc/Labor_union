@@ -19,7 +19,10 @@ from subsystems.client_profile.registry_filters import (
 from domains.case_import.order_information import project_order_information
 from domains.clients.profile import can_reclassify_client
 from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
-from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
+from subsystems.case_import.beclass_correction_workflow import (
+    allows_manual_beclass_source,
+    beclass_birth_count_correction_mode,
+)
 from domains.client_finance.virtual_account import allows_case_account_edit, allows_historical_non_citizen_account
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_case_virtual_account,
@@ -418,13 +421,9 @@ class MySqlClientRegistryQueryRepository:
             "beclass_source_kind": beclass_source_kind,
             "beclass_version": int((state or {}).get("aggregate_version") or 0),
             "beclass_values": beclass_values,
-            "beclass_financial_fields_locked": bool(
-                client.get("service_data_locked")
-                or str(client.get("order_status") or "")
-                in {
-                    "服務中", "訂單完成", "訂單取消",
-                    "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
-                }
+            "beclass_birth_count_correction_mode": beclass_birth_count_correction_mode(
+                str(client.get("order_status") or ""),
+                service_data_locked=bool(client.get("service_data_locked")),
             ),
             "order_information_values": order_information_values,
             "order_information_issues": order_information_issues,

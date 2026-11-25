@@ -55,7 +55,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
   const clientExcess = pricing?.terms.client.excess;
   const staffRate = pricing?.terms.payroll.excess;
 
-  const totalHours = serviceHours ?? (pricing?.impact ? pricing.impact.covered_hours + pricing.impact.excess_hours : null);
+  const totalHours = serviceHours ?? (pricing?.impact.covered_hours != null && pricing.impact.excess_hours != null ? pricing.impact.covered_hours + pricing.impact.excess_hours : null);
   const coveredHours = pricing?.impact.covered_hours;
   const excessHours = pricing?.impact.excess_hours;
 

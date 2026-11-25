@@ -7,8 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.schemas.order_terms import OrderTermsQueryView
+from api.schemas.accounting_pricing import HistoricalRepricingPlanView
 from api.schemas.import_field_issues import ImportFieldIssueView
+from api.schemas.order_terms import OrderTermsQueryView
+from subsystems.case_import.beclass_correction_workflow import BeClassBirthCountCorrectionMode
 
 
 class _StrictModel(BaseModel):
@@ -133,6 +135,7 @@ class ClientRegistryBeClassView(_StrictModel):
     source_kind: Literal["imported", "admin_manual"] | None = None
     version: int | None = Field(default=None, ge=0)
     full_refund_account_visible: bool = False
+    birth_count_correction_mode: BeClassBirthCountCorrectionMode = BeClassBirthCountCorrectionMode.STANDARD
     values: ClientBeClassValuesView | None = None
     field_capabilities: dict[str, RegistryFieldCapabilityView]
 
@@ -283,6 +286,7 @@ class RegistryMutationPreviewView(_StrictModel):
     before: dict[str, str | bool | int | float | None]
     after: dict[str, str | bool | int | float | None]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    historical_impact: HistoricalRepricingPlanView | None = None
 
 
 class RegistryMutationReceiptView(_StrictModel):
@@ -294,6 +298,7 @@ class RegistryMutationReceiptView(_StrictModel):
     idempotency_key: str
     replayed: bool
     readback: dict[str, str | bool | int | float | None]
+    accounting_pending: tuple[str, ...] = ()
 
 
 __all__ = [name for name in globals() if name.endswith("View") or name.endswith("Request")]
