@@ -91,7 +91,8 @@
 - Contract Signing 依 `subsystems/contract_signing/final_document_workflow.py` 交 Controlled File 納管，並在同一交易記錄 Orders 完約與歸檔回執。成功回執可讀各目標的檔名及檔案識別；同一請求重送回原結果，不再完約一次。歸檔失敗不能標完約；已有的完約事實不因重送而覆寫。排班、訂金與帳務仍由各自的規格判定。
 
 ## Verification
-- 直接歸檔正反對照：沿用下列 `test_final_document_workflow.py` 的無 session／未簽檔正例、缺月嫂分段檔及受控儲存失敗反例；這些隔離案例不驗通知、正式檔案或待辦看板推進。
+- 直接歸檔接線對照：`test_contract_external_signing_api.py::test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_session` 核對 multipart 到既有歸檔入口，不要求先產生未簽版本或 session。
+- 歸檔應用層正反例：`test_final_document_workflow.py::test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files` 同時覆蓋只有客戶檔與另有月嫂分段、缺任何應傳檔拒絕、成功回讀、同鍵重送及不同內容衝突。`test_archive_storage_failure_rolls_back_without_recording_completion` 核對寫入失敗不保存回執、不標完約。這些隔離案例不驗通知、正式檔案或待辦看板推進。
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/`
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx` — L546–550 的既有介面測試斷言：後端未提供本機測試能力時，不顯示測試跳過操作。此案例不驗證後端授權或正式環境拒絕。
