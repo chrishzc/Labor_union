@@ -17,6 +17,7 @@
   - `infrastructure/mysql/historical_completion_writer.py`
   - `infrastructure/mysql/order_auto_completion_job_repository.py`
   - `infrastructure/mysql/historical_client_finance_completion_read_adapter.py`
+  - `infrastructure/mysql/historical_staff_payables_completion_read_adapter.py` — 從 Staff Payables 取正式結清與來源版本；不由 Orders 或前端重算。
   - `infrastructure/mysql/historical_orders_scheduling_completion_read_adapter.py`
 - entrypoints:
   - `api/routes/historical_completion.py`
@@ -34,7 +35,8 @@
 - inbound: `ui_react/src/pages/FinancePage.tsx` — 客戶收款頁選取歷史服務完成案件時，透過 HistoricalCompletionPanel 呈現 owner referral、預覽並確認帳務完成；成功或手動重新整理後重新讀取案件及完成狀態。案件工作台保留完工摘要與同案帳務連結。
 
 ## Contracts
-- `document/架構重整/02_決策與退役執行記錄/PROV-20260828-historical-baseline-projector-work-packages.md` — HOB-E composition與UI boundary。
+- 以 [歷史訂單正式規格 #27 §7](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#7-帳務完成投影) 判定整案能否結清；API 組裝見 `api/dependencies/historical_completion.py`，UI 的不可判定與轉介見 `HistoricalCompletionPanel.tsx`。
+- Staff Payables 來源版本的 [正式決策](../../../../../../document/架構重整/02_決策與退役執行記錄/PROV-20260827-historical-staff-payables-completion-root-spec-gap.md) §2.2–2.3：`owner_source_versions` 列出各正式來源的類型、身分、版本，不取最大版本代表全案。一筆出款跨案時由 Staff Payables 驗整筆分配，不用本案切片推定完整。證據缺漏或歸屬不明回不可判定；Orders 不推進第 11 步，畫面沿 owner 轉介。
 - `document/架構重整/02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md` — payment、owner settlement與Step 11分離。
 - `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md` — 歷史帳務完成 Q/P/A、fresh settlement 與 fail-closed lifecycle transition。
 
@@ -45,7 +47,7 @@
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-completion.md`
 
 ## Provenance
-- Orders Step 11 composition ownership — `architecture_declared` — current HOB-E package and live subsystem owner。
+- Orders Step 11 composition ownership — `architecture_declared` — 現行 #27 §7、Orders subsystem owner 與上述 composition。
 - API／React paths and focused tests — `source_observed` — current repository。
 - Cross-owner Step 11 oracle／query／projector／API／Apply coverage remains at the Orders subsystem integration boundary declared by the parent map；React presentation另由既有focused test保護。
 
