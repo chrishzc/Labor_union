@@ -425,6 +425,9 @@ class MySqlPricingConfigurationRepository:
             from infrastructure.mysql.holiday_repricing import load_frozen_holiday_amounts, load_frozen_holiday_case_total
             frozen = load_frozen_holiday_amounts(cursor, case_no, lock=lock)
             frozen_total = load_frozen_holiday_case_total(cursor, case_no) if frozen is not None else None
+            from infrastructure.mysql.payroll_rebuild_repository import _load_obligations
+            staff_obligations = _load_obligations(cursor, case_no, lock)
+            formal_staff = sum(int(row["effective_contractual_amount_ntd"]) for row in staff_obligations) if staff_obligations else None
         return CasePricingFacts(case_no, int(order.get("pricing_revision", 0)),
             (int(order["lifecycle_version"]), finance.account_version, int(payroll["aggregate_version"]) if payroll else -1,
                 int(scheduling["aggregate_version"]) if scheduling else -1), terms,
@@ -433,7 +436,8 @@ class MySqlPricingConfigurationRepository:
                 day.holiday_hours, day.holiday_hour_segments) for day in finance.charge_days),
             finance.floor_fee.amount,
             sum(item.adjustment_total.amount for item in payroll_source.payroll.source_terms) if payroll_source else 0,
-            legacy_amount, frozen_amounts=frozen, frozen_case_total=frozen_total)
+            legacy_amount, frozen_amounts=frozen, frozen_case_total=frozen_total, formal_staff_amount=formal_staff,
+            formal_client_amount=sum(item.contracted_amount.amount for item in finance.existing_obligations) if finance.existing_obligations else None)
 
     def _legacy_terms(self, cursor, order, finance):
         from infrastructure.mysql.effective_case_service_rate import load_explicit_case_service_rate

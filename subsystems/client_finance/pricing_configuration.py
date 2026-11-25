@@ -93,6 +93,8 @@ class CasePricingFacts:
     historical_service_hours: Decimal | None = None
     frozen_amounts: tuple[int, int] | None = None
     frozen_case_total: int | None = None
+    formal_staff_amount: int | None = None
+    formal_client_amount: int | None = None
 
 
 @dataclass(frozen=True)
@@ -277,9 +279,15 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
         union_income_amount=income)
 
 
-def current_pricing_impact(facts):
+def current_pricing_impact(facts: CasePricingFacts) -> PricingImpact:
     result = pricing_impact(facts.terms, facts)
-    return replace(result, client_amount=facts.legacy_client_amount) if facts.legacy_client_amount is not None else result
+    if facts.formal_staff_amount is not None:
+        result = replace(result, staff_total_amount=facts.formal_staff_amount,
+            staff_covered_amount=None, staff_excess_amount=None,
+            union_income_amount=(result.case_total_amount - facts.formal_staff_amount + facts.payroll_adjustment)
+                if result.union_income_amount is not None else None)
+    client_amount = facts.formal_client_amount if facts.formal_client_amount is not None else facts.legacy_client_amount
+    return replace(result, client_amount=client_amount) if client_amount is not None else result
 
 
 class PricingConfigurationApplication:

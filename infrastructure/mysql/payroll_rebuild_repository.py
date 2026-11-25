@@ -317,6 +317,11 @@ def _rebuild_facts(
         assignments,
         schedules_by_assignment,
     )
+    service_hours = Decimal(str(root["service_hours_per_day"])) * sum(len(item.service_dates) for item in service_facts)
+    funding_pending = (pricing.is_full_subsidy(service_hours) is True if pricing is not None else
+        bool(root.get("identity_status")) and derive_subsidy_coverage(str(root["identity_status"]), service_hours, Decimal(root["floor_fee"])).is_full_subsidy_order)
+    if funding_pending:
+        service_facts = tuple(replace(item, double_pay_dates=(), holiday_hour_segments=()) for item in service_facts)
     return PayrollRebuildFacts(
         case_no=str(root["case_no"]),
         payroll_version=int(root["aggregate_version"]),

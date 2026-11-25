@@ -42,3 +42,5 @@ Reconcile when rebuild input facts、projection contract or verification root ch
   target: ".arch-map/requirements/03_Payroll_Domain.md#^payroll-service-pricing"
 ```
 - 假日計價接線接線由下列 owner 實作，驗證見既有測試入口。`payroll_rebuild_repository.py` 分開讀 Scheduling 實際有效日時數及原財務基準，`rebuild_workflow.py` 使用 assignment 凍結費率算月嫂服務薪資。一般與歷史入口分流，兩方收付 facts 經同一 caller UoW 重讀後才交 Payroll writer；不可單獨改未付款一邊。
+
+- 22A 全額免自備差額負擔未定時，初排 Terms impact 與完成 Rebuild 均保留原服務薪資基數，假日加成暫不入帳；Scheduling 日期、時數與付款日仍沿原流程。服務費候選由 Client Finance Query 呈現，不以政府補助補平。

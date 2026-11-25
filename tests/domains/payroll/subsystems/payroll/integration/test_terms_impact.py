@@ -138,3 +138,19 @@ def test_first_formal_candidate_includes_enabled_holiday_without_extra_writer(ki
     assert candidate.expected_payroll_version == 3
     assert candidate.resulting_payroll_version == 4
     assert sum(action.amount.amount for action in candidate.actions) == expected
+
+
+@pytest.mark.parametrize("bound_policy", [False, True])
+def test_full_subsidy_initial_holiday_keeps_base_payroll_until_funding_decision(bound_policy):
+    from dataclasses import replace
+    from decimal import Decimal
+    from domains.payroll.tiered_rates import TieredPayrollRate
+    from subsystems.payroll.terms_impact import build_payroll_handover_impact
+    item = replace(_source_facts().source_terms[0], policy_kind=PayrollPolicyKind.SUBSIDIZED_CITIZEN)
+    if bound_policy:
+        item = replace(item, hourly_rate=MoneyNTD(350),
+            tiered=TieredPayrollRate(350, 350, Decimal(120), True))
+    source = replace(_source_facts(), source_terms=(item,), double_pay_dates=(date(2026, 1, 1),))
+    candidate = build_payroll_handover_impact(source, _scheduling(), _terms(), "full-holiday-pending")
+    assert sum(action.amount.amount for action in candidate.actions) == 6600
+    assert candidate.resulting_payroll_version == candidate.expected_payroll_version + 1

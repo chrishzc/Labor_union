@@ -911,7 +911,7 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
 
 def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
     if facts.pricing is None:
-        return False
+        return facts.client_service_charge_waived
     hours = Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day))
     return facts.pricing.is_full_subsidy(hours) is True
 
@@ -930,7 +930,7 @@ def _daily_charge(facts: ClientFinanceTermsFacts, charge_day: ClientChargeDay) -
         index = facts.charge_days.index(charge_day)
         remaining = max(0,120-index*facts.service_hours_per_day)
         billed = max(0,facts.service_hours_per_day-remaining)
-        return MoneyNTD(_whole_ntd(billed*facts.payment_terms.client_hourly_rate.amount))
+        return MoneyNTD(_whole_ntd((billed + premium)*facts.payment_terms.client_hourly_rate.amount))
     if facts.client_service_charge_waived:
         return MoneyNTD(0)
     return (

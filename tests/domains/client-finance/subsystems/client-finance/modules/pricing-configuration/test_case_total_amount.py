@@ -64,3 +64,13 @@ def test_paid_manual_receivable_does_not_replace_original_service_price():
     assert (result.case_total_amount, result.client_amount, result.staff_total_amount, result.union_income_amount) == (2800, 2500, 2560, 240)
     assert result.staff_covered_amount is None
     assert result.staff_excess_amount is None
+
+
+def test_current_union_income_uses_formal_staff_own_rate_result():
+    from datetime import date
+    from subsystems.client_finance.pricing_configuration import CasePricingFacts, PricingServiceDay, current_pricing_impact
+    terms = CasePricingTerms("非市民", IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(0, 350), HourlyRates(0, 320))
+    facts = CasePricingFacts("own-staff-rate", 0, (), terms, "policy",
+        (PricingServiceDay(date(2026, 1, 1), Decimal(8), False, Decimal(8)),), 0, formal_staff_amount=4960, formal_client_amount=5500)
+    result = current_pricing_impact(facts)
+    assert (result.case_total_amount, result.client_amount, result.staff_total_amount, result.union_income_amount) == (5600, 5500, 4960, 640)

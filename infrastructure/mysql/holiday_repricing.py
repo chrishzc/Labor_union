@@ -1,13 +1,12 @@
 """Reprice both unpaid owners inside Holiday Maintenance's existing transaction."""
 from __future__ import annotations
 
-from decimal import Decimal
 from dataclasses import replace
 import json
 from pymysql.connections import Connection
 from pymysql.cursors import DictCursor
 
-from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
+from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, _full_subsidy
 from infrastructure.mysql.client_finance_terms_writer import persist_client_finance_terms_impact
 from infrastructure.mysql.order_terms_read_model import (
     _select_client_obligations, load_calculable_client_finance_facts, select_order,
@@ -116,10 +115,8 @@ class MySqlHolidayRepricing:
             facts, _ = load_calculable_client_finance_facts(cursor, order, lock=True, allow_planned=False)
             if facts is None:
                 return HolidayCaseRepricingResult(case_no, "unchanged")
-            premium_exists = any(day.holiday_hours for day in facts.charge_days)
-            if premium_exists and facts.pricing is not None and facts.pricing.is_full_subsidy(
-                Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day)),
-            ) is True:
+            premium_exists = any(day.is_double_pay or day.holiday_hours for day in facts.charge_days)
+            if premium_exists and _full_subsidy(facts):
                 return HolidayCaseRepricingResult(case_no, "funding_decision_pending")
             child = fingerprint_payload({"holiday": key, "case": case_no}).value
             candidate = build_client_finance_terms_candidate(facts, f"holiday:{child}")

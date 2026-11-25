@@ -859,3 +859,68 @@ def test_holiday_merge_and_restore_use_effective_eight_hours_and_preserve_paid_t
         assert (impact["case_total_amount"], impact["client_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == (28000, 28000, 25600, 2400)
     finally:
         connection.close()
+
+
+@pytest.mark.parametrize("profile", ["citizen", "historical", "full_subsidy"])
+def test_holiday_identity_scope_and_pending_funding_preserve_real_ledgers(client, profile):
+    from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
+    identity = "一般市民" if profile == "citizen" else "補助市民" if profile == "full_subsidy" else "非市民"
+    case_no = "holiday-scope-" + profile
+    seed_case(case_no, identity=identity)
+    bootstrap_case(client, case_no)
+    seed_assignment(case_no)
+    connection = mysql_adapter.get_connection()
+    day = date(2026, 10, 19)
+    def amounts():
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COALESCE(SUM(e.after_amount_ntd),0) AS total FROM client_obligations o "
+                "JOIN client_obligation_events e ON e.id=o.current_event_id WHERE o.case_no=%s "
+                "AND o.obligation_type IN ('deposit','first','second')", (case_no,))
+            client_total = int(cursor.fetchone()["total"])
+            cursor.execute("SELECT COALESCE(SUM(e.after_amount_ntd),0) AS total FROM staff_obligations o "
+                "JOIN staff_obligation_events e ON e.id=o.current_event_id WHERE o.case_no=%s "
+                "AND o.obligation_kind='service_pay' AND o.status<>'cancelled'", (case_no,))
+            return client_total, int(cursor.fetchone()["total"])
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) VALUES(%s,'Synthetic scope',0) "
+                "ON DUPLICATE KEY UPDATE is_double_pay_default=0", (day,))
+            if profile == "full_subsidy":
+                cursor.execute("UPDATE orders SET service_hours_per_day=4,service_end_time='13:00:00' WHERE case_no=%s", (case_no,))
+        connection.commit()
+        with MySqlUnitOfWork(connection) as unit:
+            MySqlHolidayRepricing(connection).reprice_case(case_no, case_no + ":initial", "pricing-test")
+            unit.commit()
+        if profile == "historical":
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE orders SET status='歷史訂單－服務中' WHERE case_no=%s", (case_no,))
+            connection.commit()
+        current = client.get(f"/api/v1/accounting-pricing/cases/{case_no}").json()["data"] if profile == "citizen" else None
+        before = amounts()
+        reprice = MySqlHolidayRepricing(connection)
+        application = HolidayMaintenanceApplication(MySqlSchedulingHolidayQuery(connection),
+            lambda: MySqlUnitOfWork(connection), lambda: None, reprice, reprice.prepare)
+        command = HolidayCommand("upsert", day, "Synthetic scope", True, day, day)
+        preview = application.preview(command)
+        receipt = application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+            case_no + ":enable", "pricing-test", "synthetic scope")
+        outcome = next(result.outcome for result in receipt.case_results if result.case_no == case_no)
+        if profile == "citizen":
+            after = amounts()
+            assert after == (before[0] + 8 * current["terms"]["client"]["excess"],
+                             before[1] + 8 * current["terms"]["payroll"]["excess"])
+            assert after[0] == after[1]
+            assert outcome == "repriced"
+        else:
+            assert amounts() == before
+            assert outcome == ("historical_excluded" if profile == "historical" else "funding_decision_pending")
+        off = HolidayCommand("upsert", day, "Synthetic scope", False, day, day)
+        preview = application.preview(off)
+        application.apply(off, preview.calendar.holiday_version, preview.preview_fingerprint,
+            case_no + ":disable", "pricing-test", "synthetic scope")
+        assert amounts() == before
+    finally:
+        connection.close()

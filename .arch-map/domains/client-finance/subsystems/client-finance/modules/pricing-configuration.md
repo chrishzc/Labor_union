@@ -63,3 +63,5 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - 假日計價讀回接線由下列 owner 實作，驗證見既有測試入口。`pricing_policy.py` 的案件總額與 obligation planning 使用同一客戶服務費投影。帳務 API 提供案件總額、客戶應收、月嫂應付及工會收入的 owner 結果，`AccountingParametersCard` 與帳務工作台直接呈現；瀏覽器不重算乘數。
 
 - `holiday_repricing.py` 在設定寫入前鎖定並取得有正式收付案件的原 `case_total_amount`，保存於既有假日／日期調整 receipt JSON；讀取優先使用此原定價快照，不把人工應收當案件總額。正式應收及應付各讀原義務，工會收入由後端投影。已凍結案件缺少正式費率級距分解時，分解欄位回 null，不從新日曆捏造。
+
+- 正式 Query 的月嫂應付取 Payroll 現有義務有效金額合計，工會收入以該結果及案件服務定價投影，不以個案政策的月嫂基準費率覆蓋各指派自己的正式結果。個案改價 Preview 仍計算候選影響，與正式 Query 分開。

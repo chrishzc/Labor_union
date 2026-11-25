@@ -660,3 +660,13 @@ def test_general_terms_source_borrows_enabled_holidays_with_matching_lock_mode(l
     monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", CalendarQuery)
     assert _enabled_holiday_dates(SimpleNamespace(connection=object()), {"status": "訂單成立"}, lock) == (enabled,)
     assert calls == [lock]
+
+
+
+def test_legacy_partial_social_service_prices_covered_holiday_premium():
+    from domains.client_finance.obligation_planning import ClientChargeDay, ClientFinanceTermsFacts, _daily_charge
+    day = date(2026, 1, 1)
+    facts = ClientFinanceTermsFacts("legacy-social", 0, 8, MoneyNTD(0),
+        (ClientChargeDay(day, True),), ClientPaymentTerms(0, MoneyNTD(350), day, day, None), (),
+        identity_status="社福")
+    assert _daily_charge(facts, facts.charge_days[0]) == MoneyNTD(2800)
