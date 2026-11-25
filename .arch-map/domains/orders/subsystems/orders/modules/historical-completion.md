@@ -34,7 +34,24 @@
 - outbound: Orders canonical lifecycle writer — 追加 lifecycle event/outbox 並以 lifecycle version CAS 更新 Orders projection。
 - inbound: `ui_react/src/pages/FinancePage.tsx` — 客戶收款頁選取歷史服務完成案件時，透過 HistoricalCompletionPanel 呈現 owner referral、預覽並確認帳務完成；成功或手動重新整理後重新讀取案件及完成狀態。案件工作台保留完工摘要與同案帳務連結。
 
-## Contracts
+<a id="contracts"></a>
+
+## Contracts ^historical-completion-contracts
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: historical-completion-contracts
+  target: .arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#^historical-accounting-completion
+```
+
+### 第 11 步交接
+
+| 負責角色 | 正式約定 | 去哪查 |
+| --- | --- | --- |
+| Orders／後端 | Query 只讀；由 Orders 組合各 owner 的最新回讀。只有服務天數完整、雙邊款項均真正結清且符合 #27 §7 其餘條件時，才由 Preview／Apply 推進。 | `historical_completion_oracle.py`、`historical_completion_apply.py` |
+| Staff Payables | 跨案出款由 Staff Payables 驗整筆分配，不以單案切片推定完整；Orders 和前端不重算。 | `historical_staff_payables_completion_read_adapter.py`、下方 Staff Payables 正式決策 |
+| 前端 | 證據缺漏或歸屬不明時呈現不可判定及對應 owner 的轉介，不把第 11 步顯示成已完成。 | `HistoricalCompletionPanel.tsx`、下方 Verification |
+
 - 以 [歷史訂單正式規格 #27 §7](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#7-帳務完成投影) 判定整案能否結清；API 組裝見 `api/dependencies/historical_completion.py`，UI 的不可判定與轉介見 `HistoricalCompletionPanel.tsx`。
 - Staff Payables 來源版本的 [正式決策](../../../../../../document/架構重整/02_決策與退役執行記錄/PROV-20260827-historical-staff-payables-completion-root-spec-gap.md) §2.2–2.3：`owner_source_versions` 列出各正式來源的類型、身分、版本，不取最大版本代表全案。一筆出款跨案時由 Staff Payables 驗整筆分配，不用本案切片推定完整。證據缺漏或歸屬不明回不可判定；Orders 不推進第 11 步，畫面沿 owner 轉介。
 - `document/架構重整/02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md` — payment、owner settlement與Step 11分離。
