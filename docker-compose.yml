@@ -71,7 +71,6 @@ services:
       retries: 5
     networks:
       - registration-private
-      - registration-host
 
   registration-intake:
     profiles: ["registration"]
@@ -124,8 +123,6 @@ networks:
     driver: bridge
   registration-private:
     internal: true
-  registration-host:
-    driver: bridge
   registration-verification:
     internal: true
   registration-ingress:
