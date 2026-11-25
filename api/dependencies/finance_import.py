@@ -40,6 +40,9 @@ from subsystems.finance_import.refund_return_review_workflow import (
 )
 
 
+from domains.finance_import.correction import FinanceImportCorrectionSelection, ServiceEndReceiptQuote
+
+
 class FinanceImportOwningDomainCompositePort(Protocol):
     def bind_request(self, request): ...
 
@@ -52,9 +55,14 @@ class FinanceImportOwningDomainCompositePort(Protocol):
 
     def validate_client_refund(self, candidate, correlation_id): ...
     def preview_client_refund(self, selection, facts, correlation_id): ...
+    def preview_service_end_receipt(self, selection: FinanceImportCorrectionSelection) -> ServiceEndReceiptQuote: ...
 
 
 class UnavailableOwningDomainCompositePort:
+    def preview_service_end_receipt(self, selection: FinanceImportCorrectionSelection) -> ServiceEndReceiptQuote:
+        del selection
+        raise FinanceImportRepositoryUnavailable("Owning Finance Domain composite writer is not configured.")
+
     def preview_client_refund(self, selection, facts, correlation_id):
         del selection, facts, correlation_id
         raise FinanceImportRepositoryUnavailable("Owning Finance Domain composite writer is not configured.")

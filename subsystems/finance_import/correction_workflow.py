@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
-from domains.finance_import.correction import ClientRefundCorrectionPreview, FinanceImportCorrectionCandidate, FinanceImportCorrectionFacts, FinanceImportCorrectionSelection, build_finance_import_correction_candidate
+from domains.finance_import.correction import ClientRefundCorrectionPreview, FinanceImportCorrectionCandidate, FinanceImportCorrectionFacts, FinanceImportCorrectionSelection, ServiceEndReceiptQuote, build_finance_import_correction_candidate
 from domains.finance_import.planning import FinanceClassificationType
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -34,6 +34,7 @@ class FinanceImportCorrectionPostingPort(Protocol):
     def post(self, candidate: FinanceImportCorrectionCandidate) -> int: ...
     def validate_client_refund(self, candidate: FinanceImportCorrectionCandidate, correlation_id: CorrelationId) -> None: ...
     def preview_client_refund(self, selection: FinanceImportCorrectionSelection, facts: FinanceImportCorrectionFacts, correlation_id: CorrelationId) -> ClientRefundCorrectionPreview: ...
+    def preview_service_end_receipt(self, selection: FinanceImportCorrectionSelection) -> ServiceEndReceiptQuote: ...
 class FinanceImportRepositoryUnavailable(RuntimeError): pass
 class FinanceImportCorrectionWorkflowError(Exception):
     def __init__(self, error: TypedError) -> None: super().__init__(error.message); self.error = error
@@ -73,21 +74,22 @@ class FinanceImportCorrectionWorkflow:
     def _preview(self, selection, facts, correlation_id):
         owner_preview = (self._posting_port.preview_client_refund(selection, facts, correlation_id)
             if selection.classification_type in {FinanceClassificationType.CLIENT_REFUND, FinanceClassificationType.CLIENT_SUBSIDY_RETURN} else None)
-        return _build_preview(selection, facts, owner_preview)
+        terminal_preview = self._posting_port.preview_service_end_receipt(selection) if selection.service_end_case_no is not None else None
+        return _build_preview(selection, facts, owner_preview, terminal_preview)
     def _persist_formal_result(self,request,preview):
         candidate=preview.candidate; self._repository.append_manual_classification(candidate,request.actor); count=self._posting_port.post(candidate)
         if count < 1: raise RuntimeError("correction posting created no formal ledger entry")
         self._repository.append_reconciliation_receipt(candidate); alert_resolved_event_count=self._repository.append_alert_resolved_event(candidate,request.actor) or 0; self._repository.append_outbox(candidate); self._repository.advance_batch_version(candidate,preview.batch_version,preview.batch_version+1); return count, alert_resolved_event_count
     def _save_receipt(self,request,fingerprint,receipt): self._repository.save_correction_receipt(request.idempotency_key,StoredFinanceImportCorrectionReceipt(fingerprint,receipt))
 
-def _build_preview(selection,facts,refund_preview=None):
-    candidate=build_finance_import_correction_candidate(selection,facts,refund_preview=refund_preview); fingerprint=fingerprint_payload({"candidate_fingerprint":candidate.fingerprint.value,"batch_version":facts.batch_version,"canonical_fact_version":facts.canonical_fact_version,"alert_version":facts.alert_version}); return FinanceImportCorrectionPreview(candidate,facts.batch_version,facts.canonical_fact_version,facts.alert_version,fingerprint)
+def _build_preview(selection,facts,refund_preview=None,terminal_preview=None):
+    candidate=build_finance_import_correction_candidate(selection,facts,refund_preview=refund_preview,service_end_receipt=terminal_preview); fingerprint=fingerprint_payload({"candidate_fingerprint":candidate.fingerprint.value,"batch_version":facts.batch_version,"canonical_fact_version":facts.canonical_fact_version,"alert_version":facts.alert_version}); return FinanceImportCorrectionPreview(candidate,facts.batch_version,facts.canonical_fact_version,facts.alert_version,fingerprint)
 def _validate_expected_versions(request,facts):
     if (request.expected_batch_version.value,request.expected_canonical_fact_version.value,request.expected_alert_version.value)!=(facts.batch_version,facts.canonical_fact_version,facts.alert_version): raise _workflow_error(request.correlation_id,ErrorCategory.CONFLICT,"stale_preview","Correction facts changed before Apply.")
 def _build_receipt(preview,ledger_entry_count,alert_resolved_event_count):
-    candidate=preview.candidate; return FinanceImportCorrectionReceipt(candidate.row_identity,candidate.batch_identity,preview.batch_version+1,1,ledger_entry_count,len(candidate.allocations),1,alert_resolved_event_count,preview.fingerprint)
+    candidate=preview.candidate; return FinanceImportCorrectionReceipt(candidate.row_identity,candidate.batch_identity,preview.batch_version+1,1,ledger_entry_count,candidate.posting_allocation_count,1,alert_resolved_event_count,preview.fingerprint)
 def _command_fingerprint(request):
-    selection=request.selection; return fingerprint_payload({"row_identity":selection.row_identity,"classification_type":selection.classification_type.value,"target_obligation_identities":selection.target_obligation_identities,"refund_ledger_entry_identity":selection.refund_ledger_entry_identity,"reason":selection.reason,"evidence":selection.evidence,"expected_batch_version":request.expected_batch_version.value,"expected_canonical_fact_version":request.expected_canonical_fact_version.value,"expected_alert_version":request.expected_alert_version.value,"preview_fingerprint":request.preview_fingerprint.value,"actor_id":request.actor.actor_id})
+    selection=request.selection; return fingerprint_payload({"row_identity":selection.row_identity,"classification_type":selection.classification_type.value,"target_obligation_identities":selection.target_obligation_identities,"refund_ledger_entry_identity":selection.refund_ledger_entry_identity,"reason":selection.reason,"evidence":selection.evidence,"expected_batch_version":request.expected_batch_version.value,"expected_canonical_fact_version":request.expected_canonical_fact_version.value,"expected_alert_version":request.expected_alert_version.value,"preview_fingerprint":request.preview_fingerprint.value,"actor_id":request.actor.actor_id,**({"service_end_case_no": selection.service_end_case_no} if selection.service_end_case_no is not None else {})})
 def _domain_error(correlation_id,raw_code):
     blockers=tuple(sorted(code for code in raw_code.split(",") if code)); code=blockers[0] if blockers else "classification_conflict"; category=ErrorCategory.VALIDATION if code=="manual_evidence_required" else ErrorCategory.DOMAIN_BLOCKED; return _workflow_error(correlation_id,category,code,"Finance Import correction cannot be posted.",blockers=blockers if category is ErrorCategory.DOMAIN_BLOCKED else ())
 def _stale_error(request,facts): return _workflow_error(request.correlation_id,ErrorCategory.CONFLICT,"stale_preview","Correction candidate changed after Preview.",current_version=facts.alert_version)

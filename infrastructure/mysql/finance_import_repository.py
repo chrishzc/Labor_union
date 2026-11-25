@@ -511,7 +511,7 @@ class MySqlFinanceImportRepository:
                     _row_database_id(candidate.row_identity),
                     candidate.fingerprint.value,
                     candidate.owning_domain.value,
-                    len(candidate.allocations),
+                    candidate.posting_allocation_count,
                     candidate.bank_amount.amount,
                 ),
             )
@@ -759,7 +759,8 @@ def _load_correction_facts(cursor, selection, for_update):
     header = cursor.fetchone()
     if header is None:
         raise ValueError("finance_import_row_not_found")
-    obligations = _load_obligations(cursor, selection, for_update)
+    terminal = selection.service_end_case_no is not None
+    obligations = () if terminal else _load_obligations(cursor, selection, for_update)
     issues = _load_integrity_issues(cursor, int(header["batch_id"]))
     row_issues = issues.get(row_id, ())
     return FinanceImportCorrectionFacts(
@@ -768,8 +769,9 @@ def _load_correction_facts(cursor, selection, for_update):
         int(header["canonical_fact_version"]),
         int(header["classification_version"]),
         MoneyNTD(_integer_bank_amount(header["credit"], header["debit"])),
-        str(header["disposition"]) in {"manual_review", "business_pending"} and not header.get('period_bank_used')
-        and header.get("reconciliation_status") != "excluded",
+        (((header.get("reconciliation_status") == "pending" and header["disposition"] != "blocked") if terminal else
+          str(header["disposition"]) in {"manual_review", "business_pending"} and header.get("reconciliation_status") != "excluded")
+         and not header.get('period_bank_used')),
         obligations,
         tuple(
             code
