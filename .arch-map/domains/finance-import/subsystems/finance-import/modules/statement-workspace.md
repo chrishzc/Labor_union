@@ -101,7 +101,7 @@
 - case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection；S 由 Government Subsidy 單案共用 Query 提供，不以方案或退款義務存在為前提，未知不轉零。方案事件明示人工／銀行來源；未收到政府款不作直付證據。舊 direct arrangement 仍沿原 append-only confirm_direct/withdraw_direct 與其 writer，不回填或改寫。
 - arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
-- 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。正式核銷資訊只來自原 owner 回讀；通知仍由 [LINE payment-overdue-reminders](../../../../external-integration/subsystems/line/modules/payment-overdue-reminders.md) owner 負責，各核銷工具保留原 writer。
+- 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。待核對列使用「核對交易」；已核銷列使用「查看交易」，原始事實和正式核銷明細唯讀。台新出款判為退客戶先墊補助時，只在原流水核對同案客戶退款，不帶入月嫂義務或開「單筆人工核對」。該人工入口限台新月嫂補助出款，須由後端確認同案月嫂、正式應付與人工核對資格。任何不足以核對的列顯示原因；可確認案件時仍可查看本案帳務，查看不等於核銷。正式核銷資訊只來自原 owner 回讀；通知仍由 [LINE payment-overdue-reminders](../../../../external-integration/subsystems/line/modules/payment-overdue-reminders.md) owner 負責，各核銷工具保留原 writer。
 - 客戶收款面板的全案餘額同時消費既有 Receipt Query 與案件帳務 Query：只彙總版本一致、來源完整的客戶應收正式餘額；缺來源、缺列或未知餘額保留待確認，不從未清清單為空推定結清，也不加入月嫂應付或退款結清門檻。正式成功後依收據版本與回讀再次確認。
 
 ## Verification
