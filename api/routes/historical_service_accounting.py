@@ -404,7 +404,7 @@ def _call(command, message, correlation):
         if code == "historical_attribution_preview_stale":
             _raise(TypedError(ErrorCategory.CONFLICT, code, "案件或帳務已變動，請重新預覽。", correlation))
         attribution_blockers = {
-            "historical_completed_service_partial_baseline_required": "各人服務量尚未確認，且本案沒有可保留的歷史天數帳務版本。現有資料結構無法單獨保存這次更正，請先核對可證實的原服務量與帳務基準。",
+            "historical_completed_service_assignment_mismatch": "所選月嫂與本案已採納的指派不符，請重新查詢。",
             "historical_attribution_formal_workflow_required": "本案已採用多人服務天數，請從「調整各月嫂服務天數」辦理。",
             "historical_attribution_manual_confirmation_required": "請確認採用拆分後的新計算金額。",
             "historical_attribution_paid_manual_review_required": "已有付款的人工金額需先核對原款項及差額歸屬。",

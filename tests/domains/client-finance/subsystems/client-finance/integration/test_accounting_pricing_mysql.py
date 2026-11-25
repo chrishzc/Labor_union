@@ -1934,7 +1934,7 @@ def test_holiday_full_subsidy_existing_settlement_preserves_both_accounts(client
         connection.close()
 
 
-def seed_historical_completed_pricing_people(case_no, *, mixed_legacy_rates=False):
+def seed_historical_completed_pricing_people(case_no, *, mixed_legacy_rates=False, confirm_days=True):
     """Two evidenced five-day assignments, original payables and immutable snapshots."""
     from domains.orders.historical_service_accounting import HistoricalActualServiceDaysInput
     from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
@@ -1998,14 +1998,15 @@ def seed_historical_completed_pricing_people(case_no, *, mixed_legacy_rates=Fals
         people = ((first_staff, first_assignment), (second_staff, second_assignment))
         repository = MySqlHistoricalServiceAccountingRepository(connection)
         workflow = HistoricalServiceAccountingWorkflow(repository, lambda: MySqlUnitOfWork(connection))
-        intent = ConfirmHistoricalServiceDaysIntent(case_no, tuple(HistoricalActualServiceDaysInput(
-            f'assignment:{assignment}', staff, (3, 2)[index] if mixed_legacy_rates else 5)
-            for index, (staff, assignment) in enumerate(people)))
-        candidate = workflow.preview(intent)
-        facts = candidate.facts
-        workflow.apply(ApplyHistoricalServiceAccounting(intent, facts.lifecycle_version, facts.historical_day_revision,
-            facts.client_finance_version, facts.payroll_version, candidate.fingerprint, IdempotencyKey(case_no + ':days'),
-            ActorContext('synthetic'), 'confirmed original five-day volumes', CorrelationId(case_no + ':days')))
+        if confirm_days:
+            intent = ConfirmHistoricalServiceDaysIntent(case_no, tuple(HistoricalActualServiceDaysInput(
+                f'assignment:{assignment}', staff, (3, 2)[index] if mixed_legacy_rates else 5)
+                for index, (staff, assignment) in enumerate(people)))
+            candidate = workflow.preview(intent)
+            facts = candidate.facts
+            workflow.apply(ApplyHistoricalServiceAccounting(intent, facts.lifecycle_version, facts.historical_day_revision,
+                facts.client_finance_version, facts.payroll_version, candidate.fingerprint, IdempotencyKey(case_no + ':days'),
+                ActorContext('synthetic'), 'confirmed original five-day volumes', CorrelationId(case_no + ':days')))
         with connection.cursor() as cursor:
             cursor.execute('SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s FOR UPDATE', (case_no,))
             expected_payroll_version = int(cursor.fetchone()['aggregate_version'])
@@ -2452,6 +2453,60 @@ def test_historical_accounting_partial_service_facts_insert_adjusted_immutable_i
             assert [(row['assignment_id'], row['actual_service_days'], Decimal(str(row['actual_service_hours'])))
                     for row in items] == [(people[0][1], 5, Decimal(30)), (people[1][1], 5, Decimal(40))]
         connection.rollback()
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+    finally:
+        connection.close()
+
+
+def test_historical_accounting_saves_initial_partial_service_facts_without_inventing_totals(client: TestClient) -> None:
+    from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
+
+    case_no = 'hist-partial-initial-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no, confirm_days=False)
+    immutable = historical_completed_immutable_snapshot(case_no)
+    path = f'/api/v1/orders/{case_no}/historical-service-accounting/attribution'
+    staff_id, assignment_id = people[0]
+    period = {
+        'assignment_identity': f'assignment:{assignment_id}', 'staff_id': staff_id,
+        'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-05',
+        'service_start_time': '09:00:00', 'service_end_time': '15:00:00',
+        'service_hours_per_day': '6', 'service_end_day_offset': 0,
+    }
+    body = {'caregivers': [], 'evidence': 'confirmed first caregiver period', 'service_facts': [period]}
+    preview = post(client, path + '/preview', body, case_no + ':preview')
+    other = {**body, 'service_facts': [{**period, 'actual_end_date': '2026-10-04'}]}
+    other_preview = post(client, path + '/preview', other, case_no + ':other-preview')
+    assert preview['client_delta_ntd'] is None
+    apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed service period'}
+    key = case_no + ':apply'
+    receipt = post(client, path + '/apply', apply, key)
+    assert receipt['resulting_historical_day_revision'] == 0
+    assert receipt['total_actual_service_days'] is None
+    assert receipt['client_obligation_amount_ntd'] is None and receipt['staff_obligation_amount_ntd'] is None
+    assert post(client, path + '/apply', apply, key)['replayed'] is True
+    stale = client.post(path + '/apply', json={
+        **other, 'preview_fingerprint': other_preview['preview_fingerprint'], 'reason': 'stale service period',
+    }, headers={'Idempotency-Key': case_no + ':stale', 'X-Correlation-ID': case_no + ':stale'})
+    assert stale.status_code == 409
+    assert stale.json()['detail']['error']['code'] == 'historical_attribution_preview_stale'
+    connection = mysql_adapter.get_connection()
+    try:
+        facts = MySqlHistoricalServiceAccountingRepository(connection).load(case_no, for_update=False)
+        assert facts.service_baseline is None
+        assert facts.accounting_pending == tuple(receipt['accounting_pending'])
+        by_staff = {item.staff_id: item for item in facts.assignments}
+        selected, untouched = by_staff[staff_id], by_staff[people[1][0]]
+        assert selected.service_fact is not None
+        assert selected.service_fact.actual_start_date == date(2026, 10, 1)
+        assert selected.service_fact.actual_end_date == date(2026, 10, 5)
+        assert selected.service_fact.service_hours_per_day == Decimal('6')
+        assert untouched.service_fact is None
+        assert all(item.actual_service_days is None and item.actual_service_hours is None for item in facts.assignments)
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) AS n FROM historical_service_day_events WHERE case_no=%s', (case_no,))
+            assert cursor.fetchone()['n'] == 0
+            cursor.execute('SELECT COUNT(*) AS n FROM admin_command_receipts WHERE idempotency_key=%s', (key,))
+            assert cursor.fetchone()['n'] == 1
         assert historical_completed_immutable_snapshot(case_no) == immutable
     finally:
         connection.close()

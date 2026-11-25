@@ -101,6 +101,7 @@ class HistoricalServiceAccountingFacts:
     attribution_adopted: bool = False
     accounting_pending: tuple[str, ...] = ()
     service_baseline: HistoricalServiceAccountingBaseline | None = None
+    partial_service_facts_version: int | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.service_hours_per_day, float):
@@ -206,9 +207,9 @@ class HistoricalServiceAccountingReceipt:
     resulting_historical_day_revision: int
     resulting_client_finance_version: int
     resulting_payroll_version: int
-    total_actual_service_days: int
-    client_obligation_amount_ntd: int
-    staff_obligation_amount_ntd: int
+    total_actual_service_days: int | None
+    client_obligation_amount_ntd: int | None
+    staff_obligation_amount_ntd: int | None
     preview_fingerprint: PreviewFingerprint
     replayed: bool = False
     accounting_pending: tuple[str, ...] = ()
@@ -411,8 +412,6 @@ class HistoricalServiceAccountingWorkflow:
     def _preview_partial_service_facts(
         self, facts: HistoricalServiceAccountingFacts, intent: HistoricalAttributionIntent, *, lock: bool,
     ) -> HistoricalAttributionPreview:
-        if facts.service_baseline is None:
-            raise ValueError("historical_completed_service_partial_baseline_required")
         selected = {item.assignment_identity: item for item in intent.service_facts}
         periods_by_identity = {item.assignment_identity: item.service_fact for item in facts.assignments
                                if item.service_fact is not None}
@@ -438,7 +437,9 @@ class HistoricalServiceAccountingWorkflow:
         comparison = HistoricalServiceFactsCorrectionCandidate(facts, periods, fingerprint_payload({
             "case_no": facts.case_no, "lifecycle_version": facts.lifecycle_version,
             "historical_day_revision": facts.historical_day_revision,
-            "baseline": asdict(facts.service_baseline), "client_finance_version": facts.client_finance_version,
+            "baseline": asdict(facts.service_baseline) if facts.service_baseline else None,
+            "partial_service_facts_version": facts.partial_service_facts_version,
+            "client_finance_version": facts.client_finance_version,
             "payroll_version": facts.payroll_version,
             "assignments": tuple((item.assignment_identity, item.staff_id, item.actual_service_days,
                                   str(item.actual_service_hours) if item.actual_service_hours is not None else None)

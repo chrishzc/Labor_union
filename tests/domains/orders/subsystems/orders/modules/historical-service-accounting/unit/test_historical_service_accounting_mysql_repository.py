@@ -387,8 +387,11 @@ def _partial_completed_facts():
 
 
 @pytest.mark.parametrize("selected_staff", [3, 4])
-def test_partial_completed_facts_preview_keeps_unknown_sibling_and_dates_separate_from_days(selected_staff):
+@pytest.mark.parametrize("with_baseline", [False, True])
+def test_partial_completed_facts_preview_keeps_unknown_sibling_and_dates_separate_from_days(selected_staff, with_baseline):
     facts, _ = _partial_completed_facts()
+    if not with_baseline:
+        facts = replace(facts, historical_day_revision=0, service_baseline=None)
     selected = replace(_completed_period(), assignment_identity=f"assignment:{19 if selected_staff == 3 else 20}",
                        staff_id=selected_staff)
 
@@ -415,20 +418,7 @@ def test_partial_completed_facts_preview_keeps_unknown_sibling_and_dates_separat
     assert result.comparison.facts.assignments[1].actual_service_hours is None
     assert result.volume_repricing.persons[1].after_amount is None
     assert "historical_completed_service_volume_unresolved:assignment:20" in result.accounting_pending
-    assert result.comparison.facts.service_baseline.total_actual_service_hours == Decimal("360")
-
-
-def test_partial_completed_facts_without_previous_event_returns_specific_storage_gap():
-    facts, _ = _partial_completed_facts()
-
-    class Repository:
-        def load(self, case_no, *, for_update):
-            return replace(facts, service_baseline=None, historical_day_revision=0)
-
-    workflow = HistoricalServiceAccountingWorkflow(Repository(), lambda: None)
-    with pytest.raises(ValueError, match="historical_completed_service_partial_baseline_required"):
-        workflow.preview_attribution(HistoricalAttributionIntent(
-            facts.case_no, ((3, 3),), "逐人服務證據", (_completed_period(),)))
+    assert result.comparison.facts.service_baseline == facts.service_baseline
 
 
 def test_query_canonicalizes_assignment_identities_without_swapping_service_or_payroll_facts():

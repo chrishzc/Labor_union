@@ -119,7 +119,6 @@ export function historicalPendingLabel(code: string): string {
     historical_pricing_total_service_hours_required: '整案服務時數尚未確認，客戶與補助差額待核對。',
     historical_pricing_original_calculation_basis_required: '更正前服務量尚未確認，無法判定歷史差額；請先核對原計算基準。',
     historical_completed_service_volume_unresolved: '此指派的歷史服務量尚未確認，請補齊各人服務證據。',
-    historical_completed_service_partial_baseline_required: '尚無可採用的歷史服務天數基準，目前無法保存這組部分更正；請先由原入口確認各人服務天數。',
     historical_pricing_service_attribution_required: '各人服務量尚未確認，請先核對歷史服務歸屬。',
     case_pricing_settled_subsidy_correction_required: '補助已有核銷，差額須沿原補助更正流程核對。',
     historical_pricing_amount_conflict: '差額與原款項金額不相容，請核對原帳。',

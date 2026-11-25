@@ -219,13 +219,13 @@ def test_partial_service_fact_preview_accepts_unknown_days_and_keeps_amounts_pen
     assert result["subsidy_delta_ntd"] is None
 
 
-def test_partial_service_fact_without_saved_baseline_returns_typed_domain_blocker():
+def test_partial_service_fact_wrong_assignment_returns_typed_domain_blocker():
     client = _client()
 
     class Workflow:
         def preview_attribution(self, intent):
             assert intent.days_by_staff == ()
-            raise ValueError("historical_completed_service_partial_baseline_required")
+            raise ValueError("historical_completed_service_assignment_mismatch")
 
     client.app.dependency_overrides[get_historical_service_accounting_workflow] = lambda: Workflow()
     response = client.post("/api/v1/orders/CASE-19/historical-service-accounting/attribution/preview",
@@ -233,4 +233,4 @@ def test_partial_service_fact_without_saved_baseline_returns_typed_domain_blocke
     assert response.status_code == 409
     error = response.json()["detail"]["error"]
     assert error["category"] == "domain_blocked"
-    assert error["code"] == "historical_completed_service_partial_baseline_required"
+    assert error["code"] == "historical_completed_service_assignment_mismatch"

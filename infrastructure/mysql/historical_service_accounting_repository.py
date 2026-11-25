@@ -48,6 +48,9 @@ from subsystems.orders.terms_workflow import LifecycleImpactPersistenceCommand, 
 from subsystems.payroll.terms_impact import CasePayrollPolicyTerms, PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
 from subsystems.client_finance.pricing_configuration import pricing_payload
 
+_PARTIAL_SERVICE_FAMILY = "historical_completed_service_facts/v1"
+
+
 class MySqlHistoricalServiceAccountingRepository:
     def __init__(self, connection) -> None:
         self._connection = connection
@@ -93,11 +96,25 @@ class MySqlHistoricalServiceAccountingRepository:
                 tuple(int(row["assignment_id"]) for row in rows),
                 lock,
             )
+            partial = None
+            if root.get("day_event_id") is None and len(rows) > 1:
+                cursor.execute(
+                    "SELECT r.id,r.result_snapshot FROM admin_command_receipts r "
+                    "JOIN application_command_claims c ON c.idempotency_key=r.idempotency_key "
+                    "AND c.command_family=r.command_family "
+                    "WHERE r.command_family=%s AND c.aggregate_identity=%s "
+                    "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(r.result_snapshot,'$.adoption_receipt_id')) AS UNSIGNED)=%s "
+                    "ORDER BY r.id DESC LIMIT 1" + lock,
+                    (_PARTIAL_SERVICE_FAMILY, case_no, int(root["adoption_receipt_id"])),
+                )
+                partial = cursor.fetchone()
         adjustments = {
             int(row["assignment_id"]): MoneyNTD(int(row["amount_ntd"]))
             for row in adjustment_rows
         }
         snapshot = _object(root["day_result_snapshot"]) if root.get("day_result_snapshot") else {}
+        if partial is not None and not snapshot:
+            snapshot = _object(partial["result_snapshot"])
         service_facts = {
             item.assignment_identity: item for item in (
                 _service_fact(value) for value in snapshot.get("service_facts", ())
@@ -143,12 +160,13 @@ class MySqlHistoricalServiceAccountingRepository:
             _date_value(root["completed_on"]),
             _optional_date_value(root["staff_payment_due_date"]),
             bool(root.get("attribution_adopted", False)),
-            tuple(_object(root["day_result_snapshot"]).get("accounting_pending", ())) if root.get("day_result_snapshot") else (),
+            tuple(snapshot.get("accounting_pending", ())),
             (HistoricalServiceAccountingBaseline(
                 int(root["day_event_id"]), int(root["day_total_actual_service_days"]),
                 Decimal(str(root["day_total_actual_service_hours"])), int(root["day_historical_floor_fee_ntd"]),
                 int(root["day_client_obligation_amount_ntd"]), int(root["day_staff_obligation_amount_ntd"]),
             ) if root.get("day_event_id") is not None else None),
+            int(partial["id"]) if partial is not None else None,
         )
 
     def find_receipt(self, key):
@@ -159,6 +177,13 @@ class MySqlHistoricalServiceAccountingRepository:
                 (key.value,),
             )
             row = cursor.fetchone()
+            if row is None:
+                cursor.execute(
+                    "SELECT request_fingerprint AS command_fingerprint,result_snapshot FROM admin_command_receipts "
+                    "WHERE command_family=%s AND idempotency_key=%s FOR UPDATE",
+                    (_PARTIAL_SERVICE_FAMILY, key.value),
+                )
+                row = cursor.fetchone()
         if row is None:
             return None
         payload = _object(row["result_snapshot"])
@@ -169,9 +194,9 @@ class MySqlHistoricalServiceAccountingRepository:
                 int(payload["resulting_historical_day_revision"]),
                 int(payload["resulting_client_finance_version"]),
                 int(payload["resulting_payroll_version"]),
-                int(payload["total_actual_service_days"]),
-                int(payload["client_obligation_amount_ntd"]),
-                int(payload["staff_obligation_amount_ntd"]),
+                int(payload["total_actual_service_days"]) if payload["total_actual_service_days"] is not None else None,
+                int(payload["client_obligation_amount_ntd"]) if payload["client_obligation_amount_ntd"] is not None else None,
+                int(payload["staff_obligation_amount_ntd"]) if payload["staff_obligation_amount_ntd"] is not None else None,
                 PreviewFingerprint(str(payload["preview_fingerprint"])),
                 accounting_pending=tuple(payload.get("accounting_pending", ())),
             ),
@@ -421,8 +446,11 @@ class MySqlHistoricalServiceAccountingRepository:
         facts = candidate.facts
         baseline = facts.service_baseline
         plan = preview.volume_repricing
-        if baseline is None or plan is None:
-            raise ValueError("historical_completed_service_partial_baseline_required")
+        if plan is None:
+            raise TypeError("partial service facts financial plan required")
+        if baseline is None:
+            return self._persist_initial_service_facts(intent, preview, candidate, command,
+                actor=actor, reason=reason, key=key, correlation=correlation)
         persist_historical_repricing(self._connection, plan, actor.actor_id, reason, key.value)
         receipt = HistoricalServiceAccountingReceipt(
             facts.case_no, facts.historical_day_revision + 1,
@@ -476,6 +504,48 @@ class MySqlHistoricalServiceAccountingRepository:
             cursor.execute(
                 "UPDATE historical_service_day_projections SET current_event_id=%s,day_revision=%s WHERE case_no=%s",
                 (event_id, receipt.resulting_historical_day_revision, facts.case_no),
+            )
+        return receipt
+
+    def _persist_initial_service_facts(
+        self, intent: HistoricalAttributionIntent, preview: HistoricalAttributionPreview,
+        candidate: HistoricalServiceFactsCorrectionCandidate, command: PreviewFingerprint, *,
+        actor: ActorContext, reason: str, key: IdempotencyKey, correlation: CorrelationId,
+    ) -> HistoricalServiceAccountingReceipt:
+        from infrastructure.mysql.pricing_configuration_repository import persist_historical_repricing
+        facts, plan = candidate.facts, preview.volume_repricing
+        if plan is None:
+            raise TypeError("partial service facts financial plan required")
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "INSERT IGNORE INTO application_command_claims "
+                "(idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (key.value, _PARTIAL_SERVICE_FAMILY, facts.case_no, command.value, correlation.value),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("historical_attribution_idempotency_conflict")
+        persist_historical_repricing(self._connection, plan, actor.actor_id, reason, key.value)
+        receipt = HistoricalServiceAccountingReceipt(
+            facts.case_no, facts.historical_day_revision, plan.client_version + int(plan.client_changed),
+            plan.payroll_version + int(plan.payroll_changed) if plan.payroll_version is not None else facts.payroll_version,
+            None, None, None, preview.fingerprint, accounting_pending=preview.accounting_pending,
+        )
+        snapshot = {
+            **_receipt_payload(receipt), "adoption_receipt_id": facts.adoption_receipt_id,
+            "comparison_amounts_basis": "no_complete_attribution_baseline",
+            "financial_correction": pricing_payload(plan),
+            "service_attribution_evidence": intent.evidence,
+            "service_facts": tuple(item.canonical_payload() for item in candidate.service_facts),
+            "accounting_pending": preview.accounting_pending,
+        }
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "INSERT INTO admin_command_receipts "
+                "(command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (_PARTIAL_SERVICE_FAMILY, key.value, command.value, preview.fingerprint.value,
+                 actor.actor_id, reason, _json(snapshot)),
             )
         return receipt
 

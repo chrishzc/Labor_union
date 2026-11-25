@@ -12,6 +12,16 @@ const Allocation = z.strictObject({ assignment_identity: z.string(), staff_id: z
 const Payroll = z.strictObject({ assignment_identity: z.string(), staff_id: z.number().int().positive(), actual_service_days: z.number().int().positive(), actual_hours: z.number().positive().multipleOf(0.5), double_pay_hours: z.literal(0), hourly_rate_ntd: z.number().int().positive(), service_salary_ntd: z.number().int().nonnegative(), floor_fee_allocated_ntd: z.number().int().nonnegative(), effective_adjustments_ntd: z.number().int(), total_payable_ntd: z.number().int().positive() });
 const Preview = z.strictObject({ facts: Query, total_actual_service_days: z.number().int().positive(), total_actual_service_hours: z.string(), historical_floor_fee_ntd: z.number().int().nonnegative(), historical_double_pay_days: z.literal(0), historical_double_pay_hours: z.literal('0'), allocations: z.array(Allocation).min(1), payroll_assignments: z.array(Payroll).min(1), staff_obligation_amount_ntd: z.number().int().positive(), client_obligation_amount_ntd: z.number().int().nonnegative(), client_service_receivable_ntd: z.number().int().nonnegative(), client_subsidy_hours: z.number().nonnegative().multipleOf(0.5), client_self_pay_service_hours: z.number().nonnegative().multipleOf(0.5), preview_fingerprint: Fingerprint });
 const Receipt = z.strictObject({ case_no: z.string(), resulting_historical_day_revision: z.number().int().positive(), resulting_client_finance_version: z.number().int().nonnegative(), resulting_payroll_version: z.number().int().nonnegative(), total_actual_service_days: z.number().int().positive(), client_obligation_amount_ntd: z.number().int().nonnegative(), staff_obligation_amount_ntd: z.number().int().positive(), preview_fingerprint: Fingerprint, replayed: z.boolean() });
+const AttributionReceipt = z.union([
+  Receipt.extend({ accounting_pending: z.array(z.string()) }),
+  Receipt.extend({
+    resulting_historical_day_revision: z.literal(0),
+    total_actual_service_days: z.null(),
+    client_obligation_amount_ntd: z.null(),
+    staff_obligation_amount_ntd: z.null(),
+    accounting_pending: z.array(z.string()).min(1),
+  }),
+]);
 const AttributionPreview = z.strictObject({
   accounting_pending: z.array(z.string()),
   client_delta_ntd: z.number().int().nullable(), subsidy_delta_ntd: z.number().int().nullable(),
@@ -50,7 +60,7 @@ export const historicalServiceAccountingClient = {
     return decodePayload(envelope(AttributionPreview), await transport.post(`${path(caseNo)}/attribution/preview`, command, options())).data;
   },
   async applyAttribution(caseNo: string, command: HistoricalAttributionCommand, preview: HistoricalAttributionPreview, reason: string, key: string, adoptCalculatedAmounts: boolean) {
-    return decodePayload(envelope(Receipt.extend({ accounting_pending: z.array(z.string()) })), await transport.post(`${path(caseNo)}/attribution/apply`, {
+    return decodePayload(envelope(AttributionReceipt), await transport.post(`${path(caseNo)}/attribution/apply`, {
       ...command, preview_fingerprint: preview.preview_fingerprint, reason, adopt_calculated_amounts: adoptCalculatedAmounts,
     }, options({ 'Idempotency-Key': key, 'X-Correlation-ID': key }))).data;
   },
