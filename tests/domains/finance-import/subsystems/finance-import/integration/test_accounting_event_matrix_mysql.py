@@ -115,7 +115,7 @@ def stage(case, amount, sequence, *, account=None, incoming=False, government=Fa
     assert len(plan['rows']) == 1, plan
     return (int(plan['rows'][0]['row_identity'].split(':')[-1]), plan)
 
-def jobs(accepted):
+def jobs(accepted, *, expected_status="succeeded"):
     from api.dependencies.durable_job_handlers import default_job_handlers
     from infrastructure.mysql.background_job_repository import BackgroundJobRepository
     from subsystems.jobs.durable_job_worker import DurableJobWorker
@@ -127,7 +127,7 @@ def jobs(accepted):
     finally:
         connection.close()
     result = checked(http.get('/api/v1/jobs/' + accepted['job_id']))
-    assert result['status'] == 'succeeded', result
+    assert result['status'] == expected_status, result
     return result
 
 def owner_apply(url, body, *, case, key, versions):
@@ -688,7 +688,7 @@ def test_ordinary_completion_materializes_confirmed_customer_subsidy_after_payro
 
 
 @pytest.mark.parametrize("import_before_cancellation,fee", [(True, 0), (False, 0), (False, 1000)])
-def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_before_cancellation, fee):
+def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_before_cancellation, fee, monkeypatch):
     case, _ = new_case()
     if import_before_cancellation:
         row, _ = stage(case, 5000, 13, incoming=True)
@@ -711,13 +711,45 @@ def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_be
         assert http.post(url + '/preview', json={**selection, 'service_end_case_no': other_case}).status_code == 409
         assert snapshot(other_case) == other_before
     preview = checked(http.post(url + '/preview', json=selection))
-    assert preview['candidate']['allocations'] == []
+    assert sum(item['amount_ntd'] for item in preview['candidate']['allocations']) == fee
     assert preview['candidate']['service_end_receipt']['new_refund_ntd'] == refund_due
     review_list = checked(http.get(f'/api/v1/finance-import/bank-transactions?row_id={row}&transaction_status=all'))
     assert review_list['items'][0]['service_end_receipt_case_no'] == case, review_list
     assert snapshot(case) == before
     body = {**selection, **{f'expected_{key}_version': preview[f'{key}_version'] for key in
                             ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
+    if import_before_cancellation:
+        from infrastructure.mysql import client_service_end_receipt_writer
+
+        def fail_after_financial_writes(cursor, identity, case_no, *_args, **_kwargs):
+            assert case_no == case
+            cursor.execute("SELECT id FROM client_ledger_entries WHERE case_no=%s AND finance_import_row_id=%s",
+                           (case_no, row))
+            assert cursor.fetchone() is not None
+            cursor.execute("SELECT obligation_identity FROM client_obligations WHERE obligation_identity=%s",
+                           (identity,))
+            assert cursor.fetchone() is not None
+            raise RuntimeError("isolated injected refund recipient write failure")
+
+        def bank_facts():
+            return (
+                rows('SELECT reconciliation_status FROM finance_import_rows WHERE id=%s', (row,)),
+                rows('SELECT id FROM finance_import_classification_events WHERE finance_import_row_id=%s', (row,)),
+                rows('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s', (case,)),
+                rows('SELECT id FROM client_finance_apply_receipts WHERE case_no=%s', (case,)),
+            )
+
+        facts_before = bank_facts()
+        with monkeypatch.context() as patch:
+            patch.setattr(client_service_end_receipt_writer, '_insert_refund_recipient_snapshot',
+                          fail_after_financial_writes)
+            failure = checked(http.post(url + '/apply', json=body,
+                                        headers={'Idempotency-Key': case + ':injected-failure'}), 202)
+            result = jobs(failure, expected_status='failed')
+            assert result['outcome']['error']['code'] == 'transaction_failed'
+            assert 'isolated injected refund recipient write failure' in result['outcome']['error']['message']
+        assert bank_facts() == facts_before
+        assert snapshot(case) == before
     key = {'Idempotency-Key': case + ':terminal-late-receipt'}
     accepted = checked(http.post(url + '/apply', json=body, headers=key), 202)
     jobs(accepted)
@@ -763,10 +795,12 @@ def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_be
     assert snapshot(case) == after
 
 
-def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation():
+@pytest.mark.parametrize("import_before_completion", [True, False])
+def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation(import_before_completion):
     case, _ = new_case()
     seed_service(case)
-    bid, _ = stage(case, 50000, 14, incoming=True)
+    if import_before_completion:
+        bid, _ = stage(case, 50000, 14, incoming=True)
     terms_url = f'/api/v1/orders/{case}/terms'
     initial = checked(http.get(terms_url))
     assignment = rows('SELECT id FROM case_staff_assignments WHERE case_no=%s', (case,))[0]['id']
@@ -785,6 +819,8 @@ def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancel
     checked(http.post(terms_url + '/apply', json=applied_terms, headers={'Idempotency-Key': case + ':shorten'}))
     if snapshot(case)['order'][0]['status'] != '訂單完成':
         complete(case)
+    if not import_before_completion:
+        bid, _ = stage(case, 50000, 14, incoming=True)
     before = snapshot(case)
     assert before['order'][0]['status'] == '訂單完成'
     assert [str(row['work_date']) for row in before['schedule']] == service_dates

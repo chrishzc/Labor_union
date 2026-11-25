@@ -428,8 +428,10 @@ def _validate_correction_versions(facts) -> None:
 def _validate_obligations(
     obligations: tuple[CorrectionTargetObligation, ...],
 ) -> None:
-    if not isinstance(obligations, tuple) or not obligations:
-        raise ValueError("target obligations must be a non-empty tuple")
+    # Facts describe what exists. A verified post-cancellation receipt can
+    # have no receivable; ordinary operator selections still require targets.
+    if not isinstance(obligations, tuple):
+        raise ValueError("target obligations must be a tuple")
     identities = tuple(item.obligation_identity for item in obligations)
     if identities != tuple(sorted(set(identities))):
         raise ValueError("target obligations must be sorted and unique")
