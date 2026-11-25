@@ -55,6 +55,32 @@ def test_precision_restart_suppresses_the_stale_historical_interval(monkeypatch)
     assert "orders_historical_precision_restart" in historical_query
 
 
+def test_historical_assignment_calendar_excludes_cancelled_and_never_served_orders(monkeypatch):
+    connection = _Connection()
+    monkeypatch.setattr(staff_monthly_calendar_query, "get_connection", lambda: connection)
+    staff_monthly_calendar_query.get_staff_monthly_calendar_schedule(7, 2026, 7)
+    query, params = connection.cursor_instance.executed[2]
+    fixtures = """
+        WITH case_staff_assignments(id, case_no, staff_id, generation_id, status,
+                                    assigned_start_date, assigned_end_date) AS (
+            VALUES (1,'DONE',7,101,'completed','2026-07-01','2026-07-03'),
+                   (2,'CANCELLED',7,102,'completed','2026-07-01','2026-07-03'),
+                   (3,'UNSERVED',7,103,'completed','2026-07-01','2026-07-03')
+        ), orders(case_no,client_id,status) AS (
+            VALUES ('DONE',9,'歷史訂單－服務完成'),
+                   ('CANCELLED',9,'訂單取消'), ('UNSERVED',9,'成立後未服務')
+        ), clients(id,name) AS (VALUES (9,'客戶甲')),
+        staff(id,name) AS (VALUES (7,'月嫂甲')),
+        historical_order_pairing_evidence(assignment_id,receipt_id) AS (SELECT NULL,NULL WHERE 0),
+        historical_order_adoption_receipts(id,result_snapshot,outcome) AS (SELECT NULL,NULL,NULL WHERE 0),
+        staff_schedule(assignment_id,generation_id,is_work_day) AS (SELECT NULL,NULL,NULL WHERE 0),
+        order_lifecycle_state_events(case_no,trigger_event) AS (SELECT NULL,NULL WHERE 0)
+    """
+    with sqlite3.connect(":memory:") as db:
+        rows = db.execute(fixtures + query.replace("%s", "?"), params).fetchall()
+    assert [row[1] for row in rows] == ["DONE"]
+
+
 def test_historical_reservation_survives_restart_until_schedule_commit_or_cancellation():
     class Cursor:
         def __init__(self, connection):

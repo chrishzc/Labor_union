@@ -128,9 +128,8 @@ describe('SchedulingPage query-only presentation', () => {
     expect(afternoon).toHaveAttribute('data-start-day', '12');
     expect(morning.style.top).not.toBe(afternoon.style.top);
     fireEvent.click(afternoon);
-    const drawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
-    expect(drawer.getByText(/AFTERNOON/)).toBeInTheDocument();
-    expect(drawer.queryByText(/^指派\s+\d+$/)).not.toBeInTheDocument();
+    expect(window.location.hash).toBe('#order-workbench-v2?case=AFTERNOON&work=service');
+    expect(screen.queryByRole('dialog', { name: '排班與訂單明細' })).not.toBeInTheDocument();
   });
 
   it.each(['訂單成立', '服務中', '訂單完成', '訂單取消'])('按指派編號定位 %s 已保留的正式班次', async (orderStatus) => {
@@ -168,8 +167,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(parseFloat(first.style.left)).toBeCloseTo((monthColumn + 0.2) / 36 * 100, 5);
     expect(parseFloat(second.style.left)).toBeCloseTo((monthColumn + 1.1) / 36 * 100, 5);
     fireEvent.click(first);
-    const drawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
-    expect(drawer.getByText(`📅 服務起訖：${ym}-03 ～ ${ym}-05`)).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.hash.split('?')[1]).get('work')).toBe('service');
   });
 
   it('排班月曆讀取當月假日，返回分頁後更新標示且不改正式排班', async () => {
@@ -651,8 +649,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(overlay).toHaveTextContent('整案日期不可用');
     expect(overlay).not.toHaveClass('span-ghost-clickable');
     if (overlay) fireEvent.click(overlay);
-    const drawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
-    expect(drawer.getByText(/整案服務起訖.*整案日期不可用/)).toBeInTheDocument();
+    expect(window.location.hash).toBe('#order-workbench-v2?case=HIS-081&work=service');
   });
 
   it.each([
@@ -727,9 +724,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(parseFloat(bar.style.left)).toBeCloseTo(startColumn / 36 * 100, 5);
     expect(parseFloat(bar.style.width)).toBeCloseTo((endColumn - startColumn) / 36 * 100, 5);
     fireEvent.click(bar);
-    const drawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
-    expect(drawer.getByText(new RegExp(`整案服務起訖.*${expectedDates}`))).toBeInTheDocument();
-    expect(drawer.queryByText(/日曆日期|日曆區段|班次服務日|^指派\s+\d+$/)).not.toBeInTheDocument();
+    expect(window.location.hash).toContain('&work=service');
     expect(orderDetail).toHaveBeenCalledTimes(1);
   });
 
