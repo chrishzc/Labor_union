@@ -52,6 +52,7 @@ class FinanceImportCorrectionSelection:
     allow_partial_refund_recovery: bool = False
     allow_refund_overage_recovery: bool = False
     allow_client_receipt_overage: bool = False
+    service_end_case_no: str | None = None
 
     # Kept whole so one immutable selection validates every operator-supplied fact.
     def __post_init__(self) -> None:
@@ -66,8 +67,14 @@ class FinanceImportCorrectionSelection:
             "target obligation identities",
             _IDENTITY_MAXIMUM_LENGTH,
         )
-        if not self.target_obligation_identities:
-            raise ValueError("correction_target_required")
+        if self.service_end_case_no is None:
+            if not self.target_obligation_identities:
+                raise ValueError("correction_target_required")
+        else:
+            require_canonical_text(self.service_end_case_no, "service-end case number", 50)
+            if (self.classification_type is not FinanceClassificationType.CLIENT_RECEIPT
+                    or self.target_obligation_identities or self.allow_client_receipt_overage):
+                raise ValueError("late_service_end_receipt_intent_invalid")
         _validate_refund_return_target(self)
         _validate_partial_refund_recovery(self)
         _validate_refund_overage_recovery(self)
@@ -120,6 +127,18 @@ class ClientRefundCorrectionPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class ServiceEndReceiptQuote:
+    case_no: str
+    bank_amount_ntd: int
+    service_due_ntd: int
+    fee_ntd: int
+    pending_refund_ntd: int
+    new_refund_ntd: int
+    allocations: tuple[CorrectionAllocation, ...]
+    fingerprint: PreviewFingerprint
+
+
+@dataclass(frozen=True, slots=True)
 class FinanceImportCorrectionCandidate:
     row_identity: str
     batch_identity: str
@@ -135,6 +154,14 @@ class FinanceImportCorrectionCandidate:
     allow_refund_overage_recovery: bool = False
     allow_client_receipt_overage: bool = False
     refund_preview: ClientRefundCorrectionPreview | None = None
+    service_end_receipt: ServiceEndReceiptQuote | None = None
+
+    @property
+    def posting_allocation_count(self) -> int:
+        # Terminal surplus is explicitly allocated to a new, linked refund in
+        # the Client Finance receipt, not to a fabricated receivable ledger row.
+        refund = self.service_end_receipt
+        return len(self.allocations) + int(refund is not None and refund.new_refund_ntd > 0)
 
 
 def build_finance_import_correction_candidate(
@@ -142,10 +169,21 @@ def build_finance_import_correction_candidate(
     facts: FinanceImportCorrectionFacts,
     *,
     refund_preview: ClientRefundCorrectionPreview | None = None,
+    service_end_receipt: ServiceEndReceiptQuote | None = None,
 ) -> FinanceImportCorrectionCandidate:
     _validate_correction_blockers(facts)
-    owning_domain, allocations = _build_allocations(selection, facts, refund_preview)
+    if selection.service_end_case_no is not None:
+        if (service_end_receipt is None or service_end_receipt.case_no != selection.service_end_case_no
+                or service_end_receipt.bank_amount_ntd != facts.bank_amount.amount or refund_preview is not None):
+            raise ValueError("late_service_end_receipt_owner_preview_required")
+        owning_domain, allocations = FinanceOwningDomain.CLIENT_FINANCE, service_end_receipt.allocations
+    else:
+        if service_end_receipt is not None:
+            raise ValueError("late_service_end_receipt_intent_invalid")
+        owning_domain, allocations = _build_allocations(selection, facts, refund_preview)
     payload = _candidate_payload(selection, facts, owning_domain, allocations)
+    if service_end_receipt is not None:
+        payload["service_end_receipt"] = (service_end_receipt.case_no, service_end_receipt.fingerprint.value)
     if refund_preview is not None:
         payload['refund_preview'] = {
             'transfer_fee_ntd': refund_preview.transfer_fee.amount,
@@ -160,6 +198,7 @@ def build_finance_import_correction_candidate(
         allocations,
         fingerprint,
         refund_preview,
+        service_end_receipt,
     )
 
 
@@ -205,6 +244,7 @@ def _correction_candidate(
     allocations,
     fingerprint,
     refund_preview,
+    service_end_receipt,
 ):
     return FinanceImportCorrectionCandidate(
         selection.row_identity,
@@ -221,6 +261,7 @@ def _correction_candidate(
         selection.allow_refund_overage_recovery,
         selection.allow_client_receipt_overage,
         refund_preview,
+        service_end_receipt,
     )
 
 
@@ -387,8 +428,10 @@ def _validate_correction_versions(facts) -> None:
 def _validate_obligations(
     obligations: tuple[CorrectionTargetObligation, ...],
 ) -> None:
-    if not isinstance(obligations, tuple) or not obligations:
-        raise ValueError("target obligations must be a non-empty tuple")
+    # Facts describe what exists. A verified post-cancellation receipt can
+    # have no receivable; ordinary operator selections still require targets.
+    if not isinstance(obligations, tuple):
+        raise ValueError("target obligations must be a tuple")
     identities = tuple(item.obligation_identity for item in obligations)
     if identities != tuple(sorted(set(identities))):
         raise ValueError("target obligations must be sorted and unique")

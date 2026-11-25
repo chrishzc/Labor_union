@@ -459,6 +459,7 @@ class FinanceBankReconciliationRecordView(_StrictModel):
 class FinanceBankTransactionView(_StrictModel):
     row_id: int
     bank_memo: str | None = None
+    service_end_receipt_case_no: str | None = None
     reconciliation_records: list[FinanceBankReconciliationRecordView] = Field(default_factory=list)
     staff_subsidy_manual_review_allowed: bool = False
     staff_subsidy_batch_identity: str | None = None
@@ -734,11 +735,12 @@ class FinanceImportCorrectionSelectionBody(_StrictModel):
         "government_subsidy",
         "staff_payout",
     ]
-    target_obligation_identities: list[str] = Field(min_length=1)
+    target_obligation_identities: list[str]
     refund_ledger_entry_identity: str | None = Field(default=None, min_length=1, max_length=191)
     allow_partial_refund_recovery: bool = False
     allow_refund_overage_recovery: bool = False
     allow_client_receipt_overage: bool = False
+    service_end_case_no: str | None = Field(default=None, min_length=1, max_length=50)
     reason: str = Field(default="", max_length=500)
     evidence: list[str] = Field(min_length=1)
 
@@ -760,6 +762,14 @@ class FinanceImportRefundSummaryView(_StrictModel):
     remaining_ntd: int = Field(ge=0)
 
 
+class FinanceImportServiceEndReceiptSummaryView(_StrictModel):
+    case_no: str
+    service_due_ntd: int
+    fee_ntd: int
+    pending_refund_ntd: int
+    new_refund_ntd: int
+
+
 class FinanceImportCorrectionCandidateView(_StrictModel):
     row_identity: str
     batch_identity: str
@@ -775,6 +785,7 @@ class FinanceImportCorrectionCandidateView(_StrictModel):
     allow_client_receipt_overage: bool = False
     candidate_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     refund_summary: FinanceImportRefundSummaryView | None = None
+    service_end_receipt: FinanceImportServiceEndReceiptSummaryView | None = None
 
 
 class FinanceImportCorrectionPreviewView(_StrictModel):

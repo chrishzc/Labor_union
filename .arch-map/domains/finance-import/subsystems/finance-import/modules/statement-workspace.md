@@ -104,6 +104,18 @@
 - 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。待核對列使用「核對交易」；已核銷列使用「查看交易」，原始事實和正式核銷明細唯讀。台新出款判為退客戶先墊補助時，只在原流水核對同案客戶退款，不帶入月嫂義務或開「單筆人工核對」。該人工入口限台新月嫂補助出款，須由後端確認同案月嫂、正式應付與人工核對資格。任何不足以核對的列顯示原因；可確認案件時仍可查看本案帳務，查看不等於核銷。正式核銷資訊只來自原 owner 回讀；通知仍由 [LINE payment-overdue-reminders](../../../../external-integration/subsystems/line/modules/payment-overdue-reminders.md) owner 負責，各核銷工具保留原 writer。
 - 客戶收款面板的全案餘額同時消費既有 Receipt Query 與案件帳務 Query：只彙總版本一致、來源完整的客戶應收正式餘額；缺來源、缺列或未知餘額保留待確認，不從未清清單為空推定結清，也不加入月嫂應付或退款結清門檻。正式成功後依收據版本與回讀再次確認。
 
+### 結束服務後確認永豐入款（待實作） ^sinopac-late-receipt-routing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: sinopac-late-receipt-routing
+  target: '.arch-map/requirements/04_Client_Finance_Domain.md#^sinopac-late-receipt-refund'
+```
+
+- Finance Import 從原單筆核對入口帶入 `row_identity`、原永豐入款事實及已確認案件；Query／Preview 說明無法配對的原因，不寫帳。普通永豐入款仍沿原期款匹配；當已確認同案入款但因零服務取消或提前結束沒有可用期款時，移交 Client Finance 專責結算，不放寬一般無期款入款。提前結束讀 Orders 正式服務結果，不以取消事件為必要條件。
+- Client Finance 的 Apply 在同一外層交易重驗來源、案件、結算版本及既有收付，沿原收款與差額／退款 writer 保存可追溯的正式入款與待退款，回傳正式結果。以同一銀行流水及既有命令規則防重；失敗不留下單邊紀錄。既有出款核對仍只結清正式退款，不把這一路徑當退款出款。
+- 前端維持「核對交易」單一入口，預覽分列入款、服務應付、適用費用及待退款；確認後重讀原流水及案件帳務。後端驗匯入順序、重送及錯案拒絕；前端驗入款方向不變、待退款與已出款不混淆。業務計算先用替身測試，只對新增持久化行為補交易回滾與防重契約驗證。
+
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py` — 既有模擬案例核對現金無法跨統計範圍加總時，到期款查詢與匯出仍可使用。

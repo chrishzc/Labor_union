@@ -592,6 +592,7 @@ def finance_import_correction_apply_handler(payload: dict[str, Any]) -> tuple[di
             bool(payload.get("allow_partial_refund_recovery", False)),
             bool(payload.get("allow_refund_overage_recovery", False)),
             bool(payload.get("allow_client_receipt_overage", False)),
+            payload.get("service_end_case_no"),
         )
         request = FinanceImportCorrectionApplyRequest(
             selection,
