@@ -747,3 +747,67 @@ def test_late_receipt_does_not_change_unidentified_existing_refund_balance(
             net_cash_before=MoneyNTD(net_cash), confirmed_bank_receipt=MoneyNTD(5000),
             existing_pending_refund=MoneyNTD(pending_before),
         )
+
+
+@pytest.mark.parametrize("terminal", ["訂單取消", "成立後未服務", "訂單完成"])
+def test_late_sinopac_owner_preview_requires_real_case_and_prices_earned_service(monkeypatch, terminal: str):
+    from infrastructure.mysql import client_service_end_receipt_preview as module
+
+    occurred = date(2026, 10, 1)
+    order = {
+        "case_no": "116000001", "status": terminal, "lifecycle_version": 3,
+        "service_days": 1, "actual_start_date": occurred, "actual_end_date": occurred,
+    }
+    bank = {
+        "format_id": "sinopac", "direction": "incoming", "transaction_date": occurred,
+        "currency": "TWD", "credit": 5000, "debit": 0, "reconciliation_status": "pending",
+        "canonical_fact_version": 3, "bank_references": {"銷帳編號": "99781699116001"},
+    }
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, parameters):
+            assert sql.startswith("SELECT")
+            if "FROM client_finance_accounts" in sql:
+                self.row = {"aggregate_version": 2}
+            elif "FROM finance_import_rows" in sql:
+                self.row = bank
+            elif "FROM order_terms_apply_receipts" in sql:
+                self.row = {"id": 1}
+            elif "FROM client_obligations" not in sql:
+                raise AssertionError(sql)
+
+        def fetchone(self):
+            return self.row
+
+        def fetchall(self):
+            return ()
+
+    monkeypatch.setattr(module, "select_order", lambda *args, **kwargs: order)
+    monkeypatch.setattr(module, "query_case_net_cash", lambda *args: 0)
+    monkeypatch.setattr(module, "query_cancellation_accounting",
+                        lambda *args: SimpleNamespace(service_due_ntd=0, fee_ntd=0))
+    monkeypatch.setattr(module, "resolve_client_virtual_account",
+                        lambda *args: {"result": "resolved", "case_no": order["case_no"]})
+    monkeypatch.setattr(module, "load_calculable_client_finance_facts",
+                        lambda *args, **kwargs: (SimpleNamespace(charge_days=(ClientChargeDay(occurred, False),)), None))
+    monkeypatch.setattr(module, "_build_stage_plans", lambda facts: (SimpleNamespace(amount=MoneyNTD(2000)),))
+    connection = SimpleNamespace(cursor=Cursor)
+    result = module.preview_client_service_end_receipt(connection, row_id=10, case_no=order["case_no"])
+    assert result.bank_amount_ntd == 5000
+    assert result.balance.pending_refund_ntd == (3000 if terminal == "訂單完成" else 5000)
+    changed = module.preview_client_service_end_receipt(connection, row_id=10, case_no=order["case_no"], lock=True)
+    assert changed.fingerprint == result.fingerprint
+
+    order["status"] = "服務中"
+    with pytest.raises(ValueError, match="late_service_end_receipt_completion_not_verified"):
+        module.preview_client_service_end_receipt(connection, row_id=10, case_no=order["case_no"])
+    order["status"] = terminal
+    bank["direction"] = "outgoing"
+    with pytest.raises(ValueError, match="late_service_end_receipt_requires_sinopac_income"):
+        module.preview_client_service_end_receipt(connection, row_id=10, case_no=order["case_no"])
