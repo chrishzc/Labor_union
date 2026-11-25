@@ -450,6 +450,13 @@ def maintenance_lock(config):
         connection.close()
 
 
+def _normalize_show_create_sql(sql, databases):
+    text = str(sql or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", text)
+    text = re.sub(r"\bCHARACTER SET\s+([A-Za-z0-9_]+)\s+COLLATE\s+", "COLLATE ", text)
+    return migration._normalize_database_qualifiers(text, databases)
+
+
 def schema_inventory(config, database, equivalent_databases=(), *, reject_source_references=False):
     connection = config.connect(database)
     try:
@@ -480,10 +487,7 @@ def schema_inventory(config, database, equivalent_databases=(), *, reject_source
                         if original != database:
                             require(not re.search(rf"(?:`{re.escape(original)}`|\b{re.escape(original)})\s*\.", sql, re.I),
                                     "副本定義仍參照原資料庫，未切換；請維護人員檢查跨庫相依。")
-                sql = sql.replace("\r\n", "\n").replace("\r", "\n")
-                sql = re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", sql)
-                sql = re.sub(r"\bCHARACTER SET\s+([A-Za-z0-9_]+)\s+COLLATE\s+", "COLLATE ", sql)
-                definitions.append(migration._normalize_database_qualifiers(sql, (database, *equivalent_databases)))
+                definitions.append(_normalize_show_create_sql(sql, (database, *equivalent_databases)))
             result["definitions_sha256"] = hashlib.sha256(json.dumps(definitions, ensure_ascii=False).encode()).hexdigest()
             cursor.execute("SELECT default_character_set_name AS charset,default_collation_name AS collation FROM information_schema.schemata WHERE schema_name=%s", (database,))
             result.update(cursor.fetchone())
@@ -1163,7 +1167,7 @@ def _restore_evidence(config, database, *, source=None, check_tables=False):
         for item in programs["views"]
     ]
     snapshot["show_create_tables"] = {
-        name: re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", migration._normalize_database_qualifiers(sql, (database,))).replace("\r\n", "\n").replace("\r", "\n")
+        name: _normalize_show_create_sql(sql, (database,))
         for name, sql in snapshot["show_create_tables"].items()
     }
     tables = [item["name"] for item in inventory["tables"] if item["kind"] == "BASE TABLE"]
@@ -1196,7 +1200,7 @@ def _restore_evidence_parts(config, database, equivalent=()):
         for item in programs["views"]
     ]
     snapshot["show_create_tables"] = {
-        name: re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", migration._normalize_database_qualifiers(sql, (database,))).replace("\r\n", "\n").replace("\r", "\n")
+        name: _normalize_show_create_sql(sql, (database,))
         for name, sql in snapshot["show_create_tables"].items()
     }
     return inventory, snapshot
