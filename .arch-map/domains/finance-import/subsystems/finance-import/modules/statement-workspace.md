@@ -98,6 +98,18 @@
 - 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。正式核銷資訊只來自原 owner 回讀；通知仍由 [LINE payment-overdue-reminders](../../../../external-integration/subsystems/line/modules/payment-overdue-reminders.md) owner 負責，各核銷工具保留原 writer。
 - 客戶收款面板的全案餘額同時消費既有 Receipt Query 與案件帳務 Query：只彙總版本一致、來源完整的客戶應收正式餘額；缺來源、缺列或未知餘額保留待確認，不從未清清單為空推定結清，也不加入月嫂應付或退款結清門檻。正式成功後依收據版本與回讀再次確認。
 
+### 結束服務後確認永豐入款（待實作） ^sinopac-late-receipt-routing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: sinopac-late-receipt-routing
+  target: '.arch-map/requirements/04_Client_Finance_Domain.md#^sinopac-late-receipt-refund'
+```
+
+- Finance Import 從原單筆核對入口帶入 `row_identity`、原永豐入款事實及已確認案件；Query／Preview 說明無法配對的原因，不寫帳。普通永豐入款仍沿原期款匹配；當已確認同案入款但因零服務取消或提前結束沒有可用期款時，移交 Client Finance 專責結算，不放寬一般無期款入款。提前結束讀 Orders 正式服務結果，不以取消事件為必要條件。
+- Client Finance 的 Apply 在同一外層交易重驗來源、案件、結算版本及既有收付，沿原收款與差額／退款 writer 保存可追溯的正式入款與待退款，回傳正式結果。以同一銀行流水及既有命令規則防重；失敗不留下單邊紀錄。既有出款核對仍只結清正式退款，不把這一路徑當退款出款。
+- 前端維持「核對交易」單一入口，預覽分列入款、服務應付、適用費用及待退款；確認後重讀原流水及案件帳務。後端驗匯入順序、重送及錯案拒絕；前端驗入款方向不變、待退款與已出款不混淆。業務計算先用替身測試，只對新增持久化行為補交易回滾與防重契約驗證。
+
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py` — 既有模擬案例核對現金無法跨統計範圍加總時，到期款查詢與匯出仍可使用。
@@ -120,6 +132,7 @@
 
 - **資料來源**：Client Finance 的個案計價提供案件總額，Government Subsidy 提供正式補助。Client Finance 原收款核銷與沖正提供有效實收。台新補助出款以原 Staff Payables 或 Client Finance 核對成功證據確認案件與受款對象。客戶期款進度、工會應繳和月嫂應付仍由各 owner 投影供抽屜查閱。
 - **正式觸發**：原收款或補助出款命令在成功路徑讀取當下有效事實，依 22A §2.2 判定。預檢可試算同案擬建款和核銷。Apply 經原 owner 重驗，在同一 outer UoW 記錄核銷與符合條件的方案確認。原冪等鍵重送沿用收據。已核銷款項仍由既有 writer 負責。
+- **提前完工**：Orders Terms Apply 確認縮短後的天數及正式替代班表，Client Finance 同次承接已入帳實收的差額。若永豐入款在提前完工後才核銷，原 Client Finance 補收 writer 回傳的 ledger 來源在同一 outer UoW 觸發方案判定。用 Pricing owner 依有效班表提供的案件總額，並以正式成功回執重查同案抽屜。零服務取消仍由原取消結算承接。
 - **查詢及前端**：案件 Query 提供目前正式方案、`scheme_pending_reason` 與 `scheme_evidence_identities`。單筆預檢另提供明細候選。有效證據變更時重新判讀。失效來源及既有人工決定仍可從歷史查閱。前端收到正式成功回執後重查原單筆及同案，進行中清單依 22B §3.2 使用方案結果與收款進度。
 - **逐案直付及其他款項**：逐案直付沿原 append-only `confirm_direct` 與 `withdraw_direct` 事件。前端依 Query 隱藏該筆工會補助退款的操作，一般退款仍走原入口。Payroll 月嫂應付與 Staff Payables 出款資格分別讀取。
 - **驗證入口**：按 22A §4 的 STAR 從原收款及出款命令核對兩種順序、同鍵重播、既有確認、沖正及失敗。一般業務矩陣用替身 ports。隔離 MySQL 覆蓋原核銷正式讀回、同交易回滾及冪等。

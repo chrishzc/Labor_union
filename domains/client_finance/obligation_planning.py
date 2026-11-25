@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from enum import StrEnum
 
+from domains.client_finance.difference_resolution import client_stage_balance
 from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.terms import OrderTerms
 from domains.orders.floor_fee import prorate_floor_fee
@@ -94,11 +95,20 @@ class ExistingClientStageObligation:
     net_settled_amount: MoneyNTD
     due_date: date | None
     formal_history_exists: bool
+    net_receipt_amount: MoneyNTD | None = None
+    automatic_amount: MoneyNTD | None = None
+    manual_amount: MoneyNTD | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.obligation_identity, "obligation identity")
         _require_nonnegative_money(self.contracted_amount, "contracted amount")
         _require_nonnegative_money(self.net_settled_amount, "settled amount")
+        if self.net_receipt_amount is not None:
+            _require_nonnegative_money(self.net_receipt_amount, "net receipt amount")
+        if self.automatic_amount is not None:
+            _require_nonnegative_money(self.automatic_amount, "automatic amount")
+        if self.manual_amount is not None:
+            _require_nonnegative_money(self.manual_amount, "manual amount")
         if self.net_settled_amount.amount > self.contracted_amount.amount:
             raise ValueError("settled amount exceeds contracted amount")
         if self.formal_history_exists:
@@ -246,6 +256,47 @@ class ClientCancellationSettlement:
     fee_received_ntd: int
     fee_reason: str
     processed_on: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class LateServiceEndReceiptBalance:
+    net_received_ntd: int
+    pending_refund_ntd: int
+    new_refund_ntd: int
+    additional_charge_due_ntd: int
+    fee_received_ntd: int
+
+
+def build_late_service_end_receipt_balance(
+    *, service_due: MoneyNTD, authorized_fee: MoneyNTD, net_cash_before: MoneyNTD,
+    confirmed_bank_receipt: MoneyNTD, existing_pending_refund: MoneyNTD,
+) -> LateServiceEndReceiptBalance:
+    """Calculate the incremental balance; the caller owns source and case validation."""
+    _require_nonnegative_money(service_due, "service amount")
+    _require_nonnegative_money(authorized_fee, "authorized fee")
+    _require_nonnegative_money(net_cash_before, "net cash before posting")
+    _require_nonnegative_money(existing_pending_refund, "existing pending refund")
+    _require_nonnegative_money(confirmed_bank_receipt, "bank receipt amount")
+    require_positive_integer(confirmed_bank_receipt.amount, "bank receipt amount")
+    received = net_cash_before.amount + confirmed_bank_receipt.amount
+    charge, refund = _client_cash_balance(service_due.amount, authorized_fee.amount, received)
+    if existing_pending_refund.amount > refund:
+        raise ValueError("late_service_end_receipt_existing_refund_requires_review")
+    refund_increment = refund - existing_pending_refund.amount
+    # A newly linked receipt cannot by itself justify a larger historical correction.
+    if refund_increment > confirmed_bank_receipt.amount:
+        raise ValueError("late_service_end_receipt_prior_unresolved_refund")
+    if max(received, service_due.amount + authorized_fee.amount) > 9_223_372_036_854_775_807:
+        raise ValueError("cancellation_amount_out_of_storage_range")
+    return LateServiceEndReceiptBalance(
+        received, refund, refund_increment, charge,
+        cancellation_fee_collected(authorized_fee.amount, service_due.amount, received),
+    )
+
+
+def _client_cash_balance(service_due_ntd: int, fee_ntd: int, received_ntd: int) -> tuple[int, int]:
+    balance = service_due_ntd + fee_ntd - received_ntd
+    return max(0, balance), max(0, -balance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -619,9 +670,10 @@ def _settle_cancellation(candidate, source, change_identity, net_cash_received, 
         item.net_settled_amount.amount for item in stages
     )
     service_due = sum(item.amount.amount for item in candidate.stage_plans)
-    net_due = service_due + fee.amount - received
+    additional_charge, refund_due = _client_cash_balance(service_due, fee.amount, received)
+    net_due = additional_charge - refund_due
     summary = ClientCancellationSettlement(
-        service_due, fee.amount, received, max(0, -net_due), max(0, net_due),
+        service_due, fee.amount, received, refund_due, additional_charge,
         cancellation_fee_collected(fee.amount, service_due, received), fee_reason, processed_on,
     )
     actions = [
@@ -970,12 +1022,32 @@ def _stage_due_date(payment_terms, payment_stage, amount):
     return payment_terms.first_payment_due_date + timedelta(days=15)
 
 
-def _build_stage_action(case_no, change_identity, stage_plan, existing):
+def _build_stage_action(
+    case_no: str, change_identity: str, stage_plan: ClientStagePlan,
+    existing: ExistingClientStageObligation | None,
+) -> ClientObligationAction:
     if existing is None:
         return _new_stage_action(case_no, stage_plan)
-    if not existing.formal_history_exists or existing.net_settled_amount.amount < existing.contracted_amount.amount:
+    if existing.manual_amount is not None:
+        return ClientObligationAction(
+            ClientObligationActionKind.UNCHANGED, stage_plan.payment_stage, existing.obligation_identity,
+            existing.manual_amount, existing.manual_amount, MoneyNTD(0), existing.due_date,
+            stage_plan.due_date or existing.due_date, None, ClientFinanceDirection.NO_FINANCE_CHANGE, 0,
+        )
+    if not existing.formal_history_exists:
         return _open_stage_action(stage_plan, existing)
-    return _settled_stage_action(change_identity, stage_plan, existing)
+    received = existing.net_receipt_amount
+    if existing.net_settled_amount.amount < existing.contracted_amount.amount:
+        if received is not None and received.amount > stage_plan.amount.amount:
+            return _settled_stage_action(change_identity, stage_plan, existing, received)
+        return _open_stage_action(stage_plan, existing)
+    before_amount = existing.automatic_amount or existing.net_settled_amount
+    if received is not None:
+        noncash = max(0, existing.net_settled_amount.amount - received.amount)
+        change = (client_stage_balance(stage_plan.amount.amount, received.amount, noncash)
+                  - client_stage_balance(before_amount.amount, received.amount, noncash))
+        before_amount = stage_plan.amount - MoneyNTD(change)
+    return _settled_stage_action(change_identity, stage_plan, existing, before_amount)
 
 
 def _new_stage_action(case_no, stage_plan):
@@ -1022,14 +1094,17 @@ def _open_action_kind(stage_plan, existing):
     return ClientObligationActionKind.REPLACE_OPEN
 
 
-def _settled_stage_action(change_identity, stage_plan, existing):
-    difference = stage_plan.amount - existing.net_settled_amount
+def _settled_stage_action(
+    change_identity: str, stage_plan: ClientStagePlan, existing: ExistingClientStageObligation,
+    before_amount: MoneyNTD,
+) -> ClientObligationAction:
+    difference = stage_plan.amount - before_amount
     action = _settled_action_kind(difference)
     return ClientObligationAction(
         action,
         stage_plan.payment_stage,
         _difference_identity(change_identity, stage_plan.payment_stage, action),
-        existing.contracted_amount,
+        before_amount,
         stage_plan.amount,
         abs_money(difference),
         None,
@@ -1037,7 +1112,7 @@ def _settled_stage_action(change_identity, stage_plan, existing):
             existing.due_date if action is ClientObligationActionKind.CREATE_REFUND else None
         ),
         existing.obligation_identity,
-        *_expected_direction(action, existing.contracted_amount, stage_plan.amount),
+        *_expected_direction(action, before_amount, stage_plan.amount),
     )
 
 
@@ -1153,11 +1228,12 @@ def _settlement_projection(facts, stage_plans, actions):
 
 
 def _stage_settled(stage_plan, existing):
-    if stage_plan.amount.is_zero:
+    expected = existing.manual_amount if existing and existing.manual_amount is not None else stage_plan.amount
+    if expected.is_zero:
         return True
     if existing is None or not existing.formal_history_exists:
         return False
-    return existing.net_settled_amount.amount >= stage_plan.amount.amount
+    return existing.net_settled_amount.amount >= expected.amount
 
 
 def _creates_open_difference(actions):

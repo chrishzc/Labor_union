@@ -335,3 +335,32 @@ it('preserves the over-refund operation for the locked bank row and its confirme
   }));
   expect(corrections.apply).not.toHaveBeenCalled();
 });
+
+it('previews a verified terminal Sinopac receipt as incoming cash with a separate pending refund', async () => {
+  vi.mocked(corrections.preview).mockResolvedValue({
+    candidate: {
+      row_identity: 'row:1', batch_identity: 'batch:1', classification_type: 'client_receipt',
+      bank_amount_ntd: 5000, allocations: [],
+      service_end_receipt: { case_no: 'CASE-1', service_due_ntd: 2000, fee_ntd: 0,
+        new_refund_ntd: 3000, pending_refund_ntd: 3000 },
+    },
+    preview_fingerprint: 'a'.repeat(64),
+  } as never);
+  vi.mocked(corrections.queryOutcome).mockResolvedValue({
+    status: 'succeeded', receipt: { row_identity: 'row:1', batch_identity: 'batch:1', preview_fingerprint: 'a'.repeat(64) },
+  } as never);
+  render(<FinanceImportCorrectionForm rowIdentity="row:1" sourceLabel="永豐入款" staff={[]} serviceEndCaseNo="CASE-1" />);
+  expect(screen.queryByLabelText('款項用途')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '查詢待核銷款項' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '預覽核銷' }));
+  const review = await screen.findByLabelText('永豐入款結算預覽');
+  expect(review).toHaveTextContent('本次新增待退款');
+  expect(review).toHaveTextContent('3,000');
+  expect(corrections.preview).toHaveBeenCalledWith(expect.objectContaining({
+    classification_type: 'client_receipt', service_end_case_no: 'CASE-1', target_obligation_identities: [],
+  }));
+  expect(corrections.apply).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '確認核銷' }));
+  expect(await screen.findByText('永豐入款已核銷。待退款請查閱本案帳務，尚未出款。')).toBeInTheDocument();
+  expect(corrections.apply).toHaveBeenCalledOnce();
+});

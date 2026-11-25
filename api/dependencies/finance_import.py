@@ -8,7 +8,7 @@ from typing import Protocol, overload
 from fastapi import Depends
 from domains.finance_import.correction import (
     ClientRefundCorrectionPreview, FinanceImportCorrectionCandidate, FinanceImportCorrectionFacts,
-    FinanceImportCorrectionSelection,
+    FinanceImportCorrectionSelection, ServiceEndReceiptQuote,
 )
 from shared_kernel.identities import CorrelationId
 from domains.finance_import.planning import CanonicalFinanceImportRow
@@ -65,9 +65,14 @@ class FinanceImportOwningDomainCompositePort(Protocol):
     def preview_client_refund(
         self, selection: FinanceImportCorrectionSelection, facts: FinanceImportCorrectionFacts, correlation_id: CorrelationId,
     ) -> ClientRefundCorrectionPreview: ...
+    def preview_service_end_receipt(self, selection: FinanceImportCorrectionSelection) -> ServiceEndReceiptQuote: ...
 
 
 class UnavailableOwningDomainCompositePort:
+    def preview_service_end_receipt(self, selection: FinanceImportCorrectionSelection) -> ServiceEndReceiptQuote:
+        del selection
+        raise FinanceImportRepositoryUnavailable("Owning Finance Domain composite writer is not configured.")
+
     def preview_client_refund(self, selection, facts, correlation_id):
         del selection, facts, correlation_id
         raise FinanceImportRepositoryUnavailable("Owning Finance Domain composite writer is not configured.")

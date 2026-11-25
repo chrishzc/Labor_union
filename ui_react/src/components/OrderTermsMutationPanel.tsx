@@ -649,7 +649,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, coo
         <div><p role="status">目前鎖定原因：本案服務已完成。漏填或誤填樓層費可正式更正，差額由帳務承接。</p>
           {!floorCorrection && <button type="button" disabled={savingLocked} onClick={()=>{setDraft(draftFromQuery(currentQuery));setFloorCorrection(true);}}>更正結案樓層費</button>}
           <p className="order-v2-drawer-note" style={{ marginTop: '6px' }}>
-            💡 若本案實際服務天數縮短或提前結束需要產生退款，請使用【取消結算／確認服務天數】結算實際服務日，系統將重算總額並產生客戶退款。
+            本案已建立的待退款可在案件帳務查閱。
           </p>
         </div>
       )}
@@ -858,6 +858,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, coo
           {startedServiceUnlocked && <div>
             <p>全案約定時數：{preview.before.service_days * preview.before.service_hours_per_day} → {preview.after.service_days * preview.after.service_hours_per_day} 小時</p>
             <p>確認後，新條件將套用到已服務及後續日期的有效資料。請核對既有排班、統計及帳務影響。</p>
+            {preview.after.service_days < preview.before.service_days && <p>若縮短服務後有已入帳款項須退還，儲存後可在案件帳務查看待退款。</p>}
             {!outcomeUnknown && <button type="button" disabled={savingLocked || !startedChangeReady} onClick={() => void applyTerms()}>確認並儲存</button>}
           </div>}
 

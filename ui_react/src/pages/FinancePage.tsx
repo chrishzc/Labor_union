@@ -24,6 +24,7 @@ import { financeImportQueryClient } from '../api/finance_import/finance_import_q
 import { bankReconciliationUnavailableReason, bankReviewRoute, financeImportReviewReason, isTaishinStaffSubsidy } from '../adapters/finance/finance_import_query_adapter';
 import { SubsidyPeriodWorkbench } from '../components/SubsidyPeriodWorkbench';
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
+import { FinanceImportCorrectionForm } from '../components/FinanceImportCorrectionForm';
 import { BankTransactionFacts, BankTransactionReviewActions, FinanceBankReconciliationWorkspace, SubsidyBankReview } from '../components/FinanceBankReconciliationWorkspace';
 import { PaymentReceiptNoticeWorkbench } from '../components/PaymentReceiptNoticeWorkbench';
 
@@ -160,6 +161,12 @@ export const FinancePage: React.FC = () => {
   const bankReviewPosted = () => {
     const row = bankReviewCurrent.kind === 'ready' ? bankReviewCurrent.data : null;
     const target = row?.reconciliation_target;
+    const serviceEndCaseNo = row?.service_end_receipt_case_no;
+    if (serviceEndCaseNo) {
+      notifyCaseAccountingChanged(serviceEndCaseNo);
+      setBankCaseView(serviceEndCaseNo);
+      return;
+    }
     if (target && row && (row.classification_type === 'client_receipt'
       || row.classification_type === 'client_subsidy_return' || isTaishinStaffSubsidy(row))) {
       notifyCaseAccountingChanged(target.case_no);
@@ -462,7 +469,9 @@ export const FinancePage: React.FC = () => {
   );
 
   const reviewedRow = bankReviewCurrent.kind === 'ready' ? bankReviewCurrent.data : null;
-  const reviewRoute = reviewedRow ? bankReviewRoute(reviewedRow, bankReviewManual) : null;
+  const terminalReceiptCase = reviewedRow?.status === 'pending' ? reviewedRow.service_end_receipt_case_no : null;
+  const reviewRoute = terminalReceiptCase ? { kind: 'service-end' as const }
+    : reviewedRow ? bankReviewRoute(reviewedRow, bankReviewManual) : null;
   const manualReviewRoute = reviewedRow && bankReviewRoute(reviewedRow, true);
   const scopedBatchPosted = reviewedRow?.row_identity === reviewRowIdentity && batchOutcome.kind === 'ready'
     && batchOutcome.data.status === 'succeeded' && Boolean(batchOutcome.data.receipt?.reconciled_count);
@@ -647,12 +656,16 @@ export const FinancePage: React.FC = () => {
                 <p>{bankReconciliationUnavailableReason(reviewedRow)}</p>
               </section>
             )}
-            {reviewedRow && reviewRoute?.kind === 'case' && <FinanceCaseAccounting key={`${reviewedRow.row_id}:${reviewRoute.caseNo}`}
+            {reviewedRow && reviewRoute?.kind === 'service-end' && terminalReceiptCase && <FinanceImportCorrectionForm key={`service-end:${reviewedRow.row_identity}`}
+              rowIdentity={reviewedRow.row_identity} sourceLabel="永豐對帳單已驗證同案入款" staff={[]}
+              initialCaseNo={terminalReceiptCase} serviceEndCaseNo={terminalReceiptCase} lockedObligations={[]}
+              onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />}
+            {reviewedRow && reviewRoute?.kind === 'case' && <FinanceCaseAccounting key={`case-review:${reviewedRow.row_identity}:${reviewRoute.caseNo}`}
               embedded initialCase={reviewRoute.caseNo}
               bankReconciliation={{ row: reviewedRow, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy,
                 onViewCase: () => setBankCaseView(reviewRoute.caseNo), externalPurposeReview: true, previewRefundOnMount: bankReviewReturning }}
               onChanged={() => setReload(value => value + 1)} />}
-            {reviewedRow && reviewRoute?.kind === 'government' && <SubsidyPeriodWorkbench key={reviewedRow.row_identity}
+            {reviewedRow && reviewRoute?.kind === 'government' && <SubsidyPeriodWorkbench key={`subsidy-period:${reviewedRow.row_identity}`}
               bankSource={{ id: reviewedRow.row_id, direction: reviewRoute.direction, amountNtd: reviewedRow.amount_ntd }}
               onOpenCase={caseNo => requestLeave(() => setBankCaseView(caseNo))}
               onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />}
@@ -672,8 +685,8 @@ export const FinancePage: React.FC = () => {
             )}
             {linkedCaseNo && reviewRoute?.kind !== 'case' && <button type="button" className="finance-btn-secondary"
               disabled={bankDrawerBusy} onClick={() => requestLeave(() => setBankCaseView(linkedCaseNo))}>查看本案帳務</button>}
-            {!scopedBatchPosted && reviewedRow?.status === 'pending' && <BankTransactionReviewActions key={reviewedRow.row_identity} row={reviewedRow}
-              offerPairing={reviewRoute?.kind !== 'case' && reviewedRow.disposition !== 'blocked'}
+            {!scopedBatchPosted && reviewedRow?.status === 'pending' && <BankTransactionReviewActions key={`bank-row-actions:${reviewedRow.row_identity}`} row={reviewedRow}
+              offerPairing={reviewRoute?.kind !== 'case' && reviewRoute?.kind !== 'service-end' && reviewedRow.disposition !== 'blocked'}
               disabled={bankDrawerBusy} onBusyChange={setBankRowActionBusy}
               onPaired={() => { refreshReviewedRow(); setReload(value => value + 1); }}
               onExcluded={() => { closeCase(); setReload(value => value + 1); }} />}

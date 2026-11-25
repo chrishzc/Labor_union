@@ -20,7 +20,17 @@ def persist_client_finance_terms_impact(cursor, command, *, synchronize_governme
     terms_changed=bool(_persist_payment_terms(cursor, command))
     from infrastructure.mysql.client_difference_repository import persist_controlled_client_amount
     cancellation = getattr(command.candidate, "cancellation_settlement", None)
-    results = {} if cancellation else {stage.payment_stage:persist_controlled_client_amount(cursor,command,stage.payment_stage.value,stage.amount.amount,stage.due_date) for stage in command.candidate.stage_plans}
+    refund_stages = {
+        action.payment_stage for action in command.candidate.actions
+        if action.action is ClientObligationActionKind.CREATE_REFUND
+    }
+    results = {} if cancellation else {
+        stage.payment_stage: persist_controlled_client_amount(
+            cursor, command, stage.payment_stage.value, stage.amount.amount, stage.due_date,
+            create_linked_refund=stage.payment_stage in refund_stages,
+        )
+        for stage in command.candidate.stage_plans
+    }
     controlled={stage for stage,result in results.items() if result[0]}
     controlled_changed=any(result[1] for result in results.values())
     for ordinal, action in enumerate(command.candidate.actions, start=1):

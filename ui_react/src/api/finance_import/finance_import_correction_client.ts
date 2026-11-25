@@ -16,14 +16,18 @@ const classificationType = z.enum([
 const selectionSchema = z.strictObject({
   row_identity: z.string().min(1).max(191),
   classification_type: classificationType,
-  target_obligation_identities: z.array(z.string().min(1).max(191)).min(1),
+  target_obligation_identities: z.array(z.string().min(1).max(191)),
+  service_end_case_no: z.string().min(1).max(50).optional(),
   refund_ledger_entry_identity: z.string().min(1).max(191).nullable(),
   allow_partial_refund_recovery: z.boolean(),
   allow_refund_overage_recovery: z.boolean(),
   allow_client_receipt_overage: z.boolean(),
   reason: z.string().trim().max(500).default(''),
   evidence: z.array(z.string().min(1)).min(1),
-});
+}).refine(selection => selection.service_end_case_no === undefined
+  ? selection.target_obligation_identities.length > 0
+  : selection.classification_type === 'client_receipt' && !selection.target_obligation_identities.length
+    && !selection.allow_client_receipt_overage);
 const candidateSchema = z.strictObject({
   row_identity: z.string().min(1), batch_identity: z.string().min(1), classification_type: z.string().min(1),
   owning_domain: z.string().min(1), bank_amount_ntd: z.number().int().positive(),
@@ -31,6 +35,10 @@ const candidateSchema = z.strictObject({
   reason: z.string(), evidence: z.array(z.string().min(1)), refund_ledger_entry_identity: z.string().min(1).nullable(),
   allow_partial_refund_recovery: z.boolean(), allow_refund_overage_recovery: z.boolean(), allow_client_receipt_overage: z.boolean(),
   candidate_fingerprint: sha256,
+  service_end_receipt: z.strictObject({
+    case_no: z.string().min(1), service_due_ntd: z.number().int().nonnegative(), fee_ntd: z.number().int().nonnegative(),
+    pending_refund_ntd: z.number().int().nonnegative(), new_refund_ntd: z.number().int().nonnegative(),
+  }).nullish(),
   refund_summary: z.strictObject({ transfer_fee_ntd: z.number().int().min(0).max(100), remaining_ntd: z.number().int().nonnegative() }).nullish(),
 });
 const previewSchema = z.strictObject({

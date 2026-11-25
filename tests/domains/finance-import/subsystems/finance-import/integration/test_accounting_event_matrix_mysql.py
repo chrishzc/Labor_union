@@ -102,7 +102,7 @@ def stage(case, amount, sequence, *, account=None, incoming=False, government=Fa
         reference = refund_account or account
         memo = f'HC{virtual[-6:]} 客戶退款' if refund_account else 'synthetic'
         row = ['1' * 12, day + f' 09:08:{sequence:02d}', day, day, '轉帳', 'TWD', None if incoming else amount, amount if incoming else None, 300000 + int(case[3:]) * 100 + sequence, None if reference else virtual, reference or f'{case}:{sequence}', memo, None, 'fixture']
-    if refund_account:
+    if refund_account or (incoming and not government):
         from domains.finance_import.statement_archive import STATEMENT_COLUMNS
         headers = list(STATEMENT_COLUMNS)
         row.insert(9, None)  # 票據號碼
@@ -113,9 +113,21 @@ def stage(case, amount, sequence, *, account=None, incoming=False, government=Fa
     preview = http.post('/api/v1/finance-import/batches/preview', json={'batch_identity': batch})
     plan = checked(preview)
     assert len(plan['rows']) == 1, plan
-    return (int(plan['rows'][0]['row_identity'].split(':')[-1]), plan)
+    row_id = int(plan['rows'][0]['row_identity'].split(':')[-1])
+    if incoming and not government:
+        source, = rows(
+            "SELECT format_id,direction,classification_type,classification_reason,"
+            "JSON_UNQUOTE(JSON_EXTRACT(bank_references,'$.\"銷帳編號\"')) AS account_code "
+            "FROM finance_import_rows WHERE id=%s", (row_id,),
+        )
+        assert (source['format_id'], source['direction'], source['classification_type'],
+                source['account_code']) == ('sinopac', 'incoming', 'client_receipt', virtual), source
+        events = rows('SELECT classification_type,reason FROM finance_import_classification_events '
+                      'WHERE finance_import_row_id=%s ORDER BY id', (row_id,))
+        assert events and events[-1]['classification_type'] == 'client_receipt', events
+    return row_id, plan
 
-def jobs(accepted):
+def jobs(accepted, *, expected_status="succeeded"):
     from api.dependencies.durable_job_handlers import default_job_handlers
     from infrastructure.mysql.background_job_repository import BackgroundJobRepository
     from subsystems.jobs.durable_job_worker import DurableJobWorker
@@ -127,7 +139,7 @@ def jobs(accepted):
     finally:
         connection.close()
     result = checked(http.get('/api/v1/jobs/' + accepted['job_id']))
-    assert result['status'] == 'succeeded', result
+    assert result['status'] == expected_status, result
     return result
 
 def owner_apply(url, body, *, case, key, versions):
@@ -223,9 +235,11 @@ def government():
     current=runpy.run_path('tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_period_reconciliation_mysql.py')
     current['test_real_bank_workbook_government_receipt_stays_pending_until_period_selected'](http)
 
-def cancel(case, days):
+def cancel(case, days, *, fee=0):
     url = f'/api/v1/orders/{case}/cancellation'
     body = {'confirmed_service_days': days}
+    if fee:
+        body.update(fee_ntd=fee, fee_reason='synthetic agreed cancellation fee')
     before = snapshot(case)
     plan = checked(http.post(url + '/preview', json=body))
     assert snapshot(case) == before
@@ -683,3 +697,224 @@ def test_ordinary_completion_materializes_confirmed_customer_subsidy_after_payro
         item, = roster.list(query=case, limit=10, after=None).items
     assert item.staff_payment_due_date == date(2026, 11, 15)
     assert [row['due_date'] for row in item.client_obligation_dates if row['obligation_type'] == 'subsidy_return'] == [date(2026, 12, 15)]
+
+
+@pytest.mark.parametrize("import_before_cancellation,fee", [(True, 0), (False, 0), (False, 1000)])
+def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_before_cancellation, fee, monkeypatch):
+    case, _ = new_case()
+    if import_before_cancellation:
+        row, _ = stage(case, 5000, 13, incoming=True)
+    cancel(case, [], fee=fee)
+    refund_due = 5000 - fee
+    if not import_before_cancellation:
+        row, _ = stage(case, 5000, 13, incoming=True)
+    before = snapshot(case)
+    assert before["ledger"] == []
+    url = '/api/v1/finance-import/corrections'
+    selection = {
+        'row_identity': f'finance-import-row:{row}', 'classification_type': 'client_receipt',
+        'target_obligation_identities': [], 'service_end_case_no': case,
+        'reason': 'confirmed same-case bank receipt', 'evidence': ['synthetic original Sinopac statement'],
+    }
+    if import_before_cancellation:
+        other_case, _ = new_case()
+        cancel(other_case, [])
+        other_before = snapshot(other_case)
+        assert http.post(url + '/preview', json={**selection, 'service_end_case_no': other_case}).status_code == 409
+        assert snapshot(other_case) == other_before
+    preview = checked(http.post(url + '/preview', json=selection))
+    assert sum(item['amount_ntd'] for item in preview['candidate']['allocations']) == fee
+    assert preview['candidate']['service_end_receipt']['new_refund_ntd'] == refund_due
+    review_list = checked(http.get(f'/api/v1/finance-import/bank-transactions?row_id={row}&transaction_status=all'))
+    assert review_list['items'][0]['service_end_receipt_case_no'] == case, review_list
+    assert snapshot(case) == before
+    body = {**selection, **{f'expected_{key}_version': preview[f'{key}_version'] for key in
+                            ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
+    if import_before_cancellation:
+        from infrastructure.mysql import client_service_end_receipt_writer
+
+        def fail_after_financial_writes(cursor, identity, case_no, *_args, **_kwargs):
+            assert case_no == case
+            cursor.execute("SELECT id FROM client_ledger_entries WHERE case_no=%s AND finance_import_row_id=%s",
+                           (case_no, row))
+            assert cursor.fetchone() is not None
+            cursor.execute("SELECT obligation_identity FROM client_obligations WHERE obligation_identity=%s",
+                           (identity,))
+            assert cursor.fetchone() is not None
+            raise RuntimeError("isolated injected refund recipient write failure")
+
+        def bank_facts():
+            return (
+                rows('SELECT reconciliation_status FROM finance_import_rows WHERE id=%s', (row,)),
+                rows('SELECT id FROM finance_import_classification_events WHERE finance_import_row_id=%s', (row,)),
+                rows('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s', (case,)),
+                rows('SELECT id FROM client_finance_apply_receipts WHERE case_no=%s', (case,)),
+            )
+
+        facts_before = bank_facts()
+        with monkeypatch.context() as patch:
+            patch.setattr(client_service_end_receipt_writer, '_insert_refund_recipient_snapshot',
+                          fail_after_financial_writes)
+            failure = checked(http.post(url + '/apply', json=body,
+                                        headers={'Idempotency-Key': case + ':injected-failure'}), 202)
+            result = jobs(failure, expected_status='failed')
+            assert result['outcome']['error']['code'] == 'transaction_failed'
+            assert 'isolated injected refund recipient write failure' in result['outcome']['error']['message']
+        assert bank_facts() == facts_before
+        assert snapshot(case) == before
+    key = {'Idempotency-Key': case + ':terminal-late-receipt'}
+    accepted = checked(http.post(url + '/apply', json=body, headers=key), 202)
+    jobs(accepted)
+    outcome = checked(http.get(f"/api/v1/finance-import/jobs/{accepted['job_id']}/correction-outcome"))
+    assert outcome['receipt']['row_identity'] == selection['row_identity']
+    after = snapshot(case)
+    assert after['order'] == before['order'] and after['schedule'] == before['schedule']
+    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', 5000)]
+    previous_receivables = {item['obligation_identity']: item for item in before['client']
+                            if item['direction'] == 'receivable_from_client'}
+    current_receivables = {item['obligation_identity']: item for item in after['client']
+                           if item['direction'] == 'receivable_from_client'}
+    assert previous_receivables.keys() == current_receivables.keys()
+    if fee:
+        adjustment, = [i for i in current_receivables.values() if i['obligation_type'] == 'adjustment']
+        assert adjustment['status'] == 'settled' and adjustment['amount_due_ntd'] == 0
+    else:
+        assert current_receivables == previous_receivables
+    assert [(item['status'], item['amount_due_ntd']) for item in after['client']
+            if item['obligation_type'] == 'refund'] == [('open', refund_due)]
+    assert checked(http.post(url + '/apply', json=body, headers=key), 202)['replayed'] is True
+    assert http.post(url + '/preview', json=selection).status_code == 409
+    from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting
+    connection = mysql_adapter.get_connection()
+    try:
+        readback = query_cancellation_accounting(connection, case)
+        assert readback is not None and readback.net_received_ntd == 5000
+        assert readback.refund_due_ntd == refund_due and readback.bank_refunded_ntd == 0
+        if fee:
+            from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
+            cash = rows('SELECT UNIX_TIMESTAMP(created_at) AS epoch FROM client_ledger_entries WHERE case_no=%s',
+                        (case,))[0]
+            from datetime import datetime
+            from shared_kernel.clock import TAIPEI_TIME_ZONE
+            apply_date = datetime.fromtimestamp(int(cash['epoch']), TAIPEI_TIME_ZONE).date()
+            month = apply_date.replace(day=1)
+            recognition, = [i for i in MySqlMonthlyAccountingSource(connection).recognitions(month, month)
+                            if i.cases == (case,)]
+            assert recognition.action == 'cancellation_fee_revenue'
+            assert recognition.amount_ntd == fee and recognition.confirmed_on == apply_date.isoformat()
+    finally:
+        connection.close()
+    assert snapshot(case) == after
+
+
+def _seed_older_service_total(case):
+    write("INSERT INTO admin_command_receipts "
+          "(command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) "
+          "VALUES ('scheduling_holiday_maintenance/v2', %s, %s, %s, 'fixture', 'before shortening', %s)",
+          (case + ':previous-holiday-total', '1' * 64, '2' * 64,
+           json.dumps({'case_results': [{'case_no': case, 'case_total_amount': 72000}]})))
+
+
+def _shorten_matrix_service(case, service_dates):
+    terms_url = f'/api/v1/orders/{case}/terms'
+    initial = checked(http.get(terms_url))
+    assignment = rows('SELECT id FROM case_staff_assignments WHERE case_no=%s', (case,))[0]['id']
+    terms = {
+        'proposed_terms': {**initial['terms'], 'service_days': len(service_dates)},
+        'replacement_service_dates': service_dates,
+        'replacement_allocations': [{'assignment_id': assignment, 'service_days': len(service_dates),
+                                     'service_dates': service_dates}],
+        'allow_started_service_change': True,
+    }
+    plan = checked(http.post(terms_url + '/preview', json=terms))
+    applied_terms = {**terms, **{f'expected_{k}_version': plan[f'{k}_version'] for k in
+                                 ('order', 'scheduling', 'client_finance', 'payroll')},
+                     'preview_fingerprint': plan['preview_fingerprint'],
+                     'requires_formal_apply': plan['requires_formal_apply'], 'reason': 'synthetic actual early end'}
+    checked(http.post(terms_url + '/apply', json=applied_terms, headers={'Idempotency-Key': case + ':shorten'}))
+
+
+@pytest.mark.parametrize("import_before_completion", [True, False])
+@pytest.mark.parametrize("bank_amount,refund_due,expected_scheme", [(50000, 14000, 'unknown'), (24000, 0, 'split')])
+def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation(
+    import_before_completion, bank_amount, refund_due, expected_scheme,
+):
+    case, _ = new_case()
+    seed_service(case)
+    accounting_url = f'/api/v1/finance-import/cases/{case}/accounting'
+    _seed_older_service_total(case)
+    assert int(checked(http.get(accounting_url))['case_total_ntd']) == 72000
+    if import_before_completion:
+        bid, _ = stage(case, bank_amount, 14, incoming=True)
+    service_dates = [f'2026-10-{day:02d}' for day in range(1, 16)]
+    _shorten_matrix_service(case, service_dates)
+    if snapshot(case)['order'][0]['status'] != '訂單完成':
+        complete(case)
+    if not import_before_completion:
+        bid, _ = stage(case, bank_amount, 14, incoming=True)
+    before = snapshot(case)
+    before_accounting = checked(http.get(accounting_url))
+    assert before['order'][0]['status'] == '訂單完成'
+    assert [str(row['work_date']) for row in before['schedule']] == service_dates
+    assert not rows('SELECT id FROM order_cancellation_apply_receipts WHERE case_no=%s', (case,))
+    assert (int(before_accounting['case_total_ntd']), int(before_accounting['subsidy_ntd']), before_accounting['scheme']) == (
+        36000, 12000, 'unknown',
+    )
+    url = '/api/v1/finance-import/corrections'
+    selection = {'row_identity': f'finance-import-row:{bid}', 'classification_type': 'client_receipt',
+                 'target_obligation_identities': [], 'service_end_case_no': case,
+                 'evidence': ['synthetic bank receipt after actual service'], 'reason': 'confirmed exact case'}
+    preview = checked(http.post(url + '/preview', json=selection))
+    # This fixture's standard rate is NT$300/h, fifteen verified eight-hour days.
+    summary = preview['candidate']['service_end_receipt']
+    assert summary['service_due_ntd'] == 36000 and summary['new_refund_ntd'] == refund_due
+    assert snapshot(case) == before
+    assert checked(http.get(accounting_url))['scheme'] == 'unknown'
+    body = {**selection, **{f'expected_{k}_version': preview[f'{k}_version'] for k in
+                            ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
+    jobs(checked(http.post(url + '/apply', json=body, headers={'Idempotency-Key': case + ':late-early-end'}), 202))
+    after = snapshot(case)
+    assert after['order'] == before['order'] and after['schedule'] == before['schedule']
+    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', bank_amount)]
+    assert [(item['status'], item['amount_due_ntd']) for item in after['client']
+            if item['obligation_type'] == 'refund'] == ([('open', refund_due)] if refund_due else [])
+    accounting = checked(http.get(accounting_url))
+    assert accounting['scheme'] == expected_scheme
+    if expected_scheme == 'split':
+        assert accounting['subsidy_plan']['events'][-1]['source'] == 'receipt'
+
+
+def test_terminal_sinopac_receipt_keeps_current_shortened_total_after_holiday_change():
+    from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
+
+    case, _ = new_case()
+    bank(case, 12000, 1)
+    seed_service(case)
+    _seed_older_service_total(case)
+    _shorten_matrix_service(case, [f'2026-10-{day:02d}' for day in range(1, 16)])
+    accounting_url = f'/api/v1/finance-import/cases/{case}/accounting'
+    assert int(checked(http.get(accounting_url))['case_total_ntd']) == 36000
+
+    before_ledger = snapshot(case)['ledger']
+    connection = mysql_adapter.get_connection()
+    try:
+        repricing = MySqlHolidayRepricing(connection)
+        application = HolidayMaintenanceApplication(
+            MySqlSchedulingHolidayQuery(connection), lambda: MySqlUnitOfWork(connection), lambda: None,
+            repricing, repricing.prepare,
+        )
+        holiday_date = date(2026, 10, 2)
+        command = HolidayCommand('upsert', holiday_date, 'Synthetic holiday', True, holiday_date, holiday_date)
+        preview = application.preview(command)
+        receipt = application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+                                    case + ':post-shortening-holiday', 'fixture', 'frozen after payment')
+    finally:
+        connection.close()
+
+    case_result = next(result for result in receipt.case_results if result.case_no == case)
+    assert (case_result.outcome, case_result.case_total_amount) == ('preserved_cash_history', 36000)
+    assert snapshot(case)['ledger'] == before_ledger
+    assert int(checked(http.get(accounting_url))['case_total_ntd']) == 36000

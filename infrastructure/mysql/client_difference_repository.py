@@ -212,7 +212,7 @@ def _latest_stage_computations(cursor,case_no):
         return {}
 
 
-def _set_client_amount(cursor,case_no,identity,effective,before,key,actor,reason,version):
+def _set_client_amount(cursor,case_no,identity,effective,before,key,actor,reason,version, *, cash_refund_only: bool = False):
     cursor.execute('SELECT o.*,e.after_amount_ntd nominal FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id WHERE o.obligation_identity=%s AND o.case_no=%s FOR UPDATE',(identity,case_no))
     row=cursor.fetchone()
     if not row:
@@ -220,7 +220,7 @@ def _set_client_amount(cursor,case_no,identity,effective,before,key,actor,reason
     cash,noncash=_cash(cursor,identity),_noncash(cursor,identity)
     target=ClientDifferenceTarget(identity,row['obligation_type'],row['direction'],before,cash,int(row['amount_due_ntd']),noncash)
     frozen=row['status']=='settled' or _has_separate_correction(cursor,identity)
-    plan=plan_client_amount_change(target,effective,frozen=frozen)
+    plan=plan_client_amount_change(target,effective,frozen=frozen,cash_refund_only=cash_refund_only)
     if effective==before:
         return
     if not frozen:
@@ -285,7 +285,7 @@ def persist_controlled_client_stage(cursor, command, stage):
     return persist_controlled_client_amount(cursor,command,stage.payment_stage.value,stage.amount.amount,stage.due_date)[0]
 
 
-def persist_controlled_client_amount(cursor,command,kind,computed,due_date=None):
+def persist_controlled_client_amount(cursor,command,kind,computed,due_date=None, *, create_linked_refund: bool = False):
     cursor.execute('SELECT o.obligation_identity,o.status,c.amount_mode,c.computed_ntd,c.effective_ntd FROM client_obligations o '
         'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
         'WHERE o.case_no=%s AND o.obligation_type=%s FOR UPDATE',(command.candidate.case_no,kind))
@@ -293,7 +293,8 @@ def persist_controlled_client_amount(cursor,command,kind,computed,due_date=None)
     if not row:
         return False,False
     identity=row['obligation_identity']
-    if row['amount_mode'] is None and not _noncash(cursor,identity) and row['status']!='settled':
+    if (row['amount_mode'] is None and not create_linked_refund
+            and not _noncash(cursor,identity) and row['status']!='settled'):
         return False,False
     if row['amount_mode'] is None:
         cursor.execute('SELECT e.after_amount_ntd FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id WHERE o.obligation_identity=%s',(identity,))
@@ -304,12 +305,16 @@ def persist_controlled_client_amount(cursor,command,kind,computed,due_date=None)
     changed=False
     key='client-source:'+sha256((command.idempotency_key.value+':'+identity).encode()).hexdigest()
     if computed!=int(row['computed_ntd']) or effective!=int(row['effective_ntd']):
-        _set_client_amount(cursor,command.candidate.case_no,identity,effective,int(row['effective_ntd']),key,command.actor.actor_id,command.reason,command.candidate.resulting_account_version)
+        _set_client_amount(cursor,command.candidate.case_no,identity,effective,int(row['effective_ntd']),key,
+            command.actor.actor_id,command.reason,command.candidate.resulting_account_version,
+            cash_refund_only=kind in {'deposit', 'first', 'second'})
         _amount_event(cursor,identity,'source_update',int(row['effective_ntd']),effective,computed,key,sha256(key.encode()).hexdigest(),command.actor.actor_id,command.reason)
         cursor.execute('UPDATE client_finance_amount_controls SET computed_ntd=%s,effective_ntd=%s WHERE obligation_identity=%s',(computed,effective,identity))
         changed=True
     cursor.execute('SELECT o.*,e.after_amount_ntd nominal FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id WHERE o.obligation_identity=%s FOR UPDATE',(identity,))
     source=cursor.fetchone()
+    if row['amount_mode']=='manual' and due_date is None:
+        due_date=source['due_date']
     if source['status']=='open' and source['due_date']!=due_date:
         date_key=key+':due'
         cursor.execute('INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,before_due_date,after_due_date,source_event_identity,source_obligation_identity,expected_account_version,idempotency_key,actor,reason) '

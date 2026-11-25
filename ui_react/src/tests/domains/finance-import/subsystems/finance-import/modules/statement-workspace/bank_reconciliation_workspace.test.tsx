@@ -304,6 +304,87 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     }
   });
 
+  it('keeps one terminal Sinopac review mounted from bank selection to a verified receipt', async () => {
+    window.location.hash = '#finance?tab=bank';
+    const caseNo = '115000001';
+    const row: FinanceBankTransaction = {
+      ...sinopac, amount_ntd: 5000, service_end_receipt_case_no: caseNo, reconciliation_target: null,
+      review_reason: 'sinopac_client_receipt_no_open_obligation',
+    };
+    const jobId = 'terminal-sinopac-job';
+    const batchIdentity = 'finance-import-batch:17';
+    const fingerprint = 'a'.repeat(64);
+    const receipt = {
+      row_identity: row.row_identity, batch_identity: batchIdentity, preview_fingerprint: fingerprint,
+      resulting_batch_version: 2, classification_event_count: 1, ledger_entry_count: 1, allocation_count: 1,
+      reconciliation_receipt_count: 1, alert_resolved_event_count: 0,
+    };
+    let confirmed = false;
+    const wrap = <T,>(data: T) => ({ success: true, message: 'ok', error: null, data });
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async query => ({
+      items: confirmed ? (query.transaction_status === 'posted' || query.row_id
+        ? [{ ...row, status: 'posted', service_end_receipt_case_no: null }] : []) : [row],
+      pending_count: confirmed ? 0 : 1, next_before_row_id: null,
+    }));
+    const token = vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-token');
+    const post = vi.spyOn(transport, 'post').mockImplementation(async path => {
+      if (path === '/api/v1/finance-import/corrections/preview') return wrap({
+        candidate: {
+          row_identity: row.row_identity, batch_identity: batchIdentity, classification_type: 'client_receipt',
+          owning_domain: 'client_finance', bank_amount_ntd: 5000, allocations: [], reason: '',
+          evidence: ['永豐對帳單已驗證同案入款'], refund_ledger_entry_identity: null,
+          allow_partial_refund_recovery: false, allow_refund_overage_recovery: false,
+          allow_client_receipt_overage: false, candidate_fingerprint: 'b'.repeat(64),
+          service_end_receipt: { case_no: caseNo, service_due_ntd: 0, fee_ntd: 0,
+            new_refund_ntd: 5000, pending_refund_ntd: 5000 }, refund_summary: null,
+        },
+        batch_version: 1, canonical_fact_version: 1, alert_version: 0, preview_fingerprint: fingerprint,
+      }) as never;
+      if (path === '/api/v1/finance-import/corrections/apply') return wrap({
+        job_id: jobId, status_url: '/jobs/' + jobId, replayed: false,
+      }) as never;
+      throw new Error(`unexpected POST ${path}`);
+    });
+    const get = vi.spyOn(transport, 'get').mockImplementation(async path => {
+      if (path === `/api/v1/finance-import/jobs/${jobId}/correction-outcome`) {
+        confirmed = true;
+        return wrap({ job_id: jobId, status: 'succeeded', attempt_count: 1, max_attempts: 1,
+          result_reference: `finance_import_correction:${row.row_identity}`, receipt, failure_code: null }) as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockRejectedValue(new Error('synthetic case'));
+    const warnings = vi.spyOn(console, 'error');
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const drawer = within(await screen.findByRole('dialog', { name: '核對交易' }));
+      const preview = await drawer.findByRole('button', { name: '預覽核銷' });
+      expect(drawer.getAllByRole('region', { name: '銀行款項更正' })).toHaveLength(1);
+      expect(drawer.getByRole('button', { name: '移除誤匯入明細' })).toBeEnabled();
+      fireEvent.click(preview);
+      const confirm = await drawer.findByRole('button', { name: '確認核銷' });
+      expect(drawer.getByLabelText('永豐入款結算預覽')).toHaveTextContent('5,000');
+      expect(drawer.getAllByRole('region', { name: '銀行款項更正' })).toHaveLength(1);
+      expect(post.mock.calls.map(([path]) => path)).toEqual(['/api/v1/finance-import/corrections/preview']);
+      expect(readCase).not.toHaveBeenCalled();
+      expect(warnings.mock.calls.some(call => call.some(value => String(value).includes('same key')))).toBe(false);
+      fireEvent.click(confirm);
+      await screen.findByRole('dialog', { name: `案件帳務 · ${caseNo}` });
+      await waitFor(() => expect(readCase).toHaveBeenCalledWith(caseNo, expect.any(AbortSignal)));
+      expect(post.mock.calls.map(([path]) => path)).toEqual([
+        '/api/v1/finance-import/corrections/preview',
+        '/api/v1/finance-import/corrections/apply',
+      ]);
+      expect(post.mock.calls[1][1]).toMatchObject({ row_identity: row.row_identity,
+        service_end_case_no: caseNo, classification_type: 'client_receipt', preview_fingerprint: fingerprint });
+      expect(get.mock.calls.filter(([path]) => path.endsWith('/correction-outcome'))).toHaveLength(1);
+    } finally {
+      [get, post, token, readCase, warnings].forEach(mock => mock.mockRestore());
+      window.location.hash = '';
+    }
+  });
+
   it.each([false, true])('offers single-transaction manual staff review only for backend eligibility %s', async (allowed) => {
     window.location.hash = '#finance?tab=bank';
     const row: FinanceBankTransaction = { ...taishin, direction: 'outgoing', classification_type: 'staff_payout',

@@ -3,6 +3,7 @@ File: pricing_configuration_repository.py
 Description: 管理 MySQL 帳務計價政策、個案覆寫與歷史案件重算計畫持久化。
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -10,9 +11,12 @@ import json
 from typing import Literal, TypedDict
 from zoneinfo import ZoneInfo
 
+from pymysql.cursors import DictCursor
+
 from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.orders.floor_fee import prorate_historical_floor_fee
+from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.payroll.tiered_rates import TieredPayrollRate
 from infrastructure.mysql.case_category_query import BOUND_POLICY_IDENTITY_SQL
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -201,13 +205,44 @@ def load_case_pricing(cursor, order_row, *, lock=False):
     return policy.for_case(str(identity), twins=_is_twins(cursor, order_row["case_no"], lock))
 
 
+@dataclass(frozen=True, slots=True)
+class ServiceShorteningPricingBasis:
+    receipt_id: int
+    scheduling_version: int
+
+
+def find_service_shortening_pricing_basis(
+    cursor: DictCursor, order: Mapping[str, object], *, lock: bool = False,
+) -> ServiceShorteningPricingBasis | None:
+    service_days = order.get('service_days')
+    if not isinstance(service_days, int) or order['status'] not in (
+        OrderLifecycleStatus.IN_SERVICE, OrderLifecycleStatus.COMPLETED,
+    ):
+        return None
+    cursor.execute(
+        "SELECT receipt.id,receipt.lifecycle_status,receipt.scheduling_version,"
+        "CAST(JSON_UNQUOTE(JSON_EXTRACT(event.before_terms,'$.service_days')) AS UNSIGNED) AS before_days,"
+        "CAST(JSON_UNQUOTE(JSON_EXTRACT(event.after_terms,'$.service_days')) AS UNSIGNED) AS after_days "
+        "FROM order_terms_apply_receipts receipt JOIN order_terms_change_events event "
+        "ON event.id=receipt.order_terms_event_id AND event.case_no=receipt.case_no "
+        "WHERE receipt.case_no=%s HAVING before_days<>after_days ORDER BY receipt.order_version DESC LIMIT 1"
+        + (' FOR UPDATE' if lock else ''),
+        (order['case_no'],),
+    )
+    receipt = cursor.fetchone()
+    if (receipt is None or receipt['after_days'] != service_days or receipt['before_days'] <= service_days
+            or receipt['lifecycle_status'] not in (OrderLifecycleStatus.IN_SERVICE, OrderLifecycleStatus.COMPLETED)):
+        return None
+    return ServiceShorteningPricingBasis(int(receipt['id']), int(receipt['scheduling_version']))
+
+
 def query_case_pricing_total(connection, case_no: str, *, for_update: bool = False) -> int | None:
     """Case total from formal pricing and service facts, independent of payment terms."""
     from domains.client_finance.pricing_policy import (
         calculate_case_total_amount, calculate_holiday_premium,
     )
     from infrastructure.mysql.holiday_repricing import load_frozen_holiday_case_total
-    from infrastructure.mysql.order_terms_read_model import select_order, load_client_pricing_charge_days
+    from infrastructure.mysql.order_terms_read_model import load_client_pricing_charge_days, select_order
 
     lock = " FOR UPDATE" if for_update else ""
     try:
@@ -246,16 +281,24 @@ def query_case_pricing_total(connection, case_no: str, *, for_update: bool = Fal
                     return None
                 hours = Decimal(str(order['service_hours_per_day'])) * int(order['service_days'])
                 return calculate_case_total_amount(pricing, ((hours, False),), int(order['floor_fee']))
-            frozen = load_frozen_holiday_case_total(cursor, case_no)
+            service_days = order.get('service_days')
+            shortening = find_service_shortening_pricing_basis(cursor, order, lock=for_update)
+            frozen = load_frozen_holiday_case_total(cursor, case_no, shortening=shortening)
             if frozen is not None:
                 return frozen
             if any(order.get(key) is None for key in ('floor_fee', 'service_hours_per_day', 'service_days')):
                 return None
             daily_hours = Decimal(str(order['service_hours_per_day']))
             floor = int(order['floor_fee'])
-            days = load_client_pricing_charge_days(cursor, order, lock=for_update)
+            days = load_client_pricing_charge_days(cursor, order, lock=for_update, allow_planned=shortening is None)
             if not days:
                 return None
+            if shortening is not None:
+                start, end = order.get('actual_start_date'), order.get('actual_end_date')
+                if start is None or end is None or len(days) != service_days:
+                    return None
+                if any(not start <= day.service_date <= end for day in days):
+                    return None
             gross = calculate_case_total_amount(pricing, tuple((daily_hours, day.is_double_pay) for day in days), floor)
             return gross + calculate_holiday_premium(pricing, tuple(
                 (daily_hours, day.holiday_hour_segments or ((Decimal(0), day.holiday_hours),)) for day in days
@@ -917,7 +960,8 @@ class MySqlPricingConfigurationRepository:
             scheduling = cursor.fetchone()
             from infrastructure.mysql.holiday_repricing import load_frozen_holiday_amounts, load_frozen_holiday_case_total
             frozen = load_frozen_holiday_amounts(cursor, case_no, lock=lock)
-            frozen_total = load_frozen_holiday_case_total(cursor, case_no) if frozen is not None else None
+            shortening = find_service_shortening_pricing_basis(cursor, order, lock=lock) if frozen is not None else None
+            frozen_total = load_frozen_holiday_case_total(cursor, case_no, shortening=shortening) if frozen is not None else None
             from infrastructure.mysql.payroll_rebuild_repository import _load_obligations
             staff_obligations = _load_obligations(cursor, case_no, lock)
             formal_staff = sum(int(row["effective_contractual_amount_ntd"]) for row in staff_obligations) if staff_obligations else None

@@ -490,6 +490,20 @@ class FinanceImportQueryService:
             for row, item in zip(page, items, strict=True):
                 if item["status"] != "pending" or item["disposition"] == "blocked":
                     continue
+                if (row_id is not None and row["format_id"] == "sinopac" and row["direction"] == "incoming"
+                        and row["classification_type"] == "client_receipt" and len(item["cases"]) == 1
+                        and not row.get("is_manual_supplement")):
+                    from infrastructure.mysql.client_service_end_receipt_preview import preview_client_service_end_receipt
+                    from infrastructure.mysql.client_service_end_receipt_writer import terminal_receipt_allocations
+                    try:
+                        end_receipt = preview_client_service_end_receipt(
+                            self._connection, row_id=row_id, case_no=item["cases"][0],
+                        )
+                        terminal_receipt_allocations(end_receipt)
+                    except ValueError:
+                        pass
+                    else:
+                        item["service_end_receipt_case_no"] = end_receipt.case_no
                 if (row_id is not None and row['format_id'] == 'taishin' and row['direction'] == 'outgoing'
                         and row['classification_type'] in {'staff_payout', 'staff_salary', 'staff_legacy_subsidy'}
                         and not row.get('is_manual_supplement')

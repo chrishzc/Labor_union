@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 import re
+from typing import TYPE_CHECKING
 from pymysql.connections import Connection
 from pymysql.cursors import DictCursor
 
@@ -19,6 +20,9 @@ from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
 from subsystems.payroll.rebuild_workflow import PayrollRebuildWorkflow
 from subsystems.scheduling.holiday_maintenance import HolidayCaseRepricingResult, HolidayCommand, HolidayRepricingOutcome
+
+if TYPE_CHECKING:
+    from infrastructure.mysql.pricing_configuration_repository import ServiceShorteningPricingBasis
 
 
 def load_frozen_holiday_amounts(cursor: DictCursor, case_no: str, *, lock: bool = False) -> tuple[int, int] | None:
@@ -42,12 +46,16 @@ def load_frozen_holiday_amounts(cursor: DictCursor, case_no: str, *, lock: bool 
 
 
 
-def load_frozen_holiday_case_total(cursor: DictCursor, case_no: str) -> int | None:
+def load_frozen_holiday_case_total(
+    cursor: DictCursor, case_no: str, *, shortening: ServiceShorteningPricingBasis | None = None,
+) -> int | None:
     cursor.execute("SELECT result_snapshot FROM admin_command_receipts "
                    "WHERE command_family=%s ORDER BY id DESC", ("scheduling_holiday_maintenance/v2",))
     for row in cursor.fetchall():
         payload = row["result_snapshot"]
         payload = json.loads(payload) if isinstance(payload, str) else payload
+        if shortening is not None and payload.get("service_shortening_receipts", {}).get(case_no) != shortening.receipt_id:
+            continue
         for result in payload.get("case_results", ()):
             if result["case_no"] == case_no and result.get("case_total_amount") is not None:
                 return int(result["case_total_amount"])
@@ -55,6 +63,8 @@ def load_frozen_holiday_case_total(cursor: DictCursor, case_no: str) -> int | No
     for row in cursor.fetchall():
         payload = row["result_snapshot"]
         payload = json.loads(payload) if isinstance(payload, str) else payload
+        if shortening is not None and payload.get("scheduling_version", -1) <= shortening.scheduling_version:
+            continue
         if payload.get("frozen_case_total_amount") is not None:
             return int(payload["frozen_case_total_amount"])
     return None
@@ -82,14 +92,21 @@ class MySqlHolidayRepricing:
                 self.prepare_case(case_no)
 
     def prepare_case(self, case_no: str) -> int | None:
-        from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
+        from infrastructure.mysql.pricing_configuration_repository import (
+            MySqlPricingConfigurationRepository, find_service_shortening_pricing_basis, query_case_pricing_total,
+        )
         from subsystems.client_finance.pricing_configuration import case_total_amount
         try:
             with self._connection.cursor(DictCursor) as cursor:
                 if load_frozen_holiday_amounts(cursor, case_no, lock=True) is None:
                     return None
-                previous = load_frozen_holiday_case_total(cursor, case_no)
-                if previous is None:
+                order = select_order(cursor, case_no, lock=True)
+                shortening = find_service_shortening_pricing_basis(cursor, order, lock=True)
+                if shortening is not None:
+                    previous = query_case_pricing_total(self._connection, case_no, for_update=True)
+                else:
+                    previous = load_frozen_holiday_case_total(cursor, case_no)
+                if previous is None and shortening is None:
                     facts = MySqlPricingConfigurationRepository(self._connection).case(case_no, lock=True)
                     previous = case_total_amount(replace(facts, frozen_amounts=None))
                 if previous is not None:
@@ -126,6 +143,8 @@ class MySqlHolidayRepricing:
             return result
 
     def _reprice_case(self, case_no: str, key: str, actor: str) -> HolidayCaseRepricingResult:
+        from infrastructure.mysql.pricing_configuration_repository import find_service_shortening_pricing_basis
+
         with self._connection.cursor(DictCursor) as cursor:
             order = select_order(cursor, case_no, lock=True)
             if is_holiday_pricing_excluded(cursor, order, lock=True):
@@ -134,7 +153,8 @@ class MySqlHolidayRepricing:
             if frozen is not None:
                 saved_total = self._before_totals.get(case_no)
                 if saved_total is None:
-                    saved_total = load_frozen_holiday_case_total(cursor, case_no)
+                    shortening = find_service_shortening_pricing_basis(cursor, order, lock=True)
+                    saved_total = load_frozen_holiday_case_total(cursor, case_no, shortening=shortening)
                 preparation = self._prepare_errors.get(case_no)
                 return HolidayCaseRepricingResult(case_no, "preserved_cash_history", saved_total,
                     "formal_cash_history_exists", frozen[0], frozen[1],

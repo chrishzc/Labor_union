@@ -534,7 +534,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
         <p>本案目前沒有可選款項。
           {isStaff ? ' 若此出款實為客戶退款，可點擊上方【更正出款用途】切換；若為月嫂薪資，請至案件帳務確認服務條件與應付明細。' : ''}
           {canOpenCancellation
-            ? ' 若案件提前結束服務或實際服務天數變更，請點擊上方【取消結算】確認實際服務日產生退款。'
+            ? ' 完全未服務可使用上方【取消結算】。已有服務而要提前結束時，請在案件資訊解除鎖定並修改服務天數及正式班表。'
             : ' 請回案件帳務確認正式款項資料。'}
         </p>
         {onViewCase && <button type="button" className="finance-btn-secondary" disabled={selectionBusy} onClick={() => requestLeave(() => onViewCase())}>查看本案帳務</button>}
