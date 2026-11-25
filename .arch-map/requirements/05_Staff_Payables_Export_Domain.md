@@ -71,6 +71,15 @@ staff_payout_obligation_links
 - Apply 必須綁定 exact `case_no`、`staff_id`、`payer=工會`、`payee=月嫂`、所選 obligations 與 historical adoption，並保存 `actor`、`reason`、`evidence`、`expected_version`、`fingerprint`、`idempotency_key`、`receipt` 與 `outbox`；付款日不明時記錄 `unknown`，禁止偽填日期或偽造 bank row。
 - 歷史 `paid` 只建立選定月嫂義務付款事實；`settled` 僅終止本 Domain 選定義務，不影響 Client Finance。客戶付款、Orders 完成、清冊下載或政府撥款均不能推定月嫂已付款。未入清冊查核與補登見 [Accounts Payable Export 規格](16A_Accounts_Payable_Export與現金需求清冊規格.md#historical-payables-review-entry) 與 [歷史訂單帳務規格](27_歷史訂單生命週期與服務天數帳務正式規格.md)。
 
+- 歷史服務完成案件核對已發生的出款，使用正式應付及原銀行流水；若同案、同月嫂、款項歸屬及足額／手續費證據均成立，不要求先確認不影響本次分配的補助流向、政府核銷或預計付款日。若待查的資金分期會改變本次款項歸屬或可核銷餘額，只暫停該款分配並回報具體缺項；既有已確認的分期與限額保留。
+- 未來出款與清冊另用適用的付款日、正確付款路由及帳戶確認；不得把已建應付視為可立即放款。整案結清仍依規格 27 的正式雙邊證據，不由單筆出款核銷推定。
+
+| S 情境 | T 任務 | A 操作 | R 驗收結果 |
+| --- | --- | --- | --- |
+| 歷史已完工、可證實應付 48,000 元，資金流向或預計付款日未知 | 承接原有薪資出款 | 建應付，再人工核對同案同月嫂永豐 47,985 元，15 元內扣手續費有證據 | 應付與出款可各自讀回；待付為 0；補助仍待查，無新出款、不推進整案結清；重送不重複 |
+| 同一銀行列也可能屬其他應付，或正式分期不允許該分配 | 防止錯誤核銷 | 用同一入口預覽或送出 | 回具體歧義或分期限制，不核銷、不生成其他金流 |
+| 多位月嫂僅一位資料齊全 | 僅建立已確認應付 | 同步兩次並核對結果 | 齊全者只建立一次，缺值者待查，各人來源與已有原帳不變 |
+
 ### 3.4 Payable Anomaly Facts 與 Accounts Payable Export 不變量
 
 - Payable Anomaly 投影輸出：`PAYOUT-001`（到期未匯）、`PAYOUT-003`（銀行主檔不完整）及 ownership／共享帳戶／金額衝突。人工 resolve 警示僅記錄處置，不變更義務或實付。應付於原基準日後始形成或變動的 `PAYOUT-002` 依 [Payroll §3.6](03_Payroll_Domain.md#36-payout-002-晚到義務處置) 處置，不進 [Anomalies runtime current issues](06_Anomalies_Domain.md#33-退役代碼歸屬對照不進-runtime-current-issues)。

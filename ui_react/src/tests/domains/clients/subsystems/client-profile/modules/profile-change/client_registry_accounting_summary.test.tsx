@@ -154,3 +154,31 @@ it('shows the exact stale historical payment identity without treating it as cur
   expect(screen.queryByText('歷史已付證據，非銀行入帳')).not.toBeInTheDocument();
   expect(screen.queryByText('全額補助／免自備，客戶應付 0 元')).not.toBeInTheDocument();
 });
+
+it('separates established payable, pending payment arrangement, and reconciled vs remaining amounts on the client summary', async () => {
+  vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({
+    ...facts('split'),
+    scheme: 'waiting',
+    historical_stages: true,
+    subsidy_ntd: 12000,
+    staff_items: [
+      {
+        identity: 'staff-a', direction: 'payable', label: '服務費', party: '月嫂甲',
+        expected_ntd: 48000, actual_ntd: 0, remaining_ntd: 48000, has_payment: false, version: '1', due_date: null,
+      },
+      {
+        identity: 'staff-b', direction: 'payable', label: '服務費', party: '月嫂乙',
+        expected_ntd: 48000, actual_ntd: 48000, remaining_ntd: 0, has_payment: true, settled: true, version: '2', due_date: null,
+      },
+    ],
+    staff_accounting_availability: [{
+      assignment_id: 1, staff_id: 7, party: '月嫂甲', obligation_identities: ['staff-a'],
+      status: 'formal', pending_reasons: ['historical_payroll_due_date_missing', 'historical_payroll_funding_source_missing'],
+      estimated_self_pay_date: null, estimated_subsidy_date: null,
+    }],
+  });
+  render(<ClientRegistryAccountingSummary caseNo="SYNTHETIC-1" revision={0} />);
+  expect(await screen.findByText(/已建立應付 · 月嫂甲／服務費：48,000 元，應付日 待確認（付款安排待確認） · 已核銷 0 元／剩餘 48,000 元/)).toBeInTheDocument();
+  expect(screen.getByText(/已建立應付 · 月嫂乙／服務費：48,000 元，應付日 待確認 · 已核銷 48,000 元／剩餘 0 元/)).toBeInTheDocument();
+  expect(screen.getByText('原正式應付缺少到期日，金額與付款紀錄保留。')).toBeInTheDocument();
+});
