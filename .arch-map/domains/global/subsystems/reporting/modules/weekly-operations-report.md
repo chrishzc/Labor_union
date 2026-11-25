@@ -151,6 +151,26 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
   target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^weekly-service-daily-hours'
 ```
 
+### 補助資格分類與報表輸出 ^reporting-qualification-stats
+
+[需求書 §3](../../../../../requirements/34_營運報表與統計口徑正式規格.md#qualification-and-aboriginal-stats) 定義三軌資格、HCM 作廢與新 `A` 案隔離。Reporting 只讀分類，不更正原案或重新計價。
+
+| 負責角色 | 正式約定與現行接線 | 去哪查 |
+| --- | --- | --- |
+| 案件來源／資料 | 讀取正式 `identity_status`、`hcm_review_status` 與案件識別。整案審核不符合的原 HCM 紀錄留在週報候選；另立的 `A` 案仍依 §5 分流，不把新案回灌到原 HCM 計數。 | `infrastructure/mysql/weekly_operations_report_query_adapter.py` 的 `_REPORT_CASE_CATEGORY_SQL` |
+| Reporting／後端 | `review_result` 每案一個；六項資格旗標與四項案件狀況分開，不相加作總件數。確認為零時保留數值 `0`；有未能歸類的拒絕且該拒絕欄沒有已知計數時，該欄回 `null`，不補零。相同日期範圍才比較週報與待辦看板；年度補助統計的範圍另算。 | `WeeklyOperationsReportQuery._case_row`、`_qualification_summary`、`weekly_report_metrics_service.py` |
+| 前端／匯出 | 待辦看板把未知的資格彙總顯示為 `—`。週報 XLSX 彙總保留真實數字 `0`，未知留空；明細的 `0/1` 旗標則是 `0` 留空、`1` 顯示，不改 JSON 的數值。 | `WorkbenchCaseStatistics.tsx`、`weekly_operations_report_export.py` |
+
+未證實的邊界：若實為非市民的誤報案作廢後仍保留原住民 `identity_status`，週報分類器會把該筆判為原住民不符合。尚未確認作廢上游是否在投影前提供更正後的身分，因此不能把 `QUAL-STAT-03` 視為已驗收，也不更動該條規格。
+
+驗證定位：`tests/test_weekly_operations_report_contract.py::test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_period` 核對替身資料的相同期間、已知零與未知值。它不證明原住民誤報作廢的正式資料鏈、實際畫面或 XLSX 資格儲存格已驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-qualification-stats
+  target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^qualification-and-aboriginal-stats'
+```
+
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
