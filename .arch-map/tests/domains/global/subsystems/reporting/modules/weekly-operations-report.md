@@ -11,6 +11,7 @@ higher_boundary:
   - ui_react/src/tests/weekly_operations_report_client.test.ts
 
 # Owned verification
+- `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py` — 以替身案件確認跨年週仍歸前一年 12 月小計，而同筆申請計入當年年度累計；同檔亦覆蓋選一週內部分日期時，明細受日期篩選，週指標不拆分。
 - `tests/test_weekly_operations_report_contract.py` — strict API、selected-period案件／服務 facts、`end_date` 年度補助 candidate、跨民國申請年度摘要 aggregate與三worksheet contract。
 - `ui_react/src/tests/reports_query_page.test.tsx` — 營運兩分頁、帳務唯一補助入口的14／15／10欄與原 XLSX、日期套用及 stale export presentation。
 - `ui_react/src/tests/reports_weekly_totals.test.tsx` — 模板雙層表頭、既有明細指標、年度累計與月小計欄位對齊。
