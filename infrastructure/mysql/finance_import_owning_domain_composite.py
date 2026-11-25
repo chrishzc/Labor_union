@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
+from typing import overload
 
 from domains.client_finance.reconciliation import (
     PaymentStage,
@@ -194,7 +195,7 @@ class MySqlFinanceImportOwningDomainComposite:
         except ClientRefundReversalError as error:
             raise ValueError(error.error.code) from error
 
-    def resolve(self, candidate):
+    def resolve(self, candidate: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow:
         if not isinstance(candidate, CanonicalFinanceImportRow):
             raise TypeError("unsupported Finance Import resolution candidate")
         if candidate.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
@@ -217,7 +218,7 @@ class MySqlFinanceImportOwningDomainComposite:
             return _resolve_staff_payout(self._connection, candidate)
         return candidate
 
-    def resolve_pending_government(self, candidate):
+    def resolve_pending_government(self, candidate: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow:
         if candidate.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
             return candidate
         from subsystems.government_subsidy.period_reconciliation import period_rematch_targets
@@ -235,7 +236,13 @@ class MySqlFinanceImportOwningDomainComposite:
             MySqlGovernmentSubsidyPeriodRepository(self._connection), BorrowedTransactionUnitOfWork,
         )
 
-    def post(self, candidate):
+    @overload
+    def post(self, candidate: CanonicalFinanceImportRow) -> FinanceImportDispatchResult: ...
+
+    @overload
+    def post(self, candidate: FinanceImportCorrectionCandidate) -> int: ...
+
+    def post(self, candidate: CanonicalFinanceImportRow | FinanceImportCorrectionCandidate) -> FinanceImportDispatchResult | int:
         try:
             return self._post(candidate, self._require_context())
         except (

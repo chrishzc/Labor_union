@@ -216,6 +216,9 @@ def test_taishin_raw_memo_owner_preview_apply_and_replay_without_accounts(monkey
     from copy import deepcopy
     from datetime import date
     import infrastructure.mysql.staff_payout_repository as storage
+    from domains.finance_import.statement_archive import CaseArrangement
+    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+
     from domains.staff_payables.reconciliation import StaffPayoutEvent,project_staff_payable
     from shared_kernel.fingerprints import PreviewFingerprint
     bank={'id':88,'format_id':'taishin','memo':memo,'transaction_date':date(2026,10,20),'currency':'TWD',
@@ -257,6 +260,8 @@ def test_taishin_raw_memo_owner_preview_apply_and_replay_without_accounts(monkey
         def append_outbox(self,candidate):self.outbox.append(candidate)
         def save_receipt(self,key,stored):self.receipts[key.value]=stored
     repo=Repository()
+    monkeypatch.setattr(MySqlAccountingWorkspaceState, 'arrangement',
+                        lambda _state, case_no, **_kwargs: CaseArrangement(case_no))
     def current_events(*args):
         return {link.obligation_identity:(StaffPayoutEvent('event:1',StaffPayoutEventType.PAYOUT,link.allocated_amount),) for link in repo.links}
     monkeypatch.setattr(storage,'_load_obligation_events',current_events)

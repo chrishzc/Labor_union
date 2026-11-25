@@ -13,8 +13,9 @@ import hashlib
 import json
 import unicodedata
 import re
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence, cast
 
+from pymysql.cursors import DictCursor
 from pymysql.err import IntegrityError, OperationalError
 from domains.finance_import.transaction_classifier import extract_name_from_row_text
 
@@ -245,7 +246,8 @@ class MySqlStaffPayoutRepository:
         request = self._require_request()
         if receipt.event_type is StaffPayoutEventType.PAYOUT and len(request.selection.bank_fact_identities) == 1:
             row_id = int(request.selection.bank_fact_identities[0])
-            with _mysql_cursor(self._connection) as cursor:
+            with _mysql_cursor(self._connection) as raw_cursor:
+                cursor = cast(DictCursor, raw_cursor)
                 cursor.execute(
                     "SELECT DISTINCT o.case_no FROM staff_payout_events e "
                     "JOIN finance_import_rows b ON b.id=e.finance_import_row_id "

@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Protocol
+from typing import Protocol, overload
 from fastapi import Depends
+from domains.finance_import.correction import (
+    ClientRefundCorrectionPreview, FinanceImportCorrectionCandidate, FinanceImportCorrectionFacts,
+    FinanceImportCorrectionSelection,
+)
+from shared_kernel.identities import CorrelationId
+from domains.finance_import.planning import CanonicalFinanceImportRow
 
 from infrastructure.mysql.finance_import_repository import (
     FinanceImportMySqlUnitOfWork,
@@ -27,6 +33,7 @@ from subsystems.finance_import.correction_workflow import (
 )
 from subsystems.finance_import.import_workflow import (
     FinanceImportApplyRequest,
+    FinanceImportDispatchResult,
     FinanceImportRepositoryUnavailable,
     FinanceImportWorkflow,
 )
@@ -45,13 +52,19 @@ class FinanceImportOwningDomainCompositePort(Protocol):
 
     def clear_request(self): ...
 
-    def resolve(self, candidate): ...
-    def resolve_pending_government(self, candidate): ...
+    def resolve(self, candidate: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow: ...
+    def resolve_pending_government(self, candidate: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow: ...
 
-    def post(self, candidate): ...
+    @overload
+    def post(self, candidate: CanonicalFinanceImportRow) -> FinanceImportDispatchResult: ...
 
-    def validate_client_refund(self, candidate, correlation_id): ...
-    def preview_client_refund(self, selection, facts, correlation_id): ...
+    @overload
+    def post(self, candidate: FinanceImportCorrectionCandidate) -> int: ...
+
+    def validate_client_refund(self, candidate: FinanceImportCorrectionCandidate, correlation_id: CorrelationId) -> None: ...
+    def preview_client_refund(
+        self, selection: FinanceImportCorrectionSelection, facts: FinanceImportCorrectionFacts, correlation_id: CorrelationId,
+    ) -> ClientRefundCorrectionPreview: ...
 
 
 class UnavailableOwningDomainCompositePort:
