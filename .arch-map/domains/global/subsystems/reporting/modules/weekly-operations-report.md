@@ -111,6 +111,8 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 
 `OperationsReportsWorkspace.tsx` 與 `weekly_operations_report_export.py` 消費這兩組統計，年度累計先於週資料，月小計在相同月份最後一組週資料後；畫面與 XLSX 不各自重算歸屬。
 
+版本交接：前端查詢請求新版；若回應明示 `operations-report.v3`，`weekly_operations_report_adapter.ts` 將兩組總計標為不可用，工作區顯示舊版提示並停用新版 XLSX，不以零值或畫面明細補算。宣告新版卻缺任一總計陣列時，由嚴格解碼拒絕，不降為舊版。這是版本相容分支，不代表需求書的新版畫面／XLSX 已驗收。
+
 驗證定位：`tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py` 的 `test_partial_date_selection_keeps_case_filter_but_never_splits_week_metrics` 與 `test_early_january_week_remains_in_previous_december` 覆蓋查詢與歸屬；`test_cross_year_months_follow_monday_and_annual_cases_follow_calendar_year` 另核對 XLSX 列順序。這些是合成資料的查詢與活頁簿測試，不是 React 或真實資料庫驗收。
 
 ```yaml archmap-impact
