@@ -211,6 +211,39 @@ function notice(stage:'deposit'|'first'|'second'='first'):CasePaymentReminder{re
 function wrapper(ui:React.ReactNode){return render(<UnsavedChangesProvider>{ui}</UnsavedChangesProvider>);}
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(differenceResolutionClient.staff).mockResolvedValue({case_no:caseNo,items:[],events:[]});vi.mocked(subsidyPeriodClient.caseCoverage).mockResolvedValue({case_no:caseNo,service_end_date:null,amount_ntd:12000,coverage:[]});vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({case_no:caseNo,revision:0,source:'legacy',terms:{identity_name:'一般市民',rule:'citizen',subsidy_hours:40,client:{covered:300,excess:300},payroll:{covered:300,excess:300}},impact:{covered_hours:40,excess_hours:60,client_amount:30000,staff_covered_amount:12000,staff_excess_amount:18000,case_total_amount:30000, union_income_amount: 0, staff_total_amount:30000,subsidy_amount:12000,subsidy_return_amount:0}});vi.mocked(financeAccountingClient.previewSubsidyPlan).mockImplementation(async(caseNo,command)=>({case_no:caseNo,scheme:command.scheme,plan_version:command.expected_version,subsidy_ntd:12000,total_ntd:30000,confirmation_only:true,payables:[],blocker:null,preview_fingerprint:'b'.repeat(64)}));vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
 describe('精簡案件抽屜',()=>{
+ it('詳細計價回 422 時兩處案件總額仍顯示帳務案件總額，月嫂應付待確認',async()=>{
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({
+   ...facts(),case_total_ntd:48000,staff_receivable_ntd:null,staff_items:[],payable_ntd:null,paid_ntd:null,
+  });
+  vi.mocked(accountingPricingClient.queryCase).mockRejectedValue(new ApiHttpError(
+   422,'client_finance_bootstrap_required','缺少完整期款條款',
+  ));
+
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  const summary=within(await screen.findByLabelText('案件精簡摘要'));
+  expect(summary.getByText('NT$ 48,000',{exact:true})).toBeVisible();
+  const parameters=screen.getByLabelText('帳務計價依據與核心參數');
+  expect(parameters).toHaveTextContent('案件總額 NT$ 48,000');
+  expect(parameters).toHaveTextContent('月嫂基準應付 待確認');
+  const staffSummary=within(screen.getByLabelText('月嫂薪資匯總'));
+  expect(staffSummary.queryByText('NT$ 48,000',{exact:true})).not.toBeInTheDocument();
+ });
+
+ it('帳務案件總額明確未知時兩處均待確認，月嫂應付仍顯示正式金額',async()=>{
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({
+   ...facts(),case_total_ntd:null,staff_receivable_ntd:42000,
+   staff_items:[{...facts().staff_items[0],expected_ntd:42000}],
+  });
+
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  const summary=within(await screen.findByLabelText('案件精簡摘要'));
+  expect(summary.getByText('案件總額 T',{exact:true}).nextElementSibling).toHaveTextContent('待確認');
+  const parameters=screen.getByLabelText('帳務計價依據與核心參數');
+  expect(parameters).toHaveTextContent('案件總額 待確認');
+  expect(parameters).toHaveTextContent('工會收入 NT$ 0');
+  expect(parameters).toHaveTextContent('月嫂基準應付 NT$ 42,000');
+ });
+
  it.each([
   [null, 'NT$ 48,000'],
   [0, 'NT$ 48,000'],
@@ -1446,7 +1479,7 @@ it.each([false,true])('兩入口對唯一結束日來源 %s 保留正式應付�
 
 it('歷史帳務 API 契約經 strict client 解碼後交抽屜呈現，拒絕未定義付款證據',async()=>{
  const {financeAccountingClient:actualClient}=await vi.importActual<typeof import('../../../../../../../api/finance_import/finance_accounting_client')>('../../../../../../../api/finance_import/finance_accounting_client');
- const raw={...facts(),historical_stages:true,full_subsidy_eligibility:null,accounting_pending_reasons:[],
+ const raw={...facts(),case_total_ntd:'9007199254740993',historical_stages:true,full_subsidy_eligibility:null,accounting_pending_reasons:[],
   subsidy_pending_reason:'rate_snapshot_missing',client_items:[{...facts().client_items[0],identity:'contract-source',
    source_event_identity:'event-42',payment_evidence:'historical_paid',payment_date:'2025-11-06'}],transactions:[]};
  const token=vi.spyOn(sessionClient,'getToken').mockReturnValue('synthetic-contract-token');
@@ -1458,6 +1491,7 @@ it('歷史帳務 API 契約經 strict client 解碼後交抽屜呈現，拒絕�
   const row=await screen.findByRole('row',{name:/contract-source/});
   expect(row).toHaveTextContent('event-42');expect(row).toHaveTextContent('歷史付款證據日期 2025-11-06');
   expect(row).toHaveTextContent('歷史已付證據，非銀行入帳');
+  expect(within(screen.getByLabelText('案件精簡摘要')).getByText('NT$ 9,007,199,254,740,993',{exact:true})).toBeVisible();
   request.mockResolvedValue({success:true,message:'ok',data:{...raw,client_items:[{...raw.client_items[0],payment_evidence:'paid'}]}});
   await expect(actualClient.query(caseNo)).rejects.toThrow(/payment_evidence/);
  }finally{request.mockRestore();token.mockRestore();}

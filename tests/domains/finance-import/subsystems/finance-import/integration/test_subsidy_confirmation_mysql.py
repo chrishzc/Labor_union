@@ -1089,6 +1089,7 @@ def test_reconciled_partial_receipt_confirms_subsidy_scheme(connection, monkeypa
         ClientReceiptReconciliationApplication, get_client_receipt_reconciliation_application,
     )
     from api.routes.client_receipt_reconciliation import router
+    from api.routes.finance_statement_workspace import _case_view
     from domains.client_finance.client_refund_reversal import ClientFinanceCorrectionType
     from infrastructure.mysql import subsidy_confirmation_repository
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
@@ -1124,6 +1125,7 @@ def test_reconciled_partial_receipt_confirms_subsidy_scheme(connection, monkeypa
     assert initial.scheme in {'unknown', 'waiting'}
     assert initial.subsidy_plan.selected_scheme is None
     assert initial.subsidy_ntd == 12000 and initial.staff_receivable_ntd is None
+    assert _case_view(initial).case_total_ntd == 48000
     if not historical:
         assert initial.customer_amount_ntd is None
 
@@ -1170,6 +1172,7 @@ def test_reconciled_partial_receipt_confirms_subsidy_scheme(connection, monkeypa
 
     after = workspace.query(case)
     assert after.scheme == 'split'
+    assert _case_view(after).case_total_ntd == 48000
     assert after.subsidy_plan.confirmation_source == 'receipt' and after.subsidy_plan.version == 1
     assert not after.ongoing_completed and after.staff_receivable_ntd is None
     item, = after.client_items

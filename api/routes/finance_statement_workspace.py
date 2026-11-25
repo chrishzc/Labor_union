@@ -81,7 +81,7 @@ def _case_view(case):
     payload.pop("funding")
     payload.pop("customer_paid_ntd")
     payload.pop("reconciled_subsidy_evidence")
-    payload.pop("scheme_case_total_ntd")
+    payload["case_total_ntd"] = payload.pop("scheme_case_total_ntd")
     payload["scheme_evidence_identities"] = list(payload["scheme_evidence_identities"])
     payload["zero_stages"] = list(payload["zero_stages"])
     payload["accounting_pending_reasons"] = list(payload["accounting_pending_reasons"])

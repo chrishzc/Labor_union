@@ -665,7 +665,10 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const staffPaidTotal=staffItems.reduce((sum,item)=>sum+item.actual_ntd,0);
  const staffRemainingTotal=staffItems.reduce((sum,item)=>sum+(item.remaining_ntd??Math.max(0,item.expected_ntd-item.actual_ntd)),0);
  const isEstablishedUnserved=state.order?.order_status==='成立後未服務';
- const caseTotal=isEstablishedUnserved?staffPayableTotal:pricingTotal;
+ const reportedCaseTotal = data?.case_total_ntd;
+ const caseTotal = isEstablishedUnserved ? staffPayableTotal
+  : reportedCaseTotal === undefined ? pricingTotal : reportedCaseTotal;
+ const staffEstimate = data?.historical_stages ? null : isEstablishedUnserved ? staffPayableTotal : pricingTotal;
 
  const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
  const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];
@@ -753,7 +756,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
    pricing={state.pricing}
    multiBirthCount={multiBirthCount}
    customerAmountNtd={data.customer_amount_ntd ?? data.receivable_ntd}
-   staffAmountNtd={isEstablishedUnserved?caseTotal:data.staff_receivable_ntd}
+   staffAmountNtd={isEstablishedUnserved?staffPayableTotal:data.staff_receivable_ntd}
+   caseTotalNtd={caseTotal}
    onOpenEdit={() => setParamsDrawerOpen(true)}
  />
  <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(caseTotal)}</dd></div></dl>
@@ -926,7 +930,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   <div className="finance-staff-summary-cards" aria-label="月嫂薪資匯總">
     <div className="finance-staff-summary-card">
       <small>{staffItems.length ? '應付月嫂總額' : '月嫂薪資金額'}</small>
-      <strong>{money(staffItems.length ? staffPayableTotal : data.historical_stages ? null : caseTotal)}</strong>
+      <strong>{money(staffItems.length ? staffPayableTotal : staffEstimate)}</strong>
     </div>
     <div className="finance-staff-summary-card">
       <small>已核銷金額（含內扣手續費）</small>

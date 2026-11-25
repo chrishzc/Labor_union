@@ -314,6 +314,7 @@ class CaseAccountingView(_StrictModel):
     historical_marker: HistoricalAccountingMarkerView | None = None
     remaining_in_ntd: ExactNtd | None = None
     remaining_out_ntd: ExactNtd | None = None
+    case_total_ntd: ExactNtd | None = None
     staff_receivable_ntd: int | None = None
     customer_amount_ntd: int | None = None
     customer_fully_received: bool | None = None
