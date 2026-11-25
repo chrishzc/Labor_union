@@ -113,7 +113,19 @@ def stage(case, amount, sequence, *, account=None, incoming=False, government=Fa
     preview = http.post('/api/v1/finance-import/batches/preview', json={'batch_identity': batch})
     plan = checked(preview)
     assert len(plan['rows']) == 1, plan
-    return (int(plan['rows'][0]['row_identity'].split(':')[-1]), plan)
+    row_id = int(plan['rows'][0]['row_identity'].split(':')[-1])
+    if incoming and not government:
+        source, = rows(
+            "SELECT format_id,direction,classification_type,classification_reason,"
+            "JSON_UNQUOTE(JSON_EXTRACT(bank_references,'$.\"銷帳編號\"')) AS account_code "
+            "FROM finance_import_rows WHERE id=%s", (row_id,),
+        )
+        assert (source['format_id'], source['direction'], source['classification_type'],
+                source['account_code']) == ('sinopac', 'incoming', 'client_receipt', virtual), source
+        events = rows('SELECT classification_type,reason FROM finance_import_classification_events '
+                      'WHERE finance_import_row_id=%s ORDER BY id', (row_id,))
+        assert events and events[-1]['classification_type'] == 'client_receipt', events
+    return row_id, plan
 
 def jobs(accepted, *, expected_status="succeeded"):
     from api.dependencies.durable_job_handlers import default_job_handlers

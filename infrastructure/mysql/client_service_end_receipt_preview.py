@@ -91,9 +91,10 @@ def preview_client_service_end_receipt(
         references = row["bank_references"]
         if isinstance(references, (str, bytes)):
             references = json.loads(references)
-        if (row["effective_classification_type"] != "client_receipt"
-                or (isinstance(references, Mapping) and references.get("source") == "manual_supplement")):
-            raise ValueError("late_service_end_receipt_requires_sinopac_income")
+        if isinstance(references, Mapping) and references.get("source") == "manual_supplement":
+            raise ValueError("late_service_end_receipt_requires_original_bank_source")
+        if row["effective_classification_type"] != "client_receipt":
+            raise ValueError("late_service_end_receipt_client_purpose_unverified")
         account_code = resolve_finance_cancellation_code({**row, "bank_references": references})["cancellation_code"]
         resolved = resolve_client_virtual_account(cursor, account_code)
         if resolved["result"] != "resolved" or resolved["case_no"] != case_no:
