@@ -13,7 +13,7 @@ import hashlib
 import json
 import unicodedata
 import re
-from typing import Iterator, Mapping
+from typing import Any, Iterator, Mapping, Sequence
 
 from pymysql.err import IntegrityError, OperationalError
 from domains.finance_import.transaction_classifier import extract_name_from_row_text
@@ -371,6 +371,8 @@ class MySqlStaffPayoutRepository:
             from dataclasses import replace
             subsidy_split = self._prepare_subsidy_split(cursor, bank_rows, obligation_rows, obligations, lock)
             remaining = subsidy_split.subsidy_remaining_ntd if bank_rows[0]['format_id'] == 'taishin' else subsidy_split.client_remaining_ntd
+            _verify_taishin_subsidy_month(self._connection, bank_rows, subsidy_split.case_no,
+                tuple(portion.due_date for portion in subsidy_split.installments if portion.funding_kind == 'subsidy'))
             obligations = (replace(obligations[0], installment_limit=MoneyNTD(remaining)),)
         if selection.event_type is StaffPayoutEventType.PAYOUT and bank_rows and subsidy_split is None:
             from dataclasses import replace
@@ -390,6 +392,9 @@ class MySqlStaffPayoutRepository:
                     settled_total=project_staff_payable(payable).net_paid.amount, amount_total=payable.amount_due.amount)
                 if any(p.remaining_ntd is None for p in portions):
                     raise ValueError('staff_installment_funding_unconfirmed')
+                _verify_taishin_subsidy_month(self._connection, bank_rows, row['case_no'],
+                    tuple(p.due_date for p in portions if p.funding_kind == 'subsidy'
+                        and p.remaining_ntd is not None and p.remaining_ntd > 0))
                 limits[str(row['obligation_identity'])] = sum(p.remaining_ntd for p in portions if p.funding_kind == funding)
             if limits:
                 obligations = tuple(replace(item, installment_limit=MoneyNTD(limits[item.obligation_identity]))
@@ -699,7 +704,13 @@ def _parse_staff_identities(raw: object) -> set[int]:
     return staff_ids
 
 
-def _verify_taishin_memo_recipients(cursor, bank_rows, lock, *, expected_cases=None):
+def _verify_taishin_memo_recipients(
+    cursor: Any,
+    bank_rows: tuple[dict[str, Any], ...],
+    lock: bool,
+    *,
+    expected_cases: set[str | None] | None = None,
+) -> tuple[dict[str, Any], ...]:
     if not any(row.get("format_id") == "taishin" and row.get("manual_confirmed_staff_id") is None for row in bank_rows):
         return bank_rows
     cursor.execute("SELECT id,name FROM staff WHERE name IS NOT NULL AND name<>'' ORDER BY id" + (" FOR UPDATE" if lock else ""))
@@ -717,24 +728,47 @@ def _verify_taishin_memo_recipients(cursor, bank_rows, lock, *, expected_cases=N
         matches = names.get(name, ())
         from infrastructure.mysql.finance_import_repository import paired_bank_case
         paired = paired_bank_case(cursor, row["id"]) if row.get("manually_paired") else None
+        memo_case_no = None
+        if expected_cases is not None:
+            from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
+            from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
+            suffixes = sinopac_memo_case_suffixes(row.get("memo"))
+            if suffixes:
+                if len(suffixes) != 1:
+                    raise ValueError("staff_memo_case_mismatch")
+                resolved = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
+                memo_case_no = resolved.get("case_no")
+                if resolved.get("result") != "resolved" or expected_cases != {memo_case_no}:
+                    raise ValueError("staff_memo_case_mismatch")
         if paired:
             case_no, recipient = paired
             if (not recipient.startswith("staff:") or int(recipient[6:]) not in matches
                     or (expected_cases is not None and expected_cases != {case_no})):
                 raise ValueError("staff_memo_case_mismatch")
-            verified.append({**row, "taishin_memo_staff_id": int(recipient[6:])})
+            verified.append({**row, "taishin_memo_staff_id": int(recipient[6:]),
+                "taishin_memo_case_no": memo_case_no})
             continue
         if len(matches) != 1:
             raise ValueError("staff_memo_recipient_unconfirmed")
-        from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
-        from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
-        suffixes = sinopac_memo_case_suffixes(row.get('memo'))
-        if suffixes and expected_cases is not None:
-            resolved = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes))) if len(suffixes) == 1 else {}
-            if resolved.get('result') != 'resolved' or resolved.get('case_no') not in expected_cases:
-                raise ValueError('staff_memo_case_mismatch')
-        verified.append({**row, "taishin_memo_staff_id": matches[0]})
+        verified.append({**row, "taishin_memo_staff_id": matches[0],
+            "taishin_memo_case_no": memo_case_no})
     return tuple(verified)
+
+
+def _verify_taishin_subsidy_month(
+    connection: Any, bank_rows: Sequence[Mapping[str, Any]], case_no: str, due_dates: Sequence[date | None],
+) -> None:
+    from domains.finance_import.transaction_classifier import _is_same_month
+
+    known_due_dates = tuple(due for due in due_dates if due is not None)
+    for row in bank_rows:
+        if row.get('format_id') != 'taishin' or row.get('manual_confirmed_staff_id') is not None:
+            continue
+        if not known_due_dates:
+            continue
+        if not all(_is_same_month(row.get('transaction_date'), due) for due in known_due_dates):
+            if row.get('taishin_memo_case_no') != case_no:
+                raise ValueError('outgoing_staff_payout_month_no_match')
 
 
 def _payout_source_account(row):

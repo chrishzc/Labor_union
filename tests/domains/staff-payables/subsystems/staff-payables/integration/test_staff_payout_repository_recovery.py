@@ -116,18 +116,39 @@ def test_funding_projection_uses_settlement_links_by_bank_including_fee_and_reop
     assert 'reversal_of_event_id' in cursor.calls[1][0]
 
 
-@pytest.mark.parametrize('bank,expected', [('sinopac', 18000), ('taishin', 12000)])
-def test_owner_load_binds_same_month_installment_to_source_bank_not_combined_due_amount(monkeypatch, bank, expected):
+@pytest.mark.parametrize('bank,occurred_on,memo,subsidy_due,expected,error', [
+    ('sinopac', date(2026, 10, 15), None, date(2026, 10, 15), 18000, None),
+    ('taishin', date(2026, 10, 15), '合成月嫂甲', date(2026, 10, 15), 12000, None),
+    ('taishin', date(2026, 11, 15), '合成月嫂甲 HC115807', date(2026, 10, 15), 12000, None),
+    ('taishin', date(2026, 11, 15), '合成月嫂甲', date(2026, 10, 15), None, 'outgoing_staff_payout_month_no_match'),
+    ('taishin', date(2026, 10, 15), '合成月嫂甲 HC115808', date(2026, 10, 15), None, 'staff_memo_case_mismatch'),
+    ('taishin', date(2026, 11, 15), '合成月嫂甲', None, 12000, None),
+])
+def test_owner_load_checks_taishin_memo_case_and_month_and_limits_each_bank_installment(
+    monkeypatch, bank, occurred_on, memo, subsidy_due, expected, error,
+):
     from types import SimpleNamespace
     from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
+    import infrastructure.mysql.manual_supplement_evidence as evidence
     import infrastructure.mysql.staff_payout_repository as module
-    cursor = _Cursor()
+
+    case_no = '115000007'
+
+    class Cursor(_BankReadCursor):
+        def execute(self, statement, params=()):
+            if 'FROM order_lifecycle_state_events' in statement:
+                self.rows = []
+            elif 'FROM client_legacy_virtual_accounts mapping' in statement:
+                mapping = {'99781699115807': case_no, '99781699115808': '115000008'}
+                self.rows = [{'case_no': mapping[params[0]]}]
+            else:
+                super().execute(statement, params)
+
+    cursor = Cursor({})
     repository = MySqlStaffPayoutRepository(object())
     monkeypatch.setattr(cursor, 'fetchone', lambda: None, raising=False)
     selection = SimpleNamespace(event_type=StaffPayoutEventType.PAYOUT, difference_mode=None, obligation_identities=('obligation:1',))
-    import infrastructure.mysql.manual_supplement_evidence as evidence
     monkeypatch.setattr(evidence, 'manual_source_matches', lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(module, '_verify_taishin_memo_recipients', lambda _c, rows, _lock, **_kwargs: rows)
     monkeypatch.setattr(module, '_load_bank_accounts', lambda *_: ())
     monkeypatch.setattr(module, '_load_obligation_events', lambda *_: ())
     monkeypatch.setattr(module, '_obligation_facts', lambda *_: (StaffPayableFacts('obligation:1', 7, MoneyNTD(30000)),))
@@ -137,24 +158,27 @@ def test_owner_load_binds_same_month_installment_to_source_bank_not_combined_due
     monkeypatch.setattr(module, '_bank_facts_version', lambda *_: 1)
     monkeypatch.setattr(module, 'query_staff_funding_portions', lambda *_args, **_kwargs: (
         StaffFundingPortion('client', 18000, date(2026, 10, 15), 0, 18000),
-        StaffFundingPortion('subsidy', 12000, date(2026, 10, 15), 0, 12000)))
+        StaffFundingPortion('subsidy', 12000, subsidy_due, 0, 12000)))
     def qualified_split(_cursor, _banks, roots, _obligations, _lock):
         from domains.payroll.installments import PayrollInstallment
         from subsystems.staff_payables.payout_reconciliation import StaffSubsidySplit
         if not roots[0]['has_installments']:
             raise ValueError('staff_installment_funding_unconfirmed')
-        return StaffSubsidySplit('SYNTHETIC','obligation:1',1,True,30000,12000,18000,12000,False,
+        return StaffSubsidySplit(case_no,'obligation:1',1,True,30000,12000,18000,12000,False,
             (PayrollInstallment('client',18000,date(2026,10,15)),
-             PayrollInstallment('subsidy',12000,date(2026,10,15))))
+             PayrollInstallment('subsidy',12000,subsidy_due)))
     monkeypatch.setattr(repository, '_prepare_subsidy_split', qualified_split)
-    facts = repository._assemble_facts(cursor, selection, 7, 1,
-        ({'transaction_date': date(2026, 10, 15), 'currency': 'TWD', 'format_id': bank},),
-        ({'obligation_identity': 'obligation:1', 'case_no': 'SYNTHETIC', 'has_installments': True},), True)
+    source = {'transaction_date': occurred_on, 'currency': 'TWD', 'format_id': bank, 'memo': memo}
+    obligation = {'obligation_identity': 'obligation:1', 'case_no': case_no, 'has_installments': True}
+    if error:
+        with pytest.raises(ValueError, match=error):
+            repository._assemble_facts(cursor, selection, 7, 1, (source,), (obligation,), True)
+        return
+    facts = repository._assemble_facts(cursor, selection, 7, 1, (source,), (obligation,), True)
     assert facts.obligations[0].installment_limit == MoneyNTD(expected)
     with pytest.raises(ValueError, match='staff_installment_funding_unconfirmed'):
-        repository._assemble_facts(cursor, selection, 7, 1,
-            ({'transaction_date': date(2026, 10, 15), 'currency': 'TWD', 'format_id': bank},),
-            ({'obligation_identity': 'obligation:1', 'case_no': 'SYNTHETIC', 'has_installments': False, 'requires_funding_split': True},), True)
+        repository._assemble_facts(cursor, selection, 7, 1, (source,),
+            ({**obligation, 'has_installments': False, 'requires_funding_split': True},), True)
 
 
 def test_query_due_date_follows_unpaid_funding_when_subsidy_was_paid_first(monkeypatch):

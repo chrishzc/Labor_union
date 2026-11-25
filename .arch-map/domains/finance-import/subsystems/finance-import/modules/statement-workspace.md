@@ -27,7 +27,7 @@
 - `api/routes/finance_import.py` — composed router and existing bank commands
 - `subsystems/finance_import/import_workflow.py`、`infrastructure/mysql/finance_import_repository.py` — 待核對跨批次重配借用既有 owner resolve／post；保留跨批次競用與須人工確認的明細。
 - 舊版永豐待核對薪資可由原始退款備註與同案唯一正式退款單更正。新分類事件與 Client Finance 核銷共用重配交易，原分類與原流水仍可追溯。
-- `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx` — 單一正式明細匯出入口及待核對批次重配。
+- `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx` — 單一正式明細匯出入口、待核對批次重配及每筆唯一核對入口；交易明細唯讀，案件帳務沿既有整案檢視。
 - `api/dependencies/finance_import.py`
 - `api/schemas/finance_import.py`
 - shared: `api/schemas/base.py`, `ui_react/src/api/shared/exact_ntd.ts` — transport preserves whole NTD above the browser's safe integer range.
@@ -37,7 +37,7 @@
 - `ui_react/src/components/FinanceReceivableItems.tsx` — 按到期月份列出正式應收款，未定日期款分到待確認；同一 typed Query 不建立第二份案件總額。
 - `ui_react/src/pages/FinancePage.tsx` — 進行中案件（預設）、銀行對帳、政府補助清單、每月帳務；所有案件入口開同一右側抽屜，原核銷與查證工具保留可達入口。
 - `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→方案確認；客戶款齊且人工或銀行明細已正式確認方案才移出。列表由查看案件進入共用抽屜，各期查看通知共用 LINE 同案期款來源及歷史；不可寄送仍可查閱並顯示原因。
-- `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數。已確認的案件款項帶原流水直開共用案件抽屜核對，政府款開原整期核對。匯入紀錄從獨立入口查看。
+- `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數。所有待核對列從同一主入口開單筆抽屜，缺件及查詢失敗仍保留原流水；用途路由不受批次提示覆蓋。匯入及匯入紀錄從原獨立入口查看。
 - 永豐待核對的同案月嫂薪資／一般退款流水可在案件抽屜開啟既有 Orders 取消結算，確認實際服務日、預覽並提交；正式回讀後重查同一筆流水與案件款項。
 - 「核對交易」以原流水及名冊候選完成單案人工配對。未核銷的誤匯入來源可排除，保留原列、指紋與排除事件，重新匯入沿原指紋判重。
 - 補助確認預檢在原上傳面板顯示金額、受款方向與建款／核銷計畫。同月唯一且可核銷的月嫂補助，沿原批次 Apply 自動核銷；同月多案保留選案及確認套用。六碼已定位且有同案應付款的跨月列可開單筆人工核對，沿原 Staff Payables 確認流程。全部受阻時不提供批次核銷動作。
@@ -68,12 +68,15 @@
 ## Contracts
 - `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
 - archive endpoints beneath `/api/v1/finance-import`: `GET statements/export` 只納入正式owner核銷證據，匯出分銀行原欄位並附「款項用途」（含單一項目與訂金+第一期(組合銷帳)等組合銷帳標示）與「關聯案件」，不顯示內部明細識別與資料來源欄；`GET statements/manual/export` 獨立唯讀匯出既有人工備查；`POST statements/manual` 經認證後回typed 410、無DB writer。React僅提供兩種匯出，不再提供無案件新增表單；案件正式補登仍沿規格22 §19。`POST statements/duplicates` 保留原判重契約。
-- `bank-transactions` — 顯示正式核銷的銀行流水及符合保留條件的待核對列，包含尚未確認唯一案件的台新月嫂補助及同名客戶補助退款。台新僅六碼定位但用途待確認的來源提供案件入口。案件與對象已確認的待核對列可開核銷子畫面；唯一款項預選，其餘 target 以 `requires_selection` 及同案同對象候選 IDs 要求選款。正式 owner 重驗核銷，不由 Query／UI 寫帳。
+- `GET /api/v1/finance-import/bank-transactions` — 同一唯讀清單／單筆查詢，以 `row_id` 精確重查原流水，`row_identity=finance-import-row:<row_id>` 供原命令使用。`classification_type` 為正式用途；`cases` 為可查閱案件，不能作核銷資格；`reconciliation_target` 保存 `case_no`、`obligation_identities`、`staff_id` 及 `requires_selection`。無目標與 `reconciliation_unavailable_reason` 不使核對入口消失，查詢失敗不轉成無候選。正式 owner 重驗核銷，不由 Query／UI 寫帳。
+- `bank_memo` 為原備註的帳號遮罩投影，不修改銀行原文。單筆 `row_id` 查詢的 `reconciliation_records` 優先讀同筆正式 `finance_import_reconciliation_receipts`，含 `owning_domain`、`amount_ntd`、`recorded_at`。無匯入回執時，讀原 Client Finance 現金收付或 Staff Payables payout 事件，不與匯入回執重複列出。兩者皆無則回空陣列並明示紀錄缺漏，不由已核銷狀態造紀錄；沖正、退匯及其他歷史事件仍由原案件帳務查閱。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
 - 台新客戶補助的當次自動配對失敗原因以 `pending_reason` 進入原 Apply 收據，清單以 `recorded_pending_reason` 讀回；不以備註六碼定位成功證據取代真正的日期、款項、金額、多候選或 owner 資格阻擋。
 - 永豐月嫂舊流水的對象辨識紀錄為空時，清單只讀原交易參考編號，沿既有完整帳號解析確認唯一主要帳戶及同案正式月嫂義務後提供核對入口，不回填舊辨識紀錄。缺帳號、帳號不唯一或無同案義務仍待確認；台新及客戶款不採此補充查核，正式 Preview／Apply 仍由原 owner 重驗。
 - 台新客戶補助的入口依原始備註六碼或客戶姓名確認案件，並排除命中月嫂姓名的來源。同名客戶依六碼或唯一合格退款月份定位，跨月或無唯一案件留待核對。候選限同案補助待退款；正式 Preview／Apply 重驗原備註、資金資格、日期及核銷規則。
-- 台新待核對月嫂補助依流水 occurrence 找最近完成的正式批次，清單及交易明細共用原批次預檢與選案入口。
+- 台新待核對月嫂補助依流水 occurrence 找最近完成的正式批次，`staff_subsidy_batch_identity` 只對月嫂用途投影。客戶補助退款不產生該提示，前端即使收到舊提示也優先走退款。`staff_subsidy_manual_review_allowed` 由後端沿原 owner 補助資格及來源分期日期查核，僅確認符合例外時為 true；案件、一般應付日期及提示本身都不能替代資格。
+- `POST /api/v1/finance-import/batches/preview` 與 `batches/apply` 保留原批次入口；單筆抽屜沿同一契約傳 `review_row_identity`、`staff_subsidy_selections`，只解析及派送指定交易。Apply 重新建立相同 scope，驗證原 fingerprint 與版本，沿原 durable job／outcome 回讀；不因單筆入口核銷同批其他列。
+- 客戶退款沿 `POST /api/v1/finance-import/corrections/preview`、`corrections/apply` 與 `GET /api/v1/finance-import/jobs/{job_id}/correction-outcome`，送 `row_identity`、正式 `classification_type`、`target_obligation_identities` 及原預檢版本／fingerprint。原 correction workflow 委派 Client Finance，缺正式退款不自動建款；核對流程與錯誤投影見 `finance-import-correction`。
 - `import-history`、`workbooks/ingestion-outcome` — 查每次匯入的保存、核銷結果與原操作結果；待核對歷史筆數沿原匯入／核銷收據保存，缺歷史證據顯示未知。
 - manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan` 與 POST `cases/{case_no}/accounting/subsidy-plan/preview`；沿原 actor、version CAS、Orders identity lock 與同鍵重播。Preview 零寫入，原保存重驗預檢並借用既有 owner 承接已合資格款項；未具金融資格可保存已預檢的方案但不得建款或核銷。無外部付款及日期重算。
 - case/warning endpoints: `cases/{case_no}/accounting`, `cases/{case_no}/accounting/dismiss`, `accounting/warnings`
@@ -85,7 +88,7 @@
 - case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection；S 由 Government Subsidy 單案共用 Query 提供，不以方案或退款義務存在為前提，未知不轉零。方案事件明示人工／銀行來源；未收到政府款不作直付證據。舊 direct arrangement 仍沿原 append-only confirm_direct/withdraw_direct 與其 writer，不回填或改寫。
 - arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
-- case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; the bank list opens a scoped reconciliation subview with the selected source and matched obligations or unselected same-case candidates; the normal case overview has no duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
+- 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。正式核銷資訊只來自原 owner 回讀；通知仍由 LINE owner 負責，各核銷工具保留原 writer。
 - 客戶收款面板的全案餘額同時消費既有 Receipt Query 與案件帳務 Query：只彙總版本一致、來源完整的客戶應收正式餘額；缺來源、缺列或未知餘額保留待確認，不從未清清單為空推定結清，也不加入月嫂應付或退款結清門檻。正式成功後依收據版本與回讀再次確認。
 
 ## Verification

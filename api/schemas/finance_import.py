@@ -450,8 +450,17 @@ class FinanceBankPurposeReviewView(_StrictModel):
     candidates: list[FinanceBankPairingCandidateView]
 
 
+class FinanceBankReconciliationRecordView(_StrictModel):
+    owning_domain: Literal['client_finance', 'staff_payables']
+    amount_ntd: int
+    recorded_at: str
+
+
 class FinanceBankTransactionView(_StrictModel):
     row_id: int
+    bank_memo: str | None = None
+    reconciliation_records: list[FinanceBankReconciliationRecordView] = Field(default_factory=list)
+    staff_subsidy_manual_review_allowed: bool = False
     staff_subsidy_batch_identity: str | None = None
     pairing_candidates: list[FinanceBankPairingCandidateView] = Field(default_factory=list)
     pairing_memo: str | None = None
