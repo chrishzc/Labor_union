@@ -58,3 +58,20 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - inbound: `clients/client-profile` — Drawer composes typed workflow only.
 - inbound: `global/reporting` and Client Finance payment queries — reuse the same policy-based case category; case-number spelling does not determine category.
 - inbound: `government-subsidy/reconciliation-register-query` 與 Orders 補助投影 adapter — 重用 `CASE_PRICING_FACTS_SQL` 的有效補助上限／費率，不由消費端重解讀舊政策名稱。
+
+## 國定假日計價接線 ^pricing-configuration-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: pricing-configuration-holiday-pricing
+  target: ".arch-map/requirements/04_Client_Finance_Domain.md#^holiday-service-pricing"
+```
+- 假日計價讀回接線由下列 owner 實作，驗證見既有測試入口。`pricing_policy.py` 的案件總額與 obligation planning 使用同一客戶服務費投影。帳務 API 提供案件總額、客戶應收、月嫂應付及工會收入的 owner 結果，`AccountingParametersCard` 與帳務工作台直接呈現；瀏覽器不重算乘數。
+
+- `holiday_repricing.py` 在設定寫入前鎖定並取得有正式收付案件的原 `case_total_amount`，保存於既有假日／日期調整 receipt JSON；讀取優先使用此原定價快照，不把人工應收當案件總額。正式應收及應付各讀原義務，工會收入由後端投影。已凍結案件缺少正式費率級距分解時，分解欄位回 null，不從新日曆捏造。
+
+- 正式 Query 的月嫂應付取 Payroll 現有義務有效金額合計，工會收入以該結果及案件服務定價投影，不以個案政策的月嫂基準費率覆蓋各指派自己的正式結果。個案改價 Preview 仍計算候選影響，與正式 Query 分開。
+
+- 未綁政策／個案覆寫的補助案件沒有另一個正式有效上限來源。定價 Query 不把讀取相容用的預設 120／80 視為已確認上限；Client Finance 與 Payroll 仍依已知服務時數及費率更新可計算結果，補助及未分配差額沿 22A 的 L 未知契約交原 owner 查核。
+
+- 全額免自備依22A §2.3提供可持久讀回的重算結果，正式 Query 區分重算金額、原已入帳金額與待對帳差額；不以缺少負擔人把可計算服務費留在暫態候選。若既有資料模型缺少必要欄位，回報具體缺口，不以預設0或隱藏原價補足。
