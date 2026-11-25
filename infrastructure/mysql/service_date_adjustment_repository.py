@@ -35,7 +35,6 @@ class MySqlServiceDateAdjustmentRepository:
             order = cursor.fetchone()
             if order is None:
                 raise ValueError("service_date_adjustment_case_not_found")
-            receipts = _load_receipts(cursor, case_no, suffix)
             cursor.execute(
                 "SELECT id,version,scheduling_version FROM confirmed_service_date_versions WHERE case_no=%s AND is_current=1" + suffix,
                 (case_no,),
@@ -45,12 +44,14 @@ class MySqlServiceDateAdjustmentRepository:
             staff_rows = _formal_staff(cursor, generation_id, suffix) if generation_id else ()
             formal = _formal_days(cursor, generation_id, suffix) if generation_id else ()
             if formal:
+                receipts = _load_formal_receipts(cursor, case_no, confirmed_version, suffix)
                 days = formal
                 selectable, planned_owners = (), ()
             else:
                 generation_id = None
                 staff_rows = _planned_staff(cursor, case_no, suffix)
                 days = _planned_days(cursor, confirmed_version["id"], staff_rows, suffix) if confirmed_version else ()
+                receipts = _load_planned_receipts(cursor, case_no, confirmed_version, suffix)
                 from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
                 selectable = MySqlServiceDateConfirmationRepository._selectable_dates(order)
                 planned_owners = tuple((day, owner) for day in selectable
@@ -163,9 +164,26 @@ def _formal_days(cursor, generation_id, suffix):
 
 def load_payroll_service_dates(cursor, generation_id, assignments, service_days, *, lock):
     """Keep date-only adjustments separate from the assignment's financial basis."""
+    original = load_unadjusted_service_dates(
+        cursor, generation_id, tuple(int(row["id"]) for row in assignments), service_days, lock=lock,
+    )
+    if original:
+        return _cancellation_floor_identities(cursor, generation_id, service_days, original, lock=lock)
+    # Financial corrections own a new basis. Do not freeze it across non-neutral rebuilds.
+    cursor.execute(
+        "SELECT assignment_id,work_date FROM staff_schedule "
+        "WHERE generation_id=%s AND effective_marker=1 AND is_work_day=1 "
+        "ORDER BY assignment_id,work_date" + (" FOR UPDATE" if lock else ""), (generation_id,),
+    )
+    rows = tuple(cursor.fetchall())
+    return _cancellation_floor_identities(cursor, generation_id, service_days, rows, lock=lock)
+
+
+def load_unadjusted_service_dates(cursor, generation_id, assignment_ids, service_days, *, lock):
+    """Read normal-day history and its one-to-one path to current assignments."""
     suffix = " FOR UPDATE" if lock else ""
     current_generation = generation_id
-    identities = {int(row["id"]): int(row["id"]) for row in assignments}
+    identities = {assignment_id: assignment_id for assignment_id in assignment_ids}
     visited = set()
     while current_generation not in visited:
         visited.add(current_generation)
@@ -178,10 +196,9 @@ def load_payroll_service_dates(cursor, generation_id, assignments, service_days,
         if len(original) == service_days:
             current_by_source = {source: current for current, source in identities.items()}
             if all(int(row["assignment_id"]) in current_by_source for row in original):
-                rows = tuple({"assignment_id": current_by_source[int(row["assignment_id"])],
+                return tuple({"assignment_id": current_by_source[int(row["assignment_id"])],
                               "financial_assignment_identity": f"assignment:{int(row['assignment_id'])}",
                               "work_date": row["work_date"]} for row in original)
-                return _cancellation_floor_identities(cursor, generation_id, service_days, rows, lock=lock)
         cursor.execute(
             "SELECT lineage.new_assignment_id,old.id AS source_assignment_id,old.generation_id AS source_generation_id "
             "FROM scheduling_rebuild_lineage lineage "
@@ -195,19 +212,13 @@ def load_payroll_service_dates(cursor, generation_id, assignments, service_days,
         sources = tuple(cursor.fetchall())
         by_assignment = {int(row["new_assignment_id"]): int(row["source_assignment_id"]) for row in sources}
         source_generations = {int(row["source_generation_id"]) for row in sources}
-        if (len(by_assignment) != len(sources) or len(source_generations) != 1
+        if (len(by_assignment) != len(sources) or len(set(by_assignment.values())) != len(sources)
+                or len(source_generations) != 1
                 or set(by_assignment) != set(identities.values())):
             break
         identities = {current: by_assignment[source] for current, source in identities.items()}
         current_generation = next(iter(source_generations))
-    # Financial corrections own a new basis. Do not freeze it across non-neutral rebuilds.
-    cursor.execute(
-        "SELECT assignment_id,work_date FROM staff_schedule "
-        "WHERE generation_id=%s AND effective_marker=1 AND is_work_day=1 "
-        "ORDER BY assignment_id,work_date" + suffix, (generation_id,),
-    )
-    rows = tuple(cursor.fetchall())
-    return _cancellation_floor_identities(cursor, generation_id, service_days, rows, lock=lock)
+    return ()
 
 
 def _cancellation_floor_identities(cursor, generation_id, service_days, rows, *, lock):
@@ -334,6 +345,63 @@ def _load_receipts(cursor, case_no, suffix):
     return tuple(cursor.fetchall())
 
 
+def _load_formal_receipts(cursor, case_no, current_confirmation, suffix):
+    cursor.execute(
+        "SELECT receipt.resulting_scheduling_version FROM scheduling_command_receipts receipt "
+        "JOIN order_actual_start_apply_receipts actual_receipt "
+        "ON actual_receipt.scheduling_command_receipt_id=receipt.id AND actual_receipt.case_no=receipt.case_no "
+        "WHERE receipt.case_no=%s AND receipt.command_family='orders_actual_start_rebuild' "
+        "AND JSON_CONTAINS_PATH(actual_receipt.result_snapshot,'one','$.service_date_adjustment_reset')=1 "
+        "ORDER BY receipt.resulting_scheduling_version DESC LIMIT 1" + suffix, (case_no,),
+    )
+    rebuild_barrier = cursor.fetchone()
+    receipts = _load_receipts(cursor, case_no, suffix)
+    if not receipts:
+        return ()
+    # A planned receipt shares the exact Scheduling version of the confirmation
+    # it created. Preserve only planned receipts still carried by the current
+    # confirmation. This also applies after a reset followed by first scheduling.
+    cursor.execute(
+        "SELECT version,scheduling_version FROM confirmed_service_date_versions "
+        "WHERE case_no=%s" + suffix, (case_no,),
+    )
+    confirmation_versions = {row["version"]: row["scheduling_version"] for row in cursor.fetchall()}
+    active_planned = {row["id"] for row in _planned_receipt_chain(receipts, current_confirmation)}
+    active = []
+    for row in receipts:
+        snapshot = _parse_snapshot(row["result_snapshot"])
+        if snapshot["scheduling_version"] == confirmation_versions.get(snapshot["confirmed_version"]):
+            if row["id"] in active_planned:
+                active.append(row)
+            continue
+        if (rebuild_barrier is None
+                or snapshot["scheduling_version"] > rebuild_barrier["resulting_scheduling_version"]):
+            active.append(row)
+    return tuple(active)
+
+
+def _load_planned_receipts(cursor, case_no, current, suffix):
+    if current is None:
+        return ()
+    return _planned_receipt_chain(_load_receipts(cursor, case_no, suffix), current)
+
+
+def _planned_receipt_chain(receipts, current):
+    if current is None:
+        return ()
+    by_version = {}
+    for row in receipts:
+        snapshot = _parse_snapshot(row["result_snapshot"])
+        if snapshot["scheduling_version"] == current["scheduling_version"]:
+            by_version.setdefault(snapshot["confirmed_version"], row)
+    version = int(current["version"])
+    chain = []
+    while version in by_version:
+        chain.append(by_version[version])
+        version -= 1
+    return tuple(reversed(chain))
+
+
 def _active_pairs(receipts, days):
     pairs = {}
     pairing_by_day = {}
@@ -395,7 +463,7 @@ def load_first_schedule_dates(cursor, case_no, *, lock):
         return (), ()
     staff = _planned_staff(cursor, case_no, suffix)
     days = _planned_days(cursor, current["id"], staff, suffix)
-    receipts = _load_receipts(cursor, case_no, suffix)
+    receipts = _load_planned_receipts(cursor, case_no, current, suffix)
     return _original_schedule(days, receipts, int(current["version"]), int(current["scheduling_version"])), days
 
 

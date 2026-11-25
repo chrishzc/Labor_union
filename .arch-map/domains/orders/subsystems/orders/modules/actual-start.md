@@ -31,10 +31,10 @@
 - outbound: `staff-payables/payroll` — source rate snapshot 唯讀驗證與 successor identity 原值搬移，不寫 Payroll root／obligation。
 
 管理 UI 對已有正式 assignment 的重排先顯示逐段 Preview，內部操作者最後確認才呼叫單一原子 Apply；此畫面不編輯請假、假日或正式服務日。重排只綁 Orders／Scheduling owner versions，且維持 fingerprint 與 idempotency 契約。
-日期-only 分支只綁 Orders version 與該次 Preview fingerprint；若 Apply fresh-read 發現正式 assignment 已形成，回 typed conflict 並要求重新 Preview。一般 Terms reader 不得只因日期存在便投影 `service_started`。
+一般日期-only 分支綁 Orders version 與該次 Preview fingerprint；取消合併／分裂結果的日期-only 預覽另納入目前確認日期版本、Scheduling version 與正常日期候選。若 Apply fresh-read 發現正式 assignment 已形成，回 typed conflict 並要求重新 Preview。一般 Terms reader 不得只因日期存在便投影 `service_started`。
 
 ## Contracts
-- 日期合併／分裂後的逐日 `service_hours_override` 隨各段新舊服務日的順序承接；只允許有明確日期調整事實的零服務日指派保留來源 identity 與計薪快照，不替它建立班次或緩衝日。原訂每日時段及帳務基準不變。規則見 `02_Assignments_Scheduling_Domain.md#service-date-merge-split`。
+- 變更開始日涉及既有日期合併／分裂結果時，Preview 提供 typed 取消重排候選，明確確認的單一 Apply 依調整前正常服務量與人員歸屬重建日期並恢復原訂時段。事前日期不建立正式指派；正式重排保留來源 identity 與計薪快照。取消結果、正常確認日期及正式班表沿同一 outer UoW 保存，讀回不得繼續呈現舊日期、時數覆寫或舊結果的有效配對。規則見 `02_Assignments_Scheduling_Domain.md#service-date-merge-split`。
 - `.arch-map/requirements/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。
 - `subsystems/orders/actual_start_workflow.py` — Preview／Apply 與單一 outer UoW contract。
 

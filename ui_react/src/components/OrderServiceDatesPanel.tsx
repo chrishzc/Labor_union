@@ -28,7 +28,7 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import type { ActualStart } from '../api/orders/order_query_schemas';
-import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
+import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDateReset, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
 import { historicalScheduleSegments, HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
 import { coordinatedServiceTime, OrderReadOnlyServiceDateCalendar, OrderServiceDateCalendar } from './OrderServiceDateCalendar';
 import { OrderCaregiverScheduleCalendars } from './OrderCaregiverScheduleCalendars';
@@ -190,6 +190,10 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const adjustment = queryView?.case_no === caseNo ? queryView.date_adjustment : null;
   const adjustmentEditing = adjustmentCase === caseNo;
   const hasAdjustedDays = adjustment?.days.some(day => day.hours_override !== null) ?? false;
+  const reset = startPreview?.service_date_adjustment_reset
+    ?? (startUnresolved ? startFlow.command.resetPreview?.service_date_adjustment_reset : null);
+  const resetPending = !!reset || (inputInvalid && hasAdjustedDays && actualStart !== null
+    && startDate !== (actualStart.current_actual_start_date ?? actualStart.planned_start_date));
   const initialAdjustmentDates = adjustment && queryView?.current_version === null && !adjustment.days.length
     && selectedDates.length === queryView.contracted_service_days
     && selectedDates.every(day => queryView.selectable_dates.includes(day)) ? selectedDates : undefined;
@@ -327,41 +331,54 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       if (mode === 'calculate') {
         const basisDate = inputDate ?? currentStart.current_actual_start_date ?? currentStart.planned_start_date;
         basis = { date: basisDate, confirmed: basisDate === currentStart.current_actual_start_date };
-        if (weekdayOverride === null && modeValue === null) {
-          throw new Error('請對照原始服務方式，人工選定休假星期；無固定週休請點選「無固定週休」。');
-        }
-        calculated = await schedulePrecisionClient.calculate({
-          case_no: caseNo,
-          actual_start_date: basis.date,
-          target_service_days: serviceDates.contracted_service_days,
-          service_mode: modeValue ?? calendarDetail.original_service_type ?? '人工排休',
-          ...(weekdayOverride !== null ? { custom_rest_weekdays: weekdayOverride } : {}),
-        });
-        if (!current()) return;
-        if (calculated.actual_start_date !== basis.date || calculated.target_service_days !== serviceDates.contracted_service_days) {
-          throw new Error('精算結果與此次開始日或合約天數不一致，請重新精算。');
-        }
-        range = serviceDateRange(serviceDates, basis.date);
-        recommendation = calculated.day_by_day.filter((day) => day.is_work_day).map((day) => day.date);
-        if (basis.date !== currentStart.current_actual_start_date && !officeSchedule) {
+        const adjusted = serviceDates.date_adjustment?.days.some(day => day.hours_override !== null);
+        if (adjusted && basisDate !== (currentStart.current_actual_start_date ?? currentStart.planned_start_date)) {
           nextStartPreview = await orderActualStartClient.preview(caseNo, { new_actual_start_date: basis.date }, { signal: controller.signal });
           if (!current()) return;
+        }
+        if (!nextStartPreview?.service_date_adjustment_reset) {
+          if (weekdayOverride === null && modeValue === null) {
+            throw new Error('請對照原始服務方式，人工選定休假星期；無固定週休請點選「無固定週休」。');
+          }
+          calculated = await schedulePrecisionClient.calculate({
+            case_no: caseNo,
+            actual_start_date: basis.date,
+            target_service_days: serviceDates.contracted_service_days,
+            service_mode: modeValue ?? calendarDetail.original_service_type ?? '人工排休',
+            ...(weekdayOverride !== null ? { custom_rest_weekdays: weekdayOverride } : {}),
+          });
+          if (!current()) return;
+          if (calculated.actual_start_date !== basis.date || calculated.target_service_days !== serviceDates.contracted_service_days) {
+            throw new Error('精算結果與此次開始日或合約天數不一致，請重新精算。');
+          }
+          range = serviceDateRange(serviceDates, basis.date);
+          recommendation = calculated.day_by_day.filter((day) => day.is_work_day).map((day) => day.date);
+          if (!nextStartPreview && basis.date !== currentStart.current_actual_start_date && !officeSchedule) {
+            nextStartPreview = await orderActualStartClient.preview(caseNo, { new_actual_start_date: basis.date }, { signal: controller.signal });
+            if (!current()) return;
+          }
+        }
+        const nextReset = nextStartPreview?.service_date_adjustment_reset;
+        if (nextStartPreview) {
           if ((nextStartPreview.operation === 'date_only' ? nextStartPreview.case_no : nextStartPreview.actual_start.case_no) !== caseNo
             || nextStartPreview.after_actual_start_date !== basis.date || nextStartPreview.order_version !== serviceDates.order_version
-            || (nextStartPreview.scheduling_version ?? 0) !== serviceDates.scheduling_version) {
+            || (nextStartPreview.scheduling_version ?? 0) !== serviceDates.scheduling_version
+            || (nextReset && (nextReset.confirmed_version !== serviceDates.current_version
+              || nextReset.service_dates.length !== serviceDates.contracted_service_days
+              || nextReset.contracted_daily_hours !== serviceDates.date_adjustment?.contracted_daily_hours))) {
             throw new Error('開始日核對結果已變更，請重新精算。');
           }
-          if (nextStartPreview.operation === 'reschedule') {
+          if (!nextReset && nextStartPreview.operation === 'reschedule') {
             if (weekdayOverride !== null && !sameServiceDates(recommendation, nextStartPreview.actual_start.official_service_dates)) {
               throw new Error('人工選定的休假星期與既有正式重排不同，請使用既有排班異動流程；尚未保存。');
             }
             recommendation = nextStartPreview.actual_start.official_service_dates;
           }
         }
-        if (recommendation.length !== serviceDates.contracted_service_days || recommendation.some((date) => !range.includes(date))) {
+        if (!nextReset && (recommendation.length !== serviceDates.contracted_service_days || recommendation.some((date) => !range.includes(date)))) {
           throw new Error('精算結果超出目前允許的日期範圍或天數；未刪除任何建議日期，也尚未保存。請核對排休條件。');
         }
-        dates = hasManualChanges && !replaceManualDates ? [...selectedDates] : recommendation;
+        dates = nextReset || (hasManualChanges && !replaceManualDates) ? [...selectedDates] : recommendation;
       }
       const liveRecovery = recoveryFromServiceDatesDraft(caseNo);
       if (!current() || actionInFlight.current.has(caseNo)
@@ -381,13 +398,13 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       if (keepDraft) dates = [...draft.selectedDates];
       const retainedCalculation = keepDraft ? draft?.calculation : undefined;
       if (retainedCalculation) {
-        range = serviceDateRange(serviceDates, retainedCalculation.startDate);
         nextStartPreview = retainedCalculation.startPreview;
+        if (!nextStartPreview?.service_date_adjustment_reset) range = serviceDateRange(serviceDates, retainedCalculation.startDate);
       }
       // This validated read starts a fresh preview lifecycle, never an unresolved command.
       orderMutationFlowStore.resetServiceDatesDraft(caseNo);
       orderMutationFlowStore.setServiceDatesQueryReady(caseNo, continuingStart && mode === 'read' && previous ? previous : serviceDates);
-      const reviewNeeded = mode === 'calculate' ? hasManualChanges && !replaceManualDates : retainedCalculation?.needsManualReview ?? false;
+      const reviewNeeded = mode === 'calculate' ? !nextStartPreview?.service_date_adjustment_reset && hasManualChanges && !replaceManualDates : retainedCalculation?.needsManualReview ?? false;
       const nextSuggestions = mode === 'read' ? retainedCalculation?.suggestedDates ?? recommendation : recommendation;
       orderMutationFlowStore.setServiceDatesCalculation(caseNo, basis ? { startDate: basis.date, startPreview: nextStartPreview, needsManualReview: reviewNeeded, suggestedDates: nextSuggestions } : retainedCalculation);
       selectServiceDates(caseNo, dates);
@@ -402,9 +419,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       setManualNeedsReview(reviewNeeded);
       setPrecision(calculated); setServiceMode(modeValue);
       setHasManualChanges(keepDraft || (mode === 'calculate' && hasManualChanges && !replaceManualDates));
-      setBasisNotice(basis === null ? null
+      setBasisNotice(basis === null || nextStartPreview?.service_date_adjustment_reset ? null
         : `${basis.confirmed ? '已依正式實際開始日更新' : '已依此次輸入開始日試算'}服務日期，請核對後再確認。${hasManualChanges ? '先前人工選日已保留，請選擇採用新建議或重新核對人工選日。' : ''}`);
-      if (continuingStart && mode === 'read') {
+      if (continuingStart && mode === 'read' && !nextStartPreview?.service_date_adjustment_reset) {
         setBasisNotice(`此次開始日 ${currentStart.current_actual_start_date ?? '尚未確認'}；服務日期尚未完成，請接續核對保存。`);
       }
       if (retainedCalculation && !continuingStart && mode === 'read'
@@ -505,7 +522,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   };
 
   const runApply = async (saveDates = saveDatesIntent.current) => {
-    if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
+    if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null || resetPending) return;
     if (!saveValidation.validate([
       ...(actualStart && effectiveServiceDates === null ? [{ value: startDate, label: '實際開始日', ref: startDateRef, valid: /^\d{4}-\d{2}-\d{2}$/.test(startDate) && Number.isFinite(Date.parse(`${startDate}T00:00:00Z`)), message: '請填寫有效的實際開始日後再儲存。' }] : []),
       ...(saveDates ? [{ value: selectedDates.length, label: '服務日期', ref: dateSelectionRef, valid: selectedDates.length > 0 && selectedDates.length === (queryView?.contracted_service_days ?? 0), message: `請選滿 ${queryView?.contracted_service_days ?? 0} 天服務日期後再儲存。` }] : []),
@@ -532,6 +549,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         setStartPreview(candidate);
         orderMutationFlowStore.setServiceDatesCalculation(caseNo, { startDate, startPreview: candidate });
       }
+      if (candidate?.service_date_adjustment_reset) return;
       if (!saveDates && candidate?.operation === 'reschedule') {
         throw new Error('本案已有排班，請使用更正實際開始日核對各段排班調整。');
       }
@@ -599,6 +617,39 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         await loadServiceDates('read');
         if (renderedCaseNo.current === caseNo) setError(`${conflictMessage}；已重新讀取正式資料，請重新核對。`);
       }
+    }
+  };
+
+  const applyReset = async (candidate?: ActualStartPreview) => {
+    if (actionInFlight.current.has(caseNo) || working !== null || isRecoveryActive || actualStart?.service_data_locked
+      || (candidate && candidate.after_actual_start_date !== startDate)) return;
+    actionInFlight.current.add(caseNo);
+    const request = calculationSequence.current;
+    const current = () => renderedCaseNo.current === caseNo && calculationSequence.current === request;
+    setWorking('apply'); setError(null); setSuccess(null);
+    try {
+      const { start, dates } = await saveServiceDateReset(caseNo, candidate, reason.trim());
+      if (!current()) return;
+      setQueryView(dates); setSelectedDates(dates.current_dates); setActualStart(start);
+      setStartDate(start.current_actual_start_date ?? start.planned_start_date);
+      setPrecision(null); setSuggestedDates([]); setRestWeekdays(null); setReason('');
+      setAdjustmentCase(null); setOfficeStaff(null); setOfficeEditingOverride(null);
+      setOfficeReasonRequired(false); setSavedSchedule(null);
+      finishStartConfirmation();
+      setBasisNotice(null);
+      setSuccess('實際開始日及重排服務日期已儲存。');
+      onObserved?.();
+    } catch (caught) {
+      if (!current()) return;
+      if (!orderMutationFlowStore.getActualStart(caseNo)) {
+        setStartPreview(null);
+        setInputInvalid(true);
+        orderMutationFlowStore.setServiceDatesCalculation(caseNo, undefined);
+      }
+      setError(errorMessage(caught));
+    } finally {
+      actionInFlight.current.delete(caseNo);
+      if (current()) setWorking(null);
     }
   };
 
@@ -821,7 +872,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   }, [caseNo, queryView, selectedDates.length, serviceMode, actualStart, working, isRecoveryActive, startUnresolved, needsBasisUpdate, startDate, officeSchedule]);
   useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates, '原因': reason, '月嫂分配': allocation, '首排月嫂': officeStaff }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive || !!scheduleRecovery });
 
-  const adjustmentButton = Boolean(adjustmentDraft?.staff.length) && <button type="button"
+  const adjustmentButton = !resetPending && Boolean(adjustmentDraft?.staff.length) && <button type="button"
     title={!adjustmentDraft?.days.length ? '請先選齊本案原訂服務日期' : undefined}
     disabled={working !== null || adjustmentEditing || isRecoveryActive || startUnresolved}
     onClick={() => {
@@ -832,7 +883,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       setSuccess(null);
       setAdjustmentCase(caseNo);
     }}>合併或分裂日期</button>;
-  const adjustmentEditor = adjustmentEditing && adjustmentDraft && <OrderServiceDateAdjustment key={caseNo} caseNo={caseNo} query={adjustmentDraft}
+  const adjustmentEditor = !resetPending && adjustmentEditing && adjustmentDraft && <OrderServiceDateAdjustment key={caseNo} caseNo={caseNo} query={adjustmentDraft}
     initialDates={initialAdjustmentDates} onBusyChange={setAdjustmentBusy}
     onCancel={() => setAdjustmentCase(null)}
     onSaved={async observation => {
@@ -880,26 +931,26 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       <div hidden={view !== 'dates'}>
       {saveValidation.feedback}
       <div className="service-date-heading">
-        {effectiveServiceDates && onOpenActualStart && <button type="button" disabled={saving || working !== null || isRecoveryActive || startUnresolved} onClick={onOpenActualStart}>更正實際開始日</button>}
-        {officeSchedule && <button type="button" disabled={working !== null || !!scheduleRecovery || isRecoveryActive || startUnresolved}
+        {!resetPending && effectiveServiceDates && onOpenActualStart && <button type="button" disabled={saving || working !== null || isRecoveryActive || startUnresolved} onClick={onOpenActualStart}>更正實際開始日</button>}
+        {!resetPending && officeSchedule && <button type="button" disabled={working !== null || !!scheduleRecovery || isRecoveryActive || startUnresolved}
           onClick={officeEditing ? cancelOfficeEditing : () => setOfficeEditingOverride(true)}>
           {officeEditing ? '取消多月嫂編輯' : '多月嫂排班'}
         </button>}
         {adjustmentButton}
       </div>
       {adjustmentEditor}
-      {effectiveServiceDates === null && <div className="service-date-settings">
+      {(effectiveServiceDates === null || resetPending) && <div className="service-date-settings">
         <div className="service-date-start-field">
           <label>實際開始日
             <input ref={startDateRef} aria-required="true" type="date" aria-label="實際開始日" value={startDate}
               disabled={saving || !!scheduleRecovery || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
               onChange={(event) => changeStartDate(event.target.value)} />
           </label>
-          {!schedulePending && actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
+          {!resetPending && !schedulePending && actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
             disabled={working !== null || saving || isRecoveryActive || needsBasisUpdate || startUnresolved || actualStart.service_data_locked}
             onClick={() => void runApply(false)}>儲存實際開始日</button>}
         </div>
-        <div className="service-date-rest-settings">
+        {!resetPending && <div className="service-date-rest-settings">
           {originalServiceType && <p className="service-date-original-type" aria-label="原訂服務方式">
             原訂服務方式 <strong>{originalServiceType}</strong>
           </p>}
@@ -918,7 +969,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             onClick={() => changeRestWeekdays([])}>無固定週休</button>
         </div>
       </fieldset>
-        </div>
+        </div>}
       </div>}
       {actualStart?.service_data_locked && <p role="status">服務資料已鎖定，目前只能查看正式日期。</p>}
 
@@ -928,13 +979,21 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         <button type="button" disabled={working !== null} onClick={() => void loadServiceDates('read')}>重新讀取服務日期</button>
       )}
       {basisNotice !== null && !routineCalculationNotice && effectiveServiceDates === null && <p className="service-date-inline-status" role="status">{basisNotice}</p>}
-      {startPreview?.operation === 'reschedule' && <p role="status">本案確認開始日會同步建立或重排既定人員的正式服務安排。以下建議為後端正式重排日期，請核對後再保存。</p>}
-      {startUnresolved && !saving && <div role="status">
+      {reset && <>
+        <p role="status">重排後為 {reset.service_dates.length} 天，每天 {reset.contracted_daily_hours} 小時。</p>
+        <OrderReadOnlyServiceDateCalendar dates={reset.service_dates} />
+        {startUnresolved ? !saving && startFlow.status !== 'applying' && startFlow.status !== 'observing'
+          && <button type="button" onClick={() => void applyReset()}>讀取重排結果</button>
+          : startPreview && <button type="button" disabled={working !== null || needsBasisUpdate || inputInvalid || actualStart?.service_data_locked}
+            onClick={() => void applyReset(startPreview)}>取消合併／分裂結果並重新排班</button>}
+      </>}
+      {!resetPending && startPreview?.operation === 'reschedule' && <p role="status">本案確認開始日會同步建立或重排既定人員的正式服務安排。以下建議為後端正式重排日期，請核對後再保存。</p>}
+      {!resetPending && startUnresolved && !saving && <div role="status">
         <p>實際開始日的儲存結果待確認。請先確認開始日，再繼續設定服務日期。</p>
         {startPreview && <button type="button" onClick={() => void runApply()}>讀取開始日結果並接續保存</button>}
         {!startPreview && onOpenActualStart && <button type="button" onClick={onOpenActualStart}>查看實際開始日操作</button>}
       </div>}
-      {manualNeedsReview && <div role="status">
+      {!resetPending && manualNeedsReview && <div role="status">
         <p>計算條件已變更，原人工選日尚未套用新建議。</p>
         <button type="button" disabled={working !== null} onClick={() => {
           selectServiceDates(caseNo, suggestedDates); setSelectedDates(suggestedDates);
@@ -982,7 +1041,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         <p role="status">正在確認服務日期，請等候結果。</p>
       )}
 
-      {queryView !== null && (
+      {!resetPending && queryView !== null && (
         <>
           {!arrangementPending && queryView.bound_staff.length > 0 && (
             <div role="status" className="order-v2-inline-notice">

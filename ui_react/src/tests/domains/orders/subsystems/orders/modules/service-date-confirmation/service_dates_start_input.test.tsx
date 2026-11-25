@@ -101,6 +101,118 @@ beforeEach(() => {
   });
 });
 
+function setupAdjustedDates(kind: 'merge' | 'split') {
+  actual = '2026-10-01'; confirmedVersion = 3;
+  const hours = kind === 'merge' ? 4 : 8;
+  const original = days(actual, 3);
+  const adjusted = days(actual, kind === 'merge' ? 2 : 4);
+  const staff = [{ staff_id: 3, staff_name: '陳月嫂' }];
+  const normalDay = (service_date: string) => ({ service_date, staff_id: 3, hours_override: null, service_hours: hours });
+  const override = kind === 'merge' ? 8 : 4;
+  const rows: ServiceDateAdjustmentQuery['days'] = adjusted.map((date, index) => index < (kind === 'merge' ? 1 : 2)
+    ? { ...normalDay(date), hours_override: override, service_hours: override } : normalDay(date));
+  confirmedDates = adjusted;
+  const next = days('2026-10-15', 3);
+  const reset = { service_dates: next, contracted_daily_hours: hours };
+  mocks.getDates.mockImplementation(async () => ({
+    ...datesQuery(), date_adjustment: {
+      staff, contracted_daily_hours: hours, total_hours: hours * 3,
+      days: confirmedVersion === 3 ? rows : next.map(normalDay),
+      pairs: confirmedVersion === 3 ? [{ receipt_id: 8, removed: original.map(normalDay), inserted: rows }] : [],
+      first_schedule_days: confirmedVersion === 3 ? original.map(normalDay) : [],
+    } satisfies ServiceDateAdjustmentQuery,
+  }));
+  mocks.previewStart.mockImplementation(async (_case, { new_actual_start_date }) => ({
+    ...startCandidate(new_actual_start_date), service_date_adjustment_reset: { ...reset, confirmed_version: 3 },
+  }));
+  const normalApply = mocks.applyStart.getMockImplementation()!;
+  mocks.applyStart.mockImplementation(async (...args) => {
+    const receipt = await normalApply(...args);
+    confirmedDates = next; confirmedVersion = 9;
+    return { ...receipt, service_date_adjustment_reset: { ...reset, confirmed_version: 9 } };
+  });
+  return { next, hours };
+}
+
+const resetAction = '取消合併／分裂結果並重新排班';
+async function openResetPreview() {
+  const startInput = await screen.findByLabelText('實際開始日');
+  await waitFor(() => expect(startInput).toHaveValue('2026-10-01'));
+  fireEvent.change(startInput, { target: { value: '2026-10-15' } });
+  return screen.findByRole('button', { name: resetAction });
+}
+
+it.each(['merge', 'split'] as const)('已有 %s 調整時只確認後端重排一次，回讀後可重新調整', async kind => {
+  const { next, hours } = setupAdjustedDates(kind);
+  render(<OrderServiceDatesPanel caseNo={CASE} officeScheduleStaff={[{ staff_id: 3, staff_name: '陳月嫂' }]} />);
+  expect(await screen.findAllByText(/小時・月嫂跟客戶自行協調/)).toHaveLength(kind === 'merge' ? 1 : 2);
+  const confirmReset = await openResetPreview();
+  expect(screen.getByText(`重排後為 3 天，每天 ${hours} 小時。`)).toBeInTheDocument();
+  for (const name of ['採用新建議', '保留人工選日並重新核對', '儲存服務日期', '儲存實際開始日', '儲存班表', '合併或分裂日期']) {
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  }
+  expect(mocks.calculate).not.toHaveBeenCalled();
+  expect(mocks.applyStart).not.toHaveBeenCalled();
+  fireEvent.click(confirmReset);
+  await screen.findByText('實際開始日及重排服務日期已儲存。');
+  expect(mocks.applyStart).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
+    operation: 'date_only', expected_order_version: 1, preview_fingerprint: fp, reset_service_date_adjustments: true,
+  }), { idempotencyKey: expect.any(String) });
+  expect(mocks.previewDates).not.toHaveBeenCalled();
+  expect(mocks.applyDates).not.toHaveBeenCalled();
+  await waitForSelectedDates(next);
+  expectCalendarSelection(next);
+  expect(screen.queryByText(/小時・月嫂跟客戶自行協調/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '合併或分裂日期' }));
+  const editor = within(screen.getByRole('group', { name: '合併或分裂日期' }));
+  expect(editor.getByRole('button', { name: `服務日期 ${next[0]}` })).toBeEnabled();
+});
+
+it('重排預覽過期時保留原日期且要求重新核對', async () => {
+  setupAdjustedDates('merge');
+  render(<OrderServiceDatesPanel caseNo={CASE} />);
+  const confirmReset = await openResetPreview();
+  orderVersion++;
+  fireEvent.click(confirmReset);
+  expect(await screen.findByRole('alert')).toHaveTextContent('案件已更新');
+  expect(screen.queryByRole('button', { name: resetAction })).not.toBeInTheDocument();
+  expect(actual).toBe('2026-10-01');
+  expect(confirmedVersion).toBe(3);
+  expect(mocks.applyDates).not.toHaveBeenCalled();
+});
+
+it('重排回應遺失時回讀跳號後的正式版本，不重送已完成操作', async () => {
+  setupAdjustedDates('merge');
+  const applyReset = mocks.applyStart.getMockImplementation()!;
+  mocks.applyStart.mockImplementationOnce(async (...args) => {
+    await applyReset(...args);
+    throw new Error('network lost');
+  });
+  render(<OrderServiceDatesPanel caseNo={CASE} />);
+  fireEvent.click(await openResetPreview());
+  fireEvent.click(await screen.findByRole('button', { name: '讀取重排結果' }));
+  await screen.findByText('實際開始日及重排服務日期已儲存。');
+  expect(mocks.applyStart).toHaveBeenCalledTimes(1);
+  expect(mocks.applyDates).not.toHaveBeenCalled();
+});
+
+it('重排恢復送出遇到剛完成的原操作，採用正式回讀且沿用原冪等鍵', async () => {
+  setupAdjustedDates('merge');
+  const applyReset = mocks.applyStart.getMockImplementation()!;
+  mocks.applyStart.mockRejectedValueOnce(new Error('response lost'))
+    .mockImplementationOnce(async (...args) => {
+      await applyReset(...args);
+      throw new ApiHttpError(409, 'order_version_conflict', '原操作已完成');
+    });
+  render(<OrderServiceDatesPanel caseNo={CASE} />);
+  fireEvent.click(await openResetPreview());
+  fireEvent.click(await screen.findByRole('button', { name: '讀取重排結果' }));
+  await screen.findByText('實際開始日及重排服務日期已儲存。');
+  expect(mocks.applyStart).toHaveBeenCalledTimes(2);
+  expect(mocks.applyStart.mock.calls[1]).toEqual(mocks.applyStart.mock.calls[0]);
+  expect(mocks.applyDates).not.toHaveBeenCalled();
+});
+
 it('排班前建議跳過假日，人工選假日上班後可保存並保留到重新開啟', async () => {
   actual = '2026-10-01';
   mocks.holidayQuery.mockResolvedValue({ holidays: [{ holiday_date: '2026-10-02', holiday_name: '測試國定假日', is_double_pay_default: false }] });

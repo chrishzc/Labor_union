@@ -267,7 +267,12 @@ class MySqlServiceDateConfirmationRepository:
             dates = self._dates(cursor, row["id"], lock=for_update)
         return _receipt(row, dates)
 
-    def save(self, candidate, *, actor, reason, idempotency_key, command_fingerprint):
+    def save(
+        self, candidate, *, actor, reason, idempotency_key, command_fingerprint,
+        staff_ids: tuple[int | None, ...] = (),
+    ):
+        if staff_ids and len(staff_ids) != len(candidate.service_dates):
+            raise ValueError("service_date_confirmation_staff_count_mismatch")
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE confirmed_service_date_versions SET is_current=NULL,invalidated_at_utc=UTC_TIMESTAMP(6) "
@@ -288,10 +293,18 @@ class MySqlServiceDateConfirmationRepository:
                  candidate.contracted_service_days, candidate.fingerprint.value, actor, reason or None),
             )
             version_id = int(cursor.lastrowid)
-            cursor.executemany(
-                "INSERT INTO confirmed_service_date_days (confirmed_version_id,ordinal,service_date) VALUES (%s,%s,%s)",
-                [(version_id, index, value) for index, value in enumerate(candidate.service_dates, start=1)],
-            )
+            if staff_ids:
+                cursor.executemany(
+                    "INSERT INTO confirmed_service_date_days (confirmed_version_id,ordinal,service_date,staff_id) "
+                    "VALUES (%s,%s,%s,%s)",
+                    [(version_id, index, day, staff_ids[index - 1])
+                     for index, day in enumerate(candidate.service_dates, start=1)],
+                )
+            else:
+                cursor.executemany(
+                    "INSERT INTO confirmed_service_date_days (confirmed_version_id,ordinal,service_date) VALUES (%s,%s,%s)",
+                    [(version_id, index, value) for index, value in enumerate(candidate.service_dates, start=1)],
+                )
             cursor.execute(
                 "INSERT INTO confirmed_service_date_receipts "
                 "(idempotency_key,command_fingerprint,confirmed_version_id,actor_id) VALUES (%s,%s,%s,%s)",

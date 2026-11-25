@@ -10,8 +10,12 @@ from domains.scheduling.service_date_adjustment import (
     ServiceDay,
     plan_service_date_adjustment,
 )
-from infrastructure.mysql.service_date_adjustment_repository import load_first_schedule_dates
-from infrastructure.mysql.service_date_adjustment_repository import MySqlServiceDateAdjustmentRepository
+from infrastructure.mysql.service_date_adjustment_repository import (
+    MySqlServiceDateAdjustmentRepository,
+    _active_pairs,
+    _load_formal_receipts,
+    load_first_schedule_dates,
+)
 from subsystems.scheduling.service_date_adjustment import (
     ServiceDateAdjustmentFacts,
     ServiceDateAdjustmentIntent,
@@ -149,6 +153,29 @@ def test_first_schedule_uses_original_basis_after_chained_planned_adjustments(re
     assert basis == (ServiceDay(first, 3, None), ServiceDay(second, 7, None))
     assert actual == tuple(ServiceDay(item["service_date"], item["staff_id"], item["service_hours_override"])
                            for item in current)
+
+
+def test_formal_adjustment_pairs_exclude_retired_receipts_even_when_dates_match():
+    def receipt(receipt_id, day, scheduling_version, confirmed_version):
+        return {"id": receipt_id, "reverse_receipt_id": None, "result_snapshot": {
+            "confirmed_version": confirmed_version, "scheduling_version": scheduling_version,
+            "removed": [], "inserted": [{"service_date": day.isoformat(), "staff_id": 7, "hours_override": 8}],
+        }}
+
+    first, second, third = (date(2026, 11, value) for value in range(1, 4))
+    retired_plan = receipt(1, first, 0, 2)
+    retired_formal = receipt(2, second, 5, 3)
+    current_formal = receipt(3, third, 7, 4)
+    cursor = Mock()
+    cursor.fetchone.return_value = {"resulting_scheduling_version": 6}
+    cursor.fetchall.side_effect = [
+        (retired_plan, retired_formal, current_formal),
+        ({"version": 2, "scheduling_version": 0}, {"version": 3, "scheduling_version": 3},
+         {"version": 4, "scheduling_version": 6}),
+    ]
+    receipts = _load_formal_receipts(cursor, "CASE-1", {"version": 4, "scheduling_version": 6}, "")
+    days = tuple(ServiceDay(day, 7, 8) for day in (first, second, third))
+    assert [pair.receipt_id for pair in _active_pairs(receipts, days)] == [3]
 
 
 @pytest.mark.parametrize("restore", [False, True])

@@ -97,7 +97,7 @@
 ### 3.5 Actual Start Preview／Apply
 
 - 首次確認與更正皆須 Preview／Apply（正常案件開工與代班流程依 [Scheduling §3.3 SSTART-01～08](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 自動同步並保存群組結果日曆；禁止以 `planned_start` 或預設日 fallback）。
-- **尚無有效正式 assignment（日期-only 路徑）**：僅更新 `actual_start_date` 與 `lifecycle_version`（Finance／Payroll／Scheduling 不存在時傳 `NULL`，不建空事件或假排班；此狀態不代表已開始服務）；若 Preview 後已有有效排班則回 typed conflict 關閉重取。
+- **尚無有效正式 assignment（日期-only 路徑）**：一般情況僅更新 `actual_start_date` 與 `lifecycle_version`（Finance／Payroll／Scheduling 不存在時傳 `NULL`，不建空事件或假排班；此狀態不代表已開始服務）。已有合併／分裂結果而變更開始日，依 [Scheduling §3.4.2](02_Assignments_Scheduling_Domain.md#service-date-merge-split) 的取消結果及正常日期重排契約處理。若 Preview 後已有有效排班則回 typed conflict 關閉重取。
   - **正例**：案件尚無有效正式排班，其他檢查皆通過。承辦人輸入實際開始日，預覽後確認儲存；再查案件時可看到新日期，但不新增正式排班，也不因此把案件標為「服務中」。
   - **反例**：承辦人預覽日期後、確認儲存前，另一筆操作已建立有效正式排班。舊預覽不能套用，這次確認不會改寫實際開始日。承辦人須關閉舊預覽，重新讀取案件並預覽逐段排班。
 - **已有有效正式 assignment**：須顯示逐段重建預覽，單一 Apply 同交易重建 assignments、正式服務日、`actual_end_date` 與 lifecycle，並由 Payroll adapter 一對一原值搬移 source assignment rate snapshot（source 缺漏回 integrity blocker）；過期日期與新確認日間不補造服務日；歷史重啟案依 [規格 27 §8](27_歷史訂單生命週期與服務天數帳務正式規格.md#8-重啟正常流程) 免除訂金／簽約前置直接進入服務中。

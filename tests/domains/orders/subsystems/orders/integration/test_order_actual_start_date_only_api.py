@@ -17,6 +17,7 @@ from subsystems.orders.actual_start_workflow import (
     ActualStartDateOnlyPreview,
     ActualStartDateOnlyResult,
     ActualStartQueryFacts,
+    ActualStartServiceDateAdjustmentReset,
 )
 
 
@@ -171,9 +172,56 @@ def test_reschedule_apply_ignores_legacy_finance_and_payroll_versions():
     }
 
     assert ActualStartApplyBody.model_validate(legacy_payload).model_dump(
-        mode="json", exclude_none=True
+        mode="json", exclude_none=True, exclude_unset=True
     ) == payload
     with pytest.raises(ValidationError):
         ActualStartApplyBody.model_validate(
             {**payload, "unknown_actual_start_field": 3}
         )
+
+
+def test_date_only_reset_http_contract(monkeypatch):
+    original = _Application.preview
+    dates = (date(2026, 9, 2), date(2026, 9, 3))
+
+    def preview(self, case_no, new_date):
+        from dataclasses import replace
+
+        return replace(
+            original(self, case_no, new_date),
+            service_date_adjustment_reset=ActualStartServiceDateAdjustmentReset(dates, 4, 6),
+        )
+
+    def apply(self, request):
+        assert request.reset_service_date_adjustments is True
+        assert request.idempotency_key.value == "date-only-reset"
+        assert request.actor.actor_id == "admin"
+        return ActualStartDateOnlyResult(
+            request.case_no, request.new_actual_start_date, 8, None, None, None, None,
+            request.preview_fingerprint, True,
+            ActualStartServiceDateAdjustmentReset(dates, 4, 8, (3, 7)),
+        )
+
+    monkeypatch.setattr(_Application, "preview", preview)
+    monkeypatch.setattr(_Application, "apply", apply)
+    client = _client()
+    before = client.post(
+        "/api/v1/orders/CASE-DATE/actual-start/preview",
+        json={"new_actual_start_date": "2026-09-02"},
+    )
+    result = client.post(
+        "/api/v1/orders/CASE-DATE/actual-start/apply",
+        json={
+            "operation": "date_only",
+            "new_actual_start_date": "2026-09-02",
+            "expected_order_version": 7,
+            "preview_fingerprint": "a" * 64,
+            "reset_service_date_adjustments": True,
+        },
+        headers={"Idempotency-Key": "date-only-reset", "X-Correlation-ID": "date-only-reset"},
+    )
+
+    assert before.status_code == result.status_code == 200
+    expected = {"service_dates": ["2026-09-02", "2026-09-03"], "contracted_daily_hours": 4}
+    assert before.json()["data"]["service_date_adjustment_reset"] == {**expected, "confirmed_version": 6}
+    assert result.json()["data"]["service_date_adjustment_reset"] == {**expected, "confirmed_version": 8}

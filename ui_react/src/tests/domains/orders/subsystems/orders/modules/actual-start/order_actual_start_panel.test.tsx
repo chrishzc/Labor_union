@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { OrderActualStartPanel } from '../../../../../../../components/OrderActualStartPanel';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { orderActualStartClient } from '../../../../../../../api/orders/order_actual_start_client';
+import { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
@@ -100,6 +101,51 @@ async function startSave() {
   fireEvent.change(await screen.findByLabelText('更正實際開始日期'), { target: { value: '2026-09-15' } });
   fireEvent.click(screen.getByRole('button', { name: '儲存實際開始日' }));
 }
+
+it('requires explicit date-only reset confirmation and waits for canonical dates before reporting success', async () => {
+  const caseNo = 'DATE-ONLY-RESET';
+  const { facts, query, apply } = setupDateOnly(caseNo);
+  const dates = ['2026-09-15', '2026-09-16'];
+  const reset = { service_dates: dates, contracted_daily_hours: 4 };
+  vi.mocked(orderActualStartClient.preview).mockResolvedValue({
+    operation: 'date_only', case_no: caseNo, before_actual_start_date: null,
+    after_actual_start_date: '2026-09-15', order_version: 1, scheduling_version: null,
+    scheduling_generation: null, client_finance_version: null, payroll_version: null,
+    preview_fingerprint: 'c'.repeat(64), service_date_adjustment_reset: { ...reset, confirmed_version: 6 },
+  });
+  apply.mockResolvedValue({
+    operation: 'date_only', case_no: caseNo, actual_start_date: dates[0],
+    order_version: 2, scheduling_version: null, scheduling_generation: null,
+    client_finance_version: null, payroll_version: null, preview_fingerprint: 'c'.repeat(64), changed: true,
+    service_date_adjustment_reset: { ...reset, confirmed_version: 11 },
+  });
+  query.mockResolvedValueOnce(facts).mockResolvedValue({ ...facts, current_actual_start_date: dates[0], order_version: 2 });
+  const normalDays = dates.map(service_date => ({ service_date, staff_id: 5, hours_override: null, service_hours: 4 }));
+  const normal = {
+    case_no: caseNo, order_version: 2, scheduling_version: 0, current_version: 11, contracted_service_days: 2,
+    suggested_dates: dates, selectable_dates: dates, current_dates: dates, arrangement_pending: false, bound_staff: [],
+    date_adjustment: { contracted_daily_hours: 4, total_hours: 8, days: normalDays, pairs: [], staff: [], first_schedule_days: [] },
+  };
+  vi.spyOn(ordersMutationClient, 'getServiceDates')
+    .mockResolvedValueOnce({ ...normal, current_version: 10 })
+    .mockResolvedValue(normal);
+  const onObserved = vi.fn();
+  render(<OrderActualStartPanel caseNo={caseNo} onObserved={onObserved} />);
+  await startSave();
+  const confirmReset = await screen.findByRole('button', { name: '取消合併／分裂結果並重新排班' });
+  expect(screen.getByText('重排後為 2 天，每天 4 小時。')).toBeInTheDocument();
+  expect(apply).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '儲存實際開始日' })).not.toBeInTheDocument();
+  fireEvent.click(confirmReset);
+  const readAgain = await screen.findByRole('button', { name: '讀取重排結果' });
+  expect(onObserved).not.toHaveBeenCalled();
+  fireEvent.click(readAgain);
+  expect(await screen.findByText('實際開始日已完成正式回讀：2026-09-15')).toBeInTheDocument();
+  expect(onObserved).toHaveBeenCalledExactlyOnceWith('date_only');
+  expect(apply).toHaveBeenCalledExactlyOnceWith(caseNo, expect.objectContaining({
+    operation: 'date_only', reset_service_date_adjustments: true,
+  }), { idempotencyKey: expect.any(String) });
+});
 
 it('unlocks after a definite database constraint rejection', async () => {
   const { apply } = setupDateOnly('CONSTRAINT-REJECT');

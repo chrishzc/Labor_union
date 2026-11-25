@@ -39,6 +39,8 @@ from subsystems.orders.actual_start_workflow import (
     ActualStartDateOnlyApplyRequest,
     ActualStartDateOnlyPreview,
     ActualStartDateOnlyResult,
+    ActualStartRescheduleReceipt,
+    ActualStartServiceDateAdjustmentReset,
     ActualStartWorkflowError,
 )
 
@@ -71,6 +73,7 @@ class ActualStartApplyBody(ActualStartPreviewBody):
     )
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str | None = Field(default=None, max_length=500)
+    reset_service_date_adjustments: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def validate_operation_shape(self):
@@ -111,6 +114,7 @@ def query_actual_start(
 @router.post(
     "/{case_no}/actual-start/preview",
     response_model=BaseResponse[ActualStartPreviewView],
+    response_model_exclude_unset=True,
 )
 def preview_actual_start(
     body: ActualStartPreviewBody,
@@ -136,6 +140,7 @@ def preview_actual_start(
 @router.post(
     "/{case_no}/actual-start/apply",
     response_model=BaseResponse[ActualStartReceiptView],
+    response_model_exclude_unset=True,
 )
 # FastAPI requires the complete HTTP contract on this callable for OpenAPI generation.
 def apply_actual_start(
@@ -167,6 +172,7 @@ def apply_actual_start(
 
 
 def _apply_request(case_no, body, key, correlation, principal):
+    actor_id = str(principal.username or "").strip()
     if body.operation == "date_only":
         return ActualStartDateOnlyApplyRequest(
             case_no,
@@ -174,8 +180,10 @@ def _apply_request(case_no, body, key, correlation, principal):
             ExpectedVersion(body.expected_order_version),
             PreviewFingerprint(body.preview_fingerprint),
             CorrelationId(correlation),
+            reset_service_date_adjustments=body.reset_service_date_adjustments,
+            idempotency_key=IdempotencyKey(key) if body.reset_service_date_adjustments else None,
+            actor=ActorContext(actor_id) if body.reset_service_date_adjustments else None,
         )
-    actor_id = str(principal.username or "").strip()
     return ActualStartApplyRequest(
         case_no,
         body.new_actual_start_date,
@@ -186,6 +194,7 @@ def _apply_request(case_no, body, key, correlation, principal):
         ActorContext(actor_id),
         body.reason or "",
         CorrelationId(correlation),
+        reset_service_date_adjustments=body.reset_service_date_adjustments,
     )
 
 
@@ -205,6 +214,7 @@ def _query_payload(facts) -> dict[str, Any]:
 
 
 def _preview_payload(preview) -> dict[str, Any]:
+    reset = _adjustment_reset_payload(preview.service_date_adjustment_reset)
     if isinstance(preview, ActualStartDateOnlyPreview):
         return {
             "operation": "date_only",
@@ -217,6 +227,7 @@ def _preview_payload(preview) -> dict[str, Any]:
             "client_finance_version": preview.client_finance_version,
             "payroll_version": preview.payroll_version,
             "preview_fingerprint": preview.fingerprint.value,
+            **reset,
         }
     return {
         "operation": "reschedule",
@@ -230,6 +241,7 @@ def _preview_payload(preview) -> dict[str, Any]:
         "scheduling": _materialize(preview.scheduling),
         "lifecycle_impact": _materialize(preview.lifecycle_impact),
         "preview_fingerprint": preview.fingerprint.value,
+        **reset,
     }
 
 
@@ -246,6 +258,7 @@ def _apply_payload(result) -> dict[str, Any]:
             "payroll_version": result.payroll_version,
             "preview_fingerprint": result.preview_fingerprint.value,
             "changed": result.changed,
+            **_adjustment_reset_payload(result.service_date_adjustment_reset),
         }
     return {
         "operation": "reschedule",
@@ -260,13 +273,31 @@ def _apply_payload(result) -> dict[str, Any]:
         "official_service_day_count": result.official_service_day_count,
         "official_service_hours": result.official_service_hours,
         "preview_fingerprint": result.preview_fingerprint.value,
+        **_adjustment_reset_payload(
+            result.service_date_adjustment_reset
+            if isinstance(result, ActualStartRescheduleReceipt) else None
+        ),
+    }
+
+
+def _adjustment_reset_payload(
+    reset: ActualStartServiceDateAdjustmentReset | None,
+) -> dict[str, object]:
+    if reset is None:
+        return {}
+    return {
+        "service_date_adjustment_reset": {
+            "service_dates": reset.service_dates,
+            "contracted_daily_hours": reset.contracted_daily_hours,
+            "confirmed_version": reset.confirmed_version,
+        },
     }
 
 
 def _call_endpoint(command, message, correlation_id):
     try:
         payload = command()
-        return BaseResponse(data=payload, message=message)
+        return BaseResponse(data=payload, message=message, success=True, error=None)
     except ActualStartWorkflowError as error:
         _raise_typed_error(error.error)
     except ActualStartCandidateError as error:
@@ -338,6 +369,13 @@ def _raise_mysql_error(error, correlation_id):
 
 def _raise_value_error(error, correlation_id):
     code = str(error)
+    if code == "actual_start_adjustment_reset_idempotency_mismatch":
+        raise _http_error(409, TypedError(
+            ErrorCategory.IDEMPOTENCY_MISMATCH,
+            code,
+            "此冪等鍵已用於其他合併／分裂取消重排操作。",
+            correlation_id,
+        )) from error
     if code in {
         "actual_start_rate_snapshot_lineage_invalid",
         "actual_start_rate_snapshot_missing_or_ambiguous",
@@ -348,6 +386,8 @@ def _raise_value_error(error, correlation_id):
         "actual_start_leave_outcome_conflict",
         "actual_start_manual_work_confirmation_required",
         "actual_start_confirmed_dates_invalid",
+        "actual_start_adjustment_reset_basis_invalid",
+        "service_date_adjustment_stale_first_schedule",
     }:
         typed = TypedError(
             ErrorCategory.DOMAIN_BLOCKED,

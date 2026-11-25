@@ -23,6 +23,14 @@ class ActualStartQueryView(BaseModel):
     has_formal_assignments: bool
 
 
+class ActualStartServiceDateAdjustmentResetView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service_dates: list[date] = Field(min_length=1)
+    contracted_daily_hours: float = Field(gt=0, multiple_of=0.5)
+    confirmed_version: int | None = Field(ge=1)
+
+
 class ActualStartDateOnlyPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -36,6 +44,7 @@ class ActualStartDateOnlyPreviewView(BaseModel):
     client_finance_version: int | None = Field(default=None, ge=0)
     payroll_version: int | None = Field(default=None, ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentResetView | None = None
 
 
 class ActualStartReschedulePreviewView(BaseModel):
@@ -52,6 +61,7 @@ class ActualStartReschedulePreviewView(BaseModel):
     scheduling: dict[str, Any]
     lifecycle_impact: dict[str, Any]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentResetView | None = None
 
 
 ActualStartPreviewView = Annotated[
@@ -73,6 +83,7 @@ class ActualStartDateOnlyResultView(BaseModel):
     payroll_version: int | None = Field(default=None, ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     changed: bool
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentResetView | None = None
 
 
 class ActualStartRescheduleReceiptView(BaseModel):
@@ -90,6 +101,7 @@ class ActualStartRescheduleReceiptView(BaseModel):
     official_service_day_count: int = Field(ge=0)
     official_service_hours: float = Field(ge=0, multiple_of=0.5)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentResetView | None = None
 
 
 ActualStartReceiptView = Annotated[
