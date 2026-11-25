@@ -69,9 +69,11 @@ PreferenceTopicSummary {
   2. `ready` 於同母題顯示 `其它：{other_detail}`；`not_recorded` 不另顯示其它列；`source_not_ready` 於 detail surface 顯示「其它來源尚未就緒」（不得誤標「未填」）。
   3. 任一母題不可讀只降級該母題；roster 不因偏好缺失隱藏人員。
 
+<a id="staff-preference-read-boundary"></a>
+
 ## 5. Read / Write 邊界與敏感欄位排除
 
-- 本投影為 read-only，不提供接案偏好的 `POST`/`PUT`/`PATCH` write route；資料與銀行修改依 [案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md) 及各 root owner 辦理。
+- `case-preference-summary` 只讀，沒有同入口的 `POST`／`PUT`／`PATCH`。它和既有 `/api/v1/staff/case-preference-manual` 寫入流程是不同入口。摘要的六母題包含交通，不含料理；寫入流程的六類既有關聯包含料理，不含交通，不能用摘要直接組成 Apply payload。管理端可編輯範圍依 [#24](24_Staff_Matching_Preferences與不可服務期間正式規格.md)，實作與驗證位置見 [Staff 接案偏好](../domains/staff/subsystems/staff/modules/case-preference-manual.md#read-write-boundary)。其他資料與銀行修改依 [案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md) 及各 root owner 辦理。
 - `StaffCasePreferenceSummary` 嚴禁包含：`identity_card`、銀行帳號／分行、IP address、credential／password／token／secret／key、`emergency_contact_name`/`phone`、`admin_notes`、raw workbook row／raw JSON／fingerprint／idempotency key。
 
 ## 6. 驗收標準
