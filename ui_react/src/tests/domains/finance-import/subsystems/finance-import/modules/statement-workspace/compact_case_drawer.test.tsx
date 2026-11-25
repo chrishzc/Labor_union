@@ -1185,3 +1185,68 @@ it.each(['zero','unknown','pending'] as const)('通知%s即使can_send true也�
  const source=notice('first');source.can_send=true;if(mode==='zero'&&source.payment)source.payment.remaining_amount_ntd=0;if(mode==='unknown')source.payment=null;if(mode==='pending')source.history=[{task_id:1,requested_at:'2026-11-01T00:00:00Z',sent_at:null,status:'pending',content:'通知',actor:'synthetic'},{task_id:2,requested_at:'2026-10-01T00:00:00Z',sent_at:'2026-10-01T00:01:00Z',status:'sent',content:'舊通知',actor:'synthetic'}];
  wrapper(<FinanceCaseNotice item={source} onBack={vi.fn()} onChanged={vi.fn()}/>);expect(screen.getByRole('button',{name:'發送通知'})).toBeDisabled();
 });
+
+
+describe('歷史原款項契約',()=>{
+ it('免自備只顯示整案判定，不補三期、日期或月嫂應付',async()=>{
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),historical_stages:true,
+   full_subsidy_eligibility:true,full_subsidy:true,accounting_pending_reasons:[],scheme:'split',
+   client_items:[],staff_items:[],transactions:[],customer_amount_ntd:0,customer_fully_received:null,
+   receivable_ntd:null,received_ntd:null,remaining_in_ntd:null,payable_ntd:null,paid_ntd:null});
+  vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,order_status:'歷史訂單－服務完成'} as never);
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  const periods=within(await screen.findByRole('region',{name:'各期繳款與通知，可左右捲動'}));
+  expect(screen.getByText('全額補助／免自備，客戶應付 NT$ 0')).toBeVisible();
+  expect(periods.getAllByRole('row')).toHaveLength(1);
+  expect(periods.queryByText('不需繳納')).not.toBeInTheDocument();
+  expect(screen.getByText('沒有原期款證據；免自備判定不代表原款已付或帳務結清。')).toBeVisible();
+  expect(within(screen.getByLabelText('月嫂薪資匯總')).queryByText('NT$ 30,000',{exact:true})).not.toBeInTheDocument();
+  expect(paymentOverdueReminderClient.sendCase).not.toHaveBeenCalled();
+  expect(differenceResolutionClient.syncHistoricalBaseline).not.toHaveBeenCalled();
+ });
+ it('未分期、同期多筆及期別未知沿正式識別分列，原日期與餘額不互代',async()=>{
+  const base=facts(), first=base.client_items[1];
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({...base,historical_stages:true,full_subsidy:false,
+   client_items:[{...first,identity:'original-single',payment_stage:null,obligation_type:'adjustment',label:'原未分期款',due_date:'2025-01-19',expected_ntd:8000,actual_ntd:3000,remaining_ntd:5000,source_event_identity:'event-10'},
+    {...first,identity:'first-a',due_date:'2025-02-03',remaining_ntd:1000,source_event_identity:'event-11'},
+    {...first,identity:'first-b',due_date:'2025-03-08',remaining_ntd:2000,source_event_identity:'event-12'},
+    {...first,identity:'unknown-period',payment_stage:null,obligation_type:'adjustment',label:'原帳期別待確認',due_date:null,remaining_ntd:3000,source_event_identity:'event-13'}],
+   transactions:[{identity:'original-receipt',item_identity:'original-single',occurred_on:'2025-01-20',kind:'receipt',amount_ntd:4000,bank:'sinopac'},
+    {identity:'original-reversal',item_identity:'original-single',occurred_on:'2025-01-21',kind:'reversal',amount_ntd:-1000,bank:'sinopac'}]});
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  const table=within(await screen.findByRole('region',{name:'各期繳款與通知，可左右捲動'}));
+  expect(table.getAllByRole('row')).toHaveLength(5);
+  const single=table.getByRole('row',{name:/原未分期款/});
+  expect(single).toHaveTextContent('2025-01-19');expect(single).toHaveTextContent('待收 NT$ 5,000');
+  expect(single).toHaveTextContent('event-10');expect(single).toHaveTextContent('2025-01-20');expect(single).toHaveTextContent('2025-01-21');
+  expect(single).toHaveTextContent('沖正');
+  expect(table.getByRole('row',{name:/原帳期別待確認/})).toHaveTextContent('日期待確認');
+  expect(table.getAllByRole('row',{name:/第一期/})).toHaveLength(2);
+  expect(table.queryByRole('row',{name:/訂金/})).not.toBeInTheDocument();
+  expect(table.queryByRole('row',{name:/第二期/})).not.toBeInTheDocument();
+ });
+ it('未分配收款保留日期金額來源，不配成三期期款或免繳',async()=>{
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),historical_stages:true,full_subsidy:false,
+   full_subsidy_eligibility:true,scheme_conflict:true,accounting_pending_reasons:['historical_client_cash_conflict'],
+   client_items:[],transactions:[{identity:'unallocated-receipt-2',item_identity:'unallocated',occurred_on:'2025-04-23',kind:'receipt',amount_ntd:4500,bank:'sinopac'}]});
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  const receipts=within(await screen.findByRole('region',{name:'期別待確認的原收付款'}));
+  expect(receipts.getByText(/2025-04-23/)).toBeVisible();expect(receipts.getByText(/4,500/)).toBeVisible();
+  expect(receipts.getByText(/永豐/)).toBeVisible();
+  expect(screen.queryByText('全額補助／免自備，客戶應付 NT$ 0')).not.toBeInTheDocument();
+  expect(screen.getByText('原收付款與免自備判定不相容，請核對原帳。')).toBeVisible();
+  expect(paymentOverdueReminderClient.sendCase).not.toHaveBeenCalled();
+ });
+ it('只有歷史付款證據不稱銀行入帳，未知資格不顯示免自備',async()=>{
+  const original=facts().client_items[0];
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),historical_stages:true,full_subsidy_eligibility:null,
+   full_subsidy:false,accounting_pending_reasons:['historical_subsidy_limit_missing'],transactions:[],
+   client_items:[{...original,identity:'legacy-marker',payment_evidence:'historical_paid',source_event_identity:'evidence-7'}]});
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  const row=await screen.findByRole('row',{name:/legacy-marker/});
+  expect(row).toHaveTextContent('歷史已付證據，非銀行入帳');
+  expect(row).not.toHaveTextContent('尚無已核銷入帳');
+  expect(screen.getByText('缺少本案有效補助上限，免自備資格待確認。')).toBeVisible();
+  expect(screen.queryByText('全額補助／免自備，客戶應付 NT$ 0')).not.toBeInTheDocument();
+ });
+});

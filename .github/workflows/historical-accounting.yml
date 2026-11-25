@@ -1,0 +1,75 @@
+name: Historical accounting contracts
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-accounting-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Historical accounting Python and MySQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports: ["127.0.0.1:3307:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      APP_ENV: development
+      ACCESS_CONTROL_PROFILE: local_auth
+      ENABLE_ADMIN_AUTH: "true"
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3307"
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_SSL_MODE: disabled
+      DB_DATABASE: lu_test_historical_${{ github.run_id }}_${{ github.run_attempt }}
+      PRICING_MYSQL: "1"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install declared test dependencies
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 ruff pyright
+      - name: Reproduce historical funding defects before correction
+        run: >-
+          python -m pytest -vv
+          tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py
+          -k historical_full_subsidy
+
+  frontend:
+    name: Historical accounting React
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ui_react
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: npm ci --ignore-scripts
+      - name: Reproduce historical drawer defects before correction
+        run: >-
+          npm test --
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          -t 歷史原款項契約

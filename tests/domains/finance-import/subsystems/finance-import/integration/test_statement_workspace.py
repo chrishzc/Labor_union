@@ -600,6 +600,65 @@ def test_full_subsidy_conflicting_existing_customer_charge_is_preserved_for_revi
     assert result.full_subsidy is False and result.zero_stages == ()
 
 
+@pytest.mark.parametrize('kind', ['adjustment', 'receipt', 'historical_paid', 'unknown_sources'])
+def test_historical_full_subsidy_keeps_nonperiod_money_and_unknown_sources(kind):
+    from decimal import Decimal
+    from subsystems.client_finance.case_accounting_query import (
+        ClientAccountingItem, ClientAccountingTransaction, ClientCaseFunding, ClientCasePaymentTerms,
+    )
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+
+    class State:
+        def case_client(self, _): return 'Synthetic'
+        def dismissed(self, _, **kwargs): return {}
+
+    item = ClientAccountingItem('original', 'receivable', '原款項', 'Synthetic', 600, 200,
+                                True, '1', '2025-01-10', obligation_type='adjustment')
+    transaction = ClientAccountingTransaction('receipt:1', 'unallocated', '2025-01-09',
+                                               'receipt', 200, 'sinopac')
+    funding = ClientCaseFunding('CASE-HISTORY', '補助市民', Decimal(80), Decimal(120), 28000)
+    terms = ClientCasePaymentTerms(funding, historical_stages=True)
+    if kind == 'unknown_sources':
+        terms = ClientCasePaymentTerms(funding, historical_stages=True,
+                                      pending_reasons=('historical_client_finance_source_missing',))
+    result = AccountingWorkspace(
+        State(), lambda *a, **kw: ((item,) if kind in {'adjustment', 'historical_paid'} else (),
+                                   (transaction,) if kind == 'receipt' else ()),
+        lambda *a, **kw: ((), ()), payment_terms=lambda _: terms,
+    ).query('CASE-HISTORY')
+    assert result.full_subsidy is False
+    assert result.accounting_pending_reasons
+    assert result.customer_amount_ntd != 0
+    if kind in {'adjustment', 'historical_paid'}:
+        assert result.client_items == (item,)
+        assert result.customer_amount_ntd == 600
+        assert result.customer_paid_ntd == 200
+        assert result.client_items[0].remaining_ntd == 400
+
+
+def test_historical_full_subsidy_without_formal_payable_does_not_invent_staff_debt():
+    from decimal import Decimal
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding, ClientCasePaymentTerms
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+
+    class State:
+        def case_client(self, _): return 'Synthetic'
+        def dismissed(self, _, **kwargs): return {}
+
+    terms = ClientCasePaymentTerms(
+        ClientCaseFunding('CASE-HISTORY', '原住民', Decimal(80), Decimal(80), 28000),
+        historical_stages=True,
+    )
+    result = AccountingWorkspace(State(), lambda *a, **kw: ((), ()), lambda *a, **kw: ((), ()),
+                                 payment_terms=lambda _: terms).query('CASE-HISTORY')
+    assert result.full_subsidy is True
+    assert result.customer_amount_ntd == 0
+    assert result.client_items == () and result.zero_stages == ()
+    assert result.staff_receivable_ntd is None
+    assert result.payable_ntd is None and result.paid_ntd is None
+    assert result.historical_stages is True
+
+
 def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_distinct():
     from datetime import date
     from dataclasses import replace
