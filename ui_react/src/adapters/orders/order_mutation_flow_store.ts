@@ -142,6 +142,7 @@ export interface CompletionFlowState {
 export interface ActualStartCommand {
   payload: ActualStartApplyPayload;
   idempotencyKey: string;
+  resetPreview?: ActualStartPreview;
 }
 
 export interface ActualStartFlowState {

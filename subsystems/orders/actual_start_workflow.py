@@ -56,6 +56,22 @@ _REASON_MAXIMUM_LENGTH = 500
 
 
 @dataclass(frozen=True, slots=True)
+class ActualStartServiceDateAdjustmentReset:
+    service_dates: tuple[date, ...]
+    contracted_daily_hours: float
+    confirmed_version: int | None
+    staff_ids: tuple[int | None, ...] = ()
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        return {
+            "service_dates": [day.isoformat() for day in self.service_dates],
+            "contracted_daily_hours": self.contracted_daily_hours,
+            "confirmed_version": self.confirmed_version,
+            "staff_ids": self.staff_ids,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ActualStartPreview:
     before_actual_start_date: date | None
     after_actual_start_date: date
@@ -71,6 +87,7 @@ class ActualStartPreview:
     reconfirmation: ActualStartReconfirmationCandidate
     unpersisted_source_assignment_ids: tuple[int, ...]
     fingerprint: PreviewFingerprint
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentReset | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +115,7 @@ class ActualStartQueryFacts:
     payroll_version: int | None
     has_formal_assignments: bool
     historical_precision_restarted: bool
+    has_confirmed_date_adjustments: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +129,7 @@ class ActualStartDateOnlyPreview:
     client_finance_version: int | None
     payroll_version: int | None
     fingerprint: PreviewFingerprint
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentReset | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +143,24 @@ class ActualStartDateOnlyResult:
     payroll_version: int | None
     preview_fingerprint: PreviewFingerprint
     changed: bool
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentReset | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ActualStartRescheduleReceipt(OrderTermsReceipt):
+    service_date_adjustment_reset: ActualStartServiceDateAdjustmentReset
+
+    @classmethod
+    def with_adjustment_reset(
+        cls, receipt: OrderTermsReceipt, reset: ActualStartServiceDateAdjustmentReset,
+    ) -> ActualStartRescheduleReceipt:
+        return cls(
+            receipt.case_no, receipt.order_version, receipt.scheduling_version,
+            receipt.scheduling_generation, receipt.client_finance_version, receipt.payroll_version,
+            receipt.lifecycle_status, receipt.service_data_lock_formed, receipt.cancelled_assignment_ids,
+            receipt.created_assignment_keys, receipt.official_service_day_count, receipt.official_service_hours,
+            receipt.preview_fingerprint, reset,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +170,9 @@ class ActualStartDateOnlyApplyRequest:
     expected_order_version: ExpectedVersion
     preview_fingerprint: PreviewFingerprint
     correlation_id: CorrelationId
+    reset_service_date_adjustments: bool = False
+    idempotency_key: IdempotencyKey | None = None
+    actor: ActorContext | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
@@ -166,6 +206,7 @@ class ActualStartApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+    reset_service_date_adjustments: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
@@ -228,7 +269,20 @@ class ActualStartWorkflowRepository(ActualStartReconfirmationControlPort, Protoc
     def calculate_progressive_service_dates(
         self, case_no: str, new_date: date,
         assignments: tuple[ActualStartAssignmentFacts, ...], *, lock: bool,
+        reset_service_date_adjustments: bool = False,
     ) -> tuple[tuple[date, ...], str]: ...
+    def load_date_only_adjustment_reset(
+        self, facts: ActualStartQueryFacts, new_date: date, *, lock: bool,
+    ) -> ActualStartServiceDateAdjustmentReset: ...
+    def load_formal_adjustment_reset_basis(
+        self, case_no: str, assignments: tuple[ActualStartAssignmentFacts, ...],
+        *, lock: bool,
+    ) -> tuple[tuple[ActualStartAssignmentFacts, ...], int | None]: ...
+    def save_confirmed_adjustment_reset(
+        self, case_no: str, reset: ActualStartServiceDateAdjustmentReset,
+        *, order_version: int, scheduling_version: int, key: IdempotencyKey,
+        actor: ActorContext, command_fingerprint: PreviewFingerprint,
+    ) -> ActualStartServiceDateAdjustmentReset: ...
     def validate_replacement_rate_snapshots(
         self, assignments: tuple, *, lock: bool,
     ) -> None: ...
@@ -279,7 +333,25 @@ class ActualStartWorkflow:
         facts: ActualStartQueryFacts,
         new_date: date,
     ) -> ActualStartDateOnlyPreview:
-        return _date_only_preview(facts, new_date)
+        return self._preview_date_only(facts, new_date)
+
+    def _preview_date_only(
+        self, facts: ActualStartQueryFacts, new_date: date,
+        *, correlation_id: CorrelationId | None = None,
+    ) -> ActualStartDateOnlyPreview:
+        preview = _date_only_preview(facts, new_date, correlation_id=correlation_id)
+        if (not facts.has_confirmed_date_adjustments
+                or new_date == (facts.current_actual_start_date or facts.planned_start_date)):
+            return preview
+        reset = self._repository.load_date_only_adjustment_reset(
+            facts, new_date, lock=correlation_id is not None,
+        )
+        fingerprint = fingerprint_payload({
+            "actual_start": preview.fingerprint.value,
+            "scheduling_version": facts.scheduling_version,
+            "service_date_adjustment_reset": reset.fingerprint_payload(),
+        })
+        return replace(preview, fingerprint=fingerprint, service_date_adjustment_reset=reset)
 
     def apply_date_only(
         self,
@@ -304,7 +376,7 @@ class ActualStartWorkflow:
                 "The Orders root changed after Preview.",
                 current_version=facts.order_version,
             )
-        preview = _date_only_preview(
+        preview = self._preview_date_only(
             facts,
             request.new_actual_start_date,
             correlation_id=request.correlation_id,
@@ -315,6 +387,14 @@ class ActualStartWorkflow:
                 ErrorCategory.CONFLICT,
                 "stale_preview",
                 "The Actual Start date-only facts changed after Preview.",
+            )
+        reset = preview.service_date_adjustment_reset
+        _validate_reset_confirmation(request, reset)
+        if reset is not None and (request.idempotency_key is None or request.actor is None):
+            raise _workflow_error(
+                request, ErrorCategory.VALIDATION,
+                "actual_start_adjustment_reset_identity_required",
+                "The adjustment reset needs an actor and idempotency key.",
             )
         changed = facts.current_actual_start_date != request.new_actual_start_date
         resulting_version = facts.order_version + 1 if changed else facts.order_version
@@ -328,6 +408,14 @@ class ActualStartWorkflow:
                     request.correlation_id,
                 )
             )
+        if reset is not None:
+            assert request.idempotency_key is not None and request.actor is not None
+            reset = self._repository.save_confirmed_adjustment_reset(
+                request.case_no, reset, order_version=resulting_version,
+                scheduling_version=facts.scheduling_version or 0,
+                key=request.idempotency_key, actor=request.actor,
+                command_fingerprint=preview.fingerprint,
+            )
         return ActualStartDateOnlyResult(
             request.case_no,
             request.new_actual_start_date,
@@ -338,6 +426,7 @@ class ActualStartWorkflow:
             facts.payroll_version,
             preview.fingerprint,
             changed,
+            reset,
         )
 
     def preview(
@@ -429,8 +518,7 @@ class ActualStartWorkflow:
             recalculated_service_dates,
         )
         receipt = _build_receipt(preview)
-        self._persist(request, preview, command_fingerprint, receipt)
-        return receipt
+        return self._persist(request, preview, command_fingerprint, receipt)
 
     def apply_historical_source_in_current_unit_of_work(
         self,
@@ -479,8 +567,7 @@ class ActualStartWorkflow:
             recalculated_service_dates,
         )
         receipt = _build_receipt(preview)
-        self._persist(request, preview, command_fingerprint, receipt)
-        return receipt
+        return self._persist(request, preview, command_fingerprint, receipt)
 
     def apply_historical_source(
         self,
@@ -540,6 +627,7 @@ class ActualStartWorkflow:
         )
         if preview.fingerprint != request.preview_fingerprint:
             raise _workflow_error(request, ErrorCategory.CONFLICT, "stale_preview", "The business facts changed after Preview.")
+        _validate_reset_confirmation(request, preview.service_date_adjustment_reset)
         return preview
 
     def _build_preview(
@@ -549,12 +637,31 @@ class ActualStartWorkflow:
         facts = context.shared_facts
         calendar_version = None
         normal_replacement = recalculated_service_dates is None
-        if normal_replacement:
+        assignments = _actual_start_assignments(facts)
+        reset = None
+        reset_required = (
+            normal_replacement
+            and new_date != (facts.lifecycle.actual_start_date or facts.order.terms.planned_start_date)
+            and any(item.service_hours_overrides for item in assignments)
+        )
+        if reset_required:
+            assignments, confirmed_version = self._repository.load_formal_adjustment_reset_basis(
+                facts.order.case_no, assignments, lock=lock_calendar,
+            )
+            recalculated_service_dates, calendar_version = self._repository.calculate_progressive_service_dates(
+                facts.order.case_no, new_date, assignments, lock=lock_calendar,
+                reset_service_date_adjustments=True,
+            )
+            reset = ActualStartServiceDateAdjustmentReset(
+                recalculated_service_dates, float(facts.order.terms.service_hours_per_day),
+                confirmed_version,
+            )
+        elif normal_replacement:
             recalculated_service_dates, calendar_version = (
                 self._repository.calculate_progressive_service_dates(
                     facts.order.case_no,
                     new_date,
-                    _actual_start_assignments(facts),
+                    assignments,
                     lock=lock_calendar,
                 )
             )
@@ -563,6 +670,7 @@ class ActualStartWorkflow:
             facts,
             new_date,
             recalculated_service_dates,
+            assignments if reset is not None else None,
         )
         if normal_replacement:
             self._repository.validate_replacement_rate_snapshots(
@@ -591,9 +699,13 @@ class ActualStartWorkflow:
             reconfirmation,
             context.unpersisted_source_assignment_ids,
             calendar_version,
+            reset,
         )
 
-    def _persist(self, request, preview, command_fingerprint, receipt):
+    def _persist(
+        self, request: ActualStartApplyRequest, preview: ActualStartPreview,
+        command_fingerprint: PreviewFingerprint, receipt: OrderTermsReceipt,
+    ) -> OrderTermsReceipt:
         # Keep the original command fingerprint for replay; persistence needs
         # a nonempty audit description even when the optional reason is blank.
         if not request.reason:
@@ -603,13 +715,29 @@ class ActualStartWorkflow:
         control_event_id = _confirm_reconfirmation(self._repository, request, preview, event_id)
         lifecycle_id = _persist_lifecycle(self._repository, request, preview, receipt)
         _persist_order_projection(self._repository, request, preview, receipt)
+        reset = preview.service_date_adjustment_reset
+        if reset is not None:
+            reset = self._repository.save_confirmed_adjustment_reset(
+                request.case_no, reset, order_version=receipt.order_version,
+                scheduling_version=receipt.scheduling_version, key=request.idempotency_key,
+                actor=request.actor, command_fingerprint=command_fingerprint,
+            )
+            receipt = ActualStartRescheduleReceipt.with_adjustment_reset(receipt, reset)
         _persist_receipt(self._repository, request, command_fingerprint, receipt, event_id, scheduling_result.scheduling_receipt_id, lifecycle_id, control_event_id)
+        return receipt
 
 
-def _actual_start_candidates(facts, new_date, recalculated_service_dates=None):
+def _actual_start_candidates(
+    facts: TermsWorkflowFacts, new_date: date,
+    recalculated_service_dates: tuple[date, ...] | None = None,
+    assignments: tuple[ActualStartAssignmentFacts, ...] | None = None,
+) -> tuple[ActualStartCandidate, SchedulingGenerationCandidate]:
+    scheduling = _actual_start_scheduling_facts(facts)
+    if assignments is not None:
+        scheduling = replace(scheduling, assignments=assignments)
     actual_start = build_actual_start_candidate(
         _actual_start_order_facts(facts),
-        _actual_start_scheduling_facts(facts),
+        scheduling,
         new_date,
         facts.order.terms.service_hours_per_day,
         recalculated_service_dates,
@@ -913,6 +1041,7 @@ def _preview_result(
     reconfirmation,
     unpersisted_source_assignment_ids,
     calendar_version=None,
+    reset: ActualStartServiceDateAdjustmentReset | None = None,
 ):
     payload = _preview_fingerprint_payload(
         facts,
@@ -922,6 +1051,8 @@ def _preview_result(
         reconfirmation,
         calendar_version,
     )
+    if reset is not None:
+        payload["service_date_adjustment_reset"] = reset.fingerprint_payload()
     return ActualStartPreview(
         facts.lifecycle.actual_start_date,
         actual_start.new_actual_start_date,
@@ -937,6 +1068,7 @@ def _preview_result(
         reconfirmation,
         unpersisted_source_assignment_ids,
         fingerprint_payload(payload),
+        reset,
     )
 
 
@@ -978,6 +1110,18 @@ def _build_receipt(preview):
     return OrderTermsReceipt(preview.scheduling.case_no, preview.order_version + 1, preview.scheduling.resulting_aggregate_version, preview.scheduling.generation_number, preview.client_finance_version, preview.payroll_version, preview.lifecycle_impact.after_status, preview.lifecycle_impact.service_data_lock_should_exist and not preview.lifecycle_impact.service_data_lock_was_present, preview.scheduling.cancelled_assignment_ids, tuple(item.candidate_key for item in assignments), sum(len(item.service_dates) for item in assignments), sum(item.actual_hours for item in assignments), preview.fingerprint)
 
 
+def _validate_reset_confirmation(
+    request: ActualStartApplyRequest | ActualStartDateOnlyApplyRequest,
+    reset: ActualStartServiceDateAdjustmentReset | None,
+) -> None:
+    if request.reset_service_date_adjustments != (reset is not None):
+        raise _workflow_error(
+            request, ErrorCategory.CONFLICT,
+            "actual_start_adjustment_reset_confirmation_mismatch",
+            "Preview and confirm whether existing date adjustments will be cancelled.",
+        )
+
+
 def _validate_versions(request, facts):
     for expected, current, domain in _version_comparisons(request, facts):
         _validate_version(request, expected, current, domain)
@@ -1001,8 +1145,11 @@ def _validate_locked_staff_set(request, facts, staff_ids):
     raise _workflow_error(request, ErrorCategory.CONFLICT, "scheduling_lock_set_stale", "The impacted caregiver set expanded after preflight.")
 
 
-def _command_fingerprint(request):
-    return fingerprint_payload({"case_no": request.case_no, "new_actual_start_date": request.new_actual_start_date.isoformat(), "order_version": request.expected_order_version.value, "scheduling_version": request.expected_scheduling_version.value, "preview_fingerprint": request.preview_fingerprint.value, "actor": request.actor.actor_id, "reason": request.reason})
+def _command_fingerprint(request: ActualStartApplyRequest) -> PreviewFingerprint:
+    payload: dict[str, object] = {"case_no": request.case_no, "new_actual_start_date": request.new_actual_start_date.isoformat(), "order_version": request.expected_order_version.value, "scheduling_version": request.expected_scheduling_version.value, "preview_fingerprint": request.preview_fingerprint.value, "actor": request.actor.actor_id, "reason": request.reason}
+    if request.reset_service_date_adjustments:
+        payload["reset_service_date_adjustments"] = True
+    return fingerprint_payload(payload)
 
 
 def _matched_receipt(request, command_fingerprint, stored):

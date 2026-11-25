@@ -6,6 +6,7 @@ from domains.scheduling.assignment_plan import first_shift_conflict
 from infrastructure.mysql.scheduling_occupancy_facts import load_case_service_time, load_occupancy_snapshot
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date, timedelta
 import json
 from typing import Any
@@ -19,9 +20,11 @@ from domains.orders.actual_start import (
     ActualStartReconfirmationFacts,
     ActualStartReconfirmationState,
     calculate_progressive_segment_service_dates,
+    calculate_service_dates,
     date_bound_manual_overrides,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.service_date_confirmation import ConfirmedServiceDateCandidate
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.errors import ErrorCategory, TypedError
 from subsystems.orders.order_lifecycle_command_envelope import (
@@ -32,7 +35,7 @@ from subsystems.orders.order_lifecycle_control_commands import (
     apply_order_lifecycle_control_command,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
-from shared_kernel.identities import IdempotencyKey
+from shared_kernel.identities import ActorContext, IdempotencyKey
 from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
     ActualStartDateOnlyPersistenceCommand,
@@ -40,6 +43,8 @@ from subsystems.orders.actual_start_workflow import (
     ActualStartPreview,
     ActualStartQueryFacts,
     ActualStartReceiptPersistenceCommand,
+    ActualStartRescheduleReceipt,
+    ActualStartServiceDateAdjustmentReset,
     ActualStartWorkflowError,
     ActualStartWorkflowContext,
     ConfirmActualStartReconfirmationCommand,
@@ -61,6 +66,12 @@ from .order_terms_read_model import (
 )
 from .scheduling_replacement_writer import persist_scheduling_replacement
 from .scheduling_holiday_query import MySqlSchedulingHolidayQuery
+from .matching_schedule_confirmation_repository import MySqlMatchingScheduleConfirmationRepository
+from .service_date_adjustment_repository import (
+    load_first_schedule_dates,
+    load_unadjusted_service_dates,
+)
+from .service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
 from .historical_actual_start_date_planner import _canonical_service_mode
 from .payroll_terms_writer import (
     load_actual_start_source_rate_snapshots,
@@ -131,6 +142,7 @@ class MySqlOrderActualStartRepository:
             payroll_version=payroll_version,
             has_formal_assignments=has_assignments,
             historical_precision_restarted=historical_restarted,
+            has_confirmed_date_adjustments=bool(order.get("has_confirmed_date_adjustments")),
         )
 
     def save_actual_start_date_only(
@@ -187,6 +199,115 @@ class MySqlOrderActualStartRepository:
             )
         return ActualStartWorkflowContext(shared_facts, reconfirmation)
 
+    def load_date_only_adjustment_reset(
+        self, facts: ActualStartQueryFacts, new_date: date, *, lock: bool,
+    ) -> ActualStartServiceDateAdjustmentReset:
+        suffix = " FOR UPDATE" if lock else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.service_days,o.service_hours_per_day,c.service_type,v.version "
+                "FROM orders o JOIN clients c ON c.id=o.client_id "
+                "JOIN confirmed_service_date_versions v ON v.case_no=o.case_no AND v.is_current=1 "
+                "WHERE o.case_no=%s" + suffix,
+                (facts.case_no,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise ValueError("actual_start_adjustment_reset_basis_invalid")
+            original, _ = load_first_schedule_dates(cursor, facts.case_no, lock=lock)
+        total_days = int(row["service_days"])
+        if total_days <= 0 or len(original) != total_days or any(day.hours_override is not None for day in original):
+            raise ValueError("actual_start_adjustment_reset_basis_invalid")
+        service_mode = _canonical_service_mode(row["service_type"])
+        if service_mode not in {"休周六", "休周日", "週休2日", "連續服務"}:
+            raise ValueError("actual_start_attendance_rules_missing")
+        horizon = new_date + timedelta(days=total_days * 4 + 30)
+        holidays = MySqlSchedulingHolidayQuery(self._connection).query(new_date, horizon, lock=lock)
+        dates = calculate_service_dates(
+            new_date, total_days, service_mode, tuple(item.holiday_date for item in holidays.holidays),
+        )
+        if dates[-1] > horizon:
+            raise ValueError("actual_start_calendar_horizon_exceeded")
+        return ActualStartServiceDateAdjustmentReset(
+            dates, float(row["service_hours_per_day"]), int(row["version"]),
+            tuple(day.staff_id for day in original),
+        )
+
+    def load_formal_adjustment_reset_basis(
+        self, case_no: str, assignments: tuple[ActualStartAssignmentFacts, ...],
+        *, lock: bool,
+    ) -> tuple[tuple[ActualStartAssignmentFacts, ...], int | None]:
+        suffix = " FOR UPDATE" if lock else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.service_days,a.effective_generation_id,v.version AS confirmed_version "
+                "FROM orders o JOIN scheduling_aggregates a ON a.case_no=o.case_no "
+                "LEFT JOIN confirmed_service_date_versions v ON v.case_no=o.case_no AND v.is_current=1 "
+                "WHERE o.case_no=%s" + suffix,
+                (case_no,),
+            )
+            row = cursor.fetchone()
+            if row is None or row["effective_generation_id"] is None:
+                raise ValueError("actual_start_adjustment_reset_basis_invalid")
+            total_days = int(row["service_days"])
+            source = load_unadjusted_service_dates(
+                cursor, int(row["effective_generation_id"]),
+                tuple(item.assignment_id for item in assignments), total_days, lock=lock,
+            )
+        dates_by_assignment: dict[int, list[date]] = {item.assignment_id: [] for item in assignments}
+        if total_days <= 0 or len(source) != total_days or len({day["work_date"] for day in source}) != total_days:
+            raise ValueError("actual_start_adjustment_reset_basis_invalid")
+        for day in source:
+            dates_by_assignment[int(day["assignment_id"])].append(day["work_date"])
+        normal: list[ActualStartAssignmentFacts] = []
+        for assignment in assignments:
+            dates = tuple(dates_by_assignment[assignment.assignment_id])
+            if not dates:
+                raise ValueError("actual_start_adjustment_reset_basis_invalid")
+            normal.append(replace(
+                assignment,
+                assigned_start_date=min(assignment.assigned_start_date, dates[0]),
+                assigned_end_date=max(assignment.assigned_end_date, dates[-1]),
+                service_dates=dates,
+                service_hours_overrides=(),
+                date_adjusted=True,
+            ))
+        confirmed_version = row["confirmed_version"]
+        return tuple(normal), int(confirmed_version) if confirmed_version is not None else None
+
+    def save_confirmed_adjustment_reset(
+        self,
+        case_no: str,
+        reset: ActualStartServiceDateAdjustmentReset,
+        *,
+        order_version: int,
+        scheduling_version: int,
+        key: IdempotencyKey,
+        actor: ActorContext,
+        command_fingerprint: PreviewFingerprint,
+    ) -> ActualStartServiceDateAdjustmentReset:
+        candidate = ConfirmedServiceDateCandidate(
+            case_no, order_version, scheduling_version, reset.service_dates,
+            len(reset.service_dates), reset.confirmed_version,
+        )
+        confirmation_key = fingerprint_payload({
+            "purpose": "actual_start_adjustment_reset",
+            "idempotency_key": key.value,
+        }).value
+        try:
+            receipt = MySqlServiceDateConfirmationRepository(self._connection).save(
+                candidate, actor=actor.actor_id, reason="變更開始日並取消合併／分裂",
+                idempotency_key=confirmation_key, command_fingerprint=command_fingerprint.value,
+                staff_ids=reset.staff_ids,
+            )
+        except IntegrityError as error:
+            if (_mysql_error_code(error) == 1062
+                    and "uq_confirmed_service_date_receipt_key" in str(error)):
+                raise ValueError("actual_start_adjustment_reset_idempotency_mismatch") from error
+            raise
+        MySqlMatchingScheduleConfirmationRepository(self._connection).invalidate_current_snapshot(case_no)
+        return replace(reset, confirmed_version=receipt.confirmed_version)
+
     def calculate_progressive_service_dates(
         self,
         case_no: str,
@@ -194,6 +315,7 @@ class MySqlOrderActualStartRepository:
         assignments: tuple[ActualStartAssignmentFacts, ...],
         *,
         lock: bool,
+        reset_service_date_adjustments: bool = False,
     ) -> tuple[tuple[date, ...], str]:
         total_days = sum(len(item.service_dates) for item in assignments)
         if total_days <= 0:
@@ -257,7 +379,7 @@ class MySqlOrderActualStartRepository:
             (int(row["staff_id"]), row["occupancy_date"])
             for row in active_leave_rows
         }))
-        manual_work_staff_dates, manual_rest_staff_dates = date_bound_manual_overrides(
+        manual_work_staff_dates, manual_rest_staff_dates = ((), ()) if reset_service_date_adjustments else date_bound_manual_overrides(
             assignments,
             service_mode,
             tuple(item.holiday_date for item in holidays.holidays),
@@ -828,8 +950,8 @@ def _stored_receipt(row):
 
 
 # Kept cohesive so one validated snapshot creates one immutable receipt.
-def _receipt_from_payload(payload):
-    return OrderTermsReceipt(
+def _receipt_from_payload(payload: Mapping[str, Any]) -> OrderTermsReceipt:
+    receipt = OrderTermsReceipt(
         case_no=_required_text(payload, "case_no"),
         order_version=_required_integer(payload, "order_version"),
         scheduling_version=_required_integer(payload, "scheduling_version"),
@@ -853,17 +975,42 @@ def _receipt_from_payload(payload):
         official_service_day_count=_required_integer(
             payload, "official_service_day_count"
         ),
-        official_service_hours=_required_integer(
-            payload, "official_service_hours"
-        ),
+        official_service_hours=_required_service_hours(payload, "official_service_hours"),
         preview_fingerprint=PreviewFingerprint(
             _required_text(payload, "preview_fingerprint")
         ),
     )
+    if "service_date_adjustment_reset" not in payload:
+        return receipt
+    reset = _receipt_reset_from_payload(payload["service_date_adjustment_reset"])
+    if (len(reset.service_dates) != receipt.official_service_day_count
+            or len(reset.service_dates) * reset.contracted_daily_hours != receipt.official_service_hours):
+        raise ValueError("actual_start_receipt_integrity_violation")
+    return ActualStartRescheduleReceipt.with_adjustment_reset(receipt, reset)
+
+
+def _receipt_reset_from_payload(payload: object) -> ActualStartServiceDateAdjustmentReset:
+    if not isinstance(payload, dict) or set(payload) != {
+        "service_dates", "contracted_daily_hours", "confirmed_version",
+    }:
+        raise ValueError("actual_start_receipt_integrity_violation")
+    dates = tuple(date.fromisoformat(day) for day in _text_tuple(payload, "service_dates"))
+    hours = float(_required_service_hours(payload, "contracted_daily_hours"))
+    version = _required_integer(payload, "confirmed_version")
+    if not dates or dates != tuple(sorted(set(dates))) or version <= 0 or hours <= 0:
+        raise ValueError("actual_start_receipt_integrity_violation")
+    return ActualStartServiceDateAdjustmentReset(dates, hours, version)
+
+
+def _required_service_hours(payload: Mapping[str, Any], key: str) -> int | float:
+    value = payload[key]
+    if type(value) not in (int, float) or value < 0 or value % 0.5 != 0:
+        raise ValueError("actual_start_receipt_integrity_violation")
+    return value
 
 
 def _receipt_payload(receipt):
-    return {
+    payload = {
         "cancelled_assignment_ids": receipt.cancelled_assignment_ids,
         "case_no": receipt.case_no,
         "client_finance_version": receipt.client_finance_version,
@@ -878,6 +1025,15 @@ def _receipt_payload(receipt):
         "scheduling_version": receipt.scheduling_version,
         "service_data_lock_formed": receipt.service_data_lock_formed,
     }
+    if isinstance(receipt, ActualStartRescheduleReceipt):
+        reset = receipt.service_date_adjustment_reset
+        assert reset.confirmed_version is not None
+        payload["service_date_adjustment_reset"] = {
+            "service_dates": [day.isoformat() for day in reset.service_dates],
+            "contracted_daily_hours": reset.contracted_daily_hours,
+            "confirmed_version": reset.confirmed_version,
+        }
+    return payload
 
 
 # Kept cohesive so indexed columns are compared as one integrity identity.
@@ -909,7 +1065,9 @@ def _validate_receipt_columns(row, receipt):
 
 
 def _require_exact_receipt_keys(payload):
-    if set(payload) != _RECEIPT_PAYLOAD_KEYS:
+    if set(payload) not in (
+        _RECEIPT_PAYLOAD_KEYS, _RECEIPT_PAYLOAD_KEYS | {"service_date_adjustment_reset"},
+    ):
         raise ValueError("actual_start_receipt_integrity_violation")
 
 
@@ -1004,6 +1162,9 @@ _EVENT_INSERT_SQL = (
 
 _DATE_ONLY_ORDER_SELECT_SQL = (
     "SELECT o.case_no,o.actual_start_date,o.start_date,o.lifecycle_version,"
+    "EXISTS(SELECT 1 FROM confirmed_service_date_versions v JOIN confirmed_service_date_days d "
+    "ON d.confirmed_version_id=v.id WHERE v.case_no=o.case_no AND v.is_current=1 "
+    "AND d.service_hours_override IS NOT NULL) AS has_confirmed_date_adjustments,"
     "EXISTS(SELECT 1 FROM order_service_data_locks service_lock "
     "WHERE service_lock.case_no=o.case_no) AS service_data_locked "
     "FROM orders o WHERE o.case_no=%s"

@@ -198,6 +198,24 @@ describe('orderActualStartClient', () => {
     )).rejects.toBeInstanceOf(ApiDecodeError);
   });
 
+  it('decodes reset candidates and new confirmed versions, and sends explicit reset consent', async () => {
+    const service_dates = [...previewFixture.actual_start.official_service_dates];
+    const reset = { service_dates, contracted_daily_hours: 8, confirmed_version: 5 };
+    const preview = { ...previewFixture, service_date_adjustment_reset: reset };
+    const receipt = { ...receiptFixture, service_date_adjustment_reset: { ...reset, confirmed_version: 10 } };
+    const payload = { ...applyPayload, reset_service_date_adjustments: true } satisfies ActualStartApplyPayload;
+    const post = vi.spyOn(transport, 'post')
+      .mockResolvedValueOnce(envelope(preview)).mockResolvedValueOnce(envelope(receipt))
+      .mockResolvedValueOnce(envelope({ ...preview, service_date_adjustment_reset: { ...reset, ignored: true } }));
+    const request = { new_actual_start_date: '2026-09-01' };
+    await expect(orderActualStartClient.preview('CASE/1', request)).resolves.toEqual(preview);
+    await expect(orderActualStartClient.apply('CASE/1', payload, { idempotencyKey: 'reset-1' })).resolves.toEqual(receipt);
+    expect(post).toHaveBeenNthCalledWith(2, '/api/v1/orders/CASE%2F1/actual-start/apply', payload, expect.objectContaining({
+      headers: expect.objectContaining({ 'Idempotency-Key': 'reset-1' }),
+    }));
+    await expect(orderActualStartClient.preview('CASE/1', request)).rejects.toBeInstanceOf(ApiDecodeError);
+  });
+
   it('applies all fresh versions with idempotency and correlation headers', async () => {
     const post = vi.spyOn(transport, 'post').mockResolvedValue(envelope(receiptFixture));
 

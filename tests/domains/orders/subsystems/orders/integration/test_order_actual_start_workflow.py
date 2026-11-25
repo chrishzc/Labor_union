@@ -5,6 +5,7 @@ Description: 驗證實際開工 command 契約及非 AutoComplete workflow 的 l
 
 from dataclasses import replace
 from datetime import date, datetime, time
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
@@ -55,6 +56,7 @@ from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
     ActualStartDateOnlyApplyRequest,
     ActualStartQueryFacts,
+    ActualStartServiceDateAdjustmentReset,
     ActualStartWorkflow,
     ActualStartWorkflowContext,
     ActualStartWorkflowError,
@@ -119,6 +121,7 @@ def test_optional_reason_persists_nonempty_audit_without_changing_replay_identit
         lifecycle_impact=SimpleNamespace(after_status=OrderLifecycleStatus.IN_SERVICE),
         client_settlement=SimpleNamespace(fingerprint=fingerprint),
         actual_start=SimpleNamespace(kind=ActualStartCandidateKind.FIRST_CONFIRMATION, actual_end_date=date(2026, 8, 4)),
+        service_date_adjustment_reset=None,
     )
     receipt = SimpleNamespace(order_version=2)
     workflow = ActualStartWorkflow(repository, Mock(), Mock())
@@ -574,6 +577,97 @@ def test_actual_start_retains_source_identity_when_adjustment_left_no_days_for_s
     assert [buffer.staff_id for buffer in replacement.buffers] == [23]
 
 
+def test_formal_actual_start_reset_restores_contract_distribution_and_replays() -> None:
+    first, second = date(2026, 8, 3), date(2026, 8, 4)
+    requested = date(2026, 8, 8)
+    new_dates = (requested, date(2026, 8, 9))
+    service_time = ServiceTimeTerms(time(8), time(12), 0)
+    facts = TermsWorkflowFacts(
+        order=OrderAggregateFacts("CASE-1", 1, OrderTerms(first, 2, 4, MoneyNTD(0), service_time),
+                                  False, "municipal"),
+        scheduling=SchedulingGenerationFacts("CASE-1", 2, 1, (
+            EffectiveAssignmentSegment(11, 7, 1, 0, first, first, (), date_adjusted=True),
+            EffectiveAssignmentSegment(
+                12, 8, 2, 1, second, second, (second,),
+                service_hours_overrides=((second, 8),), date_adjusted=True,
+            ),
+        )),
+        planned_service_dates=(first, second),
+        planned_end_date=second,
+        client_finance=SimpleNamespace(
+            case_no="CASE-1", account_version=3, existing_obligations=(),
+            deposit_gate_override_active=False, open_nonstage_obligation_count=0,
+            payment_terms=SimpleNamespace(deposit_service_days=0),
+        ),
+        payroll=SimpleNamespace(payroll_version=4),
+        lifecycle=OrderLifecycleRootFacts(
+            "CASE-1", OrderLifecycleStatus.ESTABLISHED, True, first, True, False, False,
+        ),
+    )
+    cursor = Mock()
+    cursor.__enter__ = Mock(return_value=cursor)
+    cursor.__exit__ = Mock(return_value=False)
+    cursor.fetchone.return_value = {"service_days": 2, "effective_generation_id": 13, "confirmed_version": 5}
+    cursor.fetchall.return_value = (
+        {"assignment_id": 11, "work_date": first},
+        {"assignment_id": 12, "work_date": second},
+    )
+    mysql = MySqlOrderActualStartRepository(SimpleNamespace(cursor=lambda: cursor))
+    repository = Mock()
+    context = ActualStartWorkflowContext(facts, ActualStartReconfirmationFacts(
+        ActualStartReconfirmationState.NOT_REQUIRED, None, None, True,
+    ))
+    repository.load_for_preview.return_value = context
+    repository.load_for_apply.return_value = context
+    repository.load_formal_adjustment_reset_basis = mysql.load_formal_adjustment_reset_basis
+    repository.calculate_progressive_service_dates.return_value = (new_dates, "calendar-version")
+    repository.preflight_impacted_staff_ids.return_value = (7, 8)
+    repository.claim_actual_start_command.return_value = CommandClaimState.CREATED
+    repository.find_actual_start_receipt.return_value = None
+    repository.replace_scheduling_generation.return_value = SimpleNamespace(scheduling_receipt_id=9)
+    repository.save_confirmed_adjustment_reset.return_value = ActualStartServiceDateAdjustmentReset(new_dates, 4, 6)
+    workflow = ActualStartWorkflow(
+        repository, Mock(),
+        FixedBusinessClock(datetime(2026, 8, 1, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+
+    preview = workflow.preview("CASE-1", requested)
+    assert preview.service_date_adjustment_reset == ActualStartServiceDateAdjustmentReset(new_dates, 4, 5)
+    assignments = preview.scheduling.assignments
+    assert [(item.source_assignment_id, item.staff_id, item.service_dates, item.actual_hours,
+             item.service_hours_overrides) for item in assignments] == [
+        (11, 7, (new_dates[0],), 4, ()),
+        (12, 8, (new_dates[1],), 4, ()),
+    ]
+    repository.replace_scheduling_generation.assert_not_called()
+    repository.save_confirmed_adjustment_reset.assert_not_called()
+    request = replace(_request(), new_actual_start_date=requested, preview_fingerprint=preview.fingerprint)
+
+    with pytest.raises(ActualStartWorkflowError) as caught:
+        workflow.apply_in_current_unit_of_work(request)
+    assert caught.value.error.code == "actual_start_adjustment_reset_confirmation_mismatch"
+    repository.replace_scheduling_generation.assert_not_called()
+
+    approved = replace(request, reset_service_date_adjustments=True)
+    receipt = workflow.apply_in_current_unit_of_work(approved)
+    assert (receipt.official_service_day_count, receipt.official_service_hours) == (2, 8)
+    assert (receipt.order_version, receipt.scheduling_version, receipt.scheduling_generation) == (2, 3, 2)
+    assert (receipt.client_finance_version, receipt.payroll_version) == (3, 4)
+    assert receipt.service_date_adjustment_reset.confirmed_version == 6
+    persisted = repository.save_actual_start_receipt.call_args.args[0].stored_receipt
+    snapshot = _receipt_payload(persisted.receipt)
+    stored = _stored_receipt({
+        **snapshot,
+        "command_fingerprint": persisted.command_fingerprint.value,
+        "result_snapshot": json.dumps(snapshot),
+    })
+    repository.claim_actual_start_command.return_value = CommandClaimState.MATCHED
+    repository.find_actual_start_receipt.return_value = stored
+    assert workflow.apply_in_current_unit_of_work(approved) == receipt
+    repository.replace_scheduling_generation.assert_called_once()
+    repository.save_confirmed_adjustment_reset.assert_called_once()
+
+
 @pytest.mark.parametrize("conflict_during_apply", [False, True])
 def test_actual_start_checks_requested_date_with_real_scheduling_candidate(
     monkeypatch, conflict_during_apply,
@@ -637,7 +731,7 @@ def test_actual_start_checks_requested_date_with_real_scheduling_candidate(
         repository, Mock(),
         FixedBusinessClock(datetime(2026, 8, 1, tzinfo=TAIPEI_TIME_ZONE)),
     )
-    workflow._persist = Mock()
+    workflow._persist = Mock(side_effect=lambda _request, _preview, _fingerprint, receipt: receipt)
 
     preview = workflow.preview("CASE-1", requested_date)
 

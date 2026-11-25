@@ -25,9 +25,6 @@ async function readProfile(path, request, signal) {
 
 async function addImage(slider, item, path, request, signal) {
   const figure = document.createElement("figure");
-  const caption = document.createElement("figcaption");
-  caption.textContent = item.item_name;
-  figure.append(caption);
   slider.append(figure);
   try {
     const response = await readProfile(`${path}/images/${item.image_entry}/${item.image_version}`, request, signal);

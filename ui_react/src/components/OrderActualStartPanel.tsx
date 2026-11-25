@@ -10,6 +10,7 @@ import { orderActualStartClient, type ActualStartPreview } from '../api/orders/o
 import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore, type ActualStartCommand } from '../adapters/orders/order_mutation_flow_store';
+import { saveServiceDateReset } from '../adapters/orders/service_date_start_flow';
 
 interface Props {
   caseNo: string;
@@ -53,6 +54,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   const mounted = useRef(true);
   const activeCaseNo = useRef(caseNo);
   const flowPhase = flow?.status;
+  const reset = preview?.service_date_adjustment_reset;
   const unresolved = flowPhase === 'applying' || flowPhase === 'outcome_unknown' || flowPhase === 'observation_failed' || flowPhase === 'observing'
     || phase === 'applying' || phase === 'outcome_unknown' || phase === 'observation_failed';
   const busy = unresolved || phase === 'loading' || phase === 'previewing';
@@ -65,7 +67,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       observationSequence.current += 1;
       inFlight.current.delete(previousCaseNo);
       const saved = orderMutationFlowStore.getActualStart(previousCaseNo);
-      if (saved?.status === 'observing' && saved.receipt) {
+      if (saved?.status === 'observing' && saved.receipt && !saved.command.resetPreview) {
         orderMutationFlowStore.setActualStart(previousCaseNo, {
           ...saved, status: 'observation_failed', error: '實際開始日回讀尚未完成，請只重新讀取結果。',
         });
@@ -82,7 +84,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       sequence.current += 1;
       observationSequence.current += 1;
       const saved = orderMutationFlowStore.getActualStart(activeCaseNo.current);
-      if (saved?.status === 'observing' && saved.receipt) {
+      if (saved?.status === 'observing' && saved.receipt && !saved.command.resetPreview) {
         orderMutationFlowStore.setActualStart(activeCaseNo.current, {
           ...saved, status: 'observation_failed', error: '實際開始日回讀尚未完成，請只重新讀取結果。',
         });
@@ -123,7 +125,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       const previewCaseNo = data.operation === 'date_only' ? data.case_no : data.actual_start.case_no;
       if (previewCaseNo !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽識別資訊不一致。');
       if (!isActive(request, caseNo)) return;
-      if (data.operation === 'reschedule') {
+      if (data.service_date_adjustment_reset || data.operation === 'reschedule') {
         setPreview(data);
         setPhase('idle');
         return;
@@ -162,6 +164,30 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       },
       idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
     }, request, false);
+  };
+
+  const applyReset = async (candidate?: ActualStartPreview) => {
+    if (inFlight.current.has(caseNo) || (candidate && (busy || query?.service_data_locked
+      || candidate.after_actual_start_date !== date))) return;
+    const request = ++sequence.current;
+    inFlight.current.add(caseNo);
+    setPhase('applying'); setError(null);
+    try {
+      const { start } = await saveServiceDateReset(caseNo, candidate, reason.trim());
+      if (!isActive(request, caseNo)) return;
+      setQuery(start); setDate(start.current_actual_start_date ?? start.planned_start_date);
+      setReason(''); setPreview(null); setPhase('observed');
+      const applied = orderMutationFlowStore.getActualStart(caseNo);
+      if (applied) onObserved?.(applied.command.payload.operation);
+    } catch (caught) {
+      if (!isActive(request, caseNo)) return;
+      const state = orderMutationFlowStore.getActualStart(caseNo)?.status;
+      setPhase(state === 'outcome_unknown' || state === 'observation_failed' ? state : 'idle');
+      if (!state) setPreview(null);
+      setError(actualStartErrorMessage(caught, '服務日期重排結果尚未確認。'));
+    } finally {
+      inFlight.current.delete(caseNo);
+    }
   };
 
   const observe = async (command: ActualStartCommand, request: number) => {
@@ -285,7 +311,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     enabled: !!query,
     baseline: { '實際開始日期': query?.current_actual_start_date ?? query?.planned_start_date ?? '', '原因': '' },
     busy: requestPending,
-    save: query && !unresolved && !query.service_data_locked
+    save: query && !unresolved && !query.service_data_locked && !reset
       ? query.has_formal_assignments
         ? preview?.operation === 'reschedule' && preview.after_actual_start_date === date ? applyPreview : undefined
         : confirm
@@ -296,7 +322,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   return (
     <section ref={draftRef} aria-label={`案件 ${caseNo} 實際開始日`}>
       <h4>確認／更正實際開始日</h4>
-      <p>尚未排班時只保存日期；已有正式安排時才由後端預覽並重排服務日期及必要下游影響。</p>
+      <p>請輸入實際開始日。若變更會影響排班或合併／分裂結果，請先核對預覽再確認。</p>
       {(!autoLoad || error) && <button type="button" disabled={busy} onClick={() => void load()}>讀取實際開始日</button>}
       {phase === 'loading' && <p role="status">讀取實際開始日中…</p>}
       {query && (
@@ -308,16 +334,18 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
               onChange={(event) => { sequence.current += 1; setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
           </label>{saveValidation.feedback}</>
           <label>原因（選填）<textarea maxLength={500} value={reason} disabled={busy || query.service_data_locked} onChange={event => setReason(event.target.value)} /></label>
-          <button type="button" disabled={busy || query.service_data_locked} onClick={() => void confirm()}>
+          {!reset && <button type="button" disabled={busy || query.service_data_locked} onClick={() => void confirm()}>
             {query.has_formal_assignments ? '預覽日期與逐段排班' : '儲存實際開始日'}
-          </button>
+          </button>}
         </>
       )}
       {preview && (
         <>
           <p>實際開始：{preview.before_actual_start_date ?? '未確認'} → {preview.after_actual_start_date}</p>
+          {reset && <p>重排後為 {reset.service_dates.length} 天，每天 {reset.contracted_daily_hours} 小時。</p>}
+          {reset && preview.operation === 'date_only' && <OrderReadOnlyServiceDateCalendar dates={reset.service_dates} />}
           {preview.operation === 'date_only'
-            ? <p>目前尚無排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
+            ? !reset && <p>目前尚無排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
             : <>
               <p>請核對各段服務日期；確認前不會儲存變更。</p>
               <div className="caregiver-schedule-blocks">
@@ -329,15 +357,19 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
                 ))}
               </div>
               <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
-              <button type="button" disabled={busy || query?.service_data_locked}
-                onClick={() => void applyPreview()}>確認調整開始日與排班</button>
+              {!reset && <button type="button" disabled={busy || query?.service_data_locked}
+                onClick={() => void applyPreview()}>確認調整開始日與排班</button>}
             </>}
+          {reset && !unresolved && <button type="button" disabled={busy || query?.service_data_locked}
+            onClick={() => void applyReset(preview)}>取消合併／分裂結果並重新排班</button>}
         </>
       )}
       {phase === 'previewing' && <p role="status">正在確認實際開始日…</p>}
       {(flowPhase === 'applying' || flowPhase === 'observing' || phase === 'applying') && <p role="status">實際開始日套用／回讀中…</p>}
-      {(flowPhase === 'outcome_unknown' || phase === 'outcome_unknown') && <button type="button" onClick={() => void retryApply()}>以原操作重新確認實際開始日</button>}
-      {(flowPhase === 'observation_failed' || phase === 'observation_failed') && <button type="button" onClick={() => void retryObservation()}>只重新讀取實際開始日結果</button>}
+      {flow?.command.resetPreview && (flowPhase === 'outcome_unknown' || flowPhase === 'observation_failed') &&
+        <button type="button" onClick={() => void applyReset()}>讀取重排結果</button>}
+      {!flow?.command.resetPreview && (flowPhase === 'outcome_unknown' || phase === 'outcome_unknown') && <button type="button" onClick={() => void retryApply()}>以原操作重新確認實際開始日</button>}
+      {!flow?.command.resetPreview && (flowPhase === 'observation_failed' || phase === 'observation_failed') && <button type="button" onClick={() => void retryObservation()}>只重新讀取實際開始日結果</button>}
       {unresolved && !requestPending && onLeavePending && <>
         <p>原操作已保留於本次工作階段。可先返回待辦看板，再次開啟案件後繼續確認；確認前請勿重新整理或關閉分頁。</p>
         <button type="button" onClick={onLeavePending}>保留原操作並返回待辦看板</button>

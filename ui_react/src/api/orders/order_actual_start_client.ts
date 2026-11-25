@@ -122,11 +122,18 @@ export const ActualStartPreviewPayloadSchema = z.strictObject({
   new_actual_start_date: IsoDateSchema,
 });
 
+const ServiceDateAdjustmentResetSchema = z.strictObject({
+  service_dates: z.array(IsoDateSchema).min(1),
+  contracted_daily_hours: z.number().positive(),
+  confirmed_version: PositiveIntegerSchema.nullable(),
+});
+
 const ActualStartDateOnlyApplyPayloadSchema = z.strictObject({
   operation: z.literal('date_only'),
   new_actual_start_date: IsoDateSchema,
   expected_order_version: NonnegativeIntegerSchema,
   preview_fingerprint: FingerprintSchema,
+  reset_service_date_adjustments: z.literal(true).optional(),
 });
 
 const ActualStartRescheduleApplyPayloadSchema = z.strictObject({
@@ -135,6 +142,7 @@ const ActualStartRescheduleApplyPayloadSchema = z.strictObject({
   expected_order_version: NonnegativeIntegerSchema,
   expected_scheduling_version: NonnegativeIntegerSchema,
   preview_fingerprint: FingerprintSchema,
+  reset_service_date_adjustments: z.literal(true).optional(),
   reason: z.string().refine(
     (value) => value.length <= 500,
     { message: '原因最多 500 字元' },
@@ -156,6 +164,7 @@ const ActualStartDateOnlyPreviewSchema = z.strictObject({
   scheduling_generation: NonnegativeIntegerSchema.nullable(),
   client_finance_version: NonnegativeIntegerSchema.nullable(),
   payroll_version: NonnegativeIntegerSchema.nullable(),
+  service_date_adjustment_reset: ServiceDateAdjustmentResetSchema.nullish(),
   preview_fingerprint: FingerprintSchema,
 });
 
@@ -170,6 +179,7 @@ const ActualStartReschedulePreviewSchema = z.strictObject({
   actual_start: ActualStartCandidateSchema,
   scheduling: SchedulingGenerationSchema,
   lifecycle_impact: LifecycleImpactSchema,
+  service_date_adjustment_reset: ServiceDateAdjustmentResetSchema.nullish(),
   preview_fingerprint: FingerprintSchema,
 });
 
@@ -189,6 +199,7 @@ const ActualStartDateOnlyResultSchema = z.strictObject({
   payroll_version: NonnegativeIntegerSchema.nullable(),
   preview_fingerprint: FingerprintSchema,
   changed: z.boolean(),
+  service_date_adjustment_reset: ServiceDateAdjustmentResetSchema.nullish(),
 });
 
 const ActualStartRescheduleReceiptSchema = z.strictObject({
@@ -203,6 +214,7 @@ const ActualStartRescheduleReceiptSchema = z.strictObject({
   created_assignment_keys: z.array(z.string().min(1)),
   official_service_day_count: NonnegativeIntegerSchema,
   official_service_hours: NonnegativeIntegerSchema,
+  service_date_adjustment_reset: ServiceDateAdjustmentResetSchema.nullish(),
   preview_fingerprint: FingerprintSchema,
 });
 
