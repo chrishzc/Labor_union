@@ -70,7 +70,7 @@ bound
 2. **worker 與 retry**：以解除 request ID claim，向目前設定的 LINE 帳號確認已設定 Messaging API 預設選單，再解除該使用者的個人圖文選單，讓 LINE 顯示帳號現行預設。背景服務回讀個人選單，確認已無個人選單才完成回復。timeout／429／5xx 沿既有重試機制處理。手動重試保留最新 canonical `default_menu` 發布參照，實際回復以 LINE 當前預設為準。
 3. **完成與 crash replay**：provider 確認回復後鎖 request、binding 與 owner projection，清除 owner User ID、轉 `revoked` 並完成 request。未完成的 request 可重試解除個人選單；已完成的 request 只確認待辦完成。
 4. **人工緊急覆寫**：限 `line.identity.binding.override` 於後端在 nonretryable／重試耗盡後填寫原因並留存 audit，不在一般管理 UI 呈現；只撤銷系統授權，後續重新發布可用 `default_menu` 時仍可再排入選單修復。
-5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。個人同步、結案回復與解除優先使用已發布的 canonical 設定版本，由設定版本及發布 ID 依序降冪選取。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md) 四格名稱維護；已由人工修改之 divergent revision 不得自動覆蓋。
+5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。個人同步、結案回復與解除優先使用已發布的 canonical 設定版本，由設定版本及發布 ID 依序降冪選取。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單的按鈕與操作依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md#5-四大角色圖文選單rich-menu-audiences) 維護；已由人工修改之 divergent revision 不得自動覆蓋。
 
 ### 6.1 個人圖文選單同步
 
