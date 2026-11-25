@@ -33,6 +33,7 @@
 - `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3。
 - `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md`。
 - #16 §2.2：非同步 Apply 的 `202 JobAccepted` 是受理，不是已核銷。付款事件、義務連結和成功收據在原 owner 的同一交易提交；以背景工作成功收據加正式根資料回讀為核銷證據。不等於所有款都結清，清償狀態以各選定義務回讀為準。
+- 若送出後結果不明，先用原 `job_id` 查 `GET /api/v1/jobs/{job_id}`。`queued`／`running` 仍在處理；`failed` 讀取該工作的正式失敗結果；`succeeded` 再讀回同一月嫂、原選定義務的狀態與餘額。少付的核銷可以成功，但讀回有剩餘就仍待付，不顯示結清。
 
 ## Verification
 - integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py` — 既有合成案例核對相同命令重送回傳原收據，不增加寫入。
