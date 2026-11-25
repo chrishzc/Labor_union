@@ -90,6 +90,8 @@ jobs:
           export LABOR_UNION_TEST_MYSQL_PASSWORD="$password" DB_PASSWORD="$password"
           python - <<'PYSETUP'
           import os
+          import subprocess
+          import sys
           import pymysql
 
           database = os.environ['LABOR_UNION_TEST_MYSQL_DATABASE']
@@ -99,8 +101,22 @@ jobs:
                   cursor.execute("CREATE USER 'lu_late_fixture'@'%%' IDENTIFIED BY %s",
                                  (os.environ['LABOR_UNION_TEST_MYSQL_PASSWORD'],))
                   cursor.execute(f"GRANT ALL PRIVILEGES ON `{database}_event_matrix`.* TO 'lu_late_fixture'@'%'")
+                  # The repository fixture installs its real triggers on this disposable CI service.
+                  cursor.execute("SELECT @@GLOBAL.log_bin_trust_function_creators")
+                  previous = int(cursor.fetchone()[0])
+                  cursor.execute("SET GLOBAL log_bin_trust_function_creators = 1")
+                  try:
+                      result = subprocess.run(
+                          [sys.executable, "-m", "pytest", "-vv",
+                           "tests/domains/finance-import/subsystems/finance-import/integration/test_accounting_event_matrix_mysql.py",
+                           "-k", "terminal_sinopac_receipt"],
+                          check=False,
+                      )
+                  finally:
+                      connection.ping(reconnect=True)
+                      cursor.execute("SET GLOBAL log_bin_trust_function_creators = %s", (previous,))
+                  sys.exit(result.returncode)
           PYSETUP
-          python -m pytest -vv tests/domains/finance-import/subsystems/finance-import/integration/test_accounting_event_matrix_mysql.py -k terminal_sinopac_receipt
       - name: Verify bank review through isolated money owners
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
