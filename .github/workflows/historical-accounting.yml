@@ -63,6 +63,13 @@ jobs:
           tests/domains/staff-payables/subsystems/staff-payables/modules/historical-payment-settlement/contract/test_historical_completion_read_adapter.py
           tests/domains/orders/subsystems/orders/modules/historical-service-accounting/unit/test_historical_service_accounting_mysql_repository.py
           tests/domains/orders/subsystems/orders/modules/historical-precision-restart/unit/test_historical_precision_restart_repository_contract.py
+          tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/test_beclass_correction_workflow.py
+          tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_client_registry_query.py
+          tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_service_accounting.py
+          tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_service_accounting_workflow.py
+          tests/domains/orders/subsystems/orders/modules/historical-adoption/contract/test_historical_service_accounting_router.py
+          tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/test_pricing_policy.py
+          tests/domains/orders/subsystems/orders/modules/order-terms/contract/test_incomplete_order_terms.py
       - name: Verify isolated MySQL query to accounting API and read-only snapshots
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -199,6 +206,11 @@ jobs:
           finally:
               subprocess.run(['git', 'worktree', 'remove', str(base)], cwd=candidate, check=True)
           PY
+      - name: Check completed historical correction boundaries
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          ruff check --select E9,F63,F7,F82 domains/orders/historical_service_accounting.py domains/payroll/historical_calculation.py domains/client_finance/historical_obligation_calculation.py subsystems/case_import/beclass_correction_workflow.py subsystems/orders/historical_service_accounting_workflow.py subsystems/client_finance/pricing_configuration.py infrastructure/mysql/beclass_correction_repository.py infrastructure/mysql/beclass_financial_sync.py infrastructure/mysql/historical_service_accounting_repository.py infrastructure/mysql/pricing_configuration_repository.py api/routes/client_registry.py api/routes/historical_service_accounting.py api/routes/accounting_pricing.py api/schemas/client_registry.py api/schemas/historical_service_accounting.py api/schemas/accounting_pricing.py
+          pyright domains/orders/historical_service_accounting.py domains/payroll/historical_calculation.py domains/client_finance/historical_obligation_calculation.py subsystems/case_import/beclass_correction_workflow.py subsystems/orders/historical_service_accounting_workflow.py subsystems/client_finance/pricing_configuration.py api/schemas/client_registry.py api/schemas/historical_service_accounting.py api/schemas/accounting_pricing.py
       - name: Check the owning specification and whitespace
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -233,5 +245,6 @@ jobs:
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_pricing.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_parameters_components.test.tsx
           src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx
+          src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_page.test.tsx
       - run: npm run lint
       - run: npm run build

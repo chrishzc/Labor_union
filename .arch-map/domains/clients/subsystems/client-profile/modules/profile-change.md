@@ -49,6 +49,10 @@
 - `ui_react/src/components/RosterTableLayout.tsx`、`ui_react/src/components/RosterTableLayout.css` — 共用可調欄距、自訂顯示與凍結欄位抽象（`lu.roster.layout.client.v1`）。
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
 
+## 歷史服務完成後更正
+
+名冊與帳務抽屜消費同一後端胎數更正資格。BeClass effective value 及 correction event 保存單胞胎／雙胞胎，不改原問卷或舊 `baby_info`。歷史服務完成的新例外經既有 Preview／Apply 顯示正式差額與待核對，確認後讀回兩個 owner。歷史 financial sync 交歷史計價差額 writer，不進一般 Scheduling 計薪分支。Orders Terms 一般編輯仍受服務鎖限制，實際服務資料沿歷史服務歸屬更正；其他狀態的原有可編輯範圍保留。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
+
 ## Dependencies
 - outbound: `case-import/pairing-current-facts` — 有效退款帳戶及原問卷補正沿既有BeClass correction writer；一般查閱與事件／回執遮蔽帳號。
 - outbound: Global `registry-deletion` — ClientRosterPage／client_registry router 組合 root-only 案件永久刪除；共用 owner fresh-lock 並檢查任一相關簽回；未簽約時一併移除 case-owned 關聯，共用 Client／其他案件／月嫂保留，不借用 Client Profile 更新 writer 刪除。

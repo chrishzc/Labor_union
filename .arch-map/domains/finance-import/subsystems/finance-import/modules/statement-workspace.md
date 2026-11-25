@@ -100,7 +100,7 @@
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_archive_mysql.py` — 隔離MySQL驗證410零寫入、原鍵不重放舊新增成功、成功匯出只含正式核銷、歷史備查唯讀不改資料、三種正式補登仍可匯出。
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/`
-- integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py`，隔離 MySQL 查詢及帳務 API 回應由專項 CI 暫存傳入 `compact_case_drawer.test.tsx`，核對歷史免自備與原款項契約；不以 UI mock 取代後端驗證。
+- cross-owner evidence: [pricing-configuration 的 MySQL 整合驗證](../../../../client-finance/subsystems/client-finance/modules/pricing-configuration.md#verification)，隔離 MySQL 查詢及帳務 API 回應由專項 CI 暫存傳入 `compact_case_drawer.test.tsx`，核對歷史免自備與原款項契約；不以 UI mock 取代後端驗證。
 - `.github/workflows/historical-accounting.yml` 執行本案 Python、隔離 MySQL、React、型別與 lint 專項。
 
 ## 國定假日計價接線 ^statement-workspace-holiday-pricing

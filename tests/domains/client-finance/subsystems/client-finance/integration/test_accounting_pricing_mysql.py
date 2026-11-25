@@ -52,6 +52,8 @@ def client(database):
     app = FastAPI()
     app.include_router(pricing_router)
     app.include_router(bootstrap_router)
+    from api.routes.historical_service_accounting import router as historical_router
+    app.include_router(historical_router)
     app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(id=None, username="pricing-test", display_name="Synthetic pricing test", role="system_admin")
     with TestClient(app) as client:
         yield client
@@ -325,14 +327,15 @@ def test_historical_accounting_conflicts_preserve_original_identity_cash_dates_a
         connection.close()
 
 
-def _historical_original_obligation(cursor, case_no, identity, *, payable=False, amount=1000, version=0, status='open'):
-    kind = 'refund' if payable else 'adjustment'
+def _historical_original_obligation(cursor, case_no, identity, *, payable=False, amount=1000, version=0, status='open',
+                                   original_amount=1000, obligation_type=None):
+    kind = obligation_type or ('refund' if payable else 'adjustment')
     direction = 'payable_to_client' if payable else 'receivable_from_client'
     cursor.execute(
         "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,"
         "before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,"
-        "idempotency_key,actor,reason) VALUES(%s,%s,%s,%s,'established',0,1000,'2025-12-31',%s,0,%s,'synthetic','original source')",
-        (identity, case_no, kind, direction, identity + ':source', identity + ':establish'),
+        "idempotency_key,actor,reason) VALUES(%s,%s,%s,%s,'established',0,%s,'2025-12-31',%s,0,%s,'synthetic','original source')",
+        (identity, case_no, kind, direction, original_amount, identity + ':source', identity + ':establish'),
     )
     event = cursor.lastrowid
     cursor.execute(
@@ -1927,5 +1930,716 @@ def test_holiday_full_subsidy_existing_settlement_preserves_both_accounts(client
                 key, "pricing-test", "synthetic old full-subsidy account protection") == receipt
             assert snapshot() == before
             assert _holiday_ledger_totals(connection, case_no) == (56000, {staff_id: 56000})
+    finally:
+        connection.close()
+
+
+def seed_historical_completed_pricing_people(case_no, *, mixed_legacy_rates=False, confirm_days=True):
+    """Two evidenced five-day assignments, original payables and immutable snapshots."""
+    from domains.orders.historical_service_accounting import HistoricalActualServiceDaysInput
+    from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
+    from infrastructure.mysql.payroll_rebuild_repository import _EVENT_INSERT_SQL, _PROJECTION_INSERT_SQL
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+    from subsystems.orders.historical_service_accounting_workflow import (
+        HistoricalServiceAccountingWorkflow, ConfirmHistoricalServiceDaysIntent, ApplyHistoricalServiceAccounting,
+    )
+    first_staff, first_assignment = seed_historical_accounting_case(
+        case_no, '補助市民', 80, None if mixed_legacy_rates else 120, with_staff=True)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO staff(name) VALUES('Synthetic Second Historical Staff')")
+            second_staff = int(cursor.lastrowid)
+            cursor.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,status) "
+                           "VALUES(%s,%s,2,'2026-10-06','2026-10-10','completed')", (case_no, second_staff))
+            second_assignment = int(cursor.lastrowid)
+            cursor.execute("SELECT id FROM historical_order_adoption_receipts WHERE case_no=%s", (case_no,))
+            receipt = int(cursor.fetchone()['id'])
+            cursor.execute("INSERT INTO historical_order_pairing_evidence(receipt_id,caregiver_ordinal,staff_name,staff_id,resolution,"
+                           "source_start_date,source_end_date,assignment_id,issue_codes) VALUES(%s,2,'Synthetic Second Historical Staff',"
+                           "%s,'assignment_candidate','2026-10-06','2026-10-10',%s,'[]')", (receipt, second_staff, second_assignment))
+            cursor.execute('INSERT INTO payroll_case_accounts(case_no) VALUES(%s)', (case_no,))
+            cursor.execute("INSERT INTO order_service_data_locks(case_no,lifecycle_event_id,client_settlement_fingerprint,created_by) SELECT case_no,lifecycle_event_id,%s,'synthetic' FROM historical_order_adoption_receipts WHERE case_no=%s", ('e' * 64, case_no))
+            cursor.execute("UPDATE orders SET actual_start_date='2026-10-01',staff_payment_due_date='2026-12-15' WHERE case_no=%s", (case_no,))
+            if mixed_legacy_rates:
+                terms_source = case_no + ':client-terms'
+                cursor.execute(
+                    "INSERT INTO client_payment_terms_events(case_no,policy_version,client_hourly_rate_ntd,"
+                    "deposit_service_days,deposit_due_date,first_payment_due_date,expected_account_version,"
+                    "source_event_identity,idempotency_key,actor,reason) "
+                    "VALUES(%s,'historical-fixture-v1',350,0,'2026-09-29','2026-09-30',0,%s,%s,"
+                    "'synthetic','original client payment terms')",
+                    (case_no, terms_source, terms_source),
+                )
+                cursor.execute(
+                    "INSERT INTO client_payment_terms(case_no,policy_version,client_hourly_rate_ntd,"
+                    "deposit_service_days,deposit_due_date,first_payment_due_date,current_event_id) "
+                    "VALUES(%s,'historical-fixture-v1',350,0,'2026-09-29','2026-09-30',%s)",
+                    (case_no, cursor.lastrowid),
+                )
+            for staff in (first_staff, second_staff):
+                cursor.execute('INSERT INTO staff_payable_accounts(staff_id) VALUES(%s)', (staff,))
+            for index, assignment in enumerate((first_assignment, second_assignment)):
+                kind = 'citizen' if mixed_legacy_rates and index == 0 else 'subsidized_citizen'
+                cursor.execute("INSERT INTO assignment_payroll_rate_snapshots(assignment_id,policy_version,policy_kind,hourly_rate_ntd,source_identity_status) "
+                               "SELECT %s,policy_version,policy_kind,hourly_rate_ntd,'補助市民' FROM payroll_rate_policies "
+                               "WHERE policy_version='approved-rates-v1' AND policy_kind=%s", (assignment, kind))
+                assert cursor.rowcount == 1
+                if mixed_legacy_rates:
+                    adjustment = (150, 200)[index]
+                    identity = f'{case_no}:adjustment:{index}'
+                    cursor.execute('INSERT INTO payroll_adjustment_events(case_no,adjustment_identity,amount_ntd,'
+                        'source_event_identity,actor,reason,idempotency_key) VALUES(%s,%s,%s,%s,%s,%s,%s)',
+                        (case_no, identity, adjustment, identity, 'synthetic', 'original adjustment', identity))
+                    cursor.execute('INSERT INTO payroll_adjustment_allocations(adjustment_event_id,assignment_id,'
+                        'amount_ntd,allocation_ordinal) VALUES(%s,%s,%s,1)', (cursor.lastrowid, assignment, adjustment))
+        connection.commit()
+        people = ((first_staff, first_assignment), (second_staff, second_assignment))
+        repository = MySqlHistoricalServiceAccountingRepository(connection)
+        workflow = HistoricalServiceAccountingWorkflow(repository, lambda: MySqlUnitOfWork(connection))
+        if confirm_days:
+            intent = ConfirmHistoricalServiceDaysIntent(case_no, tuple(HistoricalActualServiceDaysInput(
+                f'assignment:{assignment}', staff, (3, 2)[index] if mixed_legacy_rates else 5)
+                for index, (staff, assignment) in enumerate(people)))
+            candidate = workflow.preview(intent)
+            facts = candidate.facts
+            workflow.apply(ApplyHistoricalServiceAccounting(intent, facts.lifecycle_version, facts.historical_day_revision,
+                facts.client_finance_version, facts.payroll_version, candidate.fingerprint, IdempotencyKey(case_no + ':days'),
+                ActorContext('synthetic'), 'confirmed original five-day volumes', CorrelationId(case_no + ':days')))
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s FOR UPDATE', (case_no,))
+            expected_payroll_version = int(cursor.fetchone()['aggregate_version'])
+            resulting_payroll_version = expected_payroll_version + 1
+            for index, (staff, assignment) in enumerate(people):
+                identity = f'{case_no}:original:{assignment}'
+                amount = (7350, 5800)[index] if mixed_legacy_rates else 14000
+                cursor.execute(_EVENT_INSERT_SQL, (identity, assignment, case_no, staff, 'service_pay', 'payable_to_staff',
+                    None, 'established', 0, amount, date(2026, 12, 15), 'd' * 64, expected_payroll_version,
+                    resulting_payroll_version, identity, 'synthetic', 'original payable'))
+                event = int(cursor.lastrowid)
+                cursor.execute(_PROJECTION_INSERT_SQL, (identity, assignment, case_no, staff, 'service_pay',
+                    'payable_to_staff', None, amount, date(2026, 12, 15), event, resulting_payroll_version))
+            cursor.execute('UPDATE payroll_case_accounts SET aggregate_version=%s WHERE case_no=%s AND aggregate_version=%s',
+                           (resulting_payroll_version, case_no, expected_payroll_version))
+            assert cursor.rowcount == 1
+        connection.commit()
+        return people
+    finally:
+        connection.close()
+
+
+def historical_completed_immutable_snapshot(case_no):
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            result = {}
+            cursor.execute('SELECT status,actual_start_date,actual_end_date,service_days,service_hours_per_day,'
+                           'service_start_time,service_end_time,service_end_day_offset FROM orders WHERE case_no=%s', (case_no,))
+            result['order'] = cursor.fetchone()
+            for table in ('staff_schedule', 'client_ledger_entries', 'order_lifecycle_state_events',
+                          'historical_order_adoption_receipts', 'client_obligations'):
+                cursor.execute(f'SELECT * FROM {table} WHERE case_no=%s', (case_no,))
+                result[table] = cursor.fetchall()
+            cursor.execute('SELECT r.* FROM assignment_payroll_rate_snapshots r JOIN case_staff_assignments a '
+                           'ON a.id=r.assignment_id WHERE a.case_no=%s ORDER BY r.assignment_id', (case_no,))
+            result['rates'] = cursor.fetchall()
+            cursor.execute('SELECT * FROM beclass_records WHERE bound_case_no=%s', (case_no,))
+            result['beclass'] = cursor.fetchall()
+            cursor.execute('SELECT * FROM clients WHERE case_no=%s', (case_no,))
+            result['client'] = cursor.fetchall()
+            for table in ('order_service_data_locks', 'historical_order_adoption_receipts', 'staff_schedule', 'client_ledger_entries'):
+                cursor.execute(f'SELECT * FROM {table} WHERE case_no=%s', (case_no,))
+                result[table] = cursor.fetchall()
+            cursor.execute('SELECT p.*,l.obligation_identity,l.allocated_amount_ntd,l.allocation_ordinal FROM staff_payout_events p '
+                           'JOIN staff_payout_obligation_links l ON l.payout_event_id=p.id '
+                           'JOIN staff_obligations o ON o.obligation_identity=l.obligation_identity '
+                           'WHERE o.case_no=%s ORDER BY p.id,l.allocation_ordinal', (case_no,))
+            result['payouts'] = cursor.fetchall()
+            cursor.execute('SELECT a.* FROM client_ledger_obligation_allocations a JOIN client_ledger_entries l ON l.id=a.ledger_entry_id '
+                           'WHERE l.case_no=%s ORDER BY l.id,a.allocation_ordinal', (case_no,))
+            result['client_allocations'] = cursor.fetchall()
+            cursor.execute("SELECT * FROM staff_obligation_events WHERE case_no=%s AND event_type='established' AND source_obligation_identity IS NULL ORDER BY id", (case_no,))
+            result['original_staff_events'] = cursor.fetchall()
+            return result
+    finally:
+        connection.close()
+
+
+def historical_completed_pricing_body(http_client, case_no, **changes):
+    current = http_client.get(f'/api/v1/accounting-pricing/cases/{case_no}')
+    assert current.status_code == 200, current.text
+    terms = current.json()['data']['terms']
+    terms.update(changes)
+    return {'terms': terms, 'expected_revision': current.json()['data']['revision']}
+
+
+@pytest.mark.parametrize('missing_original', [False, True])
+def test_historical_accounting_completed_pricing_exempt_people_partial_and_receipt_replay(client, missing_original):
+    case_no = 'hist-price-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no)
+    if missing_original:
+        connection = mysql_adapter.get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE staff_obligations SET status='cancelled',amount_due_ntd=0 WHERE case_no=%s AND assignment_id=%s",
+                               (case_no, people[1][1]))
+            connection.commit()
+        finally:
+            connection.close()
+    immutable = historical_completed_immutable_snapshot(case_no)
+    body = historical_completed_pricing_body(client, case_no, client={'covered': 360, 'excess': 300}, payroll={'covered': 360, 'excess': 300})
+    path = f'/api/v1/accounting-pricing/cases/{case_no}'
+    preview = post(client, path + '/preview', body, case_no + ':preview')
+    assert historical_completed_immutable_snapshot(case_no) == immutable
+    plan = preview['historical_plan']
+    assert plan['client_exempt'] is True and plan['client_updates'] == []
+    assert plan['persons'][0]['before_amount'] == 14000 and plan['persons'][0]['after_amount'] == 14400
+    expected_pending = [f'historical_pricing_original_payable_required:assignment:{people[1][1]}'] if missing_original else []
+    assert plan['pending'] == expected_pending
+    apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed per-person price correction'}
+    receipt = post(client, path + '/apply', apply, case_no + ':apply')
+    assert receipt['accounting_pending'] == expected_pending
+    assert client.get(path).json()['data']['accounting_pending'] == expected_pending
+    assert historical_completed_immutable_snapshot(case_no) == immutable
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT computed_ntd,effective_ntd FROM payroll_amount_controls WHERE case_no=%s ORDER BY obligation_identity', (case_no,))
+            assert [(row['computed_ntd'], row['effective_ntd']) for row in cursor.fetchall()] == [(14400, 14400)] * (1 if missing_original else 2)
+            cursor.execute('SELECT COUNT(*) n FROM staff_obligation_events WHERE case_no=%s', (case_no,))
+            count = cursor.fetchone()['n']
+            # An acknowledged command must replay before parsing later broken source data.
+            cursor.execute('UPDATE case_pricing_events SET pricing_json=%s WHERE case_no=%s AND resulting_revision=%s',
+                           ('{}', case_no, receipt['revision']))
+        connection.commit()
+        assert post(client, path + '/apply', apply, case_no + ':apply') == receipt
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) n FROM staff_obligation_events WHERE case_no=%s', (case_no,))
+            assert cursor.fetchone()['n'] == count
+    finally:
+        connection.close()
+
+
+def test_historical_accounting_completed_pricing_stale_source_and_atomic_owner_failure(client, monkeypatch):
+    from infrastructure.mysql import payroll_amount_correction_repository as payroll_writer
+    case_no = 'hist-atomic-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no)
+    path = f'/api/v1/accounting-pricing/cases/{case_no}'
+    body = historical_completed_pricing_body(client, case_no, client={'covered': 360, 'excess': 300}, payroll={'covered': 360, 'excess': 300})
+    preview = post(client, path + '/preview', body, case_no + ':preview')
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('UPDATE staff_obligations SET status=%s,amount_due_ntd=0 WHERE case_no=%s AND assignment_id=%s', ('settled', case_no, people[0][1]))
+        connection.commit()
+        apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'atomic correction'}
+        response = client.post(path + '/apply', json=apply, headers={'Idempotency-Key': case_no + ':stale'})
+        assert response.status_code == 409 and response.json()['detail']['error']['code'] == 'case_pricing_preview_stale'
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE staff_obligations SET status='open',amount_due_ntd=14000 WHERE case_no=%s", (case_no,))
+        connection.commit()
+        preview = post(client, path + '/preview', body, case_no + ':fresh')
+        apply['preview_fingerprint'] = preview['preview_fingerprint']
+        original = payroll_writer.persist_historical_source_amounts
+        def fail_after_owner_write(*args, **kwargs):
+            original(*args, **kwargs)
+            raise ValueError('synthetic_second_owner_failure')
+        monkeypatch.setattr(payroll_writer, 'persist_historical_source_amounts', fail_after_owner_write)
+        response = client.post(path + '/apply', json=apply, headers={'Idempotency-Key': case_no + ':retry'})
+        assert response.status_code == 422, response.text
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT pricing_revision FROM orders WHERE case_no=%s', (case_no,))
+            assert cursor.fetchone()['pricing_revision'] == body['expected_revision']
+            for table in ('payroll_amount_controls', 'accounting_pricing_receipts'):
+                if table == 'accounting_pricing_receipts':
+                    cursor.execute('SELECT COUNT(*) n FROM accounting_pricing_receipts WHERE idempotency_key=%s', (case_no + ':retry',))
+                else:
+                    cursor.execute(f'SELECT COUNT(*) n FROM {table} WHERE case_no=%s', (case_no,))
+                assert cursor.fetchone()['n'] == 0
+        connection.rollback()
+        monkeypatch.setattr(payroll_writer, 'persist_historical_source_amounts', original)
+        assert post(client, path + '/apply', apply, case_no + ':retry')['revision'] == body['expected_revision'] + 1
+    finally:
+        connection.close()
+
+
+def test_historical_accounting_completed_service_fact_after_pricing_shares_one_case_cap(client):
+    case_no = 'hist-service-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no)
+    immutable = historical_completed_immutable_snapshot(case_no)
+    path = f'/api/v1/accounting-pricing/cases/{case_no}'
+    body = historical_completed_pricing_body(client, case_no, subsidy_hours=60,
+        client={'covered': 360, 'excess': 300}, payroll={'covered': 360, 'excess': 300})
+    preview = post(client, path + '/preview', body, case_no + ':prices-preview')
+    assert [person['after_amount'] for person in preview['historical_plan']['persons']] == [14400, 13200]
+    post(client, path + '/apply', {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed case rates'}, case_no + ':prices')
+    service_path = f'/api/v1/orders/{case_no}/historical-service-accounting/attribution'
+    service_body = {'caregivers': [{'staff_id': staff, 'actual_service_days': 5} for staff, _ in people],
+        'evidence': 'confirmed first caregiver six hours each day', 'service_facts': [{
+            'assignment_identity': f'assignment:{people[0][1]}', 'staff_id': people[0][0],
+            'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-05',
+            'service_start_time': '09:00:00', 'service_end_time': '15:00:00',
+            'service_hours_per_day': '6', 'service_end_day_offset': 0}]}
+    service_preview = post(client, service_path + '/preview', service_body, case_no + ':hours-preview')
+    assert historical_completed_immutable_snapshot(case_no) == immutable
+    service_apply = {**service_body, 'preview_fingerprint': service_preview['preview_fingerprint'], 'reason': 'confirmed historical actual hours'}
+    receipt = post(client, service_path + '/apply', service_apply, case_no + ':hours')
+    assert post(client, service_path + '/apply', service_apply, case_no + ':hours')['replayed'] is True
+    assert receipt['accounting_pending']
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT o.assignment_id,c.computed_ntd FROM staff_obligations o JOIN payroll_amount_controls c '
+                           'ON c.obligation_identity=o.obligation_identity WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
+            assert [(row['assignment_id'], row['computed_ntd']) for row in cursor.fetchall()] == [(people[0][1], 10800), (people[1][1], 13800)]
+            cursor.execute('SELECT assignment_id,actual_service_hours FROM historical_service_day_items WHERE event_id='
+                           '(SELECT current_event_id FROM historical_service_day_projections WHERE case_no=%s) ORDER BY assignment_id', (case_no,))
+            assert [Decimal(str(row['actual_service_hours'])) for row in cursor.fetchall()] == [Decimal(30), Decimal(40)]
+    finally:
+        connection.close()
+    assert historical_completed_immutable_snapshot(case_no) == immutable
+
+
+def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_case_apply(client):
+    from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+    from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionWorkflow
+    case_no = 'hist-legacy-mixed-' + uuid4().hex[:10]
+    people = seed_historical_completed_pricing_people(case_no, mixed_legacy_rates=True)
+    first_identity = f'{case_no}:original:{people[0][1]}'
+    second_identity = f'{case_no}:original:{people[1][1]}'
+    original_amounts = [(first_identity, people[0][1], 7350), (second_identity, people[1][1], 5800)]
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO payroll_amount_controls(obligation_identity,case_no,amount_mode,"
+                "computed_ntd,effective_ntd,settlement_base_ntd) VALUES(%s,%s,'automatic',5800,5800,5800)",
+                (second_identity, case_no))
+            cursor.execute('SELECT * FROM payroll_amount_controls WHERE obligation_identity=%s', (second_identity,))
+            second_control = cursor.fetchone()
+            cursor.execute('SELECT * FROM staff_obligations WHERE obligation_identity=%s', (second_identity,))
+            second_obligation = cursor.fetchone()
+            cursor.execute('SELECT current_event_id FROM historical_service_day_projections WHERE case_no=%s', (case_no,))
+            original_day_event = cursor.fetchone()['current_event_id']
+            cursor.execute('SELECT * FROM historical_service_day_items WHERE event_id=%s ORDER BY item_ordinal', (original_day_event,))
+            original_items = cursor.fetchall()
+            cursor.execute('SELECT COUNT(*) n FROM case_payroll_rate_policy_snapshots WHERE case_no=%s', (case_no,))
+            assert cursor.fetchone()['n'] == 0
+        connection.commit()
+        immutable = historical_completed_immutable_snapshot(case_no)
+        pricing_path = f'/api/v1/accounting-pricing/cases/{case_no}'
+        current = client.get(pricing_path).json()['data']
+        assert current['source'] == 'legacy'
+        assert current['impact']['staff_total_amount'] == 13150
+        service_path = f'/api/v1/orders/{case_no}/historical-service-accounting/attribution'
+        body = {'caregivers': [{'staff_id': people[0][0], 'actual_service_days': 3}],
+            'evidence': 'confirmed first caregiver three ten-hour days', 'service_facts': [{
+                'assignment_identity': f'assignment:{people[0][1]}', 'staff_id': people[0][0],
+                'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-03',
+                'service_start_time': '09:00:00', 'service_end_time': '19:00:00',
+                'service_hours_per_day': '10', 'service_end_day_offset': 0}]}
+        preview = post(client, service_path + '/preview', body, case_no + ':service-preview')
+        assert [(person['previous_entitlement_ntd'], person['entitlement_ntd'], person['delta_ntd'])
+            for person in preview['caregivers']] == [(7350, 9150, 1800), (5800, 5800, 0)]
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+        apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed first caregiver hours'}
+        post(client, service_path + '/apply', apply, case_no + ':service-apply')
+        assert post(client, service_path + '/apply', apply, case_no + ':service-apply')['replayed'] is True
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT * FROM payroll_amount_controls WHERE obligation_identity=%s', (second_identity,))
+            assert cursor.fetchone() == second_control
+            cursor.execute('SELECT * FROM staff_obligations WHERE obligation_identity=%s', (second_identity,))
+            assert cursor.fetchone() == second_obligation
+            cursor.execute('SELECT * FROM historical_service_day_items WHERE event_id=%s ORDER BY item_ordinal', (original_day_event,))
+            assert cursor.fetchall() == original_items
+            cursor.execute('SELECT i.assignment_id,i.actual_service_days,i.actual_service_hours FROM historical_service_day_items i '
+                'JOIN historical_service_day_projections p ON p.current_event_id=i.event_id WHERE p.case_no=%s ORDER BY i.item_ordinal', (case_no,))
+            assert [(row['assignment_id'], row['actual_service_days'], Decimal(str(row['actual_service_hours'])))
+                for row in cursor.fetchall()] == [(people[0][1], 3, Decimal(30)), (people[1][1], 2, Decimal(16))]
+        connection.rollback()
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+        assert client.get(pricing_path).json()['data']['impact']['staff_total_amount'] == 14950
+        birth_repository = MySqlBeClassCorrectionRepository(connection)
+        birth_workflow = BeClassCorrectionWorkflow(birth_repository, lambda: MySqlUnitOfWork(connection),
+            MySqlBeClassFinancialSync(connection))
+        changes = {'multi_birth_count': '雙胞胎'}
+        birth = birth_workflow.preview(case_no, changes, ExpectedVersion(0))
+        blocker = 'historical_pricing_birth_bound_policy_required'
+        assert blocker in birth.historical_pricing.impact.pending
+        assert all(person.after_amount is None for person in birth.historical_pricing.impact.persons)
+        birth_workflow.apply(case_no, changes, ExpectedVersion(0), birth.preview_fingerprint,
+            IdempotencyKey(case_no + ':birth'), ActorContext('synthetic'), 'confirmed historical twins',
+            CorrelationId(case_no + ':birth'))
+        assert birth_repository.load(case_no, for_update=False)['corrections']['multi_birth_count'] == '雙胞胎'
+        connection.rollback()
+        current = client.get(pricing_path).json()['data']
+        assert current['source'] == 'legacy'
+        assert current['impact']['staff_total_amount'] == 14950
+        assert blocker in current['accounting_pending']
+        with connection.cursor() as cursor:
+            cursor.execute(f'SELECT * FROM ({CASE_PRICING_FACTS_SQL}) pricing WHERE case_no=%s', (case_no,))
+            assert cursor.fetchone() is None
+            cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.amount_due_ntd,c.computed_ntd,c.effective_ntd '
+                'FROM staff_obligations o LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+                'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
+            rows = cursor.fetchall()
+            assert [(row['obligation_identity'], row['assignment_id'], row['amount_due_ntd'])
+                for row in rows] == original_amounts
+            assert [(row['obligation_identity'], row['computed_ntd'], row['effective_ntd']) for row in rows] == [
+                (first_identity, 9150, 9150), (second_identity, 5800, 5800)]
+        connection.rollback()
+        candidate = historical_completed_pricing_body(client, case_no, payroll={'covered': 350, 'excess': 350})
+        explicit = post(client, pricing_path + '/preview', candidate, case_no + ':price-preview')
+        assert explicit['before']['staff_total_amount'] == 14950
+        assert explicit['after']['staff_total_amount'] == 16450
+        assert [person['after_amount'] for person in explicit['historical_plan']['persons']] == [10650, 5800]
+        assert blocker not in explicit['historical_plan']['pending']
+        post(client, pricing_path + '/apply', {**candidate, 'preview_fingerprint': explicit['preview_fingerprint'],
+            'reason': 'explicitly apply one case-wide candidate rate'}, case_no + ':price-apply')
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.amount_due_ntd,c.computed_ntd,c.effective_ntd '
+                'FROM staff_obligations o LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+                'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
+            rows = cursor.fetchall()
+            assert [(row['obligation_identity'], row['assignment_id'], row['amount_due_ntd'])
+                for row in rows] == original_amounts
+            assert [(row['obligation_identity'], row['computed_ntd'], row['effective_ntd']) for row in rows] == [
+                (first_identity, 10650, 10650), (second_identity, 5800, 5800)]
+        connection.rollback()
+        current = client.get(pricing_path).json()['data']
+        assert current['impact']['staff_total_amount'] == 16450
+        assert blocker not in current['accounting_pending']
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize('service_first', [False, True])
+@pytest.mark.parametrize('later_day_event', [False, True])
+def test_historical_accounting_pending_client_difference_resumes_across_pricing_and_service(client, service_first, later_day_event):
+    case_no = 'hist-carry-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT e.id,e.pricing_json FROM case_pricing_events e JOIN orders o '
+                'ON o.pricing_override_event_id=e.id WHERE o.case_no=%s', (case_no,))
+            event = cursor.fetchone()
+            initial = json.loads(event['pricing_json'])
+            initial.update(subsidy_hours=0)
+            cursor.execute('UPDATE case_pricing_events SET pricing_json=%s WHERE id=%s', (json.dumps(initial), event['id']))
+            for suffix, amount in (('original', 24000), ('ambiguous', 24000)):
+                identity = case_no + ':' + suffix
+                _historical_original_obligation(cursor, case_no, identity, amount=amount,
+                                               original_amount=amount, obligation_type='first')
+        connection.commit()
+        path = f'/api/v1/accounting-pricing/cases/{case_no}'
+        service_path = f'/api/v1/orders/{case_no}/historical-service-accounting/attribution'
+        def change_price(key):
+            body = historical_completed_pricing_body(client, case_no, client={'covered': 350, 'excess': 400})
+            preview = post(client, path + '/preview', body, key + ':preview')
+            receipt = post(client, path + '/apply', {**body,
+                'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed rate evidence'}, key)
+            assert 'historical_pricing_original_installments_ambiguous' in receipt['accounting_pending']
+            return preview
+        def change_service():
+            body = {'caregivers': [{'staff_id': staff, 'actual_service_days': 5} for staff, _ in people],
+                'evidence': 'confirmed first caregiver six hours daily', 'service_facts': [{
+                    'assignment_identity': f'assignment:{people[0][1]}', 'staff_id': people[0][0],
+                    'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-05',
+                    'service_start_time': '09:00:00', 'service_end_time': '15:00:00',
+                    'service_hours_per_day': '6', 'service_end_day_offset': 0}]}
+            preview = post(client, service_path + '/preview', body, case_no + ':service-preview')
+            receipt = post(client, service_path + '/apply', {**body,
+                'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed service evidence'}, case_no + ':service')
+            assert 'historical_pricing_original_installments_ambiguous' in receipt['accounting_pending']
+        if service_first:
+            change_service()
+            change_price(case_no + ':price')
+        else:
+            change_price(case_no + ':price')
+            change_service()
+        if later_day_event:
+            day_body = {'caregivers': [{'staff_id': staff, 'actual_service_days': 5} for staff, _ in people],
+                        'evidence': 'reconfirmed original per-person day counts'}
+            day_preview = post(client, service_path + '/preview', day_body, case_no + ':days-preview')
+            post(client, service_path + '/apply', {**day_body,
+                'preview_fingerprint': day_preview['preview_fingerprint'], 'reason': 'confirmed day counts'}, case_no + ':later-days')
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT e.result_snapshot FROM historical_service_day_projections p '
+                    'JOIN historical_service_day_events e ON e.id=p.current_event_id WHERE p.case_no=%s', (case_no,))
+                assert 'financial_correction' not in json.loads(cursor.fetchone()['result_snapshot'])
+            connection.rollback()
+        noop = change_price(case_no + ':noop')
+        assert noop['historical_plan']['client_delta'] == 4000
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE client_obligations SET status='cancelled',amount_due_ntd=0 WHERE obligation_identity=%s", (case_no + ':ambiguous',))
+        connection.commit()
+        body = historical_completed_pricing_body(client, case_no)
+        preview = post(client, path + '/preview', body, case_no + ':resolved-preview')
+        assert preview['historical_plan']['client_delta'] == 4000
+        apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed original installment evidence'}
+        receipt = post(client, path + '/apply', apply, case_no + ':resolved')
+        assert receipt['accounting_pending'] == []
+        assert post(client, path + '/apply', apply, case_no + ':resolved') == receipt
+        assert client.get(path).json()['data']['accounting_pending'] == []
+        resolved_body = historical_completed_pricing_body(client, case_no)
+        resolved_preview = post(client, path + '/preview', resolved_body, case_no + ':resolved-noop')
+        assert resolved_preview['historical_plan']['client_delta'] == 0
+        assert resolved_preview['historical_plan']['pending'] == []
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT computed_ntd FROM client_finance_amount_controls WHERE obligation_identity=%s', (case_no + ':original',))
+            assert cursor.fetchone()['computed_ntd'] == 28000
+            cursor.execute("SELECT after_amount_ntd FROM client_obligation_events WHERE obligation_identity=%s AND event_type='established'", (case_no + ':original',))
+            assert cursor.fetchone()['after_amount_ntd'] == 24000
+    finally:
+        connection.close()
+def test_historical_accounting_partial_service_facts_insert_adjusted_immutable_items(client: TestClient) -> None:
+    from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
+
+    case_no = 'hist-partial-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO staff(name) VALUES('Synthetic Unconfirmed Historical Staff')")
+            unknown_staff = int(cursor.lastrowid)
+            cursor.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,status) "
+                           "VALUES(%s,%s,3,'2026-10-01','2026-10-10','completed')", (case_no, unknown_staff))
+            unknown_assignment = int(cursor.lastrowid)
+            cursor.execute("INSERT INTO historical_order_pairing_evidence(receipt_id,caregiver_ordinal,staff_name,staff_id,resolution,"
+                           "source_start_date,source_end_date,assignment_id,issue_codes) SELECT id,3,'Synthetic Unconfirmed Historical Staff',"
+                           "%s,'assignment_candidate','2026-10-01','2026-10-10',%s,'[]' FROM historical_order_adoption_receipts WHERE case_no=%s",
+                           (unknown_staff, unknown_assignment, case_no))
+            cursor.execute('SELECT current_event_id FROM historical_service_day_projections WHERE case_no=%s', (case_no,))
+            baseline_event = int(cursor.fetchone()['current_event_id'])
+            cursor.execute('SELECT * FROM historical_service_day_items WHERE event_id=%s ORDER BY item_ordinal', (baseline_event,))
+            baseline_items = cursor.fetchall()
+            cursor.execute('SELECT * FROM historical_service_day_events WHERE id=%s', (baseline_event,))
+            baseline_record = cursor.fetchone()
+        connection.commit()
+        immutable = historical_completed_immutable_snapshot(case_no)
+        path = f'/api/v1/orders/{case_no}/historical-service-accounting/attribution'
+        body = {'caregivers': [{'staff_id': people[0][0], 'actual_service_days': 5}],
+            'evidence': 'confirmed first caregiver hours, third caregiver volume unconfirmed', 'service_facts': [{
+                'assignment_identity': f'assignment:{people[0][1]}', 'staff_id': people[0][0],
+                'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-05',
+                'service_start_time': '09:00:00', 'service_end_time': '15:00:00',
+                'service_hours_per_day': '6', 'service_end_day_offset': 0}]}
+        preview = post(client, path + '/preview', body, case_no + ':preview')
+        pending = f'historical_completed_service_volume_unresolved:assignment:{unknown_assignment}'
+        assert pending in preview['accounting_pending']
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+        apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed partial service evidence'}
+        receipt = post(client, path + '/apply', apply, case_no + ':apply')
+        assert pending in receipt['accounting_pending']
+        assert post(client, path + '/apply', apply, case_no + ':apply')['replayed'] is True
+        facts = MySqlHistoricalServiceAccountingRepository(connection).load(case_no, for_update=False)
+        unknown = next(item for item in facts.assignments if item.staff_id == unknown_staff)
+        assert unknown.actual_service_days is None and unknown.actual_service_hours is None
+        assert facts.service_baseline is not None
+        assert facts.service_baseline.total_actual_service_hours == Decimal(80)
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT * FROM historical_service_day_items WHERE event_id=%s ORDER BY item_ordinal', (baseline_event,))
+            assert cursor.fetchall() == baseline_items
+            cursor.execute('SELECT * FROM historical_service_day_events WHERE id=%s', (baseline_event,))
+            assert cursor.fetchone() == baseline_record
+            cursor.execute('SELECT assignment_id,actual_service_days,actual_service_hours FROM historical_service_day_items '
+                           'WHERE event_id=%s ORDER BY item_ordinal', (facts.service_baseline.event_id,))
+            items = cursor.fetchall()
+            assert [(row['assignment_id'], row['actual_service_days'], Decimal(str(row['actual_service_hours'])))
+                    for row in items] == [(people[0][1], 5, Decimal(30)), (people[1][1], 5, Decimal(40))]
+        connection.rollback()
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+    finally:
+        connection.close()
+
+
+def test_historical_accounting_saves_initial_partial_service_facts_without_inventing_totals(client: TestClient) -> None:
+    from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
+
+    case_no = 'hist-partial-initial-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no, confirm_days=False)
+    immutable = historical_completed_immutable_snapshot(case_no)
+    path = f'/api/v1/orders/{case_no}/historical-service-accounting/attribution'
+    staff_id, assignment_id = people[0]
+    period = {
+        'assignment_identity': f'assignment:{assignment_id}', 'staff_id': staff_id,
+        'actual_start_date': '2026-10-01', 'actual_end_date': '2026-10-05',
+        'service_start_time': '09:00:00', 'service_end_time': '15:00:00',
+        'service_hours_per_day': '6', 'service_end_day_offset': 0,
+    }
+    body = {'caregivers': [], 'evidence': 'confirmed first caregiver period', 'service_facts': [period]}
+    preview = post(client, path + '/preview', body, case_no + ':preview')
+    other = {**body, 'service_facts': [{**period, 'actual_end_date': '2026-10-04'}]}
+    other_preview = post(client, path + '/preview', other, case_no + ':other-preview')
+    assert preview['client_delta_ntd'] is None
+    apply = {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'confirmed service period'}
+    key = case_no + ':apply'
+    receipt = post(client, path + '/apply', apply, key)
+    assert receipt['resulting_historical_day_revision'] == 0
+    assert receipt['total_actual_service_days'] is None
+    assert receipt['client_obligation_amount_ntd'] is None and receipt['staff_obligation_amount_ntd'] is None
+    assert post(client, path + '/apply', apply, key)['replayed'] is True
+    stale = client.post(path + '/apply', json={
+        **other, 'preview_fingerprint': other_preview['preview_fingerprint'], 'reason': 'stale service period',
+    }, headers={'Idempotency-Key': case_no + ':stale', 'X-Correlation-ID': case_no + ':stale'})
+    assert stale.status_code == 409
+    assert stale.json()['detail']['error']['code'] == 'historical_attribution_preview_stale'
+    connection = mysql_adapter.get_connection()
+    try:
+        facts = MySqlHistoricalServiceAccountingRepository(connection).load(case_no, for_update=False)
+        assert facts.service_baseline is None
+        assert facts.accounting_pending == tuple(receipt['accounting_pending'])
+        by_staff = {item.staff_id: item for item in facts.assignments}
+        selected, untouched = by_staff[staff_id], by_staff[people[1][0]]
+        assert selected.service_fact is not None
+        assert selected.service_fact.actual_start_date == date(2026, 10, 1)
+        assert selected.service_fact.actual_end_date == date(2026, 10, 5)
+        assert selected.service_fact.service_hours_per_day == Decimal('6')
+        assert untouched.service_fact is None
+        assert all(item.actual_service_days is None and item.actual_service_hours is None for item in facts.assignments)
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) AS n FROM historical_service_day_events WHERE case_no=%s', (case_no,))
+            assert cursor.fetchone()['n'] == 0
+            cursor.execute('SELECT COUNT(*) AS n FROM admin_command_receipts WHERE idempotency_key=%s', (key,))
+            assert cursor.fetchone()['n'] == 1
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+    finally:
+        connection.close()
+
+
+def test_historical_accounting_completed_pricing_settled_subsidy_is_pending_without_blocking_payroll(client):
+    case_no = 'hist-subsidy-' + uuid4().hex[:12]
+    seed_historical_completed_pricing_people(case_no)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,direction,bank_references,warnings,raw_payload) "
+                           "VALUES(%s,'taishin','incoming','{}','[]','{}')", (uuid4().hex * 2,))
+            cursor.execute("INSERT INTO government_subsidy_period_entries(period_unit,period_year,period_index,period_start,period_end,"
+                           "finance_import_row_id,amount_ntd,paid_on,idempotency_key,actor) "
+                           "VALUES('month',2026,10,'2026-10-01','2026-11-01',%s,28000,'2026-12-15',%s,'synthetic')",
+                           (cursor.lastrowid, case_no + ':subsidy'))
+            period = int(cursor.lastrowid)
+            cursor.execute("INSERT INTO government_subsidy_period_members(receipt_id,case_no,service_end_date,amount_ntd) "
+                           "VALUES(%s,%s,'2026-10-20',28000)", (period, case_no))
+        connection.commit()
+        path = f'/api/v1/accounting-pricing/cases/{case_no}'
+        body = historical_completed_pricing_body(client, case_no,
+            client={'covered': 360, 'excess': 300}, payroll={'covered': 360, 'excess': 300})
+        preview = post(client, path + '/preview', body, case_no + ':preview')
+        assert preview['historical_plan']['pending'] == ['case_pricing_settled_subsidy_correction_required']
+        assert len(preview['historical_plan']['staff_updates']) == 2
+        receipt = post(client, path + '/apply', {**body, 'preview_fingerprint': preview['preview_fingerprint'], 'reason': 'save confirmed payroll and pending subsidy'}, case_no + ':apply')
+        assert receipt['accounting_pending'] == ['case_pricing_settled_subsidy_correction_required']
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT amount_ntd,paid_on FROM government_subsidy_period_entries WHERE id=%s', (period,))
+            assert cursor.fetchone() == {'amount_ntd': 28000, 'paid_on': date(2026, 12, 15)}
+            cursor.execute('SELECT computed_ntd FROM payroll_amount_controls WHERE case_no=%s', (case_no,))
+            assert [row['computed_ntd'] for row in cursor.fetchall()] == [14400, 14400]
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(('explicit_manual', 'bound_policy'), [(False, True), (True, True), (True, False)])
+def test_historical_accounting_completed_birth_forward_reverse_uses_bound_policy_and_preserves_sources(client, explicit_manual, bound_policy):
+    from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+    from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionWorkflow
+    revision = client.get('/api/v1/accounting-pricing').json()['data']['revision']
+    bound = post(client, '/api/v1/accounting-pricing/policies', {'policy': policy(), 'expected_revision': revision}, 'hist-birth-policy-' + uuid4().hex)['revision']
+    case_no = 'hist-birth-' + uuid4().hex[:12]
+    people = seed_historical_completed_pricing_people(case_no)
+    original_identities = tuple(f'{case_no}:original:{assignment}' for _, assignment in people)
+    paid_staff, paid_assignment = people[0]
+    paid_identity = original_identities[0]
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('UPDATE orders SET pricing_policy_id=%s WHERE case_no=%s', (bound if bound_policy else None, case_no))
+            if not explicit_manual:
+                cursor.execute('UPDATE orders SET pricing_override_event_id=NULL WHERE case_no=%s', (case_no,))
+            cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,debit,direction,"
+                           "currency,classification_type,bank_references,warnings,raw_payload) "
+                           "VALUES(%s,'taishin','2026-11-15',14000,'outgoing','TWD','staff_payout','{}','[]','{}')", (uuid4().hex * 2,))
+            bank_id = cursor.lastrowid
+            cursor.execute("INSERT INTO staff_payout_events(staff_id,finance_import_row_id,event_type,amount_ntd,occurred_on,bank_account_identity_hash,"
+                           "reconciliation_reference,idempotency_key,actor,reason) VALUES(%s,%s,'payout',14000,'2026-11-15',%s,%s,%s,'synthetic','original immutable payment')",
+                           (paid_staff, bank_id, 'a' * 64, case_no + ':paid', case_no + ':paid'))
+            cursor.execute('INSERT INTO staff_payout_obligation_links(payout_event_id,obligation_identity,allocated_amount_ntd,allocation_ordinal) VALUES(%s,%s,14000,1)',
+                           (cursor.lastrowid, paid_identity))
+            from infrastructure.mysql.staff_payout_repository import _projection_rows, _upsert_projection
+            cursor.execute('SELECT aggregate_version FROM staff_payable_accounts WHERE staff_id=%s FOR UPDATE', (paid_staff,))
+            payable_version = int(cursor.fetchone()['aggregate_version']) + 1
+            _upsert_projection(cursor, _projection_rows(cursor, (paid_identity,))[0], payable_version)
+            cursor.execute('UPDATE staff_payable_accounts SET aggregate_version=%s WHERE staff_id=%s',
+                           (payable_version, paid_staff))
+            cursor.execute('UPDATE staff_obligations SET payout_history_exists=1 WHERE obligation_identity=%s',
+                           (paid_identity,))
+            cursor.execute("INSERT INTO client_ledger_entries(case_no,entry_type,amount_ntd,occurred_on,reconciliation_reference,idempotency_key,actor,reason) "
+                           "VALUES(%s,'receipt',1000,'2026-10-01',%s,%s,'synthetic','original unallocated receipt')", (case_no, case_no + ':cash', case_no + ':cash'))
+        connection.commit()
+        immutable = historical_completed_immutable_snapshot(case_no)
+        repository = MySqlBeClassCorrectionRepository(connection)
+        workflow = BeClassCorrectionWorkflow(repository, lambda: MySqlUnitOfWork(connection), MySqlBeClassFinancialSync(connection))
+        for version, birth_count, amount in ((0, '雙胞胎', 14000 if explicit_manual else 18000), (1, '單胞胎', 14000)):
+            changes = {'multi_birth_count': birth_count}
+            preview = workflow.preview(case_no, changes, ExpectedVersion(version))
+            assert [person.after_amount for person in preview.historical_pricing.impact.persons] == [amount, amount]
+            assert historical_completed_immutable_snapshot(case_no) == immutable
+            key = IdempotencyKey(case_no + ':birth:' + str(version))
+            receipt = workflow.apply(case_no, changes, ExpectedVersion(version), preview.preview_fingerprint, key,
+                ActorContext('synthetic'), 'confirmed historical birth count', CorrelationId(key.value))
+            replay = workflow.apply(case_no, changes, ExpectedVersion(version), preview.preview_fingerprint, key,
+                ActorContext('synthetic'), 'confirmed historical birth count', CorrelationId(key.value))
+            assert replay.replayed is True and replay.resulting_version == receipt.resulting_version
+            assert repository.load(case_no, for_update=False)['corrections']['multi_birth_count'] == birth_count
+            connection.rollback()
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT o.obligation_identity,COALESCE(c.computed_ntd,e.after_amount_ntd) computed_ntd,'
+                    'COALESCE(c.effective_ntd,e.after_amount_ntd) effective_ntd FROM staff_obligations o '
+                    'JOIN staff_obligation_events e ON e.id=o.current_event_id '
+                    'LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+                    'WHERE o.case_no=%s AND o.obligation_identity IN (%s,%s)', (case_no, *original_identities))
+                assert {row['obligation_identity']: (row['computed_ntd'], row['effective_ntd'])
+                        for row in cursor.fetchall()} == dict.fromkeys(original_identities, (amount, amount))
+                cursor.execute(
+                    'SELECT obligation_amount_ntd,net_paid_ntd,balance_ntd FROM staff_payable_projections '
+                    'WHERE obligation_identity=%s', (paid_identity,),
+                )
+                assert cursor.fetchone() == {'obligation_amount_ntd': 14000, 'net_paid_ntd': 14000, 'balance_ntd': 0}
+                cursor.execute(
+                    'SELECT e.source_obligation_identity,e.staff_id,e.assignment_id,e.event_type,e.direction,'
+                    'e.before_amount_ntd,e.after_amount_ntd,o.amount_due_ntd '
+                    'FROM staff_obligation_events e LEFT JOIN staff_obligations o '
+                    'ON o.current_event_id=e.id AND o.obligation_identity=e.obligation_identity '
+                    'AND o.case_no=e.case_no AND o.staff_id=e.staff_id AND o.assignment_id=e.assignment_id '
+                    'AND o.source_obligation_identity=e.source_obligation_identity '
+                    'AND o.obligation_kind=e.obligation_kind AND o.direction=e.direction '
+                    'WHERE e.case_no=%s AND e.obligation_identity NOT IN (%s,%s) ORDER BY e.id',
+                    (case_no, *original_identities),
+                )
+                corrections = [
+                    (row['source_obligation_identity'], row['staff_id'], row['assignment_id'], row['event_type'],
+                     row['direction'], row['before_amount_ntd'], row['after_amount_ntd'], row['amount_due_ntd'])
+                    for row in cursor.fetchall()
+                ]
+                expected_corrections = []
+                if not explicit_manual:
+                    expected_corrections.append((paid_identity, paid_staff, paid_assignment, 'adjustment', 'payable_to_staff', 0, 4000, 4000))
+                    if version == 1:
+                        expected_corrections.append((paid_identity, paid_staff, paid_assignment, 'reversal', 'receivable_from_staff', 0, 4000, 4000))
+                assert corrections == expected_corrections
+            connection.rollback()
+            current = client.get(f'/api/v1/accounting-pricing/cases/{case_no}').json()['data']
+            assert current['source'] == ('manual' if explicit_manual else 'policy')
+            assert current['impact']['staff_total_amount'] == amount * 2
+            assert historical_completed_immutable_snapshot(case_no) == immutable
     finally:
         connection.close()

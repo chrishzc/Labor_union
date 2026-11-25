@@ -1,4 +1,4 @@
-"""Cross-owner financial synchronization for a pre-service BeClass rate correction."""
+"""Cross-owner financial synchronization for BeClass birth-count corrections."""
 
 from __future__ import annotations
 
@@ -26,8 +26,13 @@ from infrastructure.mysql.order_terms_read_model import (
     select_scheduling_aggregate,
 )
 from infrastructure.mysql.payroll_terms_writer import persist_payroll_terms_impact
+from infrastructure.mysql.pricing_configuration_repository import (
+    apply_historical_birth_correction,
+    preview_historical_birth_correction,
+)
 from shared_kernel.fingerprints import fingerprint_payload
-from shared_kernel.identities import IdempotencyKey
+from shared_kernel.identities import ActorContext, IdempotencyKey
+from subsystems.client_finance.pricing_configuration import HistoricalBirthCorrectionPreview
 from subsystems.orders.terms_workflow import (
     ClientFinanceImpactPersistenceCommand,
     PayrollImpactPersistenceCommand,
@@ -38,6 +43,38 @@ from subsystems.payroll.terms_impact import build_payroll_rate_correction_impact
 class MySqlBeClassFinancialSync:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def preview_historical(
+        self,
+        *,
+        case_no: str,
+        before_birth_count: str | None,
+        after_birth_count: str,
+        for_update: bool,
+    ) -> HistoricalBirthCorrectionPreview:
+        return preview_historical_birth_correction(
+            self._connection,
+            case_no=case_no,
+            before_birth_count=before_birth_count,
+            after_birth_count=after_birth_count,
+            for_update=for_update,
+        )
+
+    def apply_historical(
+        self,
+        *,
+        preview: HistoricalBirthCorrectionPreview,
+        actor: ActorContext,
+        reason: str,
+        idempotency_key: IdempotencyKey,
+    ) -> None:
+        apply_historical_birth_correction(
+            self._connection,
+            preview=preview,
+            actor=actor.actor_id,
+            reason=reason,
+            idempotency_key=_child_key(idempotency_key, "historical-birth-count").value,
+        )
 
     def apply(
         self,

@@ -28,6 +28,12 @@
   - `db/schema_parts/1046_client_zero_obligation_establishment.sql` — legacy schema history for zero baseline obligations.
   - `db/migration_releases/labor_union_2026_09_01_historical_service_accounting_v1.json`
 
+## 歷史服務完成後更正
+
+既有歷史服務歸屬 Query／Preview／Apply 接受按已採納指派的實際起訖、時段及每日時數。已有天數基準的更正保存於歷史天數事件的 `result_snapshot.service_facts`，已知的逐人工時保存於既有 day items；不建立逐日班表、不改原完工事件或訂單狀態。未送出的指派沿用已採用的各人資料，天數不由日期跨度推定。服務資料的新例外只適用歷史服務完成，既有天數、樓層費與服務歸屬入口保留。可確認的帳務差額交原 owner，待核對與更正在同一外層交易保存。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
+
+部分指派歸屬未知但已有歷史天數事件時，保留原比較基準與既有 items，只保存可確認的服務事實，未知天數與工時不補零。初始多人案件沒有天數事件時，沿現有單次命令機制保存可確認的指派事實：`historical_completed_service_facts/v1` 以案件命令 claim 與採納收據身分綁定，在同一交易保存待核對及正式操作收據，不建假天數事件。Query 讀回同一次採納最新更正；Preview 綁其版本，避免舊預覽覆寫。回執的整案比較欄位維持 null，既有天數 revision 不前進。已有正式天數基準後，後續更正沿既有 day event／items；不新增 migration。
+
 ## Dependencies
 - outbound: `client-finance/historical-service-accounting` — 計算客戶端比較金額。
 - outbound: `payroll/historical-service-accounting` — 計算逐指派比較金額。

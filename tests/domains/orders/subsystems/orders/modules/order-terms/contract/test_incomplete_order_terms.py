@@ -12,6 +12,7 @@ from api.dependencies.order_terms import OrderTermsApplication
 from api.routes import client_registry, order_terms
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
 from infrastructure.mysql.order_terms_read_model import load_registry_terms_facts
+from subsystems.case_import.beclass_correction_workflow import BeClassBirthCountCorrectionMode
 
 
 class _OrderCursor:
@@ -62,13 +63,14 @@ def registry_client(order_row):
     case_no = order_row["case_no"]
     detail = SimpleNamespace(
         case_no=case_no,
+        import_field_issues=(),
         order_dates=None,
         service_type=None,
         identity_change_available=False,
         client=SimpleNamespace(client_id=1, version=0, values={"name": "測試客戶"}),
         beclass=SimpleNamespace(
             status="unbound", record_id=None, source_kind=None, version=None, values=None,
-            financial_fields_locked=False,
+            birth_count_correction_mode=BeClassBirthCountCorrectionMode.STANDARD,
         ),
         order_information=SimpleNamespace(status="unbound", values=None, field_issues={}),
         finance=SimpleNamespace(status="not_ready", code="client_finance_bootstrap_required", values=None),
