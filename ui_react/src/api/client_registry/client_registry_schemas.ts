@@ -1,5 +1,6 @@
 import { ImportFieldIssueSchema } from '../case_import/import_field_issues';
 import { z } from 'zod';
+import { HistoricalRepricingPlanSchema } from '../client_finance/accounting_pricing_client';
 import { OrderTermsSchema } from '../orders/order_query_schemas';
 
 const nullableText = z.string().nullable();
@@ -112,6 +113,7 @@ export const ClientRegistryDetailSchema = z.strictObject({
     status: z.enum(['ready', 'unbound', 'duplicate_binding']), record_id: z.number().int().positive().nullable(),
     source_kind: z.enum(['imported', 'admin_manual']).nullable(),
     full_refund_account_visible: z.boolean().optional(),
+    birth_count_correction_mode: z.enum(['standard', 'locked', 'historical_service_completed']).optional(),
     version: z.number().int().nonnegative().nullable(), values: beclassValues.nullable(), field_capabilities: fieldCapabilities,
   }),
   order_information: z.strictObject({
@@ -126,12 +128,14 @@ export const RegistryMutationPreviewSchema = z.strictObject({
   owner: z.enum(['client_profile', 'client_beclass']), aggregate_identity: z.string(),
   current_version: z.number().int().nonnegative(), before: z.record(z.string(), orderInformationValue), after: z.record(z.string(), orderInformationValue),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  historical_impact: HistoricalRepricingPlanSchema.nullable().optional(),
 });
 export const RegistryMutationReceiptSchema = z.strictObject({
   owner: z.enum(['client_profile', 'client_beclass']), aggregate_identity: z.string(),
   resulting_version: z.number().int().positive(), changed_fields: z.array(z.string()),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/), idempotency_key: z.string(), replayed: z.boolean(),
   readback: z.record(z.string(), orderInformationValue),
+  accounting_pending: z.array(z.string()).optional(),
 });
 const response = <T extends z.ZodTypeAny>(data: T) => z.strictObject({ success: z.boolean(), message: z.string(), data: data.nullable(), error: z.string().nullable() });
 export const ClientRegistryPageResponseSchema = response(ClientRegistryPageSchema);

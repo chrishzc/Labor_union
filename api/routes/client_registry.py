@@ -25,6 +25,7 @@ from api.dependencies.client_registry import (
 )
 from api.dependencies.order_terms import get_order_terms_application
 from api.error_contracts import internal_query_error, typed_http_error
+from api.schemas.accounting_pricing import HistoricalRepricingPlanView
 from api.schemas.base import BaseResponse
 from api.routes.registry_deletion import case_router as _case_deletion_router
 from api.schemas.client_registry import (
@@ -53,11 +54,13 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal, has_required_capability
 from subsystems.case_import.beclass_correction_workflow import (
+    BeClassBirthCountCorrectionMode,
     BeClassCorrectionBlocked,
     BeClassCorrectionConflict,
     BeClassCorrectionNotFound,
     BeClassCorrectionWorkflow,
 )
+from subsystems.client_finance.pricing_configuration import PricingConflict
 from subsystems.client_profile.application import ClientProfileApplication
 from subsystems.client_profile.contracts import (
     ClientProfileNotFoundError,
@@ -66,6 +69,7 @@ from subsystems.client_profile.contracts import (
 )
 from subsystems.client_profile.registry_query import (
     ClientRegistryContractError,
+    ClientRegistryDetail,
     ClientRegistryNotFound,
     ClientRegistryQueryApplication,
 )
@@ -346,6 +350,7 @@ def get_client_registry(
                 "status": detail.beclass.status,
                 "record_id": detail.beclass.record_id,
                 "source_kind": detail.beclass.source_kind,
+                "birth_count_correction_mode": detail.beclass.birth_count_correction_mode,
                 "version": detail.beclass.version,
                 "full_refund_account_visible": full_account,
                 "values": detail.beclass.values,
@@ -458,6 +463,8 @@ def preview_beclass_correction(
             before=mask_beclass_values(preview.before),
             after=mask_beclass_values(preview.after),
             preview_fingerprint=preview.preview_fingerprint.value,
+            historical_impact=HistoricalRepricingPlanView.model_validate(preview.historical_pricing.impact)
+            if preview.historical_pricing is not None else None,
         ), message="成功產生 BeClass 修正預覽")
     except Exception as error:
         _raise_owner_error(error, correlation, "BeClass 修正無法預覽。")
@@ -495,7 +502,8 @@ def apply_beclass_correction(
                 field: value for field, value in receipt.readback.effective.items()
                 if field in BECLASS_CORRECTION_FIELDS
             }),
-        ), message="BeClass 有效資料已修正")
+            accounting_pending=receipt.accounting_pending,
+        ), message="BeClass 有效資料已修正，部分帳務待核對" if receipt.accounting_pending else "BeClass 有效資料已修正")
     except Exception as error:
         _raise_owner_error(error, correlation_id, "BeClass 修正失敗。")
 
@@ -553,7 +561,7 @@ def _readonly_fields(owner):
     return {"identity_status", "baby_info"} if owner == "client_profile" else {"birth_date", "refund_account_status"}
 
 
-def _beclass_field_capabilities(detail) -> dict[str, dict[str, Any]]:
+def _beclass_field_capabilities(detail: ClientRegistryDetail) -> dict[str, dict[str, Any]]:
     ready = detail.beclass.status == "ready"
     capabilities = _field_capabilities(
         detail.beclass.values or {},
@@ -561,7 +569,10 @@ def _beclass_field_capabilities(detail) -> dict[str, dict[str, Any]]:
         ready,
         None if ready else f"beclass_{detail.beclass.status}",
     )
-    if detail.beclass.financial_fields_locked and "multi_birth_count" in capabilities:
+    if (
+        detail.beclass.birth_count_correction_mode is BeClassBirthCountCorrectionMode.LOCKED
+        and "multi_birth_count" in capabilities
+    ):
         capabilities["multi_birth_count"] = {
             **capabilities["multi_birth_count"],
             "editable": False,
@@ -580,7 +591,7 @@ def _raise_owner_error(error: Exception, correlation: str, message: str) -> None
         message = "只有尚未開始服務的補助市民或原住民案件可改為一般市民。"
     if isinstance(error, (ClientProfileNotFoundError, BeClassCorrectionNotFound)):
         status, category = 404, "not_found"
-    elif isinstance(error, (ClientProfileStaleError, ClientProfileRequestConflictError, BeClassCorrectionConflict, BeClassCorrectionBlocked)) or "stale" in code or "idempotency" in code or "collision" in code:
+    elif isinstance(error, (ClientProfileStaleError, ClientProfileRequestConflictError, BeClassCorrectionConflict, BeClassCorrectionBlocked, PricingConflict)) or "stale" in code or "idempotency" in code or "collision" in code:
         status = 409
         category = "idempotency_mismatch" if "idempotency" in code else "conflict"
     elif isinstance(error, (ClientProfileValidationError, BeClassCorrectionError, ValueError)):

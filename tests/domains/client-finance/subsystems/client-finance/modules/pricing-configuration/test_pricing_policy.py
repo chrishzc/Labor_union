@@ -161,6 +161,7 @@ def test_case_pricing_query_and_preview_use_full_subsidy_funding(
         tuple(PricingServiceDay(date(2026, 10, day), Decimal(8)) for day in range(1, 11)), 1000)
 
     class Repository:
+        accounting_pending = ()
         def case(self, case_no, *, lock=False):
             assert not lock
             return facts
@@ -207,6 +208,7 @@ def test_new_case_settings_reject_unequal_covered_rates_but_legacy_is_readable(r
     from dataclasses import replace
     invalid = replace(terms(), rule=rule, client=HourlyRates(301, 330), payroll=HourlyRates(300, 310))
     class Repository:
+        accounting_pending = ()
         def case(self, case_no, *, lock=False):
             return CasePricingFacts(case_no, 0, (1, 2, 3), invalid, 'manual', (), 0)
     application = PricingConfigurationApplication(Repository(), lambda: pytest.fail('preview wrote'))
@@ -243,6 +245,7 @@ def test_policy_guards_identity_and_twins_covered_rates():
 
 def test_case_preview_changes_when_owner_facts_change_and_is_read_only():
     class Repository:
+        accounting_pending = ()
         facts = CasePricingFacts("case-1", 0, (1, 2, 3), terms(), "policy", (), 0)
         def case(self, case_no, *, lock=False):
             assert lock is False
@@ -294,6 +297,7 @@ def test_direct_save_accepts_omitted_reason_without_preview_and_preserves_stale_
     from subsystems.client_finance.pricing_configuration import pricing_payload
 
     class Repository:
+        accounting_pending = ()
         facts = CasePricingFacts('direct-case', 0, (1, 2, 3), terms(), 'policy', (), 0)
         receipts = {}
         saved = []
@@ -505,6 +509,7 @@ def test_case_apply_missing_refund_recipient_snapshot_returns_informative_valida
     from subsystems.access.authentication_session import AdminPrincipal
 
     class Repository:
+        accounting_pending = ()
         def case(self, case_no, *, lock=False):
             return CasePricingFacts('direct-case', 0, (0,), terms(), 'policy', (), 1000)
         def receipt(self, key, actor, command): return None
@@ -522,3 +527,195 @@ def test_case_apply_missing_refund_recipient_snapshot_returns_informative_valida
         payload = response.json()['detail']['error']
         assert payload['code'] == 'client_refund_recipient_snapshot_missing'
         assert '缺少客戶退款銀行帳號' in payload['message']
+
+
+def test_historical_completed_pricing_keeps_unknown_staff_amount_nullable():
+    from subsystems.client_finance.pricing_configuration import HistoricalPricingPerson, pricing_impact
+    facts = CasePricingFacts('unknown-person', 0, (1, 1, 1), terms(), 'manual', (), 0,
+        historical_service_hours=Decimal(80), historical=True,
+        historical_people=(HistoricalPricingPerson('assignment:1', 1, 'Synthetic', None, 0),))
+    impact = pricing_impact(facts.terms, facts)
+    assert impact.client_amount == 0
+    assert impact.staff_total_amount is None
+    assert impact.staff_covered_amount is None and impact.staff_excess_amount is None
+    assert impact.union_income_amount is None
+
+
+def test_historical_completed_pricing_replay_precedes_source_parsing():
+    from contextlib import contextmanager
+    class Repository:
+        accounting_pending = ()
+        def receipt(self, key, actor, command):
+            return 7
+        def case(self, case_no, *, lock=False):
+            raise AssertionError('Replayed commands must not parse current source')
+    @contextmanager
+    def unit():
+        yield None
+    application = PricingConfigurationApplication(Repository(), unit)
+    assert application.apply_case('replayed', terms(), 6, 'f' * 64, 'synthetic', 'original reason', 'original-key') == 7
+
+
+@pytest.mark.parametrize('service_first', [False, True])
+def test_pending_historical_client_difference_survives_other_corrections_and_noop(service_first):
+    from infrastructure.mysql.pricing_configuration_repository import _partial_historical_repricing_plan
+    initial = CasePricingTerms('一般市民', IdentityRule.CITIZEN, Decimal(40),
+        HourlyRates(300, 300), HourlyRates(300, 300))
+    revised = replace(initial, client=HourlyRates(400, 400))
+    facts = CasePricingFacts('carry', 0, (1, 1, 1, 0, 1, 1), initial, 'manual', (), 0,
+        historical_service_hours=Decimal(10), historical=True)
+    def plan(before, candidate, after, rows=()):
+        return _partial_historical_repricing_plan(before, candidate, after,
+            rows, (), (), False, 'original-evidence', True)
+    first_terms = initial if service_first else revised
+    first_facts = replace(facts, historical_service_hours=Decimal(8)) if service_first else facts
+    first = plan(facts, first_terms, first_facts)
+    assert first.client_delta == (-600 if service_first else 1000)
+    saved = replace(first_facts, terms=first_terms, accounting_carry=first.carry)
+    second = plan(saved, revised, replace(saved, historical_service_hours=Decimal(8)))
+    assert second.client_delta == 200
+    assert 'historical_pricing_original_installments_required' in second.pending
+    saved = replace(saved, terms=revised, historical_service_hours=Decimal(8), accounting_carry=second.carry)
+    noop = plan(saved, revised, saved)
+    assert noop.client_delta == 200 and noop.pending == second.pending
+    row = {'obligation_identity': 'original', 'obligation_type': 'first',
+        'computed_ntd': 3000, 'effective_ntd': 3000, 'nominal': 3000, 'amount_mode': 'automatic'}
+    resolved = plan(saved, revised, saved, (row,))
+    assert resolved.client_updates[0].computed == 3200
+    assert not any(item.component == 'client' for item in resolved.carry)
+    assert facts.terms == initial
+
+
+def test_pending_historical_subsidy_and_unknown_birth_basis_survive_noop():
+    from infrastructure.mysql.pricing_configuration_repository import _partial_historical_repricing_plan
+    from subsystems.client_finance.pricing_configuration import HistoricalAccountingCarry, HistoricalPricingPerson
+    initial = terms()
+    facts = CasePricingFacts('carry-subsidy', 0, (1, 1, 1, 0, 1, 1), initial, 'manual', (), 0,
+        historical_service_hours=Decimal(80), historical=True)
+    def plan(current, candidate):
+        return _partial_historical_repricing_plan(current, candidate, current,
+            (), (), (), True, 'current-evidence', True, client_exempt=True)
+    payroll_only = plan(facts, replace(initial, payroll=HourlyRates(400, 310)))
+    assert 'case_pricing_settled_subsidy_correction_required' not in payroll_only.pending
+    assert not any(item.component == 'subsidy' for item in payroll_only.carry)
+    revised = replace(initial, client=HourlyRates(400, 300), payroll=HourlyRates(400, 310))
+    first = plan(facts, revised)
+    assert 'case_pricing_settled_subsidy_correction_required' in first.pending
+    saved = replace(facts, terms=revised, accounting_carry=first.carry)
+    repeated = plan(saved, revised)
+    assert 'case_pricing_settled_subsidy_correction_required' in repeated.pending
+    subsidy = next(item for item in repeated.carry if item.component == 'subsidy')
+    assert subsidy.subsidy_claim_basis == 28000
+    assert subsidy.financial_sources_digest == 'current-evidence'
+    blocker = 'historical_pricing_birth_original_value_required'
+    saved = replace(saved, historical_people=(HistoricalPricingPerson('assignment:1', 1, 'Synthetic', Decimal(80), 10),),
+        accounting_carry=(HistoricalAccountingCarry('client', facts.case_no, 0, (blocker,), 'birth-evidence'),
+            HistoricalAccountingCarry('payroll', 'assignment:1', None, (blocker,), 'birth-evidence')))
+    unknown_birth = plan(saved, revised)
+    assert blocker in unknown_birth.pending
+    assert unknown_birth.client_updates == () and unknown_birth.staff_updates == ()
+    assert all(item.financial_sources_digest == 'birth-evidence' for item in unknown_birth.carry
+        if item.component in {'client', 'payroll'})
+
+
+@pytest.mark.parametrize('authority', ['legacy', 'policy', 'manual', None])
+def test_historical_accounting_event_rate_authority_is_explicit(authority):
+    from infrastructure.mysql.pricing_configuration_repository import _event_rate_authority
+    payload = {'historical_accounting': {'rate_authority': authority}}
+    assert _event_rate_authority(payload) == (authority or 'manual')
+    assert _event_rate_authority({}) == 'manual'
+
+
+@pytest.mark.parametrize('authority', ['suggested', True, 1, [], {}])
+def test_historical_accounting_event_rate_authority_rejects_unknown_metadata(authority):
+    from infrastructure.mysql.pricing_configuration_repository import _event_rate_authority
+    with pytest.raises(ValueError, match='case_pricing_rate_authority_invalid'):
+        _event_rate_authority({'historical_accounting': {'rate_authority': authority}})
+
+
+def test_historical_unknown_total_stays_nullable_while_confirmed_person_can_reprice():
+    from api.schemas.accounting_pricing import HistoricalRepricingPlanView, PricingImpactView
+    from infrastructure.mysql.pricing_configuration_repository import _partial_historical_repricing_plan
+    from subsystems.client_finance.pricing_configuration import HistoricalPricingPerson
+    facts = CasePricingFacts('unknown-total', 0, (1, 1, 1, 0, 1, 1), terms(), 'manual', (), 0,
+        historical=True, historical_people=(
+            HistoricalPricingPerson('assignment:1', 1, 'Confirmed', Decimal(40), 5),
+            HistoricalPricingPerson('assignment:2', 2, 'Unconfirmed', None, None)))
+    impact = pricing_impact(facts.terms, facts)
+    view = PricingImpactView.model_validate(impact)
+    assert (view.covered_hours, view.excess_hours, view.client_amount, view.subsidy_amount,
+        view.subsidy_return_amount, view.case_total_amount) == (None,) * 6
+    row = {'obligation_identity': 'original', 'assignment_id': 1, 'staff_id': 1,
+        'computed_ntd': 14000, 'effective_ntd': 14000, 'nominal': 14000, 'amount_mode': 'automatic'}
+    plan = _partial_historical_repricing_plan(facts, replace(facts.terms, payroll=HourlyRates(400, 310)),
+        facts, (), (row,), (), False, 'evidence', True)
+    assert [item.computed for item in plan.staff_updates] == [16000]
+    assert plan.client_updates == ()
+    assert plan.persons[1].after_amount is None
+    assert 'historical_pricing_original_calculation_basis_required' in plan.pending
+    assert HistoricalRepricingPlanView.model_validate(plan).client_delta is None
+    assert HistoricalRepricingPlanView.model_validate(plan).subsidy_delta is None
+    confirmed = replace(facts, historical_service_hours=Decimal(80), historical_people=(
+        facts.historical_people[0], replace(facts.historical_people[1], hours=Decimal(40), actual_service_days=5)))
+    resolved_current_volume = _partial_historical_repricing_plan(facts, facts.terms,
+        confirmed, (), (row,), (), False, 'new-evidence', True)
+    assert 'historical_pricing_original_calculation_basis_required' in resolved_current_volume.pending
+    assert resolved_current_volume.client_delta is None
+    assert resolved_current_volume.subsidy_delta is None
+
+
+@pytest.mark.parametrize('historical', [False, True])
+def test_legacy_mixed_person_rates_preserve_unselected_pay_and_explicit_case_candidate(historical):
+    from domains.payroll.calculation import AssignmentRateSnapshot, PayrollPolicyKind
+    from shared_kernel.money import MoneyNTD
+    from infrastructure.mysql.pricing_configuration_repository import _partial_historical_repricing_plan
+    from subsystems.client_finance.pricing_configuration import HistoricalPricingPerson, current_pricing_impact
+
+    people = tuple(HistoricalPricingPerson(f'assignment:{index}', index, f'Synthetic {index}',
+        Decimal(hours), days, adjustment,
+        AssignmentRateSnapshot(f'assignment:{index}', 'approved-rates-v1', kind, MoneyNTD(rate)))
+        for index, hours, days, adjustment, kind, rate in (
+            (1, 24, 3, 150, PayrollPolicyKind.CITIZEN, 300),
+            (2, 16, 2, 200, PayrollPolicyKind.SUBSIDIZED_CITIZEN, 350)))
+    facts = CasePricingFacts('legacy-mixed', 0, (1, 1, 1, 0, 1, 1), terms(), 'legacy', (), 0,
+        payroll_adjustment=350, historical_service_hours=Decimal(40), historical_people=people,
+        historical=historical)
+    assert current_pricing_impact(facts).staff_total_amount == 13150
+    after = replace(facts, historical_service_hours=Decimal(48),
+        historical_people=(replace(people[0], hours=Decimal(32)), people[1]))
+    rows = tuple({'obligation_identity': f'original:{index}', 'assignment_id': index, 'staff_id': index,
+        'computed_ntd': amount, 'effective_ntd': amount, 'nominal': amount, 'amount_mode': 'automatic'}
+        for index, amount in ((1, 7350), (2, 5800)))
+    service = _partial_historical_repricing_plan(facts, facts.terms, after, (), rows, (), False, 'evidence',
+        True, use_legacy_person_rates=True)
+    assert [(item.before_amount, item.after_amount, item.delta) for item in service.persons] == [
+        (7350, 9750, 2400), (5800, 5800, 0)]
+    assert current_pricing_impact(after).staff_total_amount == 15550
+    explicit = _partial_historical_repricing_plan(facts, facts.terms, after, (), rows, (), False,
+        'evidence', True)
+    assert [item.after_amount for item in explicit.persons] == [11350, 5800]
+    assert pricing_impact(facts.terms, after).staff_total_amount == 17150
+    for source in ('manual', 'policy'):
+        assert current_pricing_impact(replace(after, source=source)).staff_total_amount == 17150
+
+
+def test_legacy_person_rate_correction_preserves_floor_allocation_and_manual_effective_amount():
+    from domains.payroll.calculation import AssignmentRateSnapshot, PayrollPolicyKind
+    from shared_kernel.money import MoneyNTD
+    from infrastructure.mysql.pricing_configuration_repository import _partial_historical_repricing_plan
+    from subsystems.client_finance.pricing_configuration import HistoricalPricingPerson
+
+    person = HistoricalPricingPerson('assignment:1', 1, 'Synthetic', Decimal(24), 3, 150,
+        AssignmentRateSnapshot('assignment:1', 'approved-rates-v1', PayrollPolicyKind.CITIZEN, MoneyNTD(300)))
+    facts = CasePricingFacts('legacy-manual', 0, (1, 1, 1, 0, 1, 1), terms(), 'legacy', (), 500,
+        payroll_adjustment=150, historical_service_hours=Decimal(24), historical_people=(person,), historical=True)
+    after = replace(facts, historical_service_hours=Decimal(32), historical_people=(replace(person, hours=Decimal(32)),))
+    row = {'obligation_identity': 'original', 'assignment_id': 1, 'staff_id': 1,
+        'computed_ntd': 7850, 'effective_ntd': 8000, 'nominal': 7850, 'amount_mode': 'manual'}
+    plan = _partial_historical_repricing_plan(facts, facts.terms, after, (), (row,), (), False, 'evidence',
+        True, use_legacy_person_rates=True)
+    assert (plan.staff_updates[0].computed, plan.staff_updates[0].effective) == (10250, 8000)
+    assert (plan.persons[0].before_amount, plan.persons[0].after_amount, plan.persons[0].delta) == (8000, 8000, 0)
+    unresolved = replace(facts, historical_people=(replace(person, rate_snapshot=None),))
+    with pytest.raises(PricingConflict, match='case_pricing_payroll_snapshot_required'):
+        pricing_impact(facts.terms, unresolved, use_legacy_person_rates=True)

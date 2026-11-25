@@ -17,15 +17,24 @@ export const PricingPolicySchema = z.strictObject({ effective_on: z.string().reg
 const version = z.strictObject({ revision: z.number().int().positive(), policy: PricingPolicySchema, actor: z.string(), reason: z.string() });
 const catalog = z.strictObject({ revision: z.number().int().nonnegative(), versions: z.array(version) });
 const amount = z.number().int().nonnegative();
-const impact = z.strictObject({ covered_hours: z.number().nonnegative(), excess_hours: z.number().nonnegative(),
-  case_total_amount: amount, union_income_amount: z.number().int().nullable(),
-  client_amount: amount, staff_covered_amount: amount.nullable(), staff_excess_amount: amount.nullable(), staff_total_amount: amount,
-  subsidy_amount: amount, subsidy_return_amount: amount });
+const impact = z.strictObject({ covered_hours: z.number().nonnegative().nullable(), excess_hours: z.number().nonnegative().nullable(),
+  case_total_amount: amount.nullable(), union_income_amount: z.number().int().nullable(),
+  client_amount: amount.nullable(), staff_covered_amount: amount.nullable(), staff_excess_amount: amount.nullable(), staff_total_amount: amount.nullable(),
+  subsidy_amount: amount.nullable(), subsidy_return_amount: amount.nullable() });
+const historicalAmountUpdate = z.strictObject({ identity: z.string(), computed: amount, effective: amount,
+  before_computed: amount, before_effective: amount, mode: z.enum(['automatic', 'manual']) });
+export const HistoricalRepricingPlanSchema = z.strictObject({
+  client_updates: z.array(historicalAmountUpdate), staff_updates: z.array(historicalAmountUpdate),
+  persons: z.array(z.strictObject({ assignment_identity: z.string(), staff_id: z.number().int().positive(),
+    staff_name: z.string(), hours: z.number().nonnegative().nullable(), before_amount: amount.nullable(), after_amount: amount.nullable(), delta: z.number().int().nullable() })),
+  pending: z.array(z.string()), client_exempt: z.boolean(), client_delta: z.number().int().nullable(), subsidy_delta: z.number().int().nullable(),
+});
 const caseView = z.strictObject({ case_no: z.string(), revision: z.number().int().nonnegative(),
-  source: z.enum(['legacy', 'policy', 'manual']), terms: PricingTermsSchema, impact });
+  source: z.enum(['legacy', 'policy', 'manual']), terms: PricingTermsSchema, impact,
+  historical: z.boolean().optional(), accounting_pending: z.array(z.string()).optional() });
 const preview = z.strictObject({ current: caseView, candidate: PricingTermsSchema, before: impact, after: impact,
-  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/) });
-const receipt = z.strictObject({ revision: z.number().int().positive() });
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/), historical_plan: HistoricalRepricingPlanSchema.nullable().optional() });
+const receipt = z.strictObject({ revision: z.number().int().positive(), accounting_pending: z.array(z.string()).optional() });
 export type PricingTerms = z.infer<typeof PricingTermsSchema>;
 export type PricingPolicyIdentity = z.infer<typeof policyIdentity>;
 export type PricingPolicy = z.infer<typeof PricingPolicySchema>;
@@ -33,6 +42,7 @@ export type PricingCatalog = z.infer<typeof catalog>;
 export type CasePricing = z.infer<typeof caseView>;
 export type PricingPreview = z.infer<typeof preview>;
 export type PricingImpact = z.infer<typeof impact>;
+export type HistoricalRepricingPlan = z.infer<typeof HistoricalRepricingPlanSchema>;
 
 export function pricingIdentityLabel(terms: PricingTerms): string {
   if (['原民', '原住民市民'].includes(terms.identity_name)) return '原住民';
@@ -93,6 +103,30 @@ export function pricingRequestError(error: ApiHttpError, fallback: string): stri
   }
 }
 
+export function historicalPendingLabel(code: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    historical_pricing_original_installments_required: '缺少可唯一辨識的原客戶期款，客戶端差額待核對。',
+    historical_pricing_original_installments_ambiguous: '原客戶期款歸屬不明，客戶端差額待核對。',
+    historical_pricing_client_amount_unresolved: '客戶差額與原期款不相容，請核對原帳。',
+    historical_pricing_original_payable_required: '缺少可唯一辨識的原月嫂應付，該人差額待核對。',
+    historical_pricing_original_subsidy_return_required: '原補助退款歸屬待核對。',
+    historical_pricing_original_subsidy_return_ambiguous: '原補助退款有多筆來源，請核對款項歸屬。',
+    historical_pricing_subsidy_amount_unresolved: '補助差額與原退款不相容，請核對原帳。',
+    historical_pricing_person_service_hours_required: '此指派缺少可確認的個人服務時數，該人差額待核對。',
+    historical_pricing_payroll_amount_unresolved: '此指派的薪資差額與原應付不相容，請核對原帳。',
+    historical_pricing_assignments_required: '缺少可確認的歷史指派，月嫂差額待核對。',
+    historical_pricing_birth_bound_policy_required: '缺少本案綁定的正式胎數費率，請核對原計價來源。',
+    historical_pricing_total_service_hours_required: '整案服務時數尚未確認，客戶與補助差額待核對。',
+    historical_pricing_original_calculation_basis_required: '更正前服務量尚未確認，無法判定歷史差額；請先核對原計算基準。',
+    historical_completed_service_volume_unresolved: '此指派的歷史服務量尚未確認，請補齊各人服務證據。',
+    historical_pricing_service_attribution_required: '各人服務量尚未確認，請先核對歷史服務歸屬。',
+    case_pricing_settled_subsidy_correction_required: '補助已有核銷，差額須沿原補助更正流程核對。',
+    historical_pricing_amount_conflict: '差額與原款項金額不相容，請核對原帳。',
+  };
+  const [reason, ...source] = code.split(':');
+  return `${labels[reason ?? ''] ?? '原帳或服務量證據不足，請至同案歷史帳務查核。'}${source.length ? ` 來源 ${source.join(':')}` : ''}`;
+}
+
 function options(key?: string) {
   const token = sessionClient.getToken();
   if (!token) throw new Error('請先登入。');
@@ -113,9 +147,10 @@ export const accountingPricingClient = {
     return decode(preview, await transport.post(`${root}/cases/${encodeURIComponent(caseNo)}/preview`,
       { terms: PricingTermsSchema.parse(terms), expected_revision: expectedRevision }, options()));
   },
-  async applyCase(caseNo: string, terms: PricingTerms, expectedRevision: number, reason: string, key: string) {
+  async applyCase(caseNo: string, terms: PricingTerms, expectedRevision: number, reason: string, key: string, previewFingerprint?: string) {
     const result = decode(receipt, await transport.post(`${root}/cases/${encodeURIComponent(caseNo)}/apply`,
-      { terms: PricingTermsSchema.parse(terms), expected_revision: expectedRevision, reason }, options(key)));
+      { terms: PricingTermsSchema.parse(terms), expected_revision: expectedRevision, reason,
+        ...(previewFingerprint ? { preview_fingerprint: previewFingerprint } : {}) }, options(key)));
     notifyCaseAccountingChanged(caseNo);
     return result;
   },

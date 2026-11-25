@@ -12,6 +12,7 @@ import { ClientRegistryVirtualAccount } from './ClientRegistryVirtualAccount';
 import { ClientRegistryAccountingSummary } from './ClientRegistryAccountingSummary';
 import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import { HistoricalServiceAccountingWorkbench } from './HistoricalServiceAccountingWorkbench';
+import { HistoricalAccountingPending, HistoricalCorrectionAccounting } from './HistoricalCorrectionAccounting';
 import '../pages/ClientRegistryPage.css';
 
 const profileLabels: Record<string, string> = { identity_status: '補助身分', name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', notes: '客戶備註（主檔）', admin_notes: '行政註記（客戶主檔）', service_type: '服務方式（排班參考）' };
@@ -38,8 +39,8 @@ const canConfirmRefundBlank = (detail: ClientRegistryDetail, field: RefundField,
   detail.beclass.status === 'ready' && detail.beclass.source_kind === 'imported' &&
   detail.beclass.field_capabilities[field]?.editable === true && (value === '' || value == null) &&
   (detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.source === 'client_beclass' && issue.field === field);
-type Action = { preview: RegistryMutationPreview | null; changes: Draft; message: string; loading: boolean; key: string | null; applied: boolean; unknown: boolean };
-const idle = (): Action => ({ preview: null, changes: {}, message: '', loading: false, key: null, applied: false, unknown: false });
+type Action = { preview: RegistryMutationPreview | null; changes: Draft; message: string; loading: boolean; key: string | null; applied: boolean; unknown: boolean; accountingPending: readonly string[] };
+const idle = (): Action => ({ preview: null, changes: {}, message: '', loading: false, key: null, applied: false, unknown: false, accountingPending: [] });
 const labels = { profile: profileLabels, identity: identityLabels, beclass: beclassLabels, care: careLabels };
 const title = { profile: '客戶主檔', identity: '身分證字號', beclass: '報名問卷資料（BeClass）', care: 'BeClass 照護與特殊計費' };
 const owner = (section: Section) => section === 'profile' ? 'profile' : 'beclass';
@@ -158,10 +159,12 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   const dirty = Object.values(changes).some((value) => Object.keys(value).length > 0) || termsState.dirty || repairState.dirty || staffState.dirty || intakeState.dirty || accountState.dirty || pricingState.dirty;
   useEffect(() => { onStateChange({ dirty, busy: pending || termsState.busy }); }, [dirty, pending, termsState.busy, onStateChange]);
   const dirtySections = sections.filter(section => Object.keys(changes[section]).length > 0);
-  const unsavedRef = useUnsavedChanges('客戶名冊', sections.flatMap(section => Object.keys(changes[section]).map(field => ({ label: `${title[section]}／${labels[section][field] ?? field}`, before: section === 'identity' ? '已遮蔽' : display(source(detail, section)[field]), after: section === 'identity' ? '已遮蔽' : display(changes[section][field]) }))), { busy: pending || termsState.busy, save: async () => {
+  const historicalBirthChanged = detail.beclass.birth_count_correction_mode === 'historical_service_completed'
+    && Object.hasOwn(changes.beclass, 'multi_birth_count');
+  const unsavedRef = useUnsavedChanges('客戶名冊', sections.flatMap(section => Object.keys(changes[section]).map(field => ({ label: `${title[section]}／${labels[section][field] ?? field}`, before: section === 'identity' ? '已遮蔽' : display(source(detail, section)[field]), after: section === 'identity' ? '已遮蔽' : display(changes[section][field]) }))), { busy: pending || termsState.busy, save: historicalBirthChanged || actions.beclass.preview?.historical_impact ? undefined : async () => {
     let current = detail;
     for (const section of dirtySections) {
-      const updated = await apply(section, true, current);
+      const updated = await apply(section, false, current);
       if (!updated) return;
       current = updated;
     }
@@ -171,53 +174,86 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     setDrafts((current) => ({ ...current, [section]: { ...current[section], [field]: value } }));
     setActions((current) => ({ ...current, [section]: idle() }));
   };
-  const refresh = async (section: Section, sequence: number) => {
+  const refresh = async (section: Section, sequence: number, preview = actions[section].preview) => {
     try {
       const result = await onRefresh();
       if (!alive.current || sequence !== request.current) return;
-      if (section === 'beclass') setConfirmedBlankRefunds([]);
-      setDrafts((current) => ({ ...current, [section]: { ...source(result, section) } }));
-      setActions((current) => ({ ...current, [section]: { ...idle(), message: `${title[section]}已儲存。` } }));
+      const historicalBirth = preview?.historical_impact ? preview.after.multi_birth_count : undefined;
+      const values = source(result, section);
+      if (section === 'beclass' && historicalBirth === undefined) setConfirmedBlankRefunds([]);
+      setDrafts((current) => ({
+        ...current,
+        [section]: historicalBirth === undefined ? { ...values } : { ...current[section], multi_birth_count: values.multi_birth_count ?? null },
+      }));
+      setActions((current) => ({
+        ...current,
+        [section]: {
+          ...idle(),
+          accountingPending: current[section].accountingPending,
+          message: historicalBirth === undefined ? `${title[section]}已儲存。`
+            : values.multi_birth_count === historicalBirth ? `正式胎數已更新為${display(values.multi_birth_count)}。`
+              : `正式胎數現為${display(values.multi_birth_count)}，請核對最新資料。`,
+        },
+      }));
       return result;
     } catch (error) {
       if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...current[section], applied: true, loading: false, message: `已儲存，但最新資料讀取失敗：${errorText(error)}` } }));
     }
   };
-  const apply = async (section: Section, preparePreview = true, currentDetail = detail) => {
+  const apply = async (section: Section, confirmHistorical = false, currentDetail = detail) => {
     let approved = actions[section];
     const expectedVersion = section === 'profile' ? currentDetail.client.version : currentDetail.beclass.version ?? 0;
-    if (preparePreview && !approved.unknown && approved.preview?.current_version !== expectedVersion) approved = idle();
-    if (approved.loading || ((!approved.preview || !approved.key) && !preparePreview)) return;
+    if (!approved.unknown && approved.preview?.current_version !== expectedVersion) approved = idle();
+    if (approved.loading || (confirmHistorical && !approved.preview)
+      || (approved.preview?.historical_impact && !confirmHistorical && !approved.unknown)) return;
     const sequence = ++request.current;
     let applyStarted = false;
     setActions((current) => ({ ...current, [section]: { ...approved, loading: true, message: '正在儲存…' } }));
     try {
       if (!approved.preview || !approved.key) {
-        const submitted = section === 'profile' ? diff(drafts.profile, currentDetail.client.values, section) : changes[section];
+        const submitted = section === 'profile' ? diff(drafts.profile, currentDetail.client.values, section)
+          : section === 'beclass' && historicalBirthChanged ? { multi_birth_count: changes.beclass.multi_birth_count } : changes[section];
         const result = await clientRegistryClient.preview(detail.case_no, owner(section), submitted as ClientProfileChanges | BeClassChanges, expectedVersion);
         if (!alive.current || sequence !== request.current) return;
         approved = { ...idle(), preview: result, changes: submitted, key: `client-${owner(section)}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}` };
+        if (section === 'beclass' && historicalBirthChanged && !result.historical_impact) {
+          setActions(current => ({ ...current, [section]: { ...idle(), message: '案件的更正資格已更新，請重新讀取案件資料。' } }));
+          return;
+        }
+        if (result.historical_impact) {
+          setActions((current) => ({ ...current, [section]: approved }));
+          return;
+        }
         setActions((current) => ({ ...current, [section]: { ...approved, loading: true, message: '正在儲存…' } }));
       }
       if (!approved.preview || !approved.key) return;
       applyStarted = true;
-      await clientRegistryClient.apply(detail.case_no, owner(section), approved.changes as ClientProfileChanges | BeClassChanges, approved.preview.current_version, approved.preview.preview_fingerprint, '', approved.key);
+      const receipt = await clientRegistryClient.apply(detail.case_no, owner(section), approved.changes as ClientProfileChanges | BeClassChanges, approved.preview.current_version, approved.preview.preview_fingerprint, '', approved.key);
       if (!alive.current || sequence !== request.current) return;
-      setActions((current) => ({ ...current, [section]: { ...current[section], applied: true, unknown: false, message: '已儲存，正在讀取最新資料…' } }));
-      return await refresh(section, sequence);
+      setActions((current) => ({ ...current, [section]: {
+        ...current[section], applied: true, unknown: false,
+        accountingPending: approved.preview?.historical_impact ? receipt.accounting_pending ?? [] : [], message: '已儲存，正在讀取最新資料…',
+      } }));
+      return await refresh(section, sequence, approved.preview);
     } catch (error) {
-      if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...approved, loading: false, unknown: applyStarted && (!(error instanceof ApiHttpError) || error.status >= 500), message: applyStarted ? `${errorText(error)} 請核對結果；重試使用同一筆操作識別。` : errorText(error) } }));
+      if (!alive.current || sequence !== request.current) return;
+      const uncertain = applyStarted && (!(error instanceof ApiHttpError) || error.status >= 500 || error.status === 408);
+      setActions((current) => ({ ...current, [section]: {
+        ...(approved.preview?.historical_impact && !uncertain ? idle() : approved),
+        loading: false, unknown: uncertain,
+        message: uncertain ? `${errorText(error)} 請核對結果；重試使用同一筆操作識別。` : errorText(error),
+      } }));
     }
   };
   const saveProfile = async () => {
     let current = detail;
     const profileChanges = diff(drafts.profile, detail.client.values, 'profile');
     if (Object.keys(profileChanges).length > 0 || Object.keys(changes.identity).length === 0) {
-      const updated = await apply('profile', true, current);
+      const updated = await apply('profile', false, current);
       if (!updated) return;
       current = updated;
     }
-    if (Object.keys(changes.identity).length > 0) await apply('identity', true, current);
+    if (Object.keys(changes.identity).length > 0) await apply('identity', false, current);
   };
   const renderSection = (section: Section) => {
     const action = actions[section];
@@ -254,12 +290,17 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
         })}{section === 'profile' && <label htmlFor="registry-identity-id_number">身分證字號<input aria-invalid={(detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.field === 'id_number') || undefined} aria-describedby={(detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.field === 'id_number') ? 'registry-identity-id_number-issue' : undefined} id="registry-identity-id_number" autoComplete="off" maxLength={10} value={String(drafts.identity.id_number ?? '')} disabled={pending || termsState.busy || detail.beclass.status !== 'ready' || detail.beclass.field_capabilities.id_number?.editable === false} onChange={event => update('identity', 'id_number', event.target.value)} />{(detail.import_field_issues ?? []).some(issue => issue.owner === 'client_beclass' && issue.field === 'id_number') && <small id="registry-identity-id_number-issue" className="source-issue">{(detail.import_field_issues ?? []).filter(issue => issue.owner === 'client_beclass' && issue.field === 'id_number').map(issue => issue.message).join('；')}</small>}{detail.beclass.status !== 'ready' && <small>報名來源尚未確認，暫時無法修改身分證字號。</small>}</label>}</div>
         <div className="registry-actions">
           <button type="button" disabled={pending || termsState.busy} onClick={() => { if (section === 'beclass') setConfirmedBlankRefunds([]); setDrafts((current) => ({ ...current, [section]: { ...source(detail, section) }, ...(section === 'profile' ? { identity: { ...source(detail, 'identity') } } : {}) })); setActions((current) => ({ ...current, [section]: idle(), ...(section === 'profile' ? { identity: idle() } : {}) })); }}>取消變更</button>
-          <button type="button" disabled={pending || termsState.busy} onClick={() => void (section === 'profile' ? saveProfile() : apply(section))}>儲存</button>
+          <button type="button" disabled={pending || termsState.busy} onClick={() => void (section === 'profile' ? saveProfile() : apply(section, Boolean(action.preview?.historical_impact)))}>
+            {action.preview?.historical_impact ? '確認歷史胎數更正'
+              : section === 'beclass' && historicalBirthChanged ? '預覽歷史胎數更正' : '儲存'}
+          </button>
           {action.applied && !action.loading && <button type="button" onClick={() => { const sequence = ++request.current; setActions((current) => ({ ...current, [section]: { ...current[section], loading: true } })); void refresh(section, sequence); }}>重新讀取已儲存資料</button>}
           {action.unknown && !action.loading && <button type="button" onClick={() => void apply(section)}>確認同一筆儲存結果</button>}
         </div>
         {action.preview && <div className="registry-preview"><strong>即將變更：</strong><dl>{Object.keys(action.preview.after).map((field) => <div key={field}><dt>{labels[section][field] ?? field}</dt><dd>{display(action.preview!.before[field])} → {display(action.preview!.after[field])}</dd></div>)}</dl></div>}
+        {action.preview?.historical_impact && <HistoricalCorrectionAccounting impact={action.preview.historical_impact} />}
         {action.message && <p role="status">{action.message}</p>}
+        {!action.preview?.historical_impact && <HistoricalAccountingPending pending={action.accountingPending} />}
         {section === 'profile' && <>
           {actions.identity.message && <p role="status">{actions.identity.message}</p>}
           {actions.identity.applied && !actions.identity.loading && <button type="button" onClick={() => { const sequence = ++request.current; setActions(current => ({ ...current, identity: { ...current.identity, loading: true } })); void refresh('identity', sequence); }}>重新讀取已儲存身分證資料</button>}

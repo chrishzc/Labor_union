@@ -9,6 +9,7 @@ from typing import Any, Literal, Protocol
 
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from domains.case_import.import_field_issues import ImportFieldIssue
+from subsystems.case_import.beclass_correction_workflow import BeClassBirthCountCorrectionMode
 from subsystems.client_profile.registry_filters import (
     FIELD_KINDS, RegistryColumnFilter, RegistryFilterField, RegistryFilterOptions,
     normalize_column_filters,
@@ -75,7 +76,7 @@ class ClientRegistryBeClass:
     source_kind: str | None
     version: int | None
     values: Mapping[str, str | None] | None
-    financial_fields_locked: bool = False
+    birth_count_correction_mode: BeClassBirthCountCorrectionMode = BeClassBirthCountCorrectionMode.STANDARD
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,7 +262,7 @@ class ClientRegistryQueryApplication:
                 int(row.get("beclass_version") or 0) if beclass_status == "ready" else None,
                 ({str(key): _nullable_text(value) for key, value in beclass_values.items()}
                  if isinstance(beclass_values, Mapping) else None),
-                bool(row.get("beclass_financial_fields_locked", False)),
+                BeClassBirthCountCorrectionMode(row["beclass_birth_count_correction_mode"]),
             ),
             ClientRegistryOrderInformation(
                 beclass_status,

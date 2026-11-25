@@ -25,16 +25,18 @@ from api.schemas.historical_service_accounting import (
     HistoricalPrecisionRestartReceiptView,
 )
 from domains.orders.historical_precision_restart import HistoricalPrecisionRestartIntent
-from domains.orders.historical_service_accounting import HistoricalActualServiceDaysInput
+from domains.orders.historical_service_accounting import HistoricalActualServiceDaysInput, HistoricalAssignmentServiceFact
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.client_finance.pricing_configuration import PricingConflict
 from subsystems.orders.historical_service_accounting_workflow import (
     ApplyHistoricalServiceAccounting,
     ConfirmHistoricalServiceDaysIntent,
     HistoricalServiceAccountingError,
     HistoricalAttributionIntent,
+    HistoricalServiceFactsCorrectionCandidate,
 )
 from api.schemas.historical_service_accounting import HistoricalAttributionApplyBody, HistoricalAttributionPreviewBody
 from subsystems.orders.historical_precision_restart_workflow import (
@@ -51,10 +53,13 @@ _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 
 
-def _attribution_intent(case_no, body):
+def _attribution_intent(case_no: str, body: HistoricalAttributionPreviewBody) -> HistoricalAttributionIntent:
     return HistoricalAttributionIntent(case_no.strip(), tuple(
         (item.staff_id, item.actual_service_days) for item in body.caregivers
-    ), body.evidence.strip())
+    ), body.evidence.strip(), tuple(HistoricalAssignmentServiceFact(
+        item.assignment_identity.strip(), item.staff_id, item.actual_start_date, item.actual_end_date,
+        item.service_start_time, item.service_end_time, item.service_hours_per_day, item.service_end_day_offset,
+    ) for item in body.service_facts))
 
 
 @router.post("/attribution/preview")
@@ -68,13 +73,51 @@ def preview_historical_attribution(
     del principal
     def preview():
         result = workflow.preview_attribution(_attribution_intent(case_no, body))
+        plan = result.volume_repricing
+        comparison = result.comparison
+        if isinstance(comparison, HistoricalServiceFactsCorrectionCandidate):
+            periods = comparison.service_facts
+            days = {item.staff_id: item.actual_service_days for item in comparison.facts.assignments}
+        else:
+            periods = tuple(item.service_fact for item in comparison.service_days.allocations if item.service_fact is not None)
+            days = {item.staff_id: item.actual_service_days for item in comparison.service_days.allocations}
+        pending = result.accounting_pending
+        client_pending = any(code in {
+            "historical_pricing_original_installments_ambiguous",
+            "historical_pricing_original_installments_required",
+            "historical_pricing_client_amount_unresolved",
+            "historical_pricing_total_service_hours_required",
+        } for code in pending)
+        subsidy_pending = any(code in {
+            "case_pricing_settled_subsidy_correction_required",
+            "historical_pricing_original_subsidy_return_ambiguous",
+            "historical_pricing_original_subsidy_return_required",
+            "historical_pricing_subsidy_amount_unresolved",
+            "historical_pricing_total_service_hours_required",
+        } for code in pending)
         return {
             "preview_fingerprint": result.fingerprint.value, "reopen_accounting": result.reopen,
             "accounting_pending": result.accounting_pending,
-            "caregivers": [{
+            "client_delta_ntd": None if client_pending else plan.client_delta if plan else 0,
+            "subsidy_delta_ntd": None if subsidy_pending else plan.subsidy_delta if plan else 0,
+            "service_facts": [{
+                "assignment_identity": item.assignment_identity,
+                "before": next((value.service_fact.canonical_payload() if value.service_fact else None
+                                for value in result.comparison.facts.assignments
+                                if value.assignment_identity == item.assignment_identity), None),
+                "after": item.canonical_payload(),
+            } for item in periods],
+            "caregivers": ([{
+                "staff_id": item.staff_id,
+                "actual_service_days": days[item.staff_id],
+                "entitlement_ntd": item.after_amount,
+                "previous_entitlement_ntd": item.before_amount,
+                "delta_ntd": item.delta,
+            } for item in result.volume_repricing.persons] if result.volume_repricing else [{
                 "staff_id": item.staff_id, "actual_service_days": item.actual_service_days,
                 "entitlement_ntd": item.total_payable.amount,
-            } for item in result.comparison.payroll.assignments],
+            } for item in (comparison.payroll.assignments
+                           if not isinstance(comparison, HistoricalServiceFactsCorrectionCandidate) else ())]),
             "paid_obligations": [{
                 "staff_id": item.staff_id, "paid_ntd": item.paid_net_amount.amount,
                 "remaining_payable_ntd": max(0, item.revised_entitlement.amount - item.paid_net_amount.amount),
@@ -280,6 +323,11 @@ def _query_view(facts):
                 "policy_version": item.rate_snapshot.policy_version,
                 "policy_kind": item.rate_snapshot.policy_kind.value,
                 "hourly_rate_ntd": item.rate_snapshot.hourly_rate.amount,
+                "actual_service_days": item.actual_service_days,
+                "actual_service_hours": str(item.actual_service_hours) if item.actual_service_hours is not None else None,
+                "adopted_start_date": item.adopted_start_date,
+                "adopted_end_date": item.adopted_end_date,
+                "service_fact": item.service_fact.canonical_payload() if item.service_fact else None,
             }
             for item in facts.assignments
         ],
@@ -347,6 +395,8 @@ def _call(command, message, correlation):
         return BaseResponse(success=True, data=command(), message=message, error=None)
     except (HistoricalServiceAccountingError, HistoricalPrecisionRestartError) as error:
         _raise(error.error)
+    except PricingConflict as error:
+        _raise(TypedError(ErrorCategory.CONFLICT, error.code, "案件或帳務已變動或來源待核對，請重新預覽。", correlation))
     except ValueError as error:
         code = str(error) or "historical_actual_service_days_invalid"
         if code == "historical_attribution_idempotency_conflict":
@@ -354,6 +404,7 @@ def _call(command, message, correlation):
         if code == "historical_attribution_preview_stale":
             _raise(TypedError(ErrorCategory.CONFLICT, code, "案件或帳務已變動，請重新預覽。", correlation))
         attribution_blockers = {
+            "historical_completed_service_assignment_mismatch": "所選月嫂與本案已採納的指派不符，請重新查詢。",
             "historical_attribution_formal_workflow_required": "本案已採用多人服務天數，請從「調整各月嫂服務天數」辦理。",
             "historical_attribution_manual_confirmation_required": "請確認採用拆分後的新計算金額。",
             "historical_attribution_paid_manual_review_required": "已有付款的人工金額需先核對原款項及差額歸屬。",
