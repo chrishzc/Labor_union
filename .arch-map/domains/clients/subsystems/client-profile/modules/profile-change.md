@@ -55,7 +55,7 @@
 
 ## Dependencies
 - outbound: `case-import/pairing-current-facts` — 有效退款帳戶及原問卷補正沿既有BeClass correction writer；一般查閱與事件／回執遮蔽帳號。
-- outbound: Global `registry-deletion` — ClientRosterPage／client_registry router 組合 root-only 案件永久刪除；共用 owner fresh-lock 並檢查任一相關簽回；未簽約時一併移除 case-owned 關聯，共用 Client／其他案件／月嫂保留，不借用 Client Profile 更新 writer 刪除。
+- outbound: [Global `registry-deletion`](../../../../global/subsystems/registry-deletion/modules/registry-deletion.md) — ClientRosterPage／client_registry router 轉接同一 root-only 案件永久刪除入口，是否有簽回或已完成簽約不改變入口。版本鎖與原子清理由 Global owner 負責，只移除本案及其從屬關聯，保留共用 Client、其他案件及月嫂；不使用 Client Profile 更新 writer 刪除。
 - inbound: `case-import/hcm-current-workbook-import` — Client Profile email-only 命令 fresh-lock 空白資格並保存 version／事件／receipt；借用 workbook outer UoW，無自有 commit。
 - Client-owned `clients.phone` 接受手機／含區碼的市話；Client Profile 與 HCM 匯入共用 `domains/clients/profile.py` 的格式規則與正規化。單一入口採用的 BeClass 電話沿相同驗證、writer 與主檔版本。
 - Client-owned `clients.email` 保留 HCM 匯入來源；案件編輯統一顯示「Email」，主檔空白才採用 BeClass effective `email`。HCM 補件沿既有 Client Profile writer，BeClass 原始值與既有修正保留來源用途。
