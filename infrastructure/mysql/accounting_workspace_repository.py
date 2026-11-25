@@ -21,6 +21,7 @@ def build_accounting_workspace(connection, *, include_staff_availability: bool =
     from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
     from infrastructure.mysql.subsidy_confirmation_repository import preview_manual_subsidy_plan, apply_manual_subsidy_plan
+    from infrastructure.mysql.pricing_configuration_repository import query_case_pricing_total
     state = MySqlAccountingWorkspaceState(connection)
     return AccountingWorkspace(state, partial(query_case_accounting, connection),
         partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
@@ -30,75 +31,11 @@ def build_accounting_workspace(connection, *, include_staff_availability: bool =
         bank_memos=partial(query_case_bank_memos, connection),
         subsidy_plan_preview=partial(preview_manual_subsidy_plan, connection),
         subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection),
-        case_total=partial(query_subsidy_case_total, connection),
+        case_total=partial(query_case_pricing_total, connection),
         subsidy_evidence=partial(query_reconciled_subsidy_evidence, connection),
         subsidy_detail=partial(query_case_subsidy_amount, connection),
         staff_availability=(partial(query_case_staff_accounting_availability, connection)
                             if include_staff_availability else None))
-
-
-def query_subsidy_case_total(connection, case_no: str, *, for_update: bool = False) -> int | None:
-    from decimal import Decimal
-    from domains.client_finance.pricing_policy import (
-        CasePricingTerms, HourlyRates, calculate_case_total_amount, calculate_holiday_premium,
-    )
-    from infrastructure.mysql.holiday_repricing import load_frozen_holiday_case_total
-    from infrastructure.mysql.order_terms_read_model import select_order, load_client_pricing_charge_days
-    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing, _legacy_rule_and_cap
-
-    lock = " FOR UPDATE" if for_update else ""
-    try:
-        with connection.cursor() as cursor:
-            order = select_order(cursor, case_no, lock=for_update)
-            pricing = load_case_pricing(cursor, order, lock=for_update)
-            if pricing is None:
-                cursor.execute("SELECT client_hourly_rate_ntd FROM client_payment_terms WHERE case_no=%s" + lock,
-                               (case_no,))
-                original = cursor.fetchone()
-                if not original or not original['client_hourly_rate_ntd']:
-                    return None
-                identity = str(order['client_identity_status'])
-                rule, cap = _legacy_rule_and_cap(identity)
-                rate = int(original['client_hourly_rate_ntd'])
-                rates = HourlyRates(rate, rate)
-                pricing = CasePricingTerms(identity, rule, cap, rates, rates)
-            if str(order["status"]).startswith('歷史'):
-                cursor.execute(
-                    "SELECT p.total_actual_service_hours,e.historical_floor_fee_ntd "
-                    "FROM historical_service_day_projections p JOIN historical_service_day_events e "
-                    "ON e.id=p.current_event_id AND e.case_no=p.case_no WHERE p.case_no=%s" + lock,
-                    (case_no,),
-                )
-                volume = cursor.fetchone()
-                if volume is not None:
-                    if volume['total_actual_service_hours'] is None or volume['historical_floor_fee_ntd'] is None:
-                        return None
-                    hours, floor = Decimal(str(volume['total_actual_service_hours'])), int(volume['historical_floor_fee_ntd'])
-                    return calculate_case_total_amount(pricing, ((hours, False),), floor)
-                cursor.execute("SELECT id FROM historical_order_adoption_receipts "
-                               "WHERE case_no=%s AND outcome='adopted' LIMIT 1" + lock, (case_no,))
-                if cursor.fetchone() is None:
-                    return None
-                if any(order.get(key) is None for key in ('floor_fee', 'service_hours_per_day', 'service_days')):
-                    return None
-                hours = Decimal(str(order['service_hours_per_day'])) * int(order['service_days'])
-                return calculate_case_total_amount(pricing, ((hours, False),), int(order['floor_fee']))
-            frozen = load_frozen_holiday_case_total(cursor, case_no)
-            if frozen is not None:
-                return frozen
-            if any(order.get(key) is None for key in ('floor_fee', 'service_hours_per_day', 'service_days')):
-                return None
-            daily_hours = Decimal(str(order['service_hours_per_day']))
-            floor = int(order['floor_fee'])
-            days = load_client_pricing_charge_days(cursor, order, lock=for_update)
-            if not days:
-                return None
-            gross = calculate_case_total_amount(pricing, tuple((daily_hours, day.is_double_pay) for day in days), floor)
-            return gross + calculate_holiday_premium(pricing, tuple(
-                (daily_hours, day.holiday_hour_segments or ((Decimal(0), day.holiday_hours),)) for day in days
-            ))
-    except ValueError:
-        return None
 
 
 def query_reconciled_subsidy_evidence(

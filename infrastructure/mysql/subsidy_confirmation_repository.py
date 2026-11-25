@@ -433,9 +433,10 @@ def confirm_reconciled_subsidy_scheme(
     """Called once by the successful money owner's Apply in the same transaction."""
     from domains.finance_import.statement_archive import case_accounting_scheme
     from infrastructure.mysql.accounting_workspace_repository import (
-        MySqlAccountingWorkspaceState, query_reconciled_subsidy_evidence, query_subsidy_case_total,
+        MySqlAccountingWorkspaceState, query_reconciled_subsidy_evidence,
     )
     from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
+    from infrastructure.mysql.pricing_configuration_repository import query_case_pricing_total
 
     state = MySqlAccountingWorkspaceState(connection)
     state.lock_arrangement_case(case_no)
@@ -447,7 +448,7 @@ def confirm_reconciled_subsidy_scheme(
         return
     if bank_row_id is not None and f"bank:{bank_row_id}" not in (*evidence.staff_payouts, *evidence.customer_refunds):
         return
-    total = query_subsidy_case_total(connection, case_no, for_update=True)
+    total = query_case_pricing_total(connection, case_no, for_update=True)
     subsidy = query_case_subsidy_amount(connection, case_no, lock=True).amount_ntd
     decision = case_accounting_scheme(total, subsidy, evidence)
     if plan.events:

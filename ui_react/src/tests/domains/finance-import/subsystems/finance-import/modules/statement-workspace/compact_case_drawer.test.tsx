@@ -229,6 +229,25 @@ describe('精簡案件抽屜',()=>{
   expect(staffSummary.queryByText('NT$ 48,000',{exact:true})).not.toBeInTheDocument();
  });
 
+ it('計價查閱有總額且缺月嫂金額時，月嫂薪資匯總仍待確認', async () => {
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({
+   ...facts(), case_total_ntd: 48000, staff_receivable_ntd: null, staff_items: [],
+  });
+  vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({
+   case_no: caseNo, revision: 1, source: 'manual', accounting_pending: ['client_finance_bootstrap_required'],
+   terms: {identity_name:'一般市民', rule:'citizen', subsidy_hours:25, client:{covered:480, excess:480}, payroll:{covered:480, excess:480}},
+   impact: {case_total_amount:48000, union_income_amount:null, client_amount:null, staff_covered_amount:null,
+    staff_excess_amount:null, staff_total_amount:null, subsidy_amount:null, subsidy_return_amount:null,
+    covered_hours:null, excess_hours:null},
+  });
+
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded />);
+  await waitFor(() => expect(screen.getByLabelText('帳務計價依據與核心參數')).toHaveTextContent('480'));
+  const staffSummary = within(screen.getByLabelText('月嫂薪資匯總'));
+  expect(staffSummary.getByText('月嫂薪資金額', {exact:true}).nextElementSibling).toHaveTextContent('待確認');
+  expect(staffSummary.queryByText('NT$ 48,000', {exact:true})).not.toBeInTheDocument();
+ });
+
  it('帳務案件總額明確未知時兩處均待確認，月嫂應付仍顯示正式金額',async()=>{
   vi.mocked(financeAccountingClient.query).mockResolvedValue({
    ...facts(),case_total_ntd:null,staff_receivable_ntd:42000,

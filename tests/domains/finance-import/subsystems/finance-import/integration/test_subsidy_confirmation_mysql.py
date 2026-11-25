@@ -1084,6 +1084,11 @@ def test_reconciled_partial_receipt_confirms_subsidy_scheme(connection, monkeypa
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    from api.dependencies.accounting_pricing import get_pricing_application
+    from api.routes.accounting_pricing import router as pricing_router
+    from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.client_finance.pricing_configuration import PricingConfigurationApplication
     from api.dependencies.admin_auth import require_system_admin
     from api.dependencies.client_receipt_reconciliation import (
         ClientReceiptReconciliationApplication, get_client_receipt_reconciliation_application,
@@ -1113,6 +1118,10 @@ def test_reconciled_partial_receipt_confirms_subsidy_scheme(connection, monkeypa
     )
     app = FastAPI()
     app.include_router(router)
+    app.include_router(pricing_router)
+    app.dependency_overrides[get_pricing_application] = lambda: PricingConfigurationApplication(
+        MySqlPricingConfigurationRepository(connection), lambda: MySqlUnitOfWork(connection),
+    )
     app.dependency_overrides[get_client_receipt_reconciliation_application] = lambda: application
     app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(
         id=None, username='synthetic', display_name='Synthetic', role='system_admin',
@@ -1130,6 +1139,25 @@ def test_reconciled_partial_receipt_confirms_subsidy_scheme(connection, monkeypa
         assert initial.customer_amount_ntd is None
 
     with TestClient(app) as client:
+        if not historical:
+            pricing_url = f'/api/v1/accounting-pricing/cases/{case}'
+            pricing_response = client.get(pricing_url)
+            assert pricing_response.status_code == 200, pricing_response.text
+            pricing = pricing_response.json()['data']
+            assert pricing['terms']['client']['covered'] == 480
+            assert pricing['impact']['case_total_amount'] == 48000
+            assert pricing['impact']['client_amount'] is None
+            assert pricing['impact']['staff_total_amount'] is None
+            assert 'client_finance_bootstrap_required' in pricing['accounting_pending']
+            guarded = client.post(pricing_url + '/preview', json={
+                'terms': pricing['terms'], 'expected_revision': pricing['revision'],
+            })
+            assert guarded.status_code == 422
+            assert guarded.json()['detail']['error']['code'] == 'client_finance_bootstrap_required'
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT 1 FROM client_payment_terms WHERE case_no=%s', (case,))
+                assert cursor.fetchone() is None
+            assert snapshot(connection, case) == before
         exact = client.post(url + '/preview', json=selection)
         assert exact.status_code == 200, exact.text
         assert exact.json()['data']['candidate']['status'] == 'review_required'

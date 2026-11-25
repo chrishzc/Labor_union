@@ -668,7 +668,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const reportedCaseTotal = data?.case_total_ntd;
  const caseTotal = isEstablishedUnserved ? staffPayableTotal
   : reportedCaseTotal === undefined ? pricingTotal : reportedCaseTotal;
- const staffEstimate = data?.historical_stages ? null : isEstablishedUnserved ? staffPayableTotal : pricingTotal;
+ const estimatedStaffAmount = state.pricing?.case_no === initialCase ? state.pricing.impact.staff_total_amount : null;
+ const staffEstimate = data?.historical_stages ? null : isEstablishedUnserved ? staffPayableTotal : estimatedStaffAmount;
 
  const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
  const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];

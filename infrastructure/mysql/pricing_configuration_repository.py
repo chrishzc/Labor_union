@@ -19,7 +19,7 @@ from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.client_finance.pricing_configuration import (
-    CasePricingFacts, PolicyVersion, PricingCatalog, PricingConflict, PricingServiceDay, pricing_impact, pricing_payload,
+    CasePricingFacts, CasePricingKnownTerms, PolicyVersion, PricingCatalog, PricingConflict, PricingServiceDay, pricing_impact, pricing_payload,
     HistoricalAmountFacts, build_historical_deposit_floor_fee_plan, build_historical_repricing_plan,
     HistoricalPricingPerson, HistoricalPersonPricing, HistoricalAmountUpdate, HistoricalRepricingPlan,
     HistoricalBirthCorrectionPreview, HistoricalAccountingCarry, HistoricalRateAuthority,
@@ -199,6 +199,69 @@ def load_case_pricing(cursor, order_row, *, lock=False):
     if event_id is not None:
         return replace(override, deposit_service_days=policy.for_case(str(identity)).deposit_service_days)
     return policy.for_case(str(identity), twins=_is_twins(cursor, order_row["case_no"], lock))
+
+
+def query_case_pricing_total(connection, case_no: str, *, for_update: bool = False) -> int | None:
+    """Case total from formal pricing and service facts, independent of payment terms."""
+    from domains.client_finance.pricing_policy import (
+        calculate_case_total_amount, calculate_holiday_premium,
+    )
+    from infrastructure.mysql.holiday_repricing import load_frozen_holiday_case_total
+    from infrastructure.mysql.order_terms_read_model import select_order, load_client_pricing_charge_days
+
+    lock = " FOR UPDATE" if for_update else ""
+    try:
+        with connection.cursor() as cursor:
+            order = select_order(cursor, case_no, lock=for_update)
+            pricing = load_case_pricing(cursor, order, lock=for_update)
+            if pricing is None:
+                cursor.execute("SELECT client_hourly_rate_ntd FROM client_payment_terms WHERE case_no=%s" + lock,
+                               (case_no,))
+                original = cursor.fetchone()
+                if not original or not original['client_hourly_rate_ntd']:
+                    return None
+                identity = str(order['client_identity_status'])
+                rule, cap = _legacy_rule_and_cap(identity)
+                rate = int(original['client_hourly_rate_ntd'])
+                rates = HourlyRates(rate, rate)
+                pricing = CasePricingTerms(identity, rule, cap, rates, rates)
+            if str(order["status"]).startswith('歷史'):
+                cursor.execute(
+                    "SELECT p.total_actual_service_hours,e.historical_floor_fee_ntd "
+                    "FROM historical_service_day_projections p JOIN historical_service_day_events e "
+                    "ON e.id=p.current_event_id AND e.case_no=p.case_no WHERE p.case_no=%s" + lock,
+                    (case_no,),
+                )
+                volume = cursor.fetchone()
+                if volume is not None:
+                    if volume['total_actual_service_hours'] is None or volume['historical_floor_fee_ntd'] is None:
+                        return None
+                    hours, floor = Decimal(str(volume['total_actual_service_hours'])), int(volume['historical_floor_fee_ntd'])
+                    return calculate_case_total_amount(pricing, ((hours, False),), floor)
+                cursor.execute("SELECT id FROM historical_order_adoption_receipts "
+                               "WHERE case_no=%s AND outcome='adopted' LIMIT 1" + lock, (case_no,))
+                if cursor.fetchone() is None:
+                    return None
+                if any(order.get(key) is None for key in ('floor_fee', 'service_hours_per_day', 'service_days')):
+                    return None
+                hours = Decimal(str(order['service_hours_per_day'])) * int(order['service_days'])
+                return calculate_case_total_amount(pricing, ((hours, False),), int(order['floor_fee']))
+            frozen = load_frozen_holiday_case_total(cursor, case_no)
+            if frozen is not None:
+                return frozen
+            if any(order.get(key) is None for key in ('floor_fee', 'service_hours_per_day', 'service_days')):
+                return None
+            daily_hours = Decimal(str(order['service_hours_per_day']))
+            floor = int(order['floor_fee'])
+            days = load_client_pricing_charge_days(cursor, order, lock=for_update)
+            if not days:
+                return None
+            gross = calculate_case_total_amount(pricing, tuple((daily_hours, day.is_double_pay) for day in days), floor)
+            return gross + calculate_holiday_premium(pricing, tuple(
+                (daily_hours, day.holiday_hour_segments or ((Decimal(0), day.holiday_hours),)) for day in days
+            ))
+    except ValueError:
+        return None
 
 
 def payroll_tiers(terms):
@@ -804,6 +867,30 @@ class MySqlPricingConfigurationRepository:
             hours = Decimal(str(order["service_hours_per_day"])) * days
             floor = prorate_historical_floor_fee(MoneyNTD(int(order["floor_fee"])), int(order["service_days"]), days)
             return calculate_case_total_amount(terms, ((hours, False),), floor.amount)
+
+    def case_for_query(self, case_no: str) -> CasePricingFacts | CasePricingKnownTerms:
+        from infrastructure.mysql.order_terms_read_model import select_order
+
+        try:
+            return self.case(case_no)
+        except ValueError as error:
+            if str(error) != 'client_finance_bootstrap_required':
+                raise
+            with self.connection.cursor() as cursor:
+                order = select_order(cursor, case_no, lock=False)
+                terms = load_case_pricing(cursor, order)
+            if terms is None:
+                raise
+            source = "manual" if order.get("pricing_override_event_id") else "policy"
+            return CasePricingKnownTerms(
+                case_no=case_no,
+                revision=int(order.get("pricing_revision", 0)),
+                terms=terms,
+                source=source,
+                case_total_amount=query_case_pricing_total(self.connection, case_no),
+                historical=str(order["status"]).startswith('歷史'),
+                accounting_pending=(str(error),),
+            )
 
     def case(self, case_no, *, lock=False):
         from infrastructure.mysql.order_terms_read_model import load_calculable_client_finance_facts, select_order
