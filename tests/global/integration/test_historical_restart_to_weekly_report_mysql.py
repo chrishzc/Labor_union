@@ -1307,7 +1307,7 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
         with connection.cursor() as cursor:
             historical_staff, legacy_assignment = _seed_owner_roots(cursor, historical, "歷史訂單－未服務")
             assert legacy_assignment is not None
-            ordinary_staff, _ = _seed_owner_roots(cursor, ordinary, "訂單成立", historical_evidence=False)
+            ordinary_staff, _ = _seed_owner_roots(cursor, ordinary, "洽談中", historical_evidence=False)
             for stage, due in (("deposit", "2026-09-01"), ("first", "2026-09-03")):
                 identity = f"{historical}-{stage}"
                 cursor.execute(

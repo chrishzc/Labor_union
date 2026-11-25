@@ -75,7 +75,7 @@ class MySqlServiceDateAdjustmentRepository:
             days, tuple(dict.fromkeys((int(row["staff_id"]), str(row["name"])) for row in staff_rows)), pairs,
             int(order["service_days"]), selectable, planned_owners,
             first_schedule_days,
-            (HolidayCaseRepricingResult(**latest_result) if receipts and
+            (HolidayCaseRepricingResult(**{**latest_result, "missing_mapping": tuple(latest_result.get("missing_mapping", ()))}) if receipts and
                 (latest_result := _parse_snapshot(receipts[-1]["result_snapshot"]).get("case_result")) else None),
         )
 
@@ -107,7 +107,8 @@ class MySqlServiceDateAdjustmentRepository:
             raise ValueError("service_date_adjustment_idempotency_conflict")
         snapshot = _parse_snapshot(row["result_snapshot"])
         return ServiceDateAdjustmentReceipt(int(row["id"]), snapshot["scheduling_version"], snapshot["confirmed_version"],
-            HolidayCaseRepricingResult(**snapshot["case_result"]) if snapshot.get("case_result") else None)
+            HolidayCaseRepricingResult(**{**snapshot["case_result"],
+                "missing_mapping": tuple(snapshot["case_result"].get("missing_mapping", ()))}) if snapshot.get("case_result") else None)
 
     def validate_availability(self, facts, change, *, lock):
         with self._connection.cursor() as cursor:
