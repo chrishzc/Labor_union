@@ -297,34 +297,47 @@ def _record_matching_acceptance(database: str, case_no: str, plan_id: int, segme
 
 def _establish_commitment_and_lock(
     database: str,
-    archive_root,
+    archive_root: str,
     case_no: str,
     plan_id: int,
     segment_id: int,
 ) -> None:
+    from pathlib import Path
+
+    from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
     from infrastructure.archive.contract_documents import (
         archive_contract_document,
         discard_uncommitted_contract_document,
     )
+    from infrastructure.mysql.client_deposit_skip_repository import (
+        MySqlClientDepositSkipRepository,
+        UnitOfWork,
+    )
     from infrastructure.mysql.client_finance_terms_writer import persist_client_finance_terms_impact
-    from infrastructure.mysql.order_terms_read_model import load_contract_client_finance_facts, select_order
-    from shared_kernel.identities import CorrelationId, IdempotencyKey
+    from infrastructure.mysql.order_terms_read_model import load_calculable_client_finance_facts, select_order
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.client_finance.deposit_skip_workflow import (
+        DepositSkipApplyRequest,
+        DepositSkipSelection,
+        DepositSkipWorkflow,
+    )
     from subsystems.contract_signing.staff_contract_application import (
         ManualStaffContractAttestationCommand,
         StaffContractSigningApplication,
     )
+    from subsystems.orders.client_finance_outbox_consumer import consume_client_finance_orders_case_override
+    from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
     from subsystems.scheduling import availability_lock_acquisition_workflow
 
     connect = _connection_factory(database)
     application = StaffContractSigningApplication(
         connect,
-        archive_root=archive_root,
+        archive_root=Path(archive_root),
         now=lambda: datetime(2026, 9, 3, 12),
         archive_document=archive_contract_document,
         discard_document=discard_uncommitted_contract_document,
         order_selector=select_order,
-        finance_facts_loader=load_contract_client_finance_facts,
-        finance_terms_writer=persist_client_finance_terms_impact,
     )
     preview = application.preview_manual_attestation(
         case_no=case_no,
@@ -340,6 +353,55 @@ def _establish_commitment_and_lock(
         CorrelationId(f"{case_no}-staff-contract"),
     ))
     assert receipt.commitment_id is not None
+
+    # Establish real receivables and use the audited unpaid-deposit release,
+    # so first assignment is eligible without creating any formal cash receipt.
+    finance_connection = connect()
+    try:
+        with MySqlUnitOfWork(finance_connection) as unit:
+            with finance_connection.cursor() as cursor:
+                order = select_order(cursor, case_no, lock=True)
+                facts, _ = load_calculable_client_finance_facts(cursor, order, lock=True)
+                assert facts is not None
+                source = f"contract_signing:{receipt.signing_event_id}"
+                candidate = build_client_finance_terms_candidate(facts, source)
+                assert not candidate.blockers, candidate.blockers
+                persist_client_finance_terms_impact(cursor, ClientFinanceImpactPersistenceCommand(
+                    candidate,
+                    IdempotencyKey(f"{case_no}-initial-receivables"),
+                    ActorContext("test"),
+                    "establish acceptance receivables before payment",
+                    CorrelationId(f"{case_no}-initial-receivables"),
+                    "contract_signing",
+                    receipt.signing_event_id,
+                ))
+            unit.commit()
+        deposit_workflow = DepositSkipWorkflow(
+            MySqlClientDepositSkipRepository(finance_connection),
+            lambda: UnitOfWork(finance_connection),
+        )
+        selection = DepositSkipSelection(case_no)
+        deposit_preview = deposit_workflow.preview(selection)
+        assert not deposit_preview.blockers, deposit_preview.blockers
+        deposit_receipt = deposit_workflow.apply(DepositSkipApplyRequest(
+            selection,
+            ExpectedVersion(deposit_preview.expected_account_version),
+            deposit_preview.fingerprint,
+            IdempotencyKey(f"{case_no}-unpaid-deposit-release"),
+            ActorContext("test"),
+            "acceptance order proceeds without formal receipt",
+            CorrelationId(f"{case_no}-unpaid-deposit-release"),
+        ))
+        assert deposit_receipt.unpaid_progression_allowed is True
+        assert consume_client_finance_orders_case_override(finance_connection, case_no) is True
+        with finance_connection.cursor() as cursor:
+            assert select_order(cursor, case_no, lock=False)["status"] == "訂單成立"
+            cursor.execute("SELECT COUNT(*) AS total FROM client_ledger_entries WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["total"] == 0
+            cursor.execute("SELECT COUNT(*) AS total FROM client_finance_noncash_events WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["total"] == 0
+    finally:
+        finance_connection.close()
 
     availability_lock_acquisition_workflow.get_connection = connect
     lock_preview = availability_lock_acquisition_workflow.preview_caregiver_availability_lock(
@@ -1396,6 +1458,8 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
         assert disabled.receipt_key != enabled.receipt_key
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM client_ledger_entries WHERE case_no IN (%s,%s)", (historical, ordinary))
+            assert cursor.fetchone()["total"] == 0
+            cursor.execute("SELECT COUNT(*) AS total FROM client_finance_noncash_events WHERE case_no IN (%s,%s)", (historical, ordinary))
             assert cursor.fetchone()["total"] == 0
             cursor.execute("SELECT COUNT(*) AS total FROM staff_payout_obligation_links l JOIN staff_obligations o "
                            "ON o.obligation_identity=l.obligation_identity WHERE o.case_no IN (%s,%s)", (historical, ordinary))

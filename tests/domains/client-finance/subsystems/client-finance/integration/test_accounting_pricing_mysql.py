@@ -1067,7 +1067,7 @@ def test_holiday_batch_keeps_setting_and_distinguishes_atomic_case_failures(clie
         connection.close()
 
 
-@pytest.mark.parametrize("mode", ["plain", "enabled", "ambiguous", "failed"])
+@pytest.mark.parametrize("mode", ["plain", "enabled", "ambiguous", "paid_ambiguous", "failed"])
 def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, mode, monkeypatch):
     from domains.scheduling.service_date_adjustment import AdjustmentTarget
     from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
@@ -1148,9 +1148,11 @@ def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, mode,
         if mode != "failed":
             assert (impact["case_total_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == (
                 (5600, 5120, 480) if enabled else (2800, 2560, 240))
-        if mode == "ambiguous":
+        if mode in {"ambiguous", "paid_ambiguous"}:
             from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
             from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+            if mode == "paid_ambiguous":
+                _holiday_formal_client_receipt(connection, case_no)
             with connection.cursor() as cursor:
                 cursor.execute("UPDATE service_date_adjustment_receipts SET result_snapshot=JSON_SET(result_snapshot,"
                     "'$.removed[1].staff_id',CAST('null' AS JSON)) WHERE id=%s", (receipt.receipt_id,))
@@ -1163,8 +1165,20 @@ def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, mode,
             applied = app.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
                 case_no + ":ambiguous-enable", "pricing-test", "synthetic missing source binding")
             failure = next(item for item in applied.case_results if item.case_no == case_no)
-            assert failure.outcome == "failed"
-            assert failure.reason_code == "holiday_service_attribution_ambiguous"
+            if mode == "paid_ambiguous":
+                assert failure.outcome == "preserved_cash_history"
+                assert failure.reason_code == "formal_cash_history_exists"
+                assert (failure.client_receivable_amount, failure.staff_payable_amount) == (2800, 2560)
+                assert failure.case_total_amount is None
+                replay = app.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+                    case_no + ":ambiguous-enable", "pricing-test", "synthetic missing source binding")
+                assert replay == applied
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) AS total FROM client_ledger_entries WHERE case_no=%s", (case_no,))
+                    assert cursor.fetchone()["total"] == 1
+            else:
+                assert failure.outcome == "failed"
+                assert failure.reason_code == "holiday_service_attribution_ambiguous"
             assert "receipt_staff_binding" in failure.missing_mapping
             assert _holiday_ledger_totals(connection, case_no) == expected
     finally:
