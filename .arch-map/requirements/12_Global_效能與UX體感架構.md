@@ -94,7 +94,11 @@ timeout 不等於失敗；前端以相同 idempotency key 查詢 receipt／retry
 - 應用程式業務語意不依 HTTP/1.1、HTTP/2、HTTP/3、reverse proxy 或 TLS 設定改變；部署架構細節由部署者自行處理。
 - 可重建 Query ViewModel 可用 `ETag`／`If-None-Match` 搭配 `304 Not Modified` 節省傳輸，但不取代 Domain version 檢查；Preview／Apply、typed errors、receipts 與財務明細禁止 shared proxy cache。
 
+<a id="controlled-query-cache"></a>
+
 ## 5. 後端關卡：Query read model 與受控快取
+
+[架構書：唯讀投影快取](../domains/global/subsystems/shared-kernel/modules/read-projection-cache.md#contracts) 說明快取適配器、正式作業的權威資料邊界與驗證入口。
 
 - Query 使用專用 read model／projection，不在 request path 觸發狀態轉移或全域 rescan；list／search 均須 bounded 並經 MySQL `EXPLAIN` 驗證索引；高成本 summary 由 outbox projector 增量更新。
 - 可快取：immutable static assets、具授權範圍與版本 key 的 Query ViewModel、pure Preview 計算結果與 bounded reference data。
