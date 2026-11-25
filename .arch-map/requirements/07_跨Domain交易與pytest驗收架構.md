@@ -15,7 +15,7 @@ Orders
   ├─委派 Scheduling 重建
   ├─委派 Client Finance 重算
   ├─委派 Payroll 重算
-  └─發出 Anomaly facts/outbox
+  └─輸出 Orders 事實與 outbox 事件
 
 Scheduling
   ├─讀取 Orders Terms
@@ -45,7 +45,7 @@ Finance Import
   └─只為匯入完整性故障輸出 bounded batch blocker desired state
 
 Anomalies
-  └─只讀各 Domain facts/outbox，不被任何 Domain 當成門禁 SSOT
+  └─只投影 LINE 提供的 LINE-006 current predicate，不作為其他 Domain 的門禁 SSOT
 
 Government Subsidy
   ├─擁有政府整期入款、receipt／reversal ledger 與 allocation
@@ -66,6 +66,8 @@ Knowledge Retrieval
   ├─擁有 source provenance、review／publish、index freshness 與 retrieval receipt
   └─只輸出 non-authoritative answer；不得觸發業務 Domain mutation
 ```
+
+Orders 的業務事件、Staff Payables 的本地核對警示，以及 Finance Import 的批次完整性故障，都不因此成為全域 current issue。現行代碼與各 owner 的處理位置以 [Anomalies 分類與歸屬](06_Anomalies_Domain.md#3-current-產品分類) 為準；批次完整性攔截仍依本文件 §3.6，不另建立執行期異常復原工作台。
 
 ## 3. Global workflow coordinator
 
