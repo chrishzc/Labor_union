@@ -19,6 +19,8 @@
 → commitment exact conversion → execution assignment／schedule
 ```
 
+上圖是一般作業順序，不是歸檔的前置條件。送交紀錄只供追蹤；就算沒有送交紀錄，人員也可從回收區直接歸檔已簽 PDF，依 §3.4 取得完約結果。
+
 ### 2.1 分責與 SSOT
 
 | Owner | Root facts／責任 | 不擁有 |
