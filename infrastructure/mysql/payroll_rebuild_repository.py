@@ -454,6 +454,10 @@ def _persist_action(cursor, persistence, action, ordinal):
         return
     if action.action is StaffObligationActionKind.REPLACE_UNPAID:
         if (action.delta_amount.is_zero and action.due_date is not None
+                and isinstance(persistence.preview.payroll, HistoricalCasePayrollCandidate)):
+            _set_historical_missing_due_date(cursor, persistence, action)
+            return
+        if (action.delta_amount.is_zero and action.due_date is not None
                 and not isinstance(persistence.preview.payroll, HistoricalCasePayrollCandidate)):
             _replace_missing_due_date(cursor, persistence, action, ordinal)
             return
@@ -526,6 +530,20 @@ def _replace_unpaid_obligation(cursor, persistence, action, ordinal):
             action.obligation_identity,
             persistence.request.case_no,
         ),
+    )
+    if int(cursor.rowcount) != 1:
+        raise ValueError("staff_obligation_frozen")
+
+
+def _set_historical_missing_due_date(cursor, persistence, action):
+    owner = _obligation_owner(cursor, action.obligation_identity)
+    if owner["due_date"] is not None:
+        raise ValueError("staff_obligation_due_date_already_established")
+    cursor.execute(
+        "UPDATE staff_obligations SET due_date=%s "
+        "WHERE obligation_identity=%s AND case_no=%s "
+        "AND due_date IS NULL AND payout_history_exists=0 AND status='open'",
+        (action.due_date, action.obligation_identity, persistence.request.case_no),
     )
     if int(cursor.rowcount) != 1:
         raise ValueError("staff_obligation_frozen")

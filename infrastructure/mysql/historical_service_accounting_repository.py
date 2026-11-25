@@ -295,9 +295,9 @@ class MySqlHistoricalServiceAccountingRepository:
                 funding = _funding_schedule(self._connection, case_no, {
                     "actual_end_date": facts.completed_on, "staff_payment_due_date": None,
                 }, 1)
-                if funding is None or funding[1]:
+                if funding.due_date is None or funding.portions:
                     raise ValueError("historical_attribution_funding_review_required")
-                source = replace(source, staff_payment_due_date=funding[0])
+                source = replace(source, staff_payment_due_date=funding.due_date)
             cursor.execute("SELECT total_actual_service_days FROM historical_service_day_projections WHERE case_no=%s" + suffix, (case_no,))
             projection = cursor.fetchone()
         return (facts, source, int(projection["total_actual_service_days"]) if projection else facts.contracted_service_days,

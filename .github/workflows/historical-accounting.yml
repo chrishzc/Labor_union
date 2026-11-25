@@ -54,6 +54,7 @@ jobs:
         run: >-
           python -m pytest -vv
           tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py
+          tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_owning_domain_composite.py
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_source_projection.py
           tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_baseline_obligation_sync.py
           tests/domains/staff-payables/subsystems/staff-payables/modules/historical-payment-settlement/contract/test_historical_completion_read_adapter.py
@@ -68,10 +69,9 @@ jobs:
           tests/domains/orders/subsystems/orders/modules/order-terms/contract/test_incomplete_order_terms.py
       - name: Verify isolated MySQL query to accounting API and read-only snapshots
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: >-
-          python -m pytest -vv
-          tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
-          -k historical_accounting
+        run: |
+          python -m pytest -vv tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py -k historical_accounting
+          python -m pytest -vv tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -88,15 +88,15 @@ jobs:
           -t 隔離
       - name: Check Python types and lint at the affected boundaries
         run: |
-          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py api/schemas/finance_import.py api/routes/finance_statement_workspace.py
-          pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py
+          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py api/schemas/finance_import.py api/routes/finance_statement_workspace.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/finance_import_owning_domain_composite.py infrastructure/mysql/accounts_payable_export_sources.py infrastructure/mysql/payroll_rebuild_repository.py infrastructure/mysql/finance_import_repository.py infrastructure/mysql/historical_staff_payout_repository.py subsystems/finance_import/query.py subsystems/orders/historical_adoption_workflow.py
+          pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/accounts_payable_export_sources.py
       - name: Check completed historical correction boundaries
         run: |
           ruff check --select E9,F63,F7,F82 domains/orders/historical_service_accounting.py domains/payroll/historical_calculation.py domains/client_finance/historical_obligation_calculation.py subsystems/case_import/beclass_correction_workflow.py subsystems/orders/historical_service_accounting_workflow.py subsystems/client_finance/pricing_configuration.py infrastructure/mysql/beclass_correction_repository.py infrastructure/mysql/beclass_financial_sync.py infrastructure/mysql/historical_service_accounting_repository.py infrastructure/mysql/pricing_configuration_repository.py api/routes/client_registry.py api/routes/historical_service_accounting.py api/routes/accounting_pricing.py api/schemas/client_registry.py api/schemas/historical_service_accounting.py api/schemas/accounting_pricing.py
           pyright domains/orders/historical_service_accounting.py domains/payroll/historical_calculation.py domains/client_finance/historical_obligation_calculation.py subsystems/case_import/beclass_correction_workflow.py subsystems/orders/historical_service_accounting_workflow.py subsystems/client_finance/pricing_configuration.py api/schemas/client_registry.py api/schemas/historical_service_accounting.py api/schemas/accounting_pricing.py
       - name: Check the owning specification and whitespace
         run: |
-          python scripts/validate_spec_hygiene.py --path .arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md
+          python scripts/validate_spec_hygiene.py
           git diff --check ${{ github.event.pull_request.base.sha || 'HEAD^' }} HEAD
 
   frontend:
@@ -118,6 +118,8 @@ jobs:
         run: >-
           npm test --
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/bank_reconciliation_workspace.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_pricing.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_parameters_components.test.tsx
           src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx

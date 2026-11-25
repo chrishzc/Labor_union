@@ -1244,6 +1244,7 @@ def _enrich_bank_transactions(
                         "FROM staff_obligations o "
                         "LEFT JOIN staff_payable_projections p ON p.obligation_identity=o.obligation_identity "
                         "WHERE o.staff_id=%s AND o.direction='payable_to_staff' "
+                        "AND o.obligation_identity NOT LIKE 'staff-handover:%%' "
                         "AND o.status<>'cancelled' AND o.amount_due_ntd>0 "
                         "AND (p.status IS NULL OR p.status IN ('payable','partially_paid'))",
                         (staff_id,),

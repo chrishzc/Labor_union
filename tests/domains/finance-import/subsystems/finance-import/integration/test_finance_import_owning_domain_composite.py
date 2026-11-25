@@ -826,3 +826,106 @@ def test_sinopac_receipt_with_same_month_open_obligation_does_not_steal_earlier_
     assert october_resolved.target_identities == (second["obligation_identity"],)
     assert october_resolved.client_receipt_review.reason == "client_receipt_underpaid"
     assert "diff_under:12000" in october_resolved.evidence
+
+
+@pytest.mark.parametrize("competing", [False, True])
+def test_staff_payout_due_date_missing_narrows_to_competing_obligations_only(monkeypatch, competing):
+    from unittest.mock import Mock
+    from domains.staff_payables.reconciliation import OutgoingBankFact, StaffPayableFacts
+    from subsystems.staff_payables.payout_reconciliation import StaffPayoutReconciliationFacts
+    import infrastructure.mysql.finance_import_owning_domain_composite as module
+
+    target_row = {"case_no": "CASE-A", "staff_id": 7, "obligation_kind": "service_pay",
+                  "obligation_identity": "staff:A", "due_date": "2026-10-15", "amount_due_ntd": 18000}
+    undated_row = {"case_no": "CASE-A" if competing else "CASE-B", "staff_id": 7, "obligation_kind": "service_pay",
+                   "obligation_identity": "staff:B", "due_date": None, "amount_due_ntd": 9999}
+    source = {"format_id": "sinopac", "direction": "outgoing", "memo": "HC115001", "transaction_date": "2026-10-20", "currency": "TWD"}
+    connection = _VirtualAccountConnection(((target_row, undated_row),))
+    connection.cursor_instance._staff_source = source
+    monkeypatch.setattr(module, "_sinopac_outgoing_case_info", lambda *args, **kwargs: (True, "CASE-A", "2026-10-20"))
+    repository = Mock()
+    repository.load.return_value = StaffPayoutReconciliationFacts(
+        4, 8, (OutgoingBankFact("88", 7, MoneyNTD(18000), is_sinopac_payout=True),), (),
+        (StaffPayableFacts("staff:A", 7, MoneyNTD(18000)),),
+    )
+    monkeypatch.setattr(module, "MySqlStaffPayoutRepository", lambda *args: repository)
+    candidate = CanonicalFinanceImportRow(
+        "finance-import-row:88", 0, MoneyNTD(18000), FinanceClassificationType.STAFF_PAYOUT,
+        FinanceImportDisposition.BUSINESS_PENDING, PreviewFingerprint("a" * 64), target_identities=("staff:7",),
+    )
+    result = _resolve_staff_payout(connection, candidate)
+    if competing:
+        assert result.disposition is FinanceImportDisposition.BUSINESS_PENDING
+        assert result.pending_reason == "due_date_missing"
+        repository.load.assert_not_called()
+    else:
+        assert result.disposition is FinanceImportDisposition.CREATE
+        assert result.target_identities == ("staff:A",)
+        repository.load.assert_called_once()
+
+
+@pytest.mark.parametrize("competing", [False, True])
+def test_client_receipt_fallback_due_date_missing_excludes_unrelated_undated_rows(competing):
+    dated_row = {"case_no": "115000003", "obligation_identity": "client-obligation:115000003:first",
+                 "obligation_type": "first", "direction": "receivable_from_client",
+                 "due_date": "2026-10-12", "amount_due_ntd": 12000}
+    undated_row = {"case_no": "115000003" if competing else "115000999",
+                   "obligation_identity": "client-obligation:other:first",
+                   "obligation_type": "first", "direction": "receivable_from_client",
+                   "due_date": None, "amount_due_ntd": 9999}
+    source = {"format_id": "sinopac", "cancellation_code": None,
+              "bank_references": {"銷帳編號": "99781699115003"}, "transaction_date": "2026-10-20"}
+    connection = _VirtualAccountConnection((
+        source, ({"case_no": "115000003"},), (), (dated_row, undated_row),
+    ))
+    resolved = _resolve_client_receipt(connection, _pending_receipt(9000))
+    if competing:
+        assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+        assert resolved.client_receipt_review.reason == "due_date_missing"
+        assert [item.obligation_identity for item in resolved.client_receipt_review.candidates] == ["client-obligation:other:first"]
+    else:
+        assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+        assert resolved.target_identities == ("client-obligation:115000003:first",)
+        assert resolved.client_receipt_review.reason == "client_receipt_underpaid"
+
+
+@pytest.mark.parametrize("competing", [False, True])
+def test_sinopac_client_refund_due_date_missing_narrows_by_case_and_purpose(monkeypatch, competing):
+    from dataclasses import replace
+    from unittest.mock import Mock
+    import infrastructure.mysql.finance_import_owning_domain_composite as module
+
+    target = {"case_no": "CASE-A", "obligation_identity": "refund:A",
+              "obligation_type": "refund", "due_date": "2026-10-15", "amount_due_ntd": 12000}
+    undated = {"case_no": "CASE-A" if competing else "CASE-B",
+               "obligation_identity": "refund:B",
+               "obligation_type": "refund" if competing else "adjustment",
+               "due_date": None, "amount_due_ntd": 5000}
+    connection = Mock()
+    connection.cursor.return_value.__enter__ = Mock(
+        return_value=Mock(
+            fetchone=Mock(return_value={"format_id": "sinopac", "currency": "TWD"}),
+            fetchall=Mock(return_value=[{"case_no": "CASE-A", "obligation_type": "refund"}]),
+        )
+    )
+    connection.cursor.return_value.__exit__ = Mock(return_value=False)
+    monkeypatch.setattr(module, "_sinopac_outgoing_case_info", lambda *args, **kwargs: (True, "CASE-A", "2026-10-20"))
+    monkeypatch.setattr(module, "_load_client_refund_targets", lambda *args, **kwargs: (target, undated))
+    workflow_preview = Mock()
+    monkeypatch.setattr(module.ClientRefundReversalWorkflow, "preview", workflow_preview)
+    candidate = replace(
+        _pending_receipt(12000),
+        classification_type=FinanceClassificationType.CLIENT_REFUND,
+        disposition=FinanceImportDisposition.BUSINESS_PENDING,
+        target_identities=("client:7",),
+        evidence=("sinopac_unique_client_refund_account_in_transaction_reference",),
+    )
+    resolved = module._resolve_client_refund(connection, candidate)
+    if competing:
+        assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+        assert resolved.pending_reason == "due_date_missing"
+        workflow_preview.assert_not_called()
+    else:
+        assert resolved.disposition is FinanceImportDisposition.CREATE
+        assert resolved.target_identities == ("refund:A",)
+        assert workflow_preview.call_count == 1

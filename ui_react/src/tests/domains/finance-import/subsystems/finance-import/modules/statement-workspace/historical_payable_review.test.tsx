@@ -73,3 +73,28 @@ it('顯示歷史歸屬更正的待核對原因，無成功回報或清冊重讀'
   expect(await screen.findByRole('status')).toHaveTextContent('請核對原出款證據，並回到歷史服務歸屬更正。');
   expect(onSaved).not.toHaveBeenCalled();
 });
+
+it('建立正式應付但付款日仍未定時，顯示付款安排待確認並重查清冊', async () => {
+  vi.spyOn(transport, 'post').mockResolvedValue({
+    success: true,
+    data: {
+      details: [{
+        case_no: pending.case_no,
+        action: 'created',
+        due_date: null,
+        payment_arrangement_pending: true,
+        pending_reason: 'historical_payroll_funding_pending',
+        detail: '月嫂付款來源與補助流向尚未確認，預計付款日與分期保留待確認。',
+      }],
+    },
+  });
+  const onSaved = vi.fn();
+  render(<HistoricalPayableEditor item={pending} onSaved={onSaved} />);
+
+  fireEvent.click(screen.getByRole('button', { name: '同步月嫂應付' }));
+
+  const status = await screen.findByRole('status');
+  expect(status).toHaveTextContent('已建立正式應付，付款安排或預計付款日待確認');
+  expect(status).toHaveTextContent('月嫂付款來源與補助流向尚未確認');
+  expect(onSaved).toHaveBeenCalledOnce();
+});

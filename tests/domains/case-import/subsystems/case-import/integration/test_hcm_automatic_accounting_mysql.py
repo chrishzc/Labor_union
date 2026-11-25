@@ -154,20 +154,25 @@ def test_hcm_to_historical_completion_establishes_payroll_and_routes_subsidy_by_
             ]
 
             roster = ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection))
-            for case, amount, recipient, subsidy in zip(cases, (63000, None, 54000, 54000),
-                                                        ("staff", None, "client", None), (42000, None, 12000, None)):
+            for case, amount, due_expected, recipient, subsidy in zip(
+                cases, (63000, 54000, 54000, 54000), (True, False, True, True),
+                ("staff", None, "client", None), (42000, None, 12000, None),
+            ):
                 item, = roster.list(query=case, limit=10, after=None).items
                 response = http.get(f"/cases/{case}/accounting")
                 assert response.is_success, response.text
                 accounting = response.json()["data"]
-                if amount is None:
+                staff, = accounting["staff_items"]
+                assert staff["expected_ntd"] == amount
+                if not due_expected:
                     assert item.staff_payment_due_date is None
-                    assert not item.staff_obligation_dates and not accounting["staff_items"]
+                    assert [row["due_date"] for row in item.staff_obligation_dates] == [None]
+                    assert staff["due_date"] is None
+                    assert staff["remaining_ntd"] == amount
                 else:
                     assert item.staff_payment_due_date == date(2026, 9, 15)
                     assert item.staff_obligation_dates[0]["due_date"] == item.staff_payment_due_date
-                    staff, = accounting["staff_items"]
-                    assert staff["expected_ntd"] == amount and staff["due_date"] == "2026-09-15"
+                    assert staff["due_date"] == "2026-09-15"
                 refund_dates = [row["due_date"] for row in item.client_obligation_dates if row["obligation_type"] == "subsidy_return"]
                 assert refund_dates == ([date(2026, 10, 15)] if recipient == "client" else [])
                 formal = [row for row in accounting["subsidy_payments"] if row["source"] == "formal"]

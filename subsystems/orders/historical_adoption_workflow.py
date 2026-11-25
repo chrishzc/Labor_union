@@ -191,8 +191,11 @@ class HistoricalOrderAdoptionWorkflow:
                 if preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value:
                     result = self._repository.synchronize_completed_payroll(preview.case_no)
                     unchanged = result["action"] == "skipped"
-                    payroll_skip_reason = result.get("reason") if unchanged else None
-                    payroll_skip_detail = result.get("detail") if unchanged else None
+                    issue_reason = result.get("reason") if unchanged else result.get("pending_reason")
+                    if issue_reason == "already_synced" and result.get("pending_reason"):
+                        issue_reason = result["pending_reason"]
+                    payroll_skip_reason = issue_reason
+                    payroll_skip_detail = result.get("detail") if issue_reason else None
                 return HistoricalOrderAdoptionReceipt(
                     preview.outcome, preview.case_no, preview.resulting_version,
                     0, None, False, preview.fingerprint, unchanged=unchanged, payroll_skip_reason=payroll_skip_reason,
