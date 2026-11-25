@@ -34,7 +34,13 @@ Append-only trigger 例外要求同案 pending claim 與 row ownership。connect
 - `POST /api/v1/admin/registries/clients/{case_no}/deletion/apply`
 
 ## Contracts
-- `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md` RD-1／RD-A1～A5。
+- [名冊規格 §3：Root 案件永久刪除](../../../../../requirements/33_案件與月嫂整合名冊正式規格.md#3-root-案件永久刪除rd-1)（RD-1／RD-A1～A5）。
+- `client_registry.py` 掛載 `registry_deletion.py` 的路由。GET 預覽透過 `get_registry_deletion_application → require_registry_deletion_root` 驗證 root；POST Apply 也明列此權限依賴。前端的 root 檢查只控制呈現，不代替 API 驗權。
+- `RegistryDeletionPanel.tsx` 只在收到成功回執後通知名冊移除案件；結果未明時保留同一組預覽版本和操作鍵供核對，不另開操作。
+
+## 交接驗收對照
+- 正例：root 預覽並確認一筆已完簽、與另一案共用 Client 的案件。應刪除本案及從屬資料，保留共用 Client、另一案與月嫂；同鍵重送只回原結果。既有 MySQL 測試：`test_signed_return_or_completion_can_be_deleted_including_old_plan`，涵蓋完簽及非目前方案的簽回。
+- 反例：一般管理員直接呼叫同一預覽或 Apply，API 拒絕且不寫入；若資料層收到已完成或不同案件的刪除命令，也不能藉此刪除歷程。後者的既有 MySQL 測試：`test_database_guards_require_pending_claim_for_deleted_row`。前端不顯示入口不能替代 API 驗權。
 
 ## Verification
 - layout_status: `custom_current`
