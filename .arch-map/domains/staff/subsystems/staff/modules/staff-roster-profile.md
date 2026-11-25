@@ -100,6 +100,34 @@ flowchart LR
   F --> I[版本化發布內容及正式回讀]
 ```
 
+## 客戶反饋照片：交接定位
+
+這三個入口分屬畫面、服務與資料。以規格 #35 為行為依據；下列實作位置供查核，不代表已跑驗收。
+
+### 前端：發布前後的畫面 ^staff-feedback-ui
+- **負責／正式約定**：客戶端與名冊前端；規格的「客戶個人網頁」定義只顯示已發布圖片、空類別隱藏與同列橫滑。送審或發布結果未確認，不顯示新照片。
+- **接線／去哪驗**：客戶頁 `line/static/staff_web_profile.html`、`line/static/staff_web_profile.js`；以 #35 §4 的客戶頁與發布案例為驗收來源。
+
+### API：本人送審、管理員發布與客戶讀取 ^staff-feedback-api
+- **負責／正式約定**：Staff；本人沿 `POST /api/v1/line/staff-self-service/profile-change/submit` 送審，管理員以 `POST /api/v1/admin/staff-profile-change-requests/{application_id}/decision` 審核。客戶經授權讀取 `POST /api/v1/line/staff-web-profiles/{staff_id}/query`。本人送審的審核入口與辦公室代傳的 `/{staff_id}/publications` 不混用。
+- **去哪驗**：現行路由 `api/routes/staff_profile_change.py` 與 `api/routes/staff_web_profile.py`；規格 #35 §3.2–3.3 及 §4，測試定位見下方 Verification。受理不等於已發布，不能以回應成功代替正式讀回。
+
+### DB：類別與保留資料升級 ^staff-feedback-db
+- **負責／正式約定**：Staff 持久層與 DB；共用模板的 `staff_web_template_items.category` 由既有 ENUM 納入 `feedback`，不新增資料表或重建照片／到期欄位。這是資料契約，不是新的業務規則。
+- **去哪驗**：沿 Implementation 所列 1086 與新建／保留資料兩份清單；分開核對類別值和既有資料保留，不以資料驗證代替客戶頁驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: staff-feedback-ui
+  target: .arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md#^staff-web-03
+- kind: implements_requirement
+  source: staff-feedback-api
+  target: .arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md#^staff-web-review-publish
+- kind: implements_requirement
+  source: staff-feedback-db
+  target: .arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md#^staff-web-01
+```
+
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/staff/subsystems/staff/modules/staff-roster-profile/`
