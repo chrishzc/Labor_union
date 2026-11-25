@@ -68,7 +68,7 @@ def query_case_payment_terms(connection, case_no: str) -> ClientCasePaymentTerms
         hours = Decimal(str(facts.service_hours_per_day))
         funding = ClientCaseFunding(case_no, facts.identity_status, hours * len(facts.charge_days),
             pricing.subsidy_hours, calculate_case_total_amount(pricing,
-                tuple((hours, day.is_double_pay) for day in facts.charge_days), facts.floor_fee.amount),
+                tuple((hours, False) for day in facts.charge_days), facts.floor_fee.amount),
             facts.existing_subsidy_return_count > 0)
 
     # Cancellation has separate actual-service terms. An incomplete service

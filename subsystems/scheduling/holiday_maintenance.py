@@ -6,7 +6,7 @@ Description: 協調國定假日 horizon 的零寫入預覽、fresh-lock Apply �
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Callable, Literal, Protocol
 
@@ -25,7 +25,7 @@ class HolidayCommand:
     action: Literal["upsert", "delete"]
     holiday_date: date
     holiday_name: str | None
-    is_double_pay_default: bool
+    is_double_pay_default: bool | None
     from_date: date
     to_date: date
 
@@ -36,6 +36,22 @@ class HolidayPreview:
     before: HolidayFact | None
     calendar: HolidayCalendarFacts
     preview_fingerprint: str
+
+
+HolidayRepricingOutcome = Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "repriced_funding_pending", "unchanged", "blocked", "failed"]
+
+
+@dataclass(frozen=True, slots=True)
+class HolidayCaseRepricingResult:
+    case_no: str
+    outcome: HolidayRepricingOutcome
+    case_total_amount: int | None = None
+    reason_code: str | None = None
+    client_receivable_amount: int | None = None
+    staff_payable_amount: int | None = None
+    subsidy_amount: int | None = None
+    unallocated_amount: int | None = None
+    missing_mapping: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +66,7 @@ class HolidayReceipt:
     previous_calendar_version: str
     resulting_calendar_version: str
     preview_fingerprint: str
+    case_results: tuple[HolidayCaseRepricingResult, ...] = ()
 
 
 class HolidayWorkflowError(Exception):
@@ -88,10 +105,14 @@ class HolidayMaintenanceApplication:
         repository: HolidayMaintenanceRepository,
         unit_of_work_factory: Callable[[], object],
         after_commit: Callable[[], None],
+        reprice: Callable[[HolidayCommand, str, str], tuple[HolidayCaseRepricingResult, ...] | None] | None = None,
+        before_change: Callable[[HolidayCommand], None] | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._after_commit = after_commit
+        self._reprice = reprice
+        self._before_change = before_change
 
     def preview(self, command: HolidayCommand) -> HolidayPreview:
         return preview(self._repository, command)
@@ -114,6 +135,8 @@ class HolidayMaintenanceApplication:
                 idempotency_key,
                 actor,
                 reason,
+                self._reprice,
+                self._before_change,
             )
             unit_of_work.commit()
         self._after_commit()
@@ -133,6 +156,8 @@ def apply(
     idempotency_key: str,
     actor: str,
     reason: str,
+    reprice: Callable[[HolidayCommand, str, str], tuple[HolidayCaseRepricingResult, ...] | None] | None = None,
+    before_change: Callable[[HolidayCommand], None] | None = None,
 ) -> HolidayReceipt:
     request_fingerprint = fingerprint_payload(
         {
@@ -157,14 +182,23 @@ def apply(
         raise HolidayWorkflowError("stale_preview")
 
     changed = _would_change(command, current_preview.before)
+    if changed and before_change is not None:
+        before_change(command)
     if changed and command.action == "delete":
         repository.delete_holiday(command.holiday_date)
     elif changed:
         repository.upsert_holiday(
             command.holiday_date,
             command.holiday_name or "",
-            command.is_double_pay_default,
+            (command.is_double_pay_default if command.is_double_pay_default is not None
+             else bool(current_preview.before and current_preview.before.is_double_pay_default)),
         )
+    case_results: tuple[HolidayCaseRepricingResult, ...] = ()
+    before_enabled = bool(current_preview.before and current_preview.before.is_double_pay_default)
+    after_enabled = (False if command.action == "delete" else
+                     command.is_double_pay_default if command.is_double_pay_default is not None else before_enabled)
+    if changed and before_enabled != after_enabled and reprice is not None:
+        case_results = reprice(command, idempotency_key, actor) or ()
     resulting = repository.query(command.from_date, command.to_date, lock=True)
     receipt = HolidayReceipt(
         idempotency_key,
@@ -177,6 +211,7 @@ def apply(
         calendar.holiday_version,
         resulting.holiday_version,
         preview_fingerprint,
+        case_results,
     )
     repository.save_receipt(
         _FAMILY,
@@ -223,7 +258,9 @@ def _preview_from_calendar(
 def _would_change(command: HolidayCommand, before: HolidayFact | None) -> bool:
     if command.action == "delete":
         return True
-    return before is None or before.holiday_name != command.holiday_name
+    return (before is None or before.holiday_name != command.holiday_name
+            or (command.is_double_pay_default is not None
+                and before.is_double_pay_default != command.is_double_pay_default))
 
 
 def _command_payload(command: HolidayCommand) -> dict[str, object]:
@@ -249,6 +286,7 @@ def _fact_payload(fact: HolidayFact | None) -> dict[str, object] | None:
 
 def _receipt_payload(receipt: HolidayReceipt) -> dict[str, object]:
     return {
+        "case_results": [asdict(result) for result in receipt.case_results],
         "receipt_key": receipt.receipt_key,
         "action": receipt.action,
         "holiday_date": receipt.holiday_date.isoformat(),
@@ -275,4 +313,5 @@ def _receipt_from_snapshot(snapshot) -> HolidayReceipt:
         payload["previous_calendar_version"],
         payload["resulting_calendar_version"],
         payload["preview_fingerprint"],
+        tuple(HolidayCaseRepricingResult(**{**item, "missing_mapping": tuple(item.get("missing_mapping", ()))}) for item in payload.get("case_results", ())),
     )

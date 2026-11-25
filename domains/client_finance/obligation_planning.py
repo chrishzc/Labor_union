@@ -54,10 +54,14 @@ class ClientFinanceDirection(StrEnum):
 class ClientChargeDay:
     service_date: date
     is_double_pay: bool
+    holiday_hours: Decimal = Decimal(0)
+    holiday_hour_segments: tuple[tuple[Decimal, Decimal], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.service_date, date):
             raise TypeError("client charge service date must be a date")
+        if not self.holiday_hours.is_finite() or self.holiday_hours < 0:
+            raise ValueError("client_holiday_hours_invalid")
         if not isinstance(self.is_double_pay, bool):
             raise TypeError("client charge double-pay marker must be bool")
 
@@ -783,7 +787,8 @@ def _materialize_terms_facts(source_facts, order_terms, scheduling):
 
 
 def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
-    charge_days = _charge_days(service_dates)
+    charge_days = tuple(replace(day, is_double_pay=day.service_date in source_facts.double_pay_dates)
+                        for day in _charge_days(service_dates))
     client_service_charge_waived = False
     if source_facts.identity_status is not None and source_facts.pricing is None:
         coverage = derive_subsidy_coverage(
@@ -906,31 +911,50 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
 
 def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
     if facts.pricing is None:
-        return False
+        return facts.client_service_charge_waived
     hours = Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day))
     return facts.pricing.is_full_subsidy(hours) is True
 
 
-def _daily_charge(facts, charge_day):
+def _holiday_funding_pending(facts: ClientFinanceTermsFacts) -> bool:
     if facts.pricing is not None:
-        consumed = Decimal(facts.charge_days.index(charge_day)) * Decimal(str(facts.service_hours_per_day))
-        return MoneyNTD(facts.pricing.client_charge(Decimal(str(facts.service_hours_per_day)), consumed))
+        return _full_subsidy(facts)
+    # No immutable case binding means the effective subsidy limit is unknown.
+    return normalize_subsidy_policy_identity(facts.identity_status or "") in {"補助市民", "原住民"}
+
+
+def _daily_charge(facts: ClientFinanceTermsFacts, charge_day: ClientChargeDay) -> MoneyNTD:
+    hours = Decimal(str(facts.service_hours_per_day))
+    premium = hours if charge_day.is_double_pay else charge_day.holiday_hours
+    if facts.pricing is None and _holiday_funding_pending(facts):
+        premium = Decimal(0)
+    if facts.pricing is not None:
+        consumed = Decimal(facts.charge_days.index(charge_day)) * hours
+        segments = charge_day.holiday_hour_segments or ((Decimal(0), premium),)
+        from domains.client_finance.pricing_policy import calculate_holiday_premium
+        premium_inputs = ((consumed, ()), (hours, segments))
+        return MoneyNTD(facts.pricing.client_charge(hours, consumed)
+                        + calculate_holiday_premium(facts.pricing, premium_inputs))
     if normalize_subsidy_policy_identity(facts.identity_status or '') == '補助市民':
         index = facts.charge_days.index(charge_day)
-        remaining = max(0,120-index*facts.service_hours_per_day)
-        billed = max(0,facts.service_hours_per_day-remaining)
-        return MoneyNTD(_whole_ntd(billed*facts.payment_terms.client_hourly_rate.amount))
+        remaining = max(Decimal(0), Decimal(120) - index * hours)
+        billed = max(Decimal(0), hours - remaining)
+        return MoneyNTD(_whole_ntd((billed + premium) * facts.payment_terms.client_hourly_rate.amount))
     if facts.client_service_charge_waived:
         return MoneyNTD(0)
     return (
         MoneyNTD(_whole_ntd(
             facts.payment_terms.client_hourly_rate.amount
-            * facts.service_hours_per_day
+            * (hours + premium)
         ))
     )
 
 
-def _whole_ntd(value: float | int) -> int:
+def _whole_ntd(value: Decimal | float | int) -> int:
+    if isinstance(value, Decimal):
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError("half-hour charge must resolve to whole NTD")
+        return int(value)
     if isinstance(value, float) and not value.is_integer():
         raise ValueError("half-hour charge must resolve to whole NTD")
     return int(value)

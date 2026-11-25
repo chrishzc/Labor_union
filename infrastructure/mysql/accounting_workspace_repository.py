@@ -21,6 +21,7 @@ def build_accounting_workspace(connection, *, include_staff_availability: bool =
     from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
     from infrastructure.mysql.subsidy_confirmation_repository import preview_manual_subsidy_plan, apply_manual_subsidy_plan
+    from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
     state = MySqlAccountingWorkspaceState(connection)
     return AccountingWorkspace(state, partial(query_case_accounting, connection),
         partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
@@ -30,6 +31,7 @@ def build_accounting_workspace(connection, *, include_staff_availability: bool =
         bank_memos=partial(query_case_bank_memos, connection),
         subsidy_plan_preview=partial(preview_manual_subsidy_plan, connection),
         subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection),
+        case_total=MySqlPricingConfigurationRepository(connection).reporting_case_total_amount,
         subsidy_detail=partial(query_case_subsidy_amount, connection),
         staff_availability=(partial(query_case_staff_accounting_availability, connection)
                             if include_staff_availability else None))

@@ -1,7 +1,7 @@
 """Compose typed owner queries; display warnings never change accounting facts."""
 from __future__ import annotations
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Callable, Protocol
 from domains.client_finance.obligation_planning import ClientSubsidyReturnPlan
 from domains.client_finance.subsidy_coverage import is_full_subsidy_case
 from domains.payroll.installments import PayrollInstallment
@@ -165,6 +165,7 @@ class CaseAccounting:
     estimated_subsidy_payment_date: str | None = None
     zero_stages: tuple[str, ...] = ()
     full_subsidy: bool = False
+    unallocated_service_difference_ntd: int | None = None
     stale_payment_evidence_identities: tuple[str, ...] = ()
     pending_bank_row_identities: tuple[str, ...] = ()
     historical_stages: bool = False
@@ -223,7 +224,8 @@ class StaffAccountingPort(Protocol):
 class AccountingWorkspace:
     def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort,
                  bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None, bank_memos=None,
-                 subsidy_plan_preview=None, subsidy_plan_apply=None, subsidy_detail=None, staff_availability=None):
+                 subsidy_plan_preview=None, subsidy_plan_apply=None, subsidy_detail=None, staff_availability=None,
+                 case_total: Callable[[str], int | None] | None = None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
         self.subsidy = subsidy
@@ -233,6 +235,7 @@ class AccountingWorkspace:
         self.bank_memos = bank_memos
         self.subsidy_plan_preview = subsidy_plan_preview
         self.subsidy_plan_apply = subsidy_plan_apply
+        self.case_total = case_total
         self.subsidy_detail = subsidy_detail
         self.staff_availability = staff_availability
 
@@ -412,12 +415,21 @@ class AccountingWorkspace:
         full_subsidy = eligibility is True and funding is not None
         pending_reasons = list(terms.pending_reasons)
         funding_conflict = False
+        service_difference = None
+        gross_total = self.case_total(case_no) if full_subsidy and not terms.historical_stages and self.case_total is not None else None
+        holiday_funding_difference = bool(full_subsidy and not terms.historical_stages and gross_total is not None
+            and subsidy is not None and gross_total > subsidy
+            and subsidy == funding.total_ntd
+            and not funding.has_subsidy_return
+            and not any(item.expected_ntd or item.actual_ntd or item.noncash_ntd for item in stages))
+        if full_subsidy and gross_total is not None and subsidy is not None:
+            service_difference = max(0, gross_total - (customer_amount or 0) - subsidy)
         if full_subsidy:
             funding_conflict = (any(reason.endswith('requires_review') or reason == 'historical_client_payment_evidence_stale'
                                     for reason in pending_reasons) or funding.has_subsidy_return
                 or any(item.expected_ntd or item.actual_ntd or item.noncash_ntd or item.payment_evidence for item in client_items)
                 or any(row.amount_ntd for row in client_transactions)
-                or (staff_total is not None and staff_total != funding.total_ntd)
+                or (staff_total is not None and staff_total != funding.total_ntd and not holiday_funding_difference)
                 or (subsidy is not None and subsidy != funding.total_ntd))
             if any(item.expected_ntd or item.actual_ntd or item.noncash_ntd or item.payment_evidence for item in client_items):
                 pending_reasons.append('historical_original_client_amount_requires_review' if terms.historical_stages else 'original_client_amount_requires_review')
@@ -425,10 +437,10 @@ class AccountingWorkspace:
                 pending_reasons.append('historical_client_cash_requires_review' if terms.historical_stages else 'client_cash_requires_review')
             if subsidy is not None and subsidy != funding.total_ntd:
                 pending_reasons.append('subsidy_amount_conflict')
-            if staff_total is not None and staff_total != funding.total_ntd:
+            if staff_total is not None and staff_total != funding.total_ntd and not holiday_funding_difference:
                 pending_reasons.append('staff_total_amount_conflict')
             if not funding_conflict and not pending_reasons:
-                if not terms.historical_stages:
+                if not terms.historical_stages and not holiday_funding_difference:
                     staff_total = funding.total_ntd
                 customer_amount, subsidy, fully_received = 0, funding.total_ntd, True
                 customer_paid = 0
@@ -487,6 +499,7 @@ class AccountingWorkspace:
             estimated_subsidy_payment_date=estimated_subsidy_payment_date,
             zero_stages=tuple(stage.value for stage in terms.zero_stages if stage.value not in recorded_stages) if not conflict else (),
             full_subsidy=full_subsidy and not conflict,
+            unallocated_service_difference_ntd=service_difference,
             stale_payment_evidence_identities=terms.stale_payment_evidence_identities,
             pending_bank_row_identities=terms.pending_bank_row_identities,
             historical_stages=terms.historical_stages,

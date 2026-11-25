@@ -614,13 +614,13 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const unallocatedClientTransactions=data?.transactions.filter(row=>row.item_identity==='unallocated')??[];
  const staff=data?[...new Set(data.staff_items.filter(row=>row.direction==='payable').map(row=>row.party))].join('、'):'';
  const staffItems=data?.staff_items.filter(row=>row.direction==='payable')??[];
- const pricingTotal=state.pricing?.case_no===initialCase ? state.pricing.impact.staff_total_amount : null;
+ const pricingTotal=state.pricing?.case_no===initialCase ? state.pricing.impact.case_total_amount : null;
  const staffTransactions=data?.transactions.filter(row=>row.kind==='payout'||staffItems.some(s=>s.identity===row.item_identity))??[];
  const staffPayableTotal=staffItems.reduce((sum,item)=>sum+item.expected_ntd,0);
  const staffPaidTotal=staffItems.reduce((sum,item)=>sum+item.actual_ntd,0);
  const staffRemainingTotal=staffItems.reduce((sum,item)=>sum+(item.remaining_ntd??Math.max(0,item.expected_ntd-item.actual_ntd)),0);
  const isEstablishedUnserved=state.order?.order_status==='成立後未服務';
- const caseTotal=data?.staff_receivable_ntd??(isEstablishedUnserved?staffPayableTotal:pricingTotal);
+ const caseTotal=isEstablishedUnserved?staffPayableTotal:pricingTotal;
 
  const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
  const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];
@@ -826,6 +826,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  {state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}
  </div></details>
  <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {data.subsidy_ntd==null?'金額待確認':money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'補助金額先計算，對象可由人工或符合條件的銀行明細確認。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{planConfirmed?'修改補助退款方案':'設定補助退款方案'}</button></div>{data.full_subsidy&&!data.scheme_conflict&&!data.historical_stages&&<p>全額補助，三期免繳</p>}<FinanceCaseBankMemos notes={data.bank_memos??[]}/><p>可在服務結束前先確認補助方案。符合給付條件時，儲存前會顯示給付金額。</p>{planConfirmed&&data.subsidy_plan?.events.at(-1)?.source==='bank'&&<p>依銀行明細確認方案</p>}{selected&&planConfirmed&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
+ {data.unallocated_service_difference_ntd != null && <p className="finance-unallocated-service-difference">待人工對帳服務費差額 {money(data.unallocated_service_difference_ntd)}，負擔歸屬待確認。</p>}
  <details className="finance-case-block" open><summary>03　月嫂薪資</summary><div className="finance-case-block-body">
   {data.staff_accounting_availability&&data.staff_accounting_availability.length>0&&<section aria-label="歷史月嫂應付依據">
     {data.staff_accounting_availability.map((item,index)=><div key={`${item.assignment_id??'unknown'}:${item.staff_id??'unknown'}:${index}`}>

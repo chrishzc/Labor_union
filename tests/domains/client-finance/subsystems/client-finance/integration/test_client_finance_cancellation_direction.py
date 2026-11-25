@@ -615,3 +615,93 @@ def test_cancellation_writer_persists_subsidy_return_as_separate_client_payable(
         14_400,
         date(2026, 10, 15),
     )
+
+
+@pytest.mark.parametrize("rate,expected", [(300, 8200), (350, 9400)])
+def test_formal_terms_candidate_uses_enabled_holiday_in_original_single_write_plan(rate, expected):
+    day = date(2026, 1, 1)
+    source = ClientFinanceTermsSourceFacts("HOLIDAY-NEW", 2,
+        ClientPaymentTerms(0, MoneyNTD(rate), day, day, None), (day,), ())
+    terms = OrderTerms(day, 2, 8, MoneyNTD(1000), ServiceTimeTerms(None, None, None))
+    assignment = AssignmentCandidate("new-assignment", None, 7, 1, day, date(2026, 1, 2),
+        (day, date(2026, 1, 2)), 16)
+    scheduling = SchedulingGenerationCandidate("HOLIDAY-NEW", 1, 0, 1, (), (assignment,), ())
+    candidate = build_client_finance_terms_impact(source, terms, scheduling, "holiday-new")
+    assert candidate.expected_account_version == 2
+    assert candidate.resulting_account_version == 3
+    assert sum(stage.amount.amount for stage in candidate.stage_plans) == expected
+
+
+@pytest.mark.parametrize("status", ["歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成"])
+def test_historical_terms_source_does_not_consume_current_holiday_calendar(status, monkeypatch):
+    from infrastructure.mysql.order_terms_read_model import _enabled_holiday_dates
+    import infrastructure.mysql.scheduling_holiday_query as holiday_adapter
+    def unavailable_calendar(connection):
+        raise AssertionError("historical case must not query current holidays")
+    monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", unavailable_calendar)
+    assert _enabled_holiday_dates(SimpleNamespace(connection=object()), {"status": status}, False) == ()
+
+
+@pytest.mark.parametrize("lock", [False, True])
+def test_general_terms_source_borrows_enabled_holidays_with_matching_lock_mode(lock, monkeypatch):
+    from infrastructure.mysql.order_terms_read_model import _enabled_holiday_dates
+    import infrastructure.mysql.order_terms_read_model as read_model
+    import infrastructure.mysql.scheduling_holiday_query as holiday_adapter
+    monkeypatch.setattr(read_model, "_historical_precision_restarted", lambda cursor, case_no, lock: False)
+    calls = []
+    enabled, disabled = date(2026, 1, 1), date(2027, 1, 1)
+    class CalendarQuery:
+        def __init__(self, connection):
+            self.connection = connection
+        def query(self, start, end, *, lock):
+            calls.append(lock)
+            return SimpleNamespace(holidays=(
+                SimpleNamespace(holiday_date=enabled, is_double_pay_default=True),
+                SimpleNamespace(holiday_date=disabled, is_double_pay_default=False),
+            ))
+    monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", CalendarQuery)
+    assert _enabled_holiday_dates(SimpleNamespace(connection=object()), {"case_no": "ordinary-holiday", "status": "訂單成立"}, lock) == (enabled,)
+    assert calls == [lock]
+
+
+
+@pytest.mark.parametrize("lock", [False, True])
+def test_precision_restart_source_excludes_holidays_after_establishment(lock, monkeypatch):
+    from infrastructure.mysql.order_terms_read_model import _enabled_holiday_dates
+    import infrastructure.mysql.scheduling_holiday_query as holiday_adapter
+
+    class Cursor:
+        connection = object()
+
+        def execute(self, statement, parameters):
+            assert "orders_historical_precision_restart" in statement
+            assert ("FOR UPDATE" in statement) is lock
+            assert parameters == ("restarted-history", "訂單成立")
+
+        def fetchone(self):
+            return {"id": 17}
+
+    def forbidden(connection):
+        raise AssertionError("precisely restarted historical source must not query holiday flags")
+
+    monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", forbidden)
+    assert _enabled_holiday_dates(Cursor(), {"case_no": "restarted-history", "status": "訂單成立"}, lock) == ()
+
+
+def test_legacy_social_without_effective_limit_defers_holiday_premium():
+    from domains.client_finance.obligation_planning import ClientChargeDay, ClientFinanceTermsFacts, _daily_charge
+    day = date(2026, 1, 1)
+    facts = ClientFinanceTermsFacts("legacy-social", 0, 8, MoneyNTD(0),
+        (ClientChargeDay(day, True),), ClientPaymentTerms(0, MoneyNTD(350), day, day, None), (),
+        identity_status="社福")
+    assert _daily_charge(facts, facts.charge_days[0]) == MoneyNTD(0)
+
+
+@pytest.mark.parametrize("identity", ["補助市民", "原住民"])
+def test_legacy_holiday_funding_with_floor_fee_does_not_invent_effective_limit(identity):
+    from domains.client_finance.obligation_planning import ClientChargeDay, ClientFinanceTermsFacts, _holiday_funding_pending
+    day = date(2026, 1, 1)
+    facts = ClientFinanceTermsFacts("legacy-limit-missing", 0, 8, MoneyNTD(500),
+        (ClientChargeDay(day, True),), ClientPaymentTerms(0, MoneyNTD(350), day, day, None), (),
+        identity_status=identity)
+    assert _holiday_funding_pending(facts) is True

@@ -7,6 +7,8 @@ import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 import {
   HolidayApplyRequestSchema,
+  HolidayAccountingResultsResponseSchema,
+  type HolidayAccountingReceipt,
   HolidayCalendarSchema,
   HolidayDateSchema,
   HolidayPreviewRequestSchema,
@@ -45,6 +47,7 @@ export interface HolidayApplyOptions extends HolidayRequestOptions {
 export type HolidayQueryResult = HolidayCalendar | HolidayRow[];
 
 export interface HolidayClient {
+  accountingResults(query: HolidayQuery, options?: HolidayRequestOptions): Promise<HolidayAccountingReceipt[]>;
   query: (query: HolidayQuery, options?: HolidayRequestOptions) => Promise<HolidayCalendar>;
   queryCalendar?: (query: HolidayQuery, options?: HolidayRequestOptions) => Promise<HolidayCalendar>;
   getCalendar?: (fromDate: string, toDate: string, options?: HolidayRequestOptions) => Promise<HolidayCalendar>;
@@ -559,6 +562,16 @@ export async function applyHolidayCsv(
 }
 
 class DefaultHolidayClient implements HolidayClient {
+  public async accountingResults(query: HolidayQuery, options?: HolidayRequestOptions): Promise<HolidayAccountingReceipt[]> {
+    const validated = validateQuery(query);
+    try {
+      return decode(HolidayAccountingResultsResponseSchema,
+        await transport.get<unknown>('/api/v1/holidays/accounting-results', {
+          ...requestOptions(options), params: queryParams(validated),
+        }), 'Query');
+    } catch (error) { throw mapHolidayError(error, 'query'); }
+  }
+
   public query(query: HolidayQuery, options?: HolidayRequestOptions): Promise<HolidayCalendar> {
     return queryHolidayCalendar(query, options);
   }

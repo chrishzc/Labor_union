@@ -125,7 +125,7 @@ describe('official holiday CSV parsing', () => {
     ].join('\n')).ok).toBe(false);
   });
 
-  it('skips an existing identical date/name before mutation', () => {
+  it('重匯既有日期保留人工開關與名稱，新日期預設關閉', () => {
     const parsed = parseOfficialHolidayCsv([
       '西元日期,星期,是否放假,備註',
       '20260101,四,2,元旦',
@@ -135,7 +135,7 @@ describe('official holiday CSV parsing', () => {
     if (!parsed.ok) return;
 
     const plan = planOfficialHolidayImport(parsed, calendar([
-      { holiday_date: '2026-01-01', holiday_name: '元旦', is_double_pay_default: false },
+      { holiday_date: '2026-01-01', holiday_name: '人工名稱', is_double_pay_default: true },
     ]));
     expect(plan.existingSkipCount).toBe(1);
     expect(plan.pending).toEqual([

@@ -48,6 +48,7 @@ class OfficialAssignmentServiceFacts:
     double_pay_dates: tuple[date, ...] = ()
     effective: bool = True
     financial_assignment_identity: str | None = None
+    holiday_hour_segments: tuple[tuple[date, Decimal, Decimal], ...] = ()
 
     def __post_init__(self) -> None:
         _validate_identity(self.assignment_identity, "assignment identity")
@@ -57,6 +58,14 @@ class OfficialAssignmentServiceFacts:
         _validate_dates(self.service_dates, "service dates")
         if self.effective and not self.service_dates:
             raise ValueError("effective_assignment_service_days_required")
+        previous_end_by_date: dict[date, Decimal] = {}
+        for service_date, offset, hours in self.holiday_hour_segments:
+            if service_date not in self.service_dates or not offset.is_finite() or offset < 0:
+                raise ValueError("payroll_holiday_segment_invalid")
+            require_positive_half_hour(hours, "holiday service hours")
+            if offset < previous_end_by_date.get(service_date, Decimal(0)):
+                raise ValueError("payroll_holiday_segments_overlap")
+            previous_end_by_date[service_date] = offset + hours
         if not isinstance(self.effective, bool):
             raise TypeError("effective must be bool")
 
@@ -126,6 +135,7 @@ class AssignmentPayrollCandidate:
     excess_salary: int = 0
     directly_subsidized: bool = False
     tiered_pricing: bool = False
+    covered_holiday_salary: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,17 +254,33 @@ def _allocate_floor_fee(earned_floor_fee, facts):
     return {item.assignment_identity: allocations[key] for key, item in indexed}
 
 
-def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments, consumed_by_date=None):
+def _build_assignment_candidate(
+    facts: OfficialAssignmentServiceFacts, rate: AssignmentRateSnapshot,
+    terms: PayrollTerms, floor_fee: MoneyNTD, adjustments: MoneyNTD,
+    consumed_by_date: dict[date, Decimal] | None = None,
+) -> AssignmentPayrollCandidate:
     service_day_count = len(facts.service_dates)
+    hours_per_day = Decimal(str(terms.service_hours_per_day))
     actual_hours = service_day_count * terms.service_hours_per_day
+    segments = facts.holiday_hour_segments or tuple(
+        (day, Decimal(0), hours_per_day) for day in facts.service_dates if day in facts.double_pay_dates
+    )
+    if any(offset + hours > hours_per_day for _, offset, hours in segments):
+        raise ValueError("payroll_holiday_hours_exceed_service_hours")
+    double_pay_hours = sum((hours for _, _, hours in segments), Decimal(0))
     service_salary = MoneyNTD(_whole_ntd(
-        actual_hours * rate.hourly_rate.amount
+        (Decimal(str(actual_hours)) + double_pay_hours) * rate.hourly_rate.amount
     ))
-    covered_salary = excess_salary = 0
+    covered_salary = excess_salary = covered_holiday_salary = 0
     if rate.tiered is not None:
+        consumed = consumed_by_date or {}
         for day in facts.service_dates:
-            covered, excess = price_hours(((Decimal(str(terms.service_hours_per_day)), False),),
-                rate.tiered, (consumed_by_date or {}).get(day, Decimal(0)))
+            covered, excess = price_hours(((hours_per_day, False),), rate.tiered, consumed.get(day, Decimal(0)))
+            covered_salary += covered
+            excess_salary += excess
+        for day, offset, hours in segments:
+            covered, excess = price_hours(((hours, False),), rate.tiered, consumed.get(day, Decimal(0)) + offset)
+            covered_holiday_salary += covered
             covered_salary += covered
             excess_salary += excess
         service_salary = MoneyNTD(covered_salary + excess_salary)
@@ -264,13 +290,14 @@ def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments, cons
         staff_id=facts.staff_id,
         official_service_day_count=service_day_count,
         actual_hours=actual_hours,
-        double_pay_hours=0,
+        double_pay_hours=double_pay_hours,
         hourly_rate=rate.hourly_rate,
         service_salary=service_salary,
         floor_fee_allocated=floor_fee,
         effective_adjustments=adjustments,
         total_payable=total_payable,
         covered_salary=covered_salary,
+        covered_holiday_salary=covered_holiday_salary,
         excess_salary=excess_salary,
         directly_subsidized=bool(rate.tiered and rate.tiered.directly_subsidized),
         tiered_pricing=rate.tiered is not None,
@@ -324,6 +351,8 @@ def _assignment_payload(item) -> dict[str, object]:
         "effective_adjustments_ntd": item.effective_adjustments.amount,
         "total_payable_ntd": item.total_payable.amount,
     }
+    if item.covered_holiday_salary:
+        payload["covered_holiday_salary"] = item.covered_holiday_salary
     if item.tiered_pricing:
         payload.update(covered_salary=item.covered_salary, excess_salary=item.excess_salary,
             directly_subsidized=item.directly_subsidized)
@@ -338,6 +367,7 @@ def _facts_payload(item, rates) -> dict[str, object]:
         "double_pay_dates": tuple(
             value.isoformat() for value in item.double_pay_dates
         ),
+        "holiday_hour_segments": tuple((day.isoformat(), offset, hours) for day, offset, hours in item.holiday_hour_segments),
         "policy_version": rate.policy_version,
         "policy_kind": rate.policy_kind.value,
     }

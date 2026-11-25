@@ -16,7 +16,7 @@ const current: CasePricing = { case_no: 'synthetic-case', revision: 0, source: '
   terms: { identity_name: '補助市民', rule: 'social', subsidy_hours: 120,
     client: { covered: 350, excess: 350 }, payroll: { covered: 350, excess: 350 } },
   impact: { covered_hours: 120, excess_hours: 40, client_amount: 14000, staff_covered_amount: 42000,
-    staff_excess_amount: 14000, staff_total_amount: 56000, subsidy_amount: 42000, subsidy_return_amount: 0 } };
+    staff_excess_amount: 14000, case_total_amount: 56000, union_income_amount: 0, staff_total_amount: 56000, subsidy_amount: 42000, subsidy_return_amount: 0 } };
 
 beforeEach(() => { vi.resetAllMocks(); });
 

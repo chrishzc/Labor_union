@@ -65,13 +65,20 @@ jobs:
           python -m pytest -vv
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
           -k historical_accounting
-      - name: Preserve synthetic API contract for the drawer
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/setup-node@v6
         with:
-          name: historical-accounting-api-contract
-          path: scratch/historical-accounting-drawer/api-contract.json
-          if-no-files-found: error
-          retention-days: 7
+          node-version: "24"
+      - name: Install strict drawer test dependencies
+        working-directory: ui_react
+        run: npm ci --ignore-scripts
+      - name: Render actual synthetic MySQL API responses through the strict client
+        working-directory: ui_react
+        env:
+          HISTORICAL_ACCOUNTING_CONTRACT_PATH: ${{ github.workspace }}/scratch/historical-accounting-drawer/api-contract.json
+        run: >-
+          npm test --
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          -t 隔離
       - name: Check Python types and lint at the affected boundaries
         run: |
           ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py api/schemas/finance_import.py api/routes/finance_statement_workspace.py
@@ -105,31 +112,3 @@ jobs:
           src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx
       - run: npm run lint
       - run: npm run build
-
-  api-to-drawer:
-    name: Isolated MySQL API to strict React drawer
-    needs: backend
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: ui_react
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: historical-accounting-api-contract
-          path: scratch/historical-accounting-drawer
-      - run: npm ci --ignore-scripts
-      - name: Render actual synthetic MySQL API responses through the strict client
-        env:
-          HISTORICAL_ACCOUNTING_CONTRACT_PATH: ${{ github.workspace }}/scratch/historical-accounting-drawer/api-contract.json
-        run: >-
-          npm test --
-          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
-          -t 隔離

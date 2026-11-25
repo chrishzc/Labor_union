@@ -144,13 +144,13 @@ function facts():CaseAccounting{return {case_no:caseNo,client_name:'合成客戶
 ] as const).map(([stage,expected,actual,remaining])=>({identity:stage,direction:'receivable',label:stage,party:'合成客戶',expected_ntd:expected,actual_ntd:actual,remaining_ntd:remaining,payment_stage:stage,has_payment:actual>0,version:'1',due_date:stage==='second'?'2099-11-16':'2026-11-01'})),staff_items:[{identity:'staff',direction:'payable',label:'服務費',party:'合成月嫂',expected_ntd:30000,actual_ntd:0,has_payment:false,version:'1',due_date:null}],transactions:[{identity:'receipt',item_identity:'first',occurred_on:'2026-11-02',kind:'receipt',amount_ntd:14000,bank:'sinopac'}],warnings:[]};}
 function notice(stage:'deposit'|'first'|'second'='first'):CasePaymentReminder{return {case_no:caseNo,payment_stage:stage,payment:{case_no:caseNo,payment_stage:stage,obligation_identity:stage,projection_version:1,obligation_event_id:1,due_date:'2099-11-16',remaining_amount_ntd:stage==='deposit'?0:1000},recipient_label:'合成客戶（私人LINE）',can_send:stage!=='deposit',unavailable_reason:stage==='deposit'?'本期已繳齊':null,message:'請繳納剩餘 1,000 元。',history:[]};}
 function wrapper(ui:React.ReactNode){return render(<UnsavedChangesProvider>{ui}</UnsavedChangesProvider>);}
-beforeEach(()=>{vi.clearAllMocks();vi.mocked(differenceResolutionClient.staff).mockResolvedValue({case_no:caseNo,items:[],events:[]});vi.mocked(subsidyPeriodClient.caseCoverage).mockResolvedValue({case_no:caseNo,service_end_date:null,amount_ntd:12000,coverage:[]});vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({case_no:caseNo,revision:0,source:'legacy',terms:{identity_name:'一般市民',rule:'citizen',subsidy_hours:40,client:{covered:300,excess:300},payroll:{covered:300,excess:300}},impact:{covered_hours:40,excess_hours:60,client_amount:30000,staff_covered_amount:12000,staff_excess_amount:18000,staff_total_amount:30000,subsidy_amount:12000,subsidy_return_amount:0}});vi.mocked(financeAccountingClient.previewSubsidyPlan).mockImplementation(async(caseNo,command)=>({case_no:caseNo,scheme:command.scheme,plan_version:command.expected_version,subsidy_ntd:12000,total_ntd:30000,confirmation_only:true,payables:[],blocker:null,preview_fingerprint:'b'.repeat(64)}));vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
+beforeEach(()=>{vi.clearAllMocks();vi.mocked(differenceResolutionClient.staff).mockResolvedValue({case_no:caseNo,items:[],events:[]});vi.mocked(subsidyPeriodClient.caseCoverage).mockResolvedValue({case_no:caseNo,service_end_date:null,amount_ntd:12000,coverage:[]});vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({case_no:caseNo,revision:0,source:'legacy',terms:{identity_name:'一般市民',rule:'citizen',subsidy_hours:40,client:{covered:300,excess:300},payroll:{covered:300,excess:300}},impact:{covered_hours:40,excess_hours:60,client_amount:30000,staff_covered_amount:12000,staff_excess_amount:18000,case_total_amount:30000, union_income_amount: 0, staff_total_amount:30000,subsidy_amount:12000,subsidy_return_amount:0}});vi.mocked(financeAccountingClient.previewSubsidyPlan).mockImplementation(async(caseNo,command)=>({case_no:caseNo,scheme:command.scheme,plan_version:command.expected_version,subsidy_ntd:12000,total_ntd:30000,confirmation_only:true,payables:[],blocker:null,preview_fingerprint:'b'.repeat(64)}));vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
 describe('精簡案件抽屜',()=>{
  it.each([
   [null, 'NT$ 48,000'],
-  [0, 'NT$ 0'],
-  [42000, 'NT$ 42,000'],
- ] as const)('帳務總額為 %s 時直接顯示金額，缺應付明細時保留核銷狀態',async(accountingTotal,amount)=>{
+  [0, 'NT$ 48,000'],
+  [42000, 'NT$ 48,000'],
+ ] as const)('月嫂應收為 %s 時案件總額仍讀客戶服務定價，缺應付明細時保留核銷狀態',async(accountingTotal,amount)=>{
   vi.mocked(financeAccountingClient.query).mockResolvedValue({
    ...facts(), staff_receivable_ntd:accountingTotal, staff_items:[], payable_ntd:null, paid_ntd:null,
   });
@@ -158,7 +158,7 @@ describe('精簡案件抽屜',()=>{
    case_no:caseNo, revision:0, source:'legacy',
    terms:{identity_name:'一般市民',rule:'citizen',subsidy_hours:40,client:{covered:300,excess:300},payroll:{covered:300,excess:300}},
    impact:{covered_hours:40,excess_hours:120,client_amount:48000,staff_covered_amount:12000,
-    staff_excess_amount:36000,staff_total_amount:48000,subsidy_amount:12000,subsidy_return_amount:0},
+    staff_excess_amount:36000,case_total_amount:48000, union_income_amount: 0, staff_total_amount:48000,subsidy_amount:12000,subsidy_return_amount:0},
   });
   try {
    wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
@@ -185,7 +185,7 @@ describe('精簡案件抽屜',()=>{
    case_no:caseNo,revision:0,source:'legacy',
    terms:{identity_name:'一般市民',rule:'citizen',subsidy_hours:40,client:{covered:300,excess:300},payroll:{covered:300,excess:300}},
    impact:{covered_hours:40,excess_hours:0,client_amount:12000,staff_covered_amount:12000,
-    staff_excess_amount:0,staff_total_amount:12000,subsidy_amount:12000,subsidy_return_amount:0},
+    staff_excess_amount:0,case_total_amount:12000, union_income_amount: 0, staff_total_amount:12000,subsidy_amount:12000,subsidy_return_amount:0},
   });
   try {
    wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
@@ -1191,6 +1191,14 @@ it.each(['zero','unknown','pending'] as const)('通知%s即使can_send true也�
  wrapper(<FinanceCaseNotice item={source} onBack={vi.fn()} onChanged={vi.fn()}/>);expect(screen.getByRole('button',{name:'發送通知'})).toBeDisabled();
 });
 
+
+it('對帳顯示後端服務費差額而不增加客戶應收或推定負擔人',async()=>{
+ const data:CaseAccounting={...facts(),unallocated_service_difference_ntd:2800,customer_amount_ntd:0,subsidy_ntd:2800};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ expect(await screen.findByText('待人工對帳服務費差額 NT$ 2,800，負擔歸屬待確認。')).toBeInTheDocument();
+ expect(vi.mocked(financeAccountingClient.query)).toHaveBeenCalled();
+});
 
 describe('歷史原款項契約',()=>{
  it('免自備只顯示整案判定，不補三期、日期或月嫂應付',async()=>{

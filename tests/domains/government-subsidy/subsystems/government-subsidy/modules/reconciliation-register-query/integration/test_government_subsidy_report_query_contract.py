@@ -100,3 +100,34 @@ def test_annual_source_gap_is_not_misreported_as_invalid_query(monkeypatch):
     assert response.status_code == 500
     assert response.json()["detail"]["error"]["code"] == "annual_subsidy_report_source_invalid"
     assert response.json()["detail"]["error"]["message"] == "年度補助核銷來源資料不完整。"
+
+
+def test_combined_export_distinguishes_invalid_query_400_from_source_invalid_500(monkeypatch):
+    client = TestClient(_app())
+
+    monkeypatch.setattr(
+        finance_reports.reconciliation_register_query,
+        "build_combined_subsidy_register",
+        lambda *_: (_ for _ in ()).throw(ValueError("quarter must be 1, 2, 3, or 4")),
+    )
+    invalid_query = client.get(
+        "/api/v1/finance-reports/subsidy-reconciliation/combined/export",
+        params={"application_year": 2026, "quarter": 1},
+    )
+    assert invalid_query.status_code == 400
+    assert invalid_query.json()["detail"]["error"]["code"] == "combined_subsidy_export_invalid"
+
+    monkeypatch.setattr(
+        finance_reports.reconciliation_register_query,
+        "build_combined_subsidy_register",
+        lambda *_: (_ for _ in ()).throw(
+            ValueError("government_subsidy_payroll_rate_snapshot_missing")
+        ),
+    )
+    source_invalid = client.get(
+        "/api/v1/finance-reports/subsidy-reconciliation/combined/export",
+        params={"application_year": 2026, "quarter": 1},
+    )
+    assert source_invalid.status_code == 500
+    assert source_invalid.json()["detail"]["error"]["code"] == "combined_subsidy_export_source_invalid"
+    assert source_invalid.json()["detail"]["error"]["message"] == "核銷清冊來源資料不完整。"

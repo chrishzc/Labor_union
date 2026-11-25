@@ -5,6 +5,7 @@ Description: 暴露國定假日 typed Query、零寫入 Preview 與 single-UoW A
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import date
 from typing import Annotated
 
@@ -17,6 +18,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.holidays import (
     HolidayApplyRequest,
+    HolidayAccountingReceiptView,
     HolidayCalendarView,
     HolidayPreviewRequest,
     HolidayPreviewView,
@@ -76,6 +78,24 @@ _COMMAND_ERRORS = {
     404: {"model": GlobalTypedErrorResponseView, "description": "找不到指定國定假日"},
     409: {"model": GlobalTypedErrorResponseView, "description": "預覽過期或冪等鍵衝突"},
 }
+
+
+@router.get("/accounting-results", response_model=BaseResponse[list[HolidayAccountingReceiptView]], responses=_QUERY_ERRORS)
+def get_holiday_accounting_results(
+    from_date: date, to_date: date, principal: AdminPrincipal = Depends(require_admin),
+):
+    del principal
+    if from_date > to_date:
+        raise typed_http_error(422, "validation", "holiday_horizon_invalid", "查詢區間不正確。", "holiday-accounting-results")
+    from infrastructure.mysql.holiday_accounting_results import query_holiday_accounting_results
+    connection = get_connection()
+    try:
+        receipts = query_holiday_accounting_results(connection, from_date, to_date)
+        return BaseResponse(data=[asdict(item) for item in receipts], message="已讀取假日帳務處理紀錄")
+    except Exception as error:
+        raise internal_query_error("holiday_accounting_results_failed", "無法讀取假日帳務處理紀錄。", "holiday-accounting-results") from error
+    finally:
+        connection.close()
 
 
 @router.get(
@@ -245,6 +265,10 @@ def _fact_payload(fact: HolidayFact) -> dict:
 
 def _preview_payload(result: holiday_maintenance.HolidayPreview) -> dict:
     command = result.command
+    previous_double = bool(result.before and result.before.is_double_pay_default)
+    resulting_double = False if command.action == "delete" else (
+        command.is_double_pay_default if command.is_double_pay_default is not None else previous_double
+    )
     return {
         "command": {
             "action": command.action,
@@ -263,13 +287,14 @@ def _preview_payload(result: holiday_maintenance.HolidayPreview) -> dict:
         "source_identity": result.calendar.source_identity,
         "calendar_version": result.calendar.holiday_version,
         "schedule_impact": "none",
-        "payroll_impact": "none",
+        "payroll_impact": "reprice_unpaid_cases" if previous_double != resulting_double else "none",
         "preview_fingerprint": result.preview_fingerprint,
     }
 
 
 def _receipt_payload(result: holiday_maintenance.HolidayReceipt) -> dict:
     return {
+        "case_results": [asdict(item) for item in result.case_results],
         "receipt_key": result.receipt_key,
         "action": result.action,
         "holiday_date": result.holiday_date,

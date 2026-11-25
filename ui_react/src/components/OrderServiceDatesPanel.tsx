@@ -1,3 +1,4 @@
+import { HolidayRepricingResults } from './HolidayRepricingResults';
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityDirectory, useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -905,6 +906,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   if (adjustmentOnly) return <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}>
     <div className="service-date-heading">{adjustmentButton}</div>
     {adjustmentEditor}
+    {!adjustmentEditing && adjustment?.accounting_result && <HolidayRepricingResults results={[adjustment.accounting_result]} />}
     {queryView && datesSummary}
     {!adjustmentEditing && adjustment?.days.filter(day => day.hours_override !== null).map(day =>
       <p key={day.service_date}>{day.service_date}・{adjustment.staff.find(person => person.staff_id === day.staff_id)?.staff_name}・{day.service_hours} 小時・{coordinatedServiceTime}</p>)}
@@ -939,6 +941,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         {adjustmentButton}
       </div>
       {adjustmentEditor}
+    {!adjustmentEditing && adjustment?.accounting_result && <HolidayRepricingResults results={[adjustment.accounting_result]} />}
       {(effectiveServiceDates === null || resetPending) && <div className="service-date-settings">
         <div className="service-date-start-field">
           <label>實際開始日
