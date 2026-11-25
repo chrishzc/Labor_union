@@ -2208,7 +2208,9 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
     from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionWorkflow
     case_no = 'hist-legacy-mixed-' + uuid4().hex[:10]
     people = seed_historical_completed_pricing_people(case_no, mixed_legacy_rates=True)
+    first_identity = f'{case_no}:original:{people[0][1]}'
     second_identity = f'{case_no}:original:{people[1][1]}'
+    original_amounts = [(first_identity, people[0][1], 7350), (second_identity, people[1][1], 5800)]
     connection = mysql_adapter.get_connection()
     try:
         with connection.cursor() as cursor:
@@ -2279,8 +2281,14 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
         with connection.cursor() as cursor:
             cursor.execute(f'SELECT * FROM ({CASE_PRICING_FACTS_SQL}) pricing WHERE case_no=%s', (case_no,))
             assert cursor.fetchone() is None
-            cursor.execute('SELECT amount_due_ntd FROM staff_obligations WHERE case_no=%s ORDER BY assignment_id', (case_no,))
-            assert [row['amount_due_ntd'] for row in cursor.fetchall()] == [9150, 5800]
+            cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.amount_due_ntd,c.computed_ntd,c.effective_ntd '
+                'FROM staff_obligations o LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+                'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
+            rows = cursor.fetchall()
+            assert [(row['obligation_identity'], row['assignment_id'], row['amount_due_ntd'])
+                for row in rows] == original_amounts
+            assert [(row['obligation_identity'], row['computed_ntd'], row['effective_ntd']) for row in rows] == [
+                (first_identity, 9150, 9150), (second_identity, 5800, 5800)]
         connection.rollback()
         candidate = historical_completed_pricing_body(client, case_no, payroll={'covered': 350, 'excess': 350})
         explicit = post(client, pricing_path + '/preview', candidate, case_no + ':price-preview')
@@ -2291,13 +2299,18 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
         post(client, pricing_path + '/apply', {**candidate, 'preview_fingerprint': explicit['preview_fingerprint'],
             'reason': 'explicitly apply one case-wide candidate rate'}, case_no + ':price-apply')
         with connection.cursor() as cursor:
-            cursor.execute('SELECT o.assignment_id,c.computed_ntd,c.effective_ntd FROM staff_obligations o '
-                'JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+            cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.amount_due_ntd,c.computed_ntd,c.effective_ntd '
+                'FROM staff_obligations o LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
                 'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
-            assert [(row['assignment_id'], row['computed_ntd'], row['effective_ntd']) for row in cursor.fetchall()] == [
-                (people[0][1], 10650, 10650), (people[1][1], 5800, 5800)]
+            rows = cursor.fetchall()
+            assert [(row['obligation_identity'], row['assignment_id'], row['amount_due_ntd'])
+                for row in rows] == original_amounts
+            assert [(row['obligation_identity'], row['computed_ntd'], row['effective_ntd']) for row in rows] == [
+                (first_identity, 10650, 10650), (second_identity, 5800, 5800)]
         connection.rollback()
-        assert blocker not in client.get(pricing_path).json()['data']['accounting_pending']
+        current = client.get(pricing_path).json()['data']
+        assert current['impact']['staff_total_amount'] == 16450
+        assert blocker not in current['accounting_pending']
         assert historical_completed_immutable_snapshot(case_no) == immutable
     finally:
         connection.close()

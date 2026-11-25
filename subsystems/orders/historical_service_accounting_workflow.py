@@ -340,15 +340,19 @@ class HistoricalServiceAccountingWorkflow:
                    for item in impact.frozen_settlements)
         )
         funding = []
-        original_funding = tuple(
-            (staff_id, portion.funding_kind, portion.amount_ntd, portion.settled_ntd, portion.due_date)
-            for staff_id, portion in previous_funding
-        )
+        original_funding: list[tuple[int, str, int, int, date | None]] = []
+        for staff_id, portion in previous_funding:
+            settled_ntd = portion.settled_ntd
+            if settled_ntd is None:
+                raise ValueError("historical_attribution_source_payout_conflict")
+            original_funding.append(
+                (staff_id, portion.funding_kind, portion.amount_ntd, settled_ntd, portion.due_date)
+            )
         if previous_funding:
             subsidy = allocate_historical_subsidy(
                 sum(portion.amount_ntd for _, portion in previous_funding if portion.funding_kind == "subsidy"), days,
             )
-            paid = {(staff_id, portion.funding_kind): portion.settled_ntd for staff_id, portion in previous_funding}
+            paid = {(staff_id, kind): settled for staff_id, kind, _, settled, _ in original_funding}
             due_dates = {(staff_id, portion.funding_kind): portion.due_date for staff_id, portion in previous_funding}
             for item in payroll_candidate.assignments:
                 for portion in confirmed_subsidy_installments(
@@ -356,7 +360,7 @@ class HistoricalServiceAccountingWorkflow:
                 ):
                     pair = item.staff_id, portion.funding_kind
                     already_paid = paid.get(pair, 0)
-                    if already_paid is None or already_paid > portion.amount:
+                    if already_paid > portion.amount:
                         raise ValueError("historical_attribution_source_payout_conflict")
                     funding.append((*pair, portion.amount, already_paid, due_dates.get(pair, portion.due_date)))
         return HistoricalAttributionPreview(comparison, impact, fingerprint_payload({
@@ -364,7 +368,7 @@ class HistoricalServiceAccountingWorkflow:
             "staff_payables": payable_versions, "manual_amounts": manual_amounts, "evidence": intent.evidence,
             "funding": tuple((*row[:-1], row[-1].isoformat() if row[-1] else None) for row in funding),
             "original_funding": tuple((*row[:-1], row[-1].isoformat() if row[-1] else None) for row in original_funding),
-        }), reopen, manual_amounts, tuple(funding), original_funding,
+        }), reopen, manual_amounts, tuple(funding), tuple(original_funding),
             ())
 
     def _preview_completed_service_facts(
@@ -540,6 +544,14 @@ def _candidate(
     if facts.lifecycle_status not in allowed:
         raise ValueError("historical_order_lifecycle_transition_invalid")
     days_by_identity = {item.assignment_identity: item.actual_service_days for item in intent.caregivers}
+    service_facts: list[HistoricalAssignmentServiceFact] = []
+    for item in facts.assignments:
+        service_fact = next(
+            (value for value in intent.service_facts if value.assignment_identity == item.assignment_identity),
+            item.service_fact,
+        )
+        if service_fact is not None:
+            service_facts.append(service_fact)
     service_days = build_historical_actual_service_days_candidate(
         case_no=facts.case_no,
         assignments=tuple(
@@ -550,13 +562,7 @@ def _candidate(
         contracted_service_days=facts.contracted_service_days,
         service_hours_per_day=_decimal_hours(facts.service_hours_per_day),
         contractual_floor_fee_ntd=facts.contractual_floor_fee.amount,
-        service_facts=tuple(
-            next((value for value in intent.service_facts if value.assignment_identity == item.assignment_identity),
-                 item.service_fact)
-            for item in facts.assignments
-            if item.service_fact is not None or any(
-                value.assignment_identity == item.assignment_identity for value in intent.service_facts)
-        ),
+        service_facts=tuple(service_facts),
         adopted_service_hours=tuple(
             (item.assignment_identity, item.actual_service_hours)
             for item in facts.assignments

@@ -28,7 +28,7 @@ class PricingConflict(ValueError):
 def pricing_payload(value):
     """Canonical representation for this pricing contract's dataclasses only."""
     def encode(item):
-        if is_dataclass(item):
+        if is_dataclass(item) and not isinstance(item, type):
             payload = asdict(item, dict_factory=lambda fields: {
                 key: value for key, value in fields
                 if key != "deposit_service_days" or (isinstance(item, PricingPolicy) and value is not None)
@@ -239,6 +239,9 @@ def build_historical_repricing_plan(facts, terms, client_sources, staff_source, 
             raise PricingConflict('historical_pricing_amount_conflict')
         return HistoricalAmountUpdate(source.identity, revised, effective,
             source.computed, source.effective, source.mode)
+    if (after.client_amount is None or before.client_amount is None
+            or after.staff_total_amount is None or before.staff_total_amount is None):
+        raise PricingConflict('historical_pricing_original_calculation_basis_required')
     delta = after.client_amount - before.client_amount
     updates = []
     for source in reversed(client_sources):
@@ -248,6 +251,8 @@ def build_historical_repricing_plan(facts, terms, client_sources, staff_source, 
     if delta:
         raise PricingConflict('historical_pricing_amount_conflict')
     if subsidy_source is not None:
+        if after.subsidy_return_amount is None or before.subsidy_return_amount is None:
+            raise PricingConflict('historical_pricing_original_calculation_basis_required')
         updates.append(update(subsidy_source, after.subsidy_return_amount - before.subsidy_return_amount))
     return HistoricalRepricingPlan(facts.case_no, facts.versions[1], facts.versions[2], tuple(updates),
         (update(staff_source, after.staff_total_amount - before.staff_total_amount),), facts.versions)
@@ -362,13 +367,13 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts, *,
     if full_subsidy and facts.historical_service_hours is None:
         subsidy = calculate_case_total_amount(terms, tuple((day.hours, False) for day in facts.days), facts.floor_fee)
     staff_total = base.staff_total_amount + staff_premium if base.staff_total_amount is not None else None
-    income = None if staff_total is None or (full_subsidy and client_premium) else total - staff_total + facts.payroll_adjustment
+    income = None if total is None or staff_total is None or (full_subsidy and client_premium) else total - staff_total + facts.payroll_adjustment
     if facts.frozen_amounts is not None:
         client_amount, staff_total = facts.frozen_amounts
         return replace(base, client_amount=client_amount, staff_total_amount=staff_total,
             staff_covered_amount=None, staff_excess_amount=None,
             case_total_amount=total, subsidy_amount=subsidy,
-            union_income_amount=total - staff_total + facts.payroll_adjustment)
+            union_income_amount=total - staff_total + facts.payroll_adjustment if total is not None else None)
     covered_premium_amount = Decimal(0)
     consumed = Decimal(0)
     for day in sorted(facts.days, key=lambda item: item.occurred_on):
@@ -377,7 +382,7 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts, *,
             covered_premium_amount += covered * terms.payroll.covered
         consumed += day.hours
     staff_covered_premium = whole_ntd(covered_premium_amount)
-    return replace(base, client_amount=base.client_amount + (0 if full_subsidy else client_premium),
+    return replace(base, client_amount=base.client_amount + (0 if full_subsidy else client_premium) if base.client_amount is not None else None,
         staff_covered_amount=base.staff_covered_amount + staff_covered_premium if base.staff_covered_amount is not None else None,
         staff_excess_amount=base.staff_excess_amount + staff_premium - staff_covered_premium if base.staff_excess_amount is not None else None,
         staff_total_amount=staff_total, subsidy_amount=subsidy, case_total_amount=total,
@@ -395,7 +400,7 @@ def current_pricing_impact(facts: CasePricingFacts) -> PricingImpact:
         result = replace(result, staff_total_amount=facts.formal_staff_amount,
             staff_covered_amount=None, staff_excess_amount=None,
             union_income_amount=(result.case_total_amount - facts.formal_staff_amount + facts.payroll_adjustment)
-                if result.union_income_amount is not None else None)
+                if result.union_income_amount is not None and result.case_total_amount is not None else None)
     client_amount = facts.formal_client_amount if facts.formal_client_amount is not None else facts.legacy_client_amount
     return replace(result, client_amount=client_amount) if client_amount is not None else result
 

@@ -43,7 +43,7 @@ class HistoricalAssignmentServiceFactBody(BaseModel):
     actual_end_date: date
     service_start_time: time
     service_end_time: time
-    service_hours_per_day: Decimal = Field(gt=0, le=24, multiple_of=Decimal("0.5"), allow_inf_nan=False)
+    service_hours_per_day: Decimal = Field(gt=0, le=24, multiple_of=0.5, allow_inf_nan=False)
     service_end_day_offset: StrictInt = Field(default=0, ge=0, le=1)
 
 
