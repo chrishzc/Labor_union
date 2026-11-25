@@ -927,7 +927,6 @@ interface GanttSpan {
   dateRangeText?: string;
   dailyTimeText?: string;
   statusLabel?: string;
-  historicalCaseDates?: string;
   lane?: number;
   shift?: StaffMonthlySchedule['days'][number];
 }
@@ -1139,7 +1138,7 @@ function showHistoricalCaseRanges(spans: GanttSpan[], ranges?: ReadonlyMap<strin
     const caseRanges = ranges?.get(span.caseText);
     const range = reservation ? caseRanges?.planned : caseRanges?.service;
     if (!range) {
-      positioned.push({ ...span, historicalCaseDates: '整案日期不可用', dateRangeText: '整案日期不可用' });
+      positioned.push({ ...span, dateRangeText: '整案日期不可用' });
       continue;
     }
     const key = `${reservation ? 'reservation' : 'assignment'}:${span.caseText}`;
@@ -1153,7 +1152,6 @@ function showHistoricalCaseRanges(spans: GanttSpan[], ranges?: ReadonlyMap<strin
       ...span,
       visualStartDate: range.start,
       visualEndDate: range.end,
-      historicalCaseDates: text,
       dateRangeText: text,
       lane: undefined,
     });
@@ -1392,7 +1390,6 @@ const SchedulingWorkbench: React.FC = () => {
 
   const [calendarCache, setCalendarCache] = useState<ReadonlyMap<string, CalendarMonthCacheEntry>>(() => new Map());
   const [orderSummariesByCaseNo, setOrderSummariesByCaseNo] = useState<Record<string, OrderSummaryInfo>>({});
-  const [selectedShift, setSelectedShift] = useState<GanttSpan | null>(null);
   const [availabilityRevision, setAvailabilityRevision] = useState(0);
   const [eligibilityCaseNo, setEligibilityCaseNo] = useState('');
   const [eligibilityState, setEligibilityState] = useState<EligibilityCollisionState>({ kind: 'idle' });
@@ -2545,9 +2542,12 @@ const SchedulingWorkbench: React.FC = () => {
                               sp.dailyTimeText,
                               sp.statusLabel ? `(${sp.statusLabel})` : null,
                             ].filter(Boolean);
+                            const caseNo = sp.shift?.case_no;
+                            const opensConflict = !sp.shift && Boolean(selectedCaseNo);
                             return (
                               <button
                                 type="button"
+                                disabled={!caseNo && !opensConflict}
                                 key={sp.id}
                                 className={`gantt-span-bar span-${sp.tone} ${selectedCaseNo && sp.tone !== 'historical' ? 'span-ghost-clickable' : ''}`}
                                 data-start-day={sp.startDay}
@@ -2557,15 +2557,14 @@ const SchedulingWorkbench: React.FC = () => {
                                   width: `${widthPercent}%`,
                                   top: `${(sp.lane ?? 0) * 52 + 7}px`,
                                 }}
-                                title={`${titleParts.join('｜')}${selectedCaseNo && sp.tone !== 'historical' ? ' — 點擊開啟詳細排查抽屜' : ''}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (sp.shift || sp.tone === 'historical') {
-                                    setSelectedShift(sp);
-                                  } else if (selectedCaseNo) {
+                                title={titleParts.join('｜')}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (caseNo) {
+                                    const target = new URLSearchParams({ case: caseNo, work: 'service' });
+                                    window.location.hash = `#order-workbench-v2?${target}`;
+                                  } else if (opensConflict) {
                                     handleOpenStaffGhostDrawer(staff);
-                                  } else {
-                                    setSelectedShift(sp);
                                   }
                                 }}
                               >
@@ -2661,29 +2660,6 @@ const SchedulingWorkbench: React.FC = () => {
       {activeTab === 'holidays' && (
         <HolidayPolicyWorkspace />
       )}
-      <Drawer isOpen={selectedShift !== null} onClose={() => setSelectedShift(null)} title="排班與訂單明細">
-        {selectedShift && (
-          <div className="collision-drawer-content">
-            <strong>
-              {selectedShift.clientName ? `${selectedShift.clientName}｜` : ''}
-              {selectedShift.caseText}
-              {selectedShift.statusLabel ? ` · ${selectedShift.statusLabel}` : ''}
-            </strong>
-            {selectedShift.historicalCaseDates ? (
-              <p>📅 整案服務起訖：{selectedShift.historicalCaseDates}</p>
-            ) : (
-              <p>📅 服務起訖：{selectedShift.dateRangeText ?? `${selectedShift.visualStartDate} ～ ${selectedShift.visualEndDate}`}</p>
-            )}
-            {selectedShift.dailyTimeText && <p>⏰ 每日時段：{selectedShift.dailyTimeText}</p>}
-            {selectedShift.tone !== 'historical' && selectedShift.shift && (
-              <p>日曆日期 {selectedShift.shift.work_date}{selectedShift.endDay !== selectedShift.startDay ? ` 至當月 ${selectedShift.endDay} 日` : ''}</p>
-            )}
-            {selectedShift.tone !== 'historical' && selectedShift.shift?.service_date && (
-              <p>首個服務日 {selectedShift.shift.service_date}</p>
-            )}
-          </div>
-        )}
-      </Drawer>
       {/* 🔮 洽談檔期衝突檢測 暨 媒合排查 Slide-over Drawer (Unified wide size) */}
       <Drawer
         isOpen={collisionDrawerOpen}
