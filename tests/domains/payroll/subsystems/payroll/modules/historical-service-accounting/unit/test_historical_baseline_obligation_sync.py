@@ -6,7 +6,11 @@ from decimal import Decimal
 import pytest
 
 from domains.staff_payables.subsidy_handoff import SubsidyPayableHandoff
-from subsystems.payroll.historical_baseline_obligation_sync import _funding_schedule, synchronize_historical_payroll
+from subsystems.payroll.historical_baseline_obligation_sync import (
+    HistoricalFundingSchedule,
+    _funding_schedule,
+    synchronize_historical_payroll,
+)
 
 
 @pytest.mark.parametrize(
@@ -30,23 +34,31 @@ def test_historical_due_date_preserves_recorded_dates_and_separates_funding(
         "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
         read_handoff,
     )
-    due_date, portions = _funding_schedule(
+    schedule = _funding_schedule(
         None, "CASE-1",
         {"actual_end_date": date(2026, 11, 30), "staff_payment_due_date": existing_due},
         12000,
     )
-    assert due_date == expected_due
-    assert tuple((item.funding_kind, item.amount) for item in portions) == expected_portions
-    if portions:
-        assert portions[1].due_date == date(2027, 1, 15)
+    assert isinstance(schedule, HistoricalFundingSchedule)
+    assert schedule.due_date == expected_due
+    assert schedule.pending_reason is None
+    assert tuple((item.funding_kind, item.amount) for item in schedule.portions) == expected_portions
+    if schedule.portions:
+        assert schedule.portions[1].due_date == date(2027, 1, 15)
 
 
-def test_conflicting_historical_funding_blocks_establishment(monkeypatch):
+def test_conflicting_historical_funding_leaves_schedule_pending_without_blocking(monkeypatch):
     monkeypatch.setattr(
         "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
         lambda *_, payroll_candidate_total: SubsidyPayableHandoff("split", False, True, 5000, False, staff_subsidy_reason="conflict"),
     )
-    assert _funding_schedule(None, "CASE-1", {"actual_end_date": date(2026, 11, 30)}, 12000) == "conflict"
+    schedule = _funding_schedule(None, "CASE-1", {"actual_end_date": date(2026, 11, 30)}, 12000)
+    assert schedule == HistoricalFundingSchedule(
+        due_date=None,
+        portions=(),
+        pending_reason="historical_payroll_funding_conflict",
+        pending_detail="conflict",
+    )
 
 
 _ORDER = {"status": "歷史訂單－服務完成", "service_days": 5,
@@ -432,18 +444,131 @@ def test_staff_availability_does_not_require_historical_evidence_for_normal_orde
 
 
 @pytest.mark.parametrize("scheme,subsidy", [("unknown", None), ("unknown", 5000), ("waiting", 5000)])
-def test_unknown_payment_source_blocks_apply_before_any_write(monkeypatch, scheme, subsidy):
-    connection = ReadOnlyConnection(_ORDER, None, (_ASSIGNMENT,), (), (), ())
+def test_unknown_payment_source_establishes_payable_without_due_date_or_installments(monkeypatch, scheme, subsidy):
+    class RecordingConnection(ReadOnlyConnection):
+        def execute(self, sql, params):
+            self.selects.append((sql, params))
+
     monkeypatch.setattr(
         "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
         lambda *_, payroll_candidate_total: SubsidyPayableHandoff(scheme, False, True, subsidy, False),
     )
+    dry_connection = ReadOnlyConnection(_ORDER, None, (_ASSIGNMENT,), (), ())
+    dry_result = synchronize_historical_payroll(dry_connection, "CASE-1", dry_run=True)
+    assert dry_result["action"] == "created"
+    assert dry_result["amount_ntd"] == 12000
+    assert dry_result["due_date"] is None
+    assert dry_result["payment_arrangement_pending"] is True
+    assert dry_result["pending_reason"] == "historical_payroll_funding_pending"
+    assert "補助流向" in dry_result["detail"]
 
-    result = synchronize_historical_payroll(connection, "CASE-1")
+    actions = []
+    installments = []
+    monkeypatch.setattr(
+        "subsystems.payroll.rebuild_workflow.PayrollRebuildWorkflow.persist_source_preview",
+        lambda self, case_no, preview, **kwargs: actions.extend(preview.actions),
+    )
+    monkeypatch.setattr(
+        "infrastructure.mysql.payroll_installments.establish_confirmed_subsidy_installments",
+        lambda cursor, identity, portions: installments.append((identity, portions)),
+    )
+    apply_connection = RecordingConnection(
+        _ORDER, None, (_ASSIGNMENT,), (), (), (), {"aggregate_version": 0},
+    )
+    created = synchronize_historical_payroll(apply_connection, "CASE-1")
+    assert created == dry_result
+    action, = actions
+    assert action.action.value == "create"
+    assert action.after_amount.amount == 12000
+    assert action.due_date is None
+    assert not installments
+    assert all("UPDATE orders SET staff_payment_due_date" not in sql for sql, _ in apply_connection.selects)
 
-    assert result["action"] == "skipped"
-    assert result["reason"] == "historical_payroll_funding_conflict"
-    assert "付款來源尚未確認" in result["detail"]
+    established_undated = {
+        **_UNPAID, "obligation_identity": "staff-obligation:assignment:17",
+        "amount_due_ntd": 12000, "effective_amount_due_ntd": 12000,
+    }
+    rerun_connection = ReadOnlyConnection(_ORDER, None, (_ASSIGNMENT,), (established_undated,), (), ())
+    rerun = synchronize_historical_payroll(rerun_connection, "CASE-1")
+    assert rerun["action"] == "skipped"
+    assert rerun["reason"] == "already_synced"
+    assert rerun["payment_arrangement_pending"] is True
+    assert len(actions) == 1
+
+
+def test_missing_end_date_establishes_payable_without_fabricating_due_date(monkeypatch):
+    class RecordingConnection(ReadOnlyConnection):
+        def execute(self, sql, params):
+            self.selects.append((sql, params))
+
+    no_end_order = {**_ORDER, "actual_end_date": None}
+    no_end_assignment = {**_ASSIGNMENT, "source_end_date": None}
+    actions = []
+    monkeypatch.setattr(
+        "subsystems.payroll.rebuild_workflow.PayrollRebuildWorkflow.persist_source_preview",
+        lambda self, case_no, preview, **kwargs: actions.extend(preview.actions),
+    )
+    connection = RecordingConnection(
+        no_end_order, None, (no_end_assignment,), (), (), (), {"aggregate_version": 0},
+    )
+    created = synchronize_historical_payroll(connection, "CASE-1")
+    assert created["action"] == "created"
+    assert created["amount_ntd"] == 12000
+    assert created["due_date"] is None
+    assert created["pending_reason"] == "historical_payroll_end_date_missing"
+    assert actions[0].due_date is None
+    assert all("UPDATE orders SET staff_payment_due_date" not in sql for sql, _ in connection.selects)
+
+
+def test_multi_caregiver_sync_creates_only_verifiable_assignment_without_copying_case_totals(monkeypatch):
+    class RecordingConnection(ReadOnlyConnection):
+        def execute(self, sql, params):
+            self.selects.append((sql, params))
+
+    case_order = {**_ORDER, "service_days": 20}
+    caregiver_a = {**_ASSIGNMENT, "id": 17, "staff_id": 3, "schedule_service_days": 8, "hourly_rate_ntd": 300}
+    caregiver_b = {**_ASSIGNMENT, "id": 18, "staff_id": 4, "schedule_service_days": 0, "hourly_rate_ntd": 300}
+    caregiver_c = {**_ASSIGNMENT, "id": 19, "staff_id": 5, "schedule_service_days": 6, "hourly_rate_ntd": 300}
+    paid_c = {
+        "obligation_identity": "staff-obligation:assignment:19", "assignment_id": 19, "staff_id": 5,
+        "amount_due_ntd": 14400, "effective_amount_due_ntd": 14400, "due_date": date(2026, 12, 15),
+        "status": "settled", "payout_history_exists": True, "has_formed_due_date": True,
+        "has_positive_installments": False, "has_payment": True,
+    }
+    monkeypatch.setattr(
+        "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
+        lambda *_, payroll_candidate_total: SubsidyPayableHandoff("unknown", False, True, 12000, False),
+    )
+    actions = []
+    monkeypatch.setattr(
+        "subsystems.payroll.rebuild_workflow.PayrollRebuildWorkflow.persist_source_preview",
+        lambda self, case_no, preview, **kwargs: actions.extend(preview.actions),
+    )
+
+    dry = synchronize_historical_payroll(
+        ReadOnlyConnection(case_order, None, (caregiver_a, caregiver_b, caregiver_c), (paid_c,), ()),
+        "CASE-MULTI",
+        dry_run=True,
+    )
+    assert dry["action"] == "created"
+    assert [(item["staff_id"], item["action"], item.get("amount_ntd"), item.get("reason")) for item in dry["items"]] == [
+        (3, "created", 19200, None),
+        (4, "skipped", None, "historical_payroll_service_basis_missing"),
+        (5, "skipped", None, "already_synced"),
+    ]
+    assert not actions
+
+    applied = synchronize_historical_payroll(
+        RecordingConnection(
+            case_order, None, (caregiver_a, caregiver_b, caregiver_c), (paid_c,), (), (), {"aggregate_version": 0},
+        ),
+        "CASE-MULTI",
+    )
+    assert applied == dry
+    assert len(actions) == 1
+    assert actions[0].assignment_identity == "assignment:17"
+    assert actions[0].after_amount.amount == 19200
+    assert actions[0].due_date is None
 
 
 @pytest.mark.parametrize("pending_count,payables,expected_reason", [

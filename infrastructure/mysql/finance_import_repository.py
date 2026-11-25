@@ -32,6 +32,10 @@ from domains.client_finance.refund_return_review import (
     RefundReturnReviewFacts,
     RefundReturnReviewSelection,
 )
+from infrastructure.mysql.staff_payable_correction_sql import (
+    effective_staff_obligation_amount,
+    selectable_staff_obligation,
+)
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.anomaly_registry_repository import (
     append_finance_import_manual_review_resolution,
@@ -1194,9 +1198,16 @@ _CLIENT_OBLIGATIONS_SQL = (
     "AND obligation_identity IN ({}) ORDER BY obligation_identity"
 )
 _STAFF_OBLIGATIONS_SQL = (
-    "SELECT obligation_identity,balance_ntd AS remaining_amount_ntd "
-    "FROM staff_payable_projections WHERE status IN ('payable','partially_paid') "
-    "AND obligation_identity IN ({}) ORDER BY obligation_identity"
+    "SELECT obligation.obligation_identity,"
+    "COALESCE(projection.balance_ntd," + effective_staff_obligation_amount("obligation") + ") AS remaining_amount_ntd "
+    "FROM staff_obligations obligation "
+    "LEFT JOIN staff_payable_projections projection "
+    "ON projection.obligation_identity=obligation.obligation_identity "
+    "WHERE obligation.direction='payable_to_staff' AND obligation.status='open' "
+    "AND obligation.amount_due_ntd>0 "
+    "AND COALESCE(projection.status,'payable') IN ('payable','partially_paid') "
+    "AND " + selectable_staff_obligation("obligation") + " "
+    "AND obligation.obligation_identity IN ({}) ORDER BY obligation.obligation_identity"
 )
 _GOVERNMENT_SUBSIDY_OBLIGATIONS_SQL = (
     "SELECT CONCAT('government-subsidy-batch:',batch_id) "

@@ -57,7 +57,7 @@ class MySqlHistoricalStaffPayoutRepository:
                 (case_no, staff_id),
             )
             obligation_rows = tuple(cursor.fetchall())
-            cursor.execute(_STAFF_BANK_CANDIDATES_SQL + suffix, (staff_id,))
+            cursor.execute(_STAFF_BANK_CANDIDATES_SQL + suffix, (staff_id, staff_id, staff_id, case_no))
             bank_rows = tuple(cursor.fetchall())
         return HistoricalStaffPayoutFacts(
             case_no,
@@ -273,14 +273,18 @@ def _cursor(connection):
 
 _STAFF_BANK_CANDIDATES_SQL = (
     "SELECT fir.id FROM finance_import_rows fir "
-    "JOIN finance_import_classification_events classification ON classification.id=("
+    "LEFT JOIN finance_import_classification_events classification ON classification.id=("
     "SELECT MAX(latest.id) FROM finance_import_classification_events latest "
     "WHERE latest.finance_import_row_id=fir.id) "
     "LEFT JOIN staff_payout_events payout ON payout.finance_import_row_id=fir.id "
     "WHERE COALESCE(classification.classification_type,fir.classification_type) "
     "IN ('staff_payout','staff_salary','staff_legacy_subsidy') "
-    "AND JSON_CONTAINS(classification.target_identities,"
-    "JSON_QUOTE(CONCAT('staff:',CAST(%s AS CHAR)))) "
+    "AND ("
+    "JSON_CONTAINS(COALESCE(classification.target_identities,JSON_ARRAY()),JSON_QUOTE(CONCAT('staff:',CAST(%s AS CHAR)))) "
+    "OR JSON_CONTAINS(COALESCE(fir.matched_identity_ids,JSON_ARRAY()),JSON_QUOTE(CONCAT('staff:',CAST(%s AS CHAR)))) "
+    "OR JSON_CONTAINS(COALESCE(fir.matched_identity_ids,JSON_ARRAY()),CAST(CAST(%s AS CHAR) AS JSON)) "
+    "OR JSON_CONTAINS(COALESCE(classification.evidence,JSON_ARRAY()),JSON_QUOTE(CONCAT('bank-paired-case:',%s)))"
+    ") "
     "AND fir.reconciliation_status='pending' AND fir.direction='outgoing' "
     "AND fir.transaction_date IS NOT NULL AND payout.id IS NULL ORDER BY fir.id"
 )

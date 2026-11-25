@@ -345,6 +345,7 @@ class MySqlStaffPayoutRepository:
                 if len(cases) == 1 and None not in cases and manual_source_matches(cursor, row, case_no=next(iter(cases)),
                     direction="staff_salary", obligations=selection.obligation_identities) else row
                 for row in bank_rows)
+            bank_rows = _verify_sinopac_payout_targets(cursor, bank_rows, staff_id=staff_id, expected_cases=cases)
             bank_rows = _verify_taishin_memo_recipients(cursor, bank_rows, lock, expected_cases=cases)
         bank_accounts = _load_bank_accounts(cursor, bank_rows, lock)
         events = _load_obligation_events(
@@ -623,7 +624,9 @@ def _load_selected_bank_rows(cursor, selection, lock):
         "SELECT fir.id,fir.dedup_fingerprint,fir.transaction_date,fir.format_id,fir.bank_references,fir.memo,"
         "fir.debit,fir.credit,fir.direction,fir.currency,"
         "fir.resolved_counterparty_account,fir.classification_type,"
+        "fir.matched_identity_ids,"
         "classification.classification_type AS authoritative_classification_type,"
+        "classification.target_identities AS authoritative_target_identities,"
         "fir.reconciliation_status,fir.warnings,spe.id AS payout_event_id,"
         "EXISTS(SELECT 1 FROM finance_import_classification_events pairing WHERE pairing.finance_import_row_id=fir.id "
         "AND pairing.reason='manual_bank_case_pairing') AS manually_paired "
@@ -640,6 +643,60 @@ def _load_selected_bank_rows(cursor, selection, lock):
         {**row, "resolved_counterparty_account": _payout_source_account(row)}
         for row in cursor.fetchall()
     )
+
+
+def _verify_sinopac_payout_targets(cursor, bank_rows, *, staff_id: int, expected_cases: set[str | None]):
+    from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
+    from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
+
+    non_null_cases = {case_no for case_no in expected_cases if case_no}
+    for row in bank_rows:
+        if row.get("format_id") not in _SINOPAC_PAYOUT_FORMATS:
+            continue
+        if row.get("manual_confirmed_staff_id") == staff_id:
+            continue
+        if _classification_type(row) in _PAYOUT_CLASSIFICATIONS:
+            row_staff_ids = _parse_staff_identities(row.get("authoritative_target_identities"))
+            if not row_staff_ids:
+                row_staff_ids = _parse_staff_identities(row.get("matched_identity_ids"))
+            if row_staff_ids and staff_id not in row_staff_ids:
+                raise ValueError("cross_staff_allocation_forbidden")
+        suffixes = sinopac_memo_case_suffixes(row.get("memo"))
+        if suffixes and non_null_cases:
+            matched_cases: set[str] = set()
+            for suffix in suffixes:
+                resolved = resolve_client_virtual_account_suffix(cursor, suffix, include_candidates=True)
+                if resolved.get("reason") == "case_not_found":
+                    continue
+                if resolved.get("result") == "resolved":
+                    case_no = resolved.get("case_no")
+                    if case_no not in non_null_cases:
+                        raise ValueError("staff_memo_case_mismatch")
+                    matched_cases.add(str(case_no))
+                    continue
+                candidates = set(resolved.get("candidate_cases") or ())
+                overlap = candidates & non_null_cases
+                if not overlap:
+                    raise ValueError("staff_memo_case_mismatch")
+                matched_cases.update(overlap)
+            if len(matched_cases) > 1:
+                raise ValueError("staff_memo_case_mismatch")
+    return bank_rows
+
+
+def _parse_staff_identities(raw: object) -> set[int]:
+    if raw is None:
+        return set()
+    parsed = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(parsed, (list, tuple)):
+        return set()
+    staff_ids: set[int] = set()
+    for item in parsed:
+        if isinstance(item, int) and not isinstance(item, bool) and item > 0:
+            staff_ids.add(item)
+        elif isinstance(item, str) and item.startswith("staff:") and item[6:].isdigit():
+            staff_ids.add(int(item[6:]))
+    return staff_ids
 
 
 def _verify_taishin_memo_recipients(cursor, bank_rows, lock, *, expected_cases=None):

@@ -78,7 +78,11 @@ function HistoricalPayableSync({ item, onSaved }: { item: HistoricalPayableAudit
     try {
       const result = await accountsPayableQueryClient.synchronizeHistorical(item.case_no);
       if (result && (result.action !== 'skipped' || result.reason === 'already_synced')) {
-        setMessage('已查回月嫂應付，清冊將重新讀取。');
+        const pending = result.payment_arrangement_pending || (result.action !== 'skipped' && result.due_date === null);
+        const base = pending
+          ? '已建立正式應付，付款安排或預計付款日待確認，清冊將重新讀取。'
+          : '已查回月嫂應付，清冊將重新讀取。';
+        setMessage(result.detail ? `${base} ${result.detail}` : base);
         onSaved();
       } else {
         setMessage(result?.detail ?? historicalSyncMessages[result?.reason ?? '']
@@ -110,6 +114,8 @@ const historicalSyncMessages: Record<string, string> = {
   payroll_rate_policy_not_found: '請查核本案保存的月嫂時薪。',
   historical_payroll_nonpositive_amount: '計算出的月嫂應付金額須大於零，請查核計算依據。',
   historical_payroll_funding_conflict: '請查核本案自費與直接補助的付款來源。',
+  historical_payroll_funding_pending: '月嫂付款來源與補助流向尚未確認，預計付款日與分期保留待確認。',
+  historical_payroll_end_date_missing: '請查核已採納之歷史服務結束日。',
   historical_payroll_attribution_pending: '請回到歷史服務歸屬更正，查核應付與原付款證據。',
 };
 

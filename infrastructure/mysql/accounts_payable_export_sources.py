@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date
 from calendar import monthrange
 from decimal import Decimal
+from typing import Any
 
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.staff_payables.reconciliation import StaffPayableStatus
@@ -96,18 +98,47 @@ class MySqlStaffPayableExportSource:
             from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
 
             outcome = synchronize_historical_payroll(self._connection, case_no, dry_run=True)
-            reason = outcome.get("detail")
-            if outcome["action"] in {"created", "updated"}:
-                reason = "已查到同步所需資料，可同步月嫂應付。本次查核尚未入帳。"
-            if reason:
-                attribution_pending = outcome.get("reason") == "historical_payroll_attribution_pending"
+            item_outcomes = {
+                int(entry["staff_id"]): entry
+                for entry in (outcome.get("items") or ())
+                if entry.get("staff_id") is not None
+            }
+            if item_outcomes:
                 items = tuple(
-                    replace(item, reason=reason)
-                    if item.payment_status in unpaid_statuses and (attribution_pending or item.disposition == "date_not_formed")
+                    replace(item, reason=_audit_reason_from_outcome(item_outcomes[item.staff_id], item.reason))
+                    if item.staff_id is not None
+                    and item.staff_id in item_outcomes
+                    and item.payment_status in unpaid_statuses
+                    and (
+                        outcome.get("reason") == "historical_payroll_attribution_pending"
+                        or item.disposition == "date_not_formed"
+                    )
                     else item
                     for item in items
                 )
-                missing_items = tuple(replace(item, reason=reason) for item in missing_items)
+                missing_items = tuple(
+                    replace(
+                        item,
+                        reason=_audit_reason_from_outcome(
+                            (item_outcomes.get(item.staff_id) if item.staff_id is not None else None) or outcome,
+                            item.reason,
+                        ),
+                    )
+                    for item in missing_items
+                )
+            else:
+                reason = outcome.get("detail")
+                if outcome["action"] in {"created", "updated"} and outcome.get("due_date") is not None:
+                    reason = "已查到同步所需資料，可同步月嫂應付。本次查核尚未入帳。"
+                if reason:
+                    attribution_pending = outcome.get("reason") == "historical_payroll_attribution_pending"
+                    items = tuple(
+                        replace(item, reason=reason)
+                        if item.payment_status in unpaid_statuses and (attribution_pending or item.disposition == "date_not_formed")
+                        else item
+                        for item in items
+                    )
+                    missing_items = tuple(replace(item, reason=reason) for item in missing_items)
         return items + missing_items
 
     def find_historical_cases(self, keyword: str, target_payment_date: date):
@@ -131,6 +162,13 @@ class MySqlStaffPayableExportSource:
         cases = (exact_case,) if exact_case is not None else candidates
         return tuple(item for case_no in cases for item in self.load_case(case_no, target_payment_date)
                      if case_no == exact_case or item.staff_id in staff_ids)
+
+
+def _audit_reason_from_outcome(outcome: Mapping[str, Any], fallback: str) -> str:
+    if outcome.get("action") in {"created", "updated"} and outcome.get("due_date") is not None:
+        return "已查到同步所需資料，可同步月嫂應付。本次查核尚未入帳。"
+    detail = outcome.get("detail")
+    return str(detail) if detail else fallback
 
 
 class MySqlClientRefundExportSource:

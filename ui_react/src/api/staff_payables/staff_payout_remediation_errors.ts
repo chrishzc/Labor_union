@@ -34,6 +34,7 @@ const PAYOUT_BLOCKER_MESSAGES: Readonly<Record<string, string>> = {
   staff_subsidy_split_service_end_missing: '本案缺少正式服務結束日，無法確認補助款撥款日期，請先確認服務資料。',
   staff_bank_account_ambiguous: '銀行流水缺少收款帳號，或無法對應唯一有效的月嫂主要帳戶，請核對原流水與月嫂帳戶。',
   staff_memo_recipient_unconfirmed: '銀行備註中的月嫂姓名無法唯一確認，請核對原始備註與月嫂姓名。',
+  staff_memo_case_mismatch: '銀行備註的案件編號與所選應付案件不符，請核對原始備註與應付款項。',
   cross_staff_allocation_forbidden: '銀行流水、收款帳戶與待付款項的月嫂歸屬不一致，請核對付款對象。',
   bank_transaction_date_missing: '原銀行流水缺少交易日，無法核銷月嫂付款，請先查核來源資料。',
   bank_currency_not_twd: '原銀行流水幣別不是新臺幣，無法核銷月嫂付款，請先查核來源資料。',

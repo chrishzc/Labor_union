@@ -340,7 +340,7 @@ def test_historical_order_apply_is_atomic_and_replays():
         connection.close()
 
 
-def test_rollover_preserves_unknown_funding_reason_without_creating_payroll():
+def test_rollover_creates_undated_payroll_and_preserves_unknown_funding_reason():
     token = uuid4().hex
     case_no = f"WP80-{token[:12]}"
     staff_name = f"歷史待核對-{token[:8]}"
@@ -371,20 +371,29 @@ def test_rollover_preserves_unknown_funding_reason_without_creating_payroll():
         completed = rollover.apply(request)
         replay = rollover.apply(request)
         assert completed.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
-        assert completed.payroll_sync.action == "skipped"
-        assert completed.payroll_sync.reason == "historical_payroll_funding_conflict"
-        assert "付款來源" in completed.payroll_sync.detail
+        assert completed.payroll_sync.action == "created"
+        assert completed.payroll_sync.reason is None
+        assert "補助流向" in completed.payroll_sync.detail
         assert replay.replayed and replay.lifecycle_event_id == completed.lifecycle_event_id
         assert replay.payroll_sync == completed.payroll_sync
 
         for dry_run in (True, False):
             result = synchronize_historical_payroll(connection, case_no, dry_run=dry_run)
-            assert result == {"action": "skipped", "reason": completed.payroll_sync.reason,
-                              "detail": completed.payroll_sync.detail}
+            assert result == {
+                "action": "skipped",
+                "reason": "already_synced",
+                "payment_arrangement_pending": True,
+                "pending_reason": "historical_payroll_funding_pending",
+                "detail": completed.payroll_sync.detail,
+            }
         with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) AS count FROM staff_obligations WHERE case_no=%s", (case_no,))
-            assert cursor.fetchone()["count"] == 0
-            cursor.execute("SELECT COUNT(*) AS count FROM staff_obligation_events WHERE case_no=%s", (case_no,))
+            cursor.execute("SELECT obligation_identity,amount_due_ntd,due_date,status FROM staff_obligations WHERE case_no=%s", (case_no,))
+            obligations = cursor.fetchall()
+            assert len(obligations) == 1
+            assert obligations[0]["amount_due_ntd"] == 72000
+            assert obligations[0]["due_date"] is None
+            assert obligations[0]["status"] == "open"
+            cursor.execute("SELECT COUNT(*) AS count FROM staff_obligation_installments i JOIN staff_obligations o ON o.obligation_identity=i.obligation_identity WHERE o.case_no=%s", (case_no,))
             assert cursor.fetchone()["count"] == 0
             cursor.execute("SELECT staff_payment_due_date FROM orders WHERE case_no=%s", (case_no,))
             assert cursor.fetchone()["staff_payment_due_date"] is None

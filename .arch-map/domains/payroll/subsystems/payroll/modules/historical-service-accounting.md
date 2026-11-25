@@ -10,13 +10,11 @@
 
 ## Implementation
 - `domains/payroll/historical_calculation.py` — 候選要求服務事實與費率快照逐筆對應，快照缺漏、重複或多出時拒絕。
-- `subsystems/payroll/historical_baseline_obligation_sync.py` — historical source synchronization in the caller's transaction.
+- `subsystems/payroll/historical_baseline_obligation_sync.py` — historical source synchronization in the caller's transaction；拆開正式應付建立與資金分期／預計付款日形成（`HistoricalFundingSchedule`）。單人與多人歷史完工案按已採納指派逐筆評估：可證實服務量與費率且無衝突者先建立正式應付（`due_date` 與分期未確認時保留 `None` 及具體原因，不填假日期、不預設補助為零），資料不足或已有原帳／衝突者保留待查或原狀；後續補齊付款日時由 `infrastructure/mysql/payroll_rebuild_repository.py::_set_historical_missing_due_date` 沿既有應付識別與版本更新日期，不改寫應付金額。
 - `api/routes/accounting_differences.py`、`scripts/sync_historical_staff_obligations.py` — existing historical synchronization entry points.
 - `infrastructure/mysql/historical_service_accounting_repository.py` — reads calculation inputs and persists the Orders comparison snapshot.
-- `infrastructure/mysql/case_staff_accounting_repository.py::query_case_staff_accounting_availability` — 逐人唯讀查核正式應付、原日期與歷史計薪來源，分開呈現已建帳缺日期、來源齊全尚未建立及具體缺項。既有應付不因他人缺件消失，無逐日班表不構成歷史計薪缺項；查詢不呼叫同步 writer。
+- `infrastructure/mysql/case_staff_accounting_repository.py::query_case_staff_accounting_availability` — 逐人唯讀查核正式應付、原日期與歷史計薪來源（含已採納指派與 `staff_schedule` 出席日數），分開呈現已建帳缺日期、來源齊全尚未建立及具體缺項。既有應付不因他人缺件消失，無逐日班表不構成單人歷史計薪缺項；查詢不呼叫同步 writer。
   - 預計付款日須有適用該應付的唯一、可證實服務結束日及資金來源。採納或服務量投影的指派來源缺失／歧義時，不以整案結束日補推日期；保留正式金額、原到期日與原已保存付款日期，並按人回傳具體缺項。唯一來源的正例僅補原缺席的唯讀預計日，不改已形成日期。
-
-**目標接線**：基準同步逐指派處理，區分應付成立與資金／日期成形。重用 Payroll 及 Staff Payables 既有 writer；正式金額可確認時不因其他指派或補助流向待查而回傳整案跳過。不得將此目標視為目前實作。
 
 ## Contracts
 - `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md`
