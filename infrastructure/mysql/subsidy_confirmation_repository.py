@@ -6,6 +6,8 @@ settlement. Bank confirmations use a reserved key in the existing plan event
 owner; public manual commands cannot claim that source namespace.
 """
 from dataclasses import replace
+from collections.abc import Mapping
+from typing import Any
 
 from domains.finance_import.planning import (
     FinanceClassificationType, FinanceImportDisposition, StaffSubsidyCaseCandidate, SubsidyConfirmationPreflight,
@@ -14,6 +16,67 @@ from domains.finance_import.transaction_classifier import TAISHIN_CLIENT_SUBSIDY
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
+from subsystems.finance_import.query import StaffSubsidyManualReviewQualification
+
+
+def qualify_staff_subsidy_manual_review(
+    connection: Any, row: Mapping[str, Any], target: Mapping[str, Any] | None,
+) -> StaffSubsidyManualReviewQualification:
+    from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
+    from domains.finance_import.transaction_classifier import _is_same_month
+    from domains.staff_payables.reconciliation import StaffPayoutEventType, project_staff_payable
+    from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
+    from infrastructure.mysql.staff_payout_repository import MySqlStaffPayoutRepository, query_staff_funding_portions
+    from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
+    from subsystems.staff_payables.payout_reconciliation import StaffPayoutSelection
+
+    if (row.get('transaction_status') != 'pending' or row.get('disposition') == 'blocked'
+            or row.get('format_id') != 'taishin' or row.get('direction') != 'outgoing'
+            or row.get('classification_type') not in {'staff_payout', 'staff_salary', 'staff_legacy_subsidy'}
+            or row.get('is_manual_supplement')):
+        return StaffSubsidyManualReviewQualification()
+    if target is None or not target.get('obligation_identities') or target.get('staff_id') is None:
+        return StaffSubsidyManualReviewQualification(unavailable_reason='no_open_items')
+    if row.get('transaction_date') is None:
+        return StaffSubsidyManualReviewQualification(unavailable_reason='bank_transaction_date_missing')
+    suffixes = sinopac_memo_case_suffixes(row.get('memo'))
+    if len(suffixes) != 1:
+        return StaffSubsidyManualReviewQualification(unavailable_reason='case_reference_unconfirmed')
+    with connection.cursor() as cursor:
+        resolved = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
+    if resolved.get('result') != 'resolved' or resolved.get('case_no') != target['case_no']:
+        return StaffSubsidyManualReviewQualification(unavailable_reason='staff_memo_case_mismatch')
+    handoff = query_subsidy_payable_handoff(connection, target['case_no'], proposed_scheme='split')
+    if not handoff.service_completed or handoff.staff_subsidy_reason:
+        return StaffSubsidyManualReviewQualification(unavailable_reason=handoff.staff_subsidy_reason or 'subsidy_service_not_completed')
+    selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (str(row['row_id']),), tuple(target['obligation_identities']))
+    try:
+        facts = MySqlStaffPayoutRepository(connection).load(selection, for_update=False)
+    except ValueError as error:
+        return StaffSubsidyManualReviewQualification(unavailable_reason=str(error))
+    if (not facts.bank_facts or any(not bank.eligible for bank in facts.bank_facts)
+            or facts.blocking_anomalies or any(bank.blocking_anomalies for bank in facts.bank_facts)):
+        return StaffSubsidyManualReviewQualification(unavailable_reason='bank_fact_not_eligible')
+    if (any(bank.taishin_memo_staff_id != target['staff_id'] for bank in facts.bank_facts)
+            or any(item.staff_id != target['staff_id'] for item in facts.obligations)):
+        return StaffSubsidyManualReviewQualification(unavailable_reason='staff_memo_recipient_unconfirmed')
+    if any(project_staff_payable(item).balance.amount <= 0 for item in facts.obligations):
+        return StaffSubsidyManualReviewQualification(unavailable_reason='no_open_items')
+    if facts.subsidy_split is not None:
+        portions = [(item.due_date, facts.subsidy_split.subsidy_remaining_ntd)
+            for item in facts.subsidy_split.installments if item.funding_kind == 'subsidy']
+    else:
+        with connection.cursor() as cursor:
+            portions = [(portion.due_date, portion.remaining_ntd)
+                for identity in selection.obligation_identities
+                for portion in query_staff_funding_portions(cursor, identity)
+                if portion.funding_kind == 'subsidy']
+    if not portions or any(amount is None or amount <= 0 for _, amount in portions):
+        return StaffSubsidyManualReviewQualification(unavailable_reason='no_open_items')
+    if any(due is None for due, _ in portions):
+        return StaffSubsidyManualReviewQualification(unavailable_reason='due_date_missing')
+    cross_month = not all(_is_same_month(row['transaction_date'], due) for due, _ in portions)
+    return StaffSubsidyManualReviewQualification(allowed=cross_month)
 
 
 def _staff_subsidy_related_cases(cursor, staff_id):

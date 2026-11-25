@@ -415,12 +415,14 @@ def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path
 @pytest.mark.parametrize('existing_installment', [False, True])
 def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(connection, tmp_path, existing_installment):
     from dataclasses import replace
+    from functools import partial
     from api.dependencies.staff_payout import build_staff_payout_application
     from domains.staff_payables.reconciliation import StaffPayoutEventType
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
     from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
     from subsystems.finance_import.import_workflow import PendingReconciliationRequest
     from subsystems.finance_import.query import FinanceImportQueryService
+    from infrastructure.mysql.subsidy_confirmation_repository import qualify_staff_subsidy_manual_review
     from subsystems.staff_payables.payout_reconciliation import (
         StaffPayoutApplyRequest, StaffPayoutReconciliationError, StaffPayoutSelection,
     )
@@ -447,12 +449,24 @@ def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(co
         ActorContext('synthetic'), correlation))
     assert app.preview_batch(batch, correlation).rows[0].pending_reason == 'outgoing_staff_payout_month_no_match'
     row_id = row.row_identity.rsplit(':', 1)[-1]
-    listed, = FinanceImportQueryService(connection).bank_transactions(
+    query = FinanceImportQueryService(connection,
+        qualify_staff_subsidy_manual_review=partial(qualify_staff_subsidy_manual_review, connection))
+    listed, = query.bank_transactions(
         bank='taishin', direction='outgoing', status='pending', start=None, end=None,
         search='', limit=1, before_row_id=None, row_id=int(row_id),
     )['items']
     assert listed['reconciliation_target']['case_no'] == case
     assert listed['reconciliation_target']['obligation_identities'] == [identity]
+    assert listed['staff_subsidy_manual_review_allowed']
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE finance_import_rows SET transaction_date='2026-11-15' WHERE id=%s", (row_id,))
+    connection.commit()
+    same_month, = query.bank_transactions(bank='taishin', direction='outgoing', status='pending', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=int(row_id))['items']
+    assert not same_month['staff_subsidy_manual_review_allowed']
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE finance_import_rows SET transaction_date='2026-12-15' WHERE id=%s", (row_id,))
+    connection.commit()
     selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (row_id,), (identity,))
     workflow = build_staff_payout_application(connection)
     with pytest.raises(StaffPayoutReconciliationError) as error:
@@ -465,13 +479,96 @@ def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(co
     request = StaffPayoutApplyRequest(selection, ExpectedVersion(checked.staff_payables_version),
         ExpectedVersion(checked.bank_facts_version), checked.fingerprint,
         IdempotencyKey('staff-manual-month:' + uuid4().hex), ActorContext('synthetic'), '人工確認跨月撥款', correlation)
+    unchanged = snapshot(connection, case)
+    with connection.cursor() as cursor:
+        cursor.execute('UPDATE finance_import_rows SET memo=%s WHERE id=%s', (name + '補助款', row_id))
+    connection.commit()
+    with pytest.raises(StaffPayoutReconciliationError) as error:
+        workflow.apply(request)
+    assert error.value.error.code == 'outgoing_staff_payout_month_no_match'
+    assert snapshot(connection, case) == unchanged
+    with connection.cursor() as cursor:
+        cursor.execute('UPDATE finance_import_rows SET memo=%s WHERE id=%s', (memo, row_id))
+        cursor.execute("UPDATE finance_import_classification_events SET classification_type='client_subsidy_return' WHERE finance_import_row_id=%s", (row_id,))
+    connection.commit()
+    with pytest.raises(StaffPayoutReconciliationError):
+        workflow.apply(request)
+    assert snapshot(connection, case) == unchanged
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE finance_import_classification_events SET classification_type='staff_payout' WHERE finance_import_row_id=%s", (row_id,))
+    connection.commit()
+    checked = workflow.preview(selection, correlation)
+    request = replace(request, expected_staff_payables_version=ExpectedVersion(checked.staff_payables_version),
+        expected_bank_facts_version=ExpectedVersion(checked.bank_facts_version), preview_fingerprint=checked.fingerprint)
     receipt = workflow.apply(request)
     assert workflow.apply(request) == receipt
     payment, = [item for item in workspace.query(case).staff_items if item.identity == identity]
     assert payment.actual_ntd == 12000
     assert app.preview_batch(batch, correlation).rows[0].disposition.value == 'existing'
+    posted, = query.bank_transactions(bank='taishin', direction='outgoing', status='posted', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=int(row_id))['items']
+    assert not posted['staff_subsidy_manual_review_allowed']
     assert tuple(replace(item, version='') for item in workspace.query(other).staff_items) == tuple(
         replace(item, version='') for item in before[other].staff_items)
+
+
+@pytest.mark.parametrize('same_month', [False, True])
+@pytest.mark.parametrize('existing_installment', [False, True])
+def test_staff_subsidy_without_suffix_cannot_bypass_cross_month_guard(connection, tmp_path, same_month, existing_installment):
+    from functools import partial
+    from api.dependencies.staff_payout import build_staff_payout_application
+    from domains.staff_payables.reconciliation import StaffPayoutEventType
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.subsidy_confirmation_repository import qualify_staff_subsidy_manual_review
+    from subsystems.finance_import.query import FinanceImportQueryService
+    from subsystems.staff_payables.payout_reconciliation import StaffPayoutSelection, StaffPayoutReconciliationError
+
+    case, name, identity = seed(connection, False, 'split')
+    workspace = build_accounting_workspace(connection)
+    if existing_installment:
+        plan = workspace.preview_subsidy_plan(case, 'split', 0)
+        workspace.save_subsidy_plan(case, 'split', 0, 'same-month-guard:' + uuid4().hex, 'synthetic', plan.fingerprint.value)
+        connection.commit()
+    batch = bank_source(connection, tmp_path, case, name, 'split',
+        transaction_date=date(2026, 11 if same_month else 12, 15))
+    row, = application(connection).preview_batch(batch, CorrelationId('month-guard')).rows
+    row_id = row.row_identity.rsplit(':', 1)[-1]
+    before = snapshot(connection, case)
+    query = FinanceImportQueryService(connection,
+        qualify_staff_subsidy_manual_review=partial(qualify_staff_subsidy_manual_review, connection))
+    listed, = query.bank_transactions(bank='taishin', direction='outgoing', status='pending', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=int(row_id))['items']
+    assert not listed['staff_subsidy_manual_review_allowed']
+    workflow = build_staff_payout_application(connection)
+    selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (row_id,), (identity,))
+    if same_month:
+        workflow.preview(selection, CorrelationId('month-guard'))
+    else:
+        with pytest.raises(StaffPayoutReconciliationError) as error:
+            workflow.preview(selection, CorrelationId('month-guard'))
+        assert error.value.error.code == 'outgoing_staff_payout_month_no_match'
+    assert snapshot(connection, case) == before
+
+
+@pytest.mark.parametrize('cash', [500, 15000])
+def test_staff_subsidy_cross_month_qualification_preserves_manual_amount_choices(connection, tmp_path, cash):
+    from functools import partial
+    from infrastructure.mysql.subsidy_confirmation_repository import qualify_staff_subsidy_manual_review
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    case, name, _ = seed(connection, False, 'split')
+    batch = bank_source(connection, tmp_path, case, name, 'split', cash=cash,
+        transaction_date=date(2026, 12, 15), memo_override=name + ' HC' + build_client_virtual_account(case)[-6:])
+    row, = application(connection).preview_batch(batch, CorrelationId('manual-amount-choices')).rows
+    before = snapshot(connection, case)
+    row_id = int(row.row_identity.rsplit(':', 1)[-1])
+    query = FinanceImportQueryService(connection,
+        qualify_staff_subsidy_manual_review=partial(qualify_staff_subsidy_manual_review, connection))
+    listed, = query.bank_transactions(bank='taishin', direction='outgoing', status='pending', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=row_id)['items']
+    assert listed['staff_subsidy_manual_review_allowed']
+    assert snapshot(connection, case) == before
 
 
 @pytest.mark.parametrize(('scheme', 'bare_case'), [('split', False), ('advance', False), ('advance', True)])
