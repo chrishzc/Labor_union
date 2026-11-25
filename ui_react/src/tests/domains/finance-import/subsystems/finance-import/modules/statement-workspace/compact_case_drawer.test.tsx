@@ -1310,7 +1310,7 @@ it('歷史帳務 API 契約經 strict client 解碼後交抽屜呈現，拒絕�
   vi.mocked(financeAccountingClient.query).mockResolvedValue(decoded);
   wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
   const row=await screen.findByRole('row',{name:/contract-source/});
-  expect(row).toHaveTextContent('event-42');expect(row).toHaveTextContent('歷史確認日 2025-11-06');
+  expect(row).toHaveTextContent('event-42');expect(row).toHaveTextContent('歷史付款證據日期 2025-11-06');
   expect(row).toHaveTextContent('歷史已付證據，非銀行入帳');
   request.mockResolvedValue({success:true,message:'ok',data:{...raw,client_items:[{...raw.client_items[0],payment_evidence:'paid'}]}});
   await expect(actualClient.query(caseNo)).rejects.toThrow(/payment_evidence/);

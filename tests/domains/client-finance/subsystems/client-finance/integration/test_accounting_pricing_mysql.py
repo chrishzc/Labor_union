@@ -542,7 +542,8 @@ def test_historical_accounting_estimates_unique_formal_single_subsidy_payment_wi
         assert available.estimated_self_pay_date is None and available.recorded_due_date is None
         assert available.pending_reasons == ('historical_payroll_due_date_missing',)
         assert result.staff_items[0].due_date is None
-        assert snapshot() == before and before[1:] == ([], [])
+        assert snapshot() == before
+        assert not before[1] and not before[2]
     finally:
         connection.close()
 
