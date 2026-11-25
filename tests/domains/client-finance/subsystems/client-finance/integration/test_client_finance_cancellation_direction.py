@@ -21,6 +21,7 @@ from domains.client_finance.obligation_planning import (
     ClientPaymentTerms,
     ExistingClientStageObligation,
     build_client_finance_cancellation_impact,
+    build_late_service_end_receipt_balance,
     build_client_finance_rate_correction_candidate,
     build_client_finance_terms_candidate,
     build_client_finance_terms_impact,
@@ -705,3 +706,44 @@ def test_legacy_holiday_funding_with_floor_fee_does_not_invent_effective_limit(i
         (ClientChargeDay(day, True),), ClientPaymentTerms(0, MoneyNTD(350), day, day, None), (),
         identity_status=identity)
     assert _holiday_funding_pending(facts) is True
+
+@pytest.mark.parametrize(
+    ("service_due", "fee", "net_cash", "pending_before", "bank_receipt", "expected"),
+    [
+        (0, 0, 0, 0, 5000, (5000, 5000, 5000, 0, 0)),
+        (2000, 0, 0, 0, 5000, (5000, 3000, 3000, 0, 0)),
+        (0, 500, 0, 0, 5000, (5000, 4500, 4500, 0, 500)),
+        (2000, 500, 0, 0, 2100, (2100, 0, 0, 400, 100)),
+        # Net cash already excludes formal prior refunds; open refunds still count once.
+        (2000, 0, 3500, 1500, 5000, (8500, 6500, 5000, 0, 0)),
+    ],
+)
+def test_late_receipt_plans_refund_without_recreating_receivable(
+    service_due: int, fee: int, net_cash: int, pending_before: int,
+    bank_receipt: int, expected: tuple[int, int, int, int, int],
+):
+    result = build_late_service_end_receipt_balance(
+        service_due=MoneyNTD(service_due), authorized_fee=MoneyNTD(fee),
+        net_cash_before=MoneyNTD(net_cash), confirmed_bank_receipt=MoneyNTD(bank_receipt),
+        existing_pending_refund=MoneyNTD(pending_before),
+    )
+    assert (
+        result.net_received_ntd, result.pending_refund_ntd, result.new_refund_ntd,
+        result.additional_charge_due_ntd, result.fee_received_ntd,
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    ("net_cash", "pending_before", "code"),
+    [(5000, 0, "late_service_end_receipt_prior_unresolved_refund"),
+     (0, 10000, "late_service_end_receipt_existing_refund_requires_review")],
+)
+def test_late_receipt_does_not_change_unidentified_existing_refund_balance(
+    net_cash: int, pending_before: int, code: str,
+):
+    with pytest.raises(ValueError, match=code):
+        build_late_service_end_receipt_balance(
+            service_due=MoneyNTD(0), authorized_fee=MoneyNTD(0),
+            net_cash_before=MoneyNTD(net_cash), confirmed_bank_receipt=MoneyNTD(5000),
+            existing_pending_refund=MoneyNTD(pending_before),
+        )
