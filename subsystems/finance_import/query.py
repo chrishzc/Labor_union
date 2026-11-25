@@ -208,14 +208,22 @@ class FinanceImportQueryNotFound(ValueError):
     """Raised when a formal Finance Import batch does not exist."""
 
 
+@dataclass(frozen=True, slots=True)
+class StaffSubsidyManualReviewQualification:
+    allowed: bool = False
+    unavailable_reason: str | None = None
+
+
 class FinanceImportQueryService:
     def __init__(
         self, connection: Any, *, match_client_month=None,
         load_payment_estimates: Callable[[Any, tuple[str, ...]], Mapping[str, Mapping[str, date | None]]] | None = None,
+        qualify_staff_subsidy_manual_review: Callable[[Mapping[str, Any], Mapping[str, Any] | None], StaffSubsidyManualReviewQualification] | None = None,
     ) -> None:
         self._connection = connection
         self._match_client_month = match_client_month
         self._load_payment_estimates = load_payment_estimates
+        self._qualify_staff_subsidy_manual_review = qualify_staff_subsidy_manual_review
 
     def bank_transactions(
         self, *, bank, direction, status, start, end, search, limit, before_row_id, row_id=None,
@@ -456,10 +464,40 @@ class FinanceImportQueryService:
                     cases_by_id.setdefault(case["row_id"], []).append(case["case_no"])
             items = _enrich_bank_transactions(cursor, page, cases_by_id,
                 match_client_month=self._match_client_month)
+            if row_id is not None and items:
+                cursor.execute(
+                    "SELECT owning_domain,amount_ntd,created_at FROM finance_import_reconciliation_receipts "
+                    "WHERE finance_import_row_id=%s ORDER BY id", (row_id,),
+                )
+                records = cursor.fetchall()
+                if not records:
+                    cursor.execute(
+                        "SELECT 'client_finance' AS owning_domain,amount_ntd,created_at "
+                        "FROM client_ledger_entries WHERE finance_import_row_id=%s "
+                        "AND entry_type IN ('receipt','refund','subsidy_return','subsidy_advance') "
+                        "UNION ALL "
+                        "SELECT 'staff_payables' AS owning_domain,amount_ntd,created_at "
+                        "FROM staff_payout_events WHERE finance_import_row_id=%s AND event_type='payout' "
+                        "ORDER BY created_at,owning_domain", (row_id, row_id),
+                    )
+                    records = cursor.fetchall()
+                items[0]['reconciliation_records'] = [
+                    {'owning_domain': receipt['owning_domain'], 'amount_ntd': int(receipt['amount_ntd']),
+                     'recorded_at': receipt['created_at'].isoformat()}
+                    for receipt in records
+                ]
             maps = None
             for row, item in zip(page, items, strict=True):
                 if item["status"] != "pending" or item["disposition"] == "blocked":
                     continue
+                if (row_id is not None and row['format_id'] == 'taishin' and row['direction'] == 'outgoing'
+                        and row['classification_type'] in {'staff_payout', 'staff_salary', 'staff_legacy_subsidy'}
+                        and not row.get('is_manual_supplement')
+                        and self._qualify_staff_subsidy_manual_review is not None):
+                    qualification = self._qualify_staff_subsidy_manual_review(row, item['reconciliation_target'])
+                    item['staff_subsidy_manual_review_allowed'] = qualification.allowed
+                    if qualification.unavailable_reason is not None:
+                        item['reconciliation_unavailable_reason'] = qualification.unavailable_reason
                 if (row["format_id"] in {"sinopac", "taishin"} and row["direction"] == "outgoing"
                         and not row.get("is_manual_supplement") and row.get("classification_version") is not None
                         and (row["classification_type"] in {"staff_payout", "staff_salary", "client_refund"}
@@ -1477,11 +1515,20 @@ def _bank_transaction(row, cases, reconciliation_target=None, reconciliation_una
         )
     return {
         "row_id": int(row["row_id"]),
+        "bank_memo": re.sub(r"\d[\d\s\-－]{6,}\d", "****", row.get("memo") or "")[:500] or None,
+        "reconciliation_records": [],
+        "staff_subsidy_manual_review_allowed": False,
+        "client_subsidy_batch_identity": (
+            row.get("batch_identity") if row["transaction_status"] == "pending"
+            and row["disposition"] != "blocked" and bank == "taishin" and row["direction"] == "outgoing"
+            and row["classification_type"] == "client_subsidy_return" and len(cases) == 1
+            and not (reconciliation_target and reconciliation_target["obligation_identities"]) else None
+        ),
         "staff_subsidy_batch_identity": (
             row.get("batch_identity") if row["transaction_status"] == "pending"
             and row["disposition"] != "blocked"
             and bank == "taishin" and row["direction"] == "outgoing"
-            and row["classification_type"] in {"staff_payout", "staff_legacy_subsidy", "staff_salary", "client_subsidy_return"} else None
+            and row["classification_type"] in {"staff_payout", "staff_legacy_subsidy", "staff_salary"} else None
         ),
         "row_identity": f'finance-import-row:{row["row_id"]}',
         "transaction_date": row["transaction_date"],

@@ -31,7 +31,7 @@ def connection(monkeypatch):
 
 
 def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, actual_end=date(2026, 9, 10), staff=None,
-         client_name='Synthetic Subsidy Client'):
+         client_name='Synthetic Subsidy Client', total=30000, single_receivable=False):
     name = '合成月嫂' + uuid4().hex[:8].translate(str.maketrans('0123456789','qrstuvwxyz'))
     with c.cursor() as q:
         while True:
@@ -44,6 +44,9 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
         q.execute("INSERT INTO orders(case_no,client_id,status,start_date,end_date,actual_start_date,actual_end_date,service_days,service_hours_per_day,floor_fee) "
                   "VALUES(%s,%s,%s,'2026-09-01','2026-09-10','2026-09-01',%s,10,10,0)",(case,q.lastrowid,status,actual_end))
         q.execute('INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES(%s,0)',(case,))
+        _seed_subsidy_pricing(q, case, total // 100)
+        if historical:
+            _seed_subsidy_historical_adoption(q, case, status)
         if staff is None:
             q.execute('INSERT INTO staff(name) VALUES(%s)', (name,))
             staff = q.lastrowid
@@ -54,13 +57,14 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
         q.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,status) VALUES(%s,%s,1,'completed')",(case,staff)); assignment=q.lastrowid
         identity='subsidy-fixture:'+uuid4().hex
         q.execute("INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) "
-            "VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,30000,'2026-10-15',%s,0,1,%s,'synthetic','Evidenced original payable fixture')",(identity,assignment,case,staff,'a'*64,identity)); event=q.lastrowid
+            "VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,%s,'2026-10-15',%s,0,1,%s,'synthetic','Evidenced original payable fixture')",(identity,assignment,case,staff,total,'a'*64,identity)); event=q.lastrowid
         q.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,amount_due_ntd,due_date,status,current_event_id,payroll_version) "
-            "VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',30000,'2026-10-15','open',%s,1)",(identity,assignment,case,staff,event))
+            "VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',%s,'2026-10-15','open',%s,1)",(identity,assignment,case,staff,total,event))
         if subsidy is not None:
             q.execute("INSERT INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) VALUES(%s,2026,'manual',%s,%s)",(case,subsidy,subsidy))
-        amounts=(5000,7000,18000-(subsidy if subsidy is not None else 12000)) if scheme=='split' else (5000,10000,15000)
-        for stage,amount in zip(('deposit','first','second'),amounts):
+        amounts=(5000,7000,total-12000-(subsidy if subsidy is not None else 12000)) if scheme=='split' else (5000,10000,total-15000)
+        staged_amounts = (('first', total),) if single_receivable else zip(('deposit','first','second'), amounts)
+        for stage,amount in staged_amounts:
             target=f'{case}:{stage}'
             q.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) "
                 "VALUES(%s,%s,%s,'receivable_from_client','established',0,%s,'2026-09-01',%s,0,%s,'synthetic','Evidenced original period fixture')",(target,case,stage,amount,target,target)); event=q.lastrowid
@@ -71,6 +75,41 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
                 q.execute("UPDATE client_obligations SET amount_due_ntd=0,status='settled' WHERE obligation_identity=%s",(target,))
         c.commit()
     return case,name,identity
+
+
+def _seed_subsidy_pricing(cursor, case, rate):
+    import json
+
+    pricing = {
+        'identity_name': '一般市民', 'rule': 'citizen', 'subsidy_hours': 40,
+        'client': {'covered': rate, 'excess': rate},
+        'payroll': {'covered': rate, 'excess': rate},
+    }
+    cursor.execute(
+        "INSERT INTO case_pricing_events(case_no,resulting_revision,pricing_json,actor,reason,created_at_utc) "
+        "VALUES(%s,1,%s,'synthetic','case-specific rate',UTC_TIMESTAMP(6))",
+        (case, json.dumps(pricing)),
+    )
+    cursor.execute("UPDATE orders SET pricing_revision=1,pricing_override_event_id=%s WHERE case_no=%s",
+                   (cursor.lastrowid, case))
+
+
+def _seed_subsidy_historical_adoption(cursor, case, status):
+    cursor.execute(
+        "INSERT INTO order_lifecycle_state_events(case_no,trigger_event,before_status,after_status,actor,"
+        "business_date,expected_version,idempotency_key,facts_snapshot) VALUES(%s,'historical_order_adoption',"
+        "'洽談中',%s,'synthetic','2026-09-10',0,%s,'{}')",
+        (case, status, case + ':adopt-state'),
+    )
+    cursor.execute(
+        "INSERT INTO historical_order_adoption_receipts(idempotency_key,command_fingerprint,source_event_identity,"
+        "source_fingerprint,preview_fingerprint,case_no,outcome,expected_version,resulting_version,"
+        "lifecycle_event_id,assignment_count,result_snapshot,actor,reason,correlation_id) "
+        "VALUES(%s,%s,%s,%s,%s,%s,'adopted',0,1,%s,0,'{}','synthetic','original case',%s)",
+        (case + ':adopt', 'a' * 64, case + ':original', 'b' * 64, 'c' * 64, case,
+         cursor.lastrowid, case + ':adopt'),
+    )
+    cursor.execute("UPDATE orders SET lifecycle_version=1 WHERE case_no=%s", (case,))
 
 
 def bank_source(c, tmp_path, case, name, scheme, *, cash=11970, bare_case=False, transaction_date=date(2026,11,15), memo_override=None):
@@ -415,12 +454,14 @@ def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path
 @pytest.mark.parametrize('existing_installment', [False, True])
 def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(connection, tmp_path, existing_installment):
     from dataclasses import replace
+    from functools import partial
     from api.dependencies.staff_payout import build_staff_payout_application
     from domains.staff_payables.reconciliation import StaffPayoutEventType
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
     from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
     from subsystems.finance_import.import_workflow import PendingReconciliationRequest
     from subsystems.finance_import.query import FinanceImportQueryService
+    from infrastructure.mysql.subsidy_confirmation_repository import qualify_staff_subsidy_manual_review
     from subsystems.staff_payables.payout_reconciliation import (
         StaffPayoutApplyRequest, StaffPayoutReconciliationError, StaffPayoutSelection,
     )
@@ -447,12 +488,24 @@ def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(co
         ActorContext('synthetic'), correlation))
     assert app.preview_batch(batch, correlation).rows[0].pending_reason == 'outgoing_staff_payout_month_no_match'
     row_id = row.row_identity.rsplit(':', 1)[-1]
-    listed, = FinanceImportQueryService(connection).bank_transactions(
+    query = FinanceImportQueryService(connection,
+        qualify_staff_subsidy_manual_review=partial(qualify_staff_subsidy_manual_review, connection))
+    listed, = query.bank_transactions(
         bank='taishin', direction='outgoing', status='pending', start=None, end=None,
         search='', limit=1, before_row_id=None, row_id=int(row_id),
     )['items']
     assert listed['reconciliation_target']['case_no'] == case
     assert listed['reconciliation_target']['obligation_identities'] == [identity]
+    assert listed['staff_subsidy_manual_review_allowed']
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE finance_import_rows SET transaction_date='2026-11-15' WHERE id=%s", (row_id,))
+    connection.commit()
+    same_month, = query.bank_transactions(bank='taishin', direction='outgoing', status='pending', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=int(row_id))['items']
+    assert not same_month['staff_subsidy_manual_review_allowed']
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE finance_import_rows SET transaction_date='2026-12-15' WHERE id=%s", (row_id,))
+    connection.commit()
     selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (row_id,), (identity,))
     workflow = build_staff_payout_application(connection)
     with pytest.raises(StaffPayoutReconciliationError) as error:
@@ -465,13 +518,127 @@ def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(co
     request = StaffPayoutApplyRequest(selection, ExpectedVersion(checked.staff_payables_version),
         ExpectedVersion(checked.bank_facts_version), checked.fingerprint,
         IdempotencyKey('staff-manual-month:' + uuid4().hex), ActorContext('synthetic'), '人工確認跨月撥款', correlation)
+    unchanged = snapshot(connection, case)
+    with connection.cursor() as cursor:
+        cursor.execute('UPDATE finance_import_rows SET memo=%s WHERE id=%s', (name + '補助款', row_id))
+    connection.commit()
+    with pytest.raises(StaffPayoutReconciliationError) as error:
+        workflow.apply(request)
+    assert error.value.error.code == 'outgoing_staff_payout_month_no_match'
+    assert snapshot(connection, case) == unchanged
+    classification_history_sql = (
+        'SELECT * FROM finance_import_classification_events WHERE finance_import_row_id=%s ORDER BY id'
+    )
+    append_classification_sql = (
+        'INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,'
+        'canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,'
+        'evidence,available_actions,actor,reason) '
+        'SELECT batch_id,finance_import_row_id,classification_version+1,canonical_fact_version,%s,disposition,'
+        'decision_facts_fingerprint,target_identities,evidence,available_actions,%s,%s '
+        'FROM finance_import_classification_events WHERE id=%s'
+    )
+    with connection.cursor() as cursor:
+        cursor.execute('UPDATE finance_import_rows SET memo=%s WHERE id=%s', (memo, row_id))
+        cursor.execute(classification_history_sql, (row_id,))
+        original_classifications = cursor.fetchall()
+        assert original_classifications[-1]['classification_type'] == 'staff_payout'
+        cursor.execute(append_classification_sql, ('client_subsidy_return', 'synthetic',
+            'Counterfactual wrong-purpose fixture', original_classifications[-1]['id']))
+    connection.commit()
+    with connection.cursor() as cursor:
+        cursor.execute(classification_history_sql, (row_id,))
+        wrong_classifications = cursor.fetchall()
+    assert wrong_classifications[:-1] == original_classifications
+    assert wrong_classifications[-1]['classification_type'] == 'client_subsidy_return'
+    assert wrong_classifications[-1]['classification_version'] == original_classifications[-1]['classification_version'] + 1
+    with pytest.raises(StaffPayoutReconciliationError):
+        workflow.apply(request)
+    assert snapshot(connection, case) == unchanged
+    with connection.cursor() as cursor:
+        cursor.execute(append_classification_sql, ('staff_payout', 'synthetic',
+            'Restore staff-purpose fixture with a new event', wrong_classifications[-1]['id']))
+    connection.commit()
+    with connection.cursor() as cursor:
+        cursor.execute(classification_history_sql, (row_id,))
+        restored_classifications = cursor.fetchall()
+    assert restored_classifications[:-1] == wrong_classifications
+    assert restored_classifications[-1]['classification_type'] == 'staff_payout'
+    assert restored_classifications[-1]['classification_version'] == wrong_classifications[-1]['classification_version'] + 1
+    checked = workflow.preview(selection, correlation)
+    request = replace(request, expected_staff_payables_version=ExpectedVersion(checked.staff_payables_version),
+        expected_bank_facts_version=ExpectedVersion(checked.bank_facts_version), preview_fingerprint=checked.fingerprint)
     receipt = workflow.apply(request)
     assert workflow.apply(request) == receipt
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT COUNT(*) n FROM staff_payout_events WHERE finance_import_row_id=%s', (row_id,))
+        assert cursor.fetchone()['n'] == 1
     payment, = [item for item in workspace.query(case).staff_items if item.identity == identity]
     assert payment.actual_ntd == 12000
     assert app.preview_batch(batch, correlation).rows[0].disposition.value == 'existing'
+    posted, = query.bank_transactions(bank='taishin', direction='outgoing', status='posted', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=int(row_id))['items']
+    assert not posted['staff_subsidy_manual_review_allowed']
     assert tuple(replace(item, version='') for item in workspace.query(other).staff_items) == tuple(
         replace(item, version='') for item in before[other].staff_items)
+
+
+@pytest.mark.parametrize('same_month', [False, True])
+@pytest.mark.parametrize('existing_installment', [False, True])
+def test_staff_subsidy_without_suffix_cannot_bypass_cross_month_guard(connection, tmp_path, same_month, existing_installment):
+    from functools import partial
+    from api.dependencies.staff_payout import build_staff_payout_application
+    from domains.staff_payables.reconciliation import StaffPayoutEventType
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.subsidy_confirmation_repository import qualify_staff_subsidy_manual_review
+    from subsystems.finance_import.query import FinanceImportQueryService
+    from subsystems.staff_payables.payout_reconciliation import StaffPayoutSelection, StaffPayoutReconciliationError
+
+    case, name, identity = seed(connection, False, 'split')
+    workspace = build_accounting_workspace(connection)
+    if existing_installment:
+        plan = workspace.preview_subsidy_plan(case, 'split', 0)
+        workspace.save_subsidy_plan(case, 'split', 0, 'same-month-guard:' + uuid4().hex, 'synthetic', plan.fingerprint.value)
+        connection.commit()
+    batch = bank_source(connection, tmp_path, case, name, 'split',
+        transaction_date=date(2026, 11 if same_month else 12, 15))
+    row, = application(connection).preview_batch(batch, CorrelationId('month-guard')).rows
+    row_id = row.row_identity.rsplit(':', 1)[-1]
+    before = snapshot(connection, case)
+    query = FinanceImportQueryService(connection,
+        qualify_staff_subsidy_manual_review=partial(qualify_staff_subsidy_manual_review, connection))
+    listed, = query.bank_transactions(bank='taishin', direction='outgoing', status='pending', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=int(row_id))['items']
+    assert not listed['staff_subsidy_manual_review_allowed']
+    workflow = build_staff_payout_application(connection)
+    selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (row_id,), (identity,))
+    if same_month:
+        workflow.preview(selection, CorrelationId('month-guard'))
+    else:
+        with pytest.raises(StaffPayoutReconciliationError) as error:
+            workflow.preview(selection, CorrelationId('month-guard'))
+        assert error.value.error.code == 'outgoing_staff_payout_month_no_match'
+    assert snapshot(connection, case) == before
+
+
+@pytest.mark.parametrize('cash', [500, 15000])
+def test_staff_subsidy_cross_month_qualification_preserves_manual_amount_choices(connection, tmp_path, cash):
+    from functools import partial
+    from infrastructure.mysql.subsidy_confirmation_repository import qualify_staff_subsidy_manual_review
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    case, name, _ = seed(connection, False, 'split')
+    batch = bank_source(connection, tmp_path, case, name, 'split', cash=cash,
+        transaction_date=date(2026, 12, 15), memo_override=name + ' HC' + build_client_virtual_account(case)[-6:])
+    row, = application(connection).preview_batch(batch, CorrelationId('manual-amount-choices')).rows
+    before = snapshot(connection, case)
+    row_id = int(row.row_identity.rsplit(':', 1)[-1])
+    query = FinanceImportQueryService(connection,
+        qualify_staff_subsidy_manual_review=partial(qualify_staff_subsidy_manual_review, connection))
+    listed, = query.bank_transactions(bank='taishin', direction='outgoing', status='pending', start=None,
+        end=None, search='', limit=1, before_row_id=None, row_id=row_id)['items']
+    assert listed['staff_subsidy_manual_review_allowed']
+    assert snapshot(connection, case) == before
 
 
 @pytest.mark.parametrize(('scheme', 'bare_case'), [('split', False), ('advance', False), ('advance', True)])
@@ -551,8 +718,13 @@ def test_bank_preview_then_apply_confirms_builds_and_settles_once(connection,tmp
     receipt=app.apply_batch(command)
     assert receipt.reconciled_count==1
     confirmed=MySqlAccountingWorkspaceState(connection).subsidy_plan(case)
-    assert confirmed.selected_scheme==scheme and confirmed.confirmation_source=='bank'
-    assert confirmed.events[-1].bank_row_identity==candidate.row_identity
+    assert confirmed.selected_scheme == scheme
+    if scheme == 'advance':
+        assert confirmed.confirmation_source == 'bank'
+        assert confirmed.events[-1].bank_row_identity == candidate.row_identity
+    else:
+        assert confirmed.confirmation_source == 'receipt'
+        assert confirmed.events[-1].receipt_identity is not None
     after=snapshot(connection,case)
     readback=build_accounting_workspace(connection).query(case)
     assert any(t.bank_amount_ntd==11970 and t.transfer_fee_ntd==30 and t.amount_ntd==12000
@@ -623,7 +795,7 @@ def test_historical_staff_subsidy_uses_same_due_date_in_both_previews(connection
 
 
 @pytest.mark.parametrize('historical',[False,True])
-@pytest.mark.parametrize('scheme',['split','advance','direct'])
+@pytest.mark.parametrize('scheme',['split','advance'])
 def test_manual_confirmation_previews_and_establishes_without_payment(connection,historical,scheme):
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
     case,_,_=seed(connection,historical,scheme)
@@ -705,22 +877,15 @@ def test_confirmed_advance_with_lawful_refund_keeps_original_bare_case_bank_evid
 
 
 @pytest.mark.parametrize('historical',[False,True])
-def test_bank_confirmation_can_precede_service_completion_without_financial_effect(connection,tmp_path,historical):
-    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
-    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
-    case,name,_=seed(connection,historical,'advance',completed=False)
-    batch=bank_source(connection,tmp_path,case,name,'advance')
-    app=application(connection);before=snapshot(connection,case)
-    plan=app.preview_batch(batch,CorrelationId('early-bank'))
-    assert plan.dispatchable_rows[0].subsidy_preflight.confirmation_only
-    request=FinanceImportApplyRequest(batch,ExpectedVersion(plan.batch_version),plan.fingerprint,
-        IdempotencyKey('early:'+uuid4().hex),ActorContext('synthetic'),'',CorrelationId('early-bank'))
-    receipt=app.apply_batch(request)
-    assert receipt.pending_count==1 and receipt.reconciled_count==0
-    after=snapshot(connection,case)
-    assert after['finance_case_subsidy_plan_events']==1
-    assert all(after[k]==v for k,v in before.items() if k!='finance_case_subsidy_plan_events')
-    assert MySqlAccountingWorkspaceState(connection).subsidy_plan(case).confirmation_source=='bank'
+def test_subsidy_candidate_before_service_completion_cannot_confirm_scheme(connection, tmp_path, historical):
+    case, name, _ = seed(connection, historical, 'advance', completed=False)
+    batch = bank_source(connection, tmp_path, case, name, 'advance')
+    app = application(connection)
+    before = snapshot(connection, case)
+    plan = app.preview_batch(batch, CorrelationId('early-bank'))
+    assert not plan.dispatchable_rows
+    assert plan.rows[0].pending_reason == 'subsidy_service_not_completed'
+    assert snapshot(connection, case) == before
 
 
 @pytest.mark.parametrize('historical',[False,True])
@@ -822,3 +987,365 @@ def test_adopted_history_single_original_period_can_preflight_and_refund_its_rea
     assert any(t.amount_ntd==12000 and t.bank_amount_ntd==11970 and t.transfer_fee_ntd==30 for t in readback.transactions)
     with connection.cursor() as q:
         q.execute('SELECT COUNT(*) n FROM staff_schedule WHERE case_no=%s',(case,));assert q.fetchone()['n']==0
+
+
+def _seed_partial_subsidy_receipt(connection, historical: bool) -> tuple[str, str, int]:
+    import hashlib
+    import json
+
+    case = 'receipt-subsidy-' + uuid4().hex[:12]
+    obligation = case + ':first'
+    status = '歷史訂單－服務完成' if historical else '服務中'
+    pricing = {
+        'identity_name': '一般市民', 'rule': 'citizen', 'subsidy_hours': 25,
+        'client': {'covered': 480, 'excess': 480},
+        'payroll': {'covered': 480, 'excess': 480},
+    }
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO clients(case_no,name,identity_status) VALUES(%s,'Synthetic receipt client','一般市民')",
+            (case,),
+        )
+        cursor.execute(
+            "INSERT INTO orders(case_no,client_id,status,start_date,end_date,actual_start_date,actual_end_date,"
+            "service_days,service_hours_per_day,floor_fee) VALUES(%s,%s,%s,'2026-09-01','2026-09-10',"
+            "'2026-09-01',%s,10,10,0)",
+            (case, cursor.lastrowid, status, date(2026, 9, 10) if historical else None),
+        )
+        cursor.execute(
+            "INSERT INTO case_pricing_events(case_no,resulting_revision,pricing_json,actor,reason,created_at_utc) "
+            "VALUES(%s,1,%s,'synthetic','case-specific rate',UTC_TIMESTAMP(6))",
+            (case, json.dumps(pricing)),
+        )
+        cursor.execute(
+            "UPDATE orders SET pricing_revision=1,pricing_override_event_id=%s WHERE case_no=%s",
+            (cursor.lastrowid, case),
+        )
+        cursor.execute("INSERT INTO client_finance_accounts(case_no) VALUES(%s)", (case,))
+        if historical:
+            cursor.execute(
+                "INSERT INTO order_lifecycle_state_events(case_no,trigger_event,before_status,after_status,actor,"
+                "business_date,expected_version,idempotency_key,facts_snapshot) VALUES(%s,'historical_order_adoption',"
+                "'洽談中',%s,'synthetic','2026-09-10',0,%s,'{}')",
+                (case, status, case + ':adopt-state'),
+            )
+            cursor.execute(
+                "INSERT INTO historical_order_adoption_receipts(idempotency_key,command_fingerprint,source_event_identity,"
+                "source_fingerprint,preview_fingerprint,case_no,outcome,expected_version,resulting_version,"
+                "lifecycle_event_id,assignment_count,result_snapshot,actor,reason,correlation_id) "
+                "VALUES(%s,%s,%s,%s,%s,%s,'adopted',0,1,%s,0,'{}','synthetic','original case',%s)",
+                (case + ':adopt', 'a' * 64, case + ':original', 'b' * 64, 'c' * 64, case,
+                 cursor.lastrowid, case + ':adopt'),
+            )
+            cursor.execute("UPDATE orders SET lifecycle_version=1 WHERE case_no=%s", (case,))
+        cursor.execute(
+            "INSERT INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) "
+            "VALUES(%s,2026,'manual',12000,12000)",
+            (case,),
+        )
+        cursor.execute(
+            "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,"
+            "before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,"
+            "idempotency_key,actor,reason) VALUES(%s,%s,'first','receivable_from_client','established',0,48000,"
+            "'2026-09-01',%s,0,%s,'synthetic','original amount')",
+            (obligation, case, obligation, obligation),
+        )
+        cursor.execute(
+            "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,"
+            "due_date,status,current_event_id,projection_version) VALUES(%s,%s,'first','receivable_from_client',"
+            "48000,'2026-09-01','open',%s,0)",
+            (obligation, case, cursor.lastrowid),
+        )
+        cursor.execute(
+            "INSERT INTO finance_import_batches(format_id,sheet_name,header_row,row_count) "
+            "VALUES('sinopac','synthetic',1,1)",
+        )
+        batch = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO finance_import_rows(dedup_fingerprint,batch_id,format_id,transaction_date,credit,"
+            "direction,bank_references,warnings,raw_payload,classification_type) "
+            "VALUES (%s,%s,'sinopac','2026-09-02',36000,'incoming','{}','[]','{}','client_receipt')",
+            (hashlib.sha256(case.encode()).hexdigest(), batch),
+        )
+        row_id = int(cursor.lastrowid)
+        cursor.execute(
+            "INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,"
+            "canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,"
+            "evidence,available_actions,actor,reason) VALUES(%s,%s,1,1,'client_receipt','manual_review',%s,%s,"
+            "'[]','[]','synthetic','same-case match')",
+            (batch, row_id, 'a' * 64, json.dumps([obligation])),
+        )
+    connection.commit()
+    return case, obligation, row_id
+
+
+@pytest.mark.parametrize('historical', [False, True], ids=['ordinary', 'historical'])
+def test_reconciled_partial_receipt_confirms_subsidy_scheme(connection, monkeypatch, historical):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.dependencies.admin_auth import require_system_admin
+    from api.dependencies.client_receipt_reconciliation import (
+        ClientReceiptReconciliationApplication, get_client_receipt_reconciliation_application,
+    )
+    from api.routes.client_receipt_reconciliation import router
+    from domains.client_finance.client_refund_reversal import ClientFinanceCorrectionType
+    from infrastructure.mysql import subsidy_confirmation_repository
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.client_receipt_reconciliation_repository import (
+        ClientReceiptMySqlUnitOfWork, MySqlClientReceiptReconciliationRepository,
+    )
+    from infrastructure.mysql.client_refund_reversal_repository import (
+        ClientRefundReversalMySqlUnitOfWork, MySqlClientRefundReversalRepository,
+    )
+    from subsystems.access.authentication_session import AdminPrincipal
+    from subsystems.client_finance.client_refund_reversal_workflow import (
+        ClientRefundReversalApplyRequest, ClientRefundReversalSelection, ClientRefundReversalWorkflow,
+    )
+    from subsystems.client_finance.reconciliation_workflow import ClientReconciliationWorkflow
+
+    case, obligation, row_id = _seed_partial_subsidy_receipt(connection, historical)
+    workspace = build_accounting_workspace(connection)
+    repository = MySqlClientReceiptReconciliationRepository(connection)
+    application = ClientReceiptReconciliationApplication(
+        repository, ClientReconciliationWorkflow(repository, lambda: ClientReceiptMySqlUnitOfWork(connection)),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_client_receipt_reconciliation_application] = lambda: application
+    app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(
+        id=None, username='synthetic', display_name='Synthetic', role='system_admin',
+    )
+    url = f'/api/v1/orders/{case}/client-finance/receipt-reconciliation'
+    selection = {'finance_import_row_ids': [row_id], 'obligation_identities': [obligation]}
+    headers = {'Idempotency-Key': case + ':receipt', 'X-Correlation-ID': case + ':receipt'}
+    before = snapshot(connection, case)
+    initial = workspace.query(case)
+    assert initial.scheme in {'unknown', 'waiting'}
+    assert initial.subsidy_plan.selected_scheme is None
+    assert initial.subsidy_ntd == 12000 and initial.staff_receivable_ntd is None
+    if not historical:
+        assert initial.customer_amount_ntd is None
+
+    with TestClient(app) as client:
+        exact = client.post(url + '/preview', json=selection)
+        assert exact.status_code == 200, exact.text
+        assert exact.json()['data']['candidate']['status'] == 'review_required'
+        partial = client.post(url + '/partial/preview', json=selection)
+        assert partial.status_code == 200, partial.text
+        preview = partial.json()['data']
+        assert preview['candidate']['status'] == 'partial'
+        assert snapshot(connection, case) == before
+        request = {
+            **selection, 'expected_account_version': 0,
+            'preview_fingerprint': preview['preview_fingerprint'], 'reason': '核對部分實收',
+        }
+        if not historical:
+            confirm = subsidy_confirmation_repository.confirm_reconciled_subsidy_scheme
+            saw_both_writes = False
+
+            def reject_after_confirmation(*args, **kwargs):
+                nonlocal saw_both_writes
+                confirm(*args, **kwargs)
+                saw_both_writes = (
+                    snapshot(connection, case)['finance_case_subsidy_plan_events'] == 1
+                    and repository.find_receipt(IdempotencyKey(headers['Idempotency-Key'])) is not None
+                )
+                raise RuntimeError('synthetic failure after writing both receipts')
+
+            with monkeypatch.context() as patches:
+                patches.setattr(subsidy_confirmation_repository, 'confirm_reconciled_subsidy_scheme',
+                                reject_after_confirmation)
+                failure = client.post(url + '/partial/apply', json=request, headers=headers)
+                assert failure.status_code == 500, failure.text
+            assert saw_both_writes
+            assert snapshot(connection, case) == before
+            assert repository.find_receipt(IdempotencyKey(headers['Idempotency-Key'])) is None
+            assert workspace.query(case).client_items == initial.client_items
+        response = client.post(url + '/partial/apply', json=request, headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()['data']['status'] == 'partial'
+        replay = client.post(url + '/partial/apply', json=request, headers=headers)
+        assert replay.json()['data'] == response.json()['data']
+
+    after = workspace.query(case)
+    assert after.scheme == 'split'
+    assert after.subsidy_plan.confirmation_source == 'receipt' and after.subsidy_plan.version == 1
+    assert not after.ongoing_completed and after.staff_receivable_ntd is None
+    item, = after.client_items
+    assert (item.expected_ntd, item.actual_ntd, item.remaining_ntd) == (48000, 36000, 12000)
+    assert item.settled is False
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s", (case,))
+        entry, = cursor.fetchall()
+    assert entry['amount_ntd'] == 36000
+    assert f"client:{entry['id']}" in after.scheme_evidence_identities
+
+    reversal_repository = MySqlClientRefundReversalRepository(connection)
+    reversal = ClientRefundReversalWorkflow(
+        reversal_repository, lambda: ClientRefundReversalMySqlUnitOfWork(connection),
+    )
+    reverse_selection = ClientRefundReversalSelection(
+        case, ClientFinanceCorrectionType.REVERSAL, reversal_target_identities=(str(entry['id']),),
+        reversal_occurred_on='2026-09-03',
+    )
+    correlation = CorrelationId(case + ':reverse')
+    reverse_preview = reversal.preview(reverse_selection, correlation)
+    reverse_request = ClientRefundReversalApplyRequest(
+        reverse_selection, ExpectedVersion(1), reverse_preview.fingerprint, IdempotencyKey(case + ':reverse'),
+        ActorContext('synthetic'), '確認原實收沖正', correlation,
+    )
+    reversal_repository.bind_apply_request(reverse_request)
+    try:
+        reversal.apply(reverse_request)
+    finally:
+        reversal_repository.clear_apply_request()
+    reversed_case = workspace.query(case)
+    assert reversed_case.scheme == 'unknown'
+    assert f"client:{entry['id']}" not in reversed_case.scheme_evidence_identities
+    assert reversed_case.subsidy_plan.events == after.subsidy_plan.events
+    reversed_item, = reversed_case.client_items
+    assert (reversed_item.expected_ntd, reversed_item.actual_ntd, reversed_item.remaining_ntd) == (48000, 0, 48000)
+
+
+@pytest.mark.parametrize('scheme', ['split', 'advance'])
+@pytest.mark.parametrize('payout_first', [False, True], ids=['receipt-first', 'payout-first'])
+def test_reconciled_subsidy_payout_and_receipt_in_both_orders(connection, tmp_path, scheme, payout_first):
+    import hashlib
+    import json
+
+    from domains.client_finance.obligation_planning import confirmed_subsidy_return_plan
+    from domains.client_finance.reconciliation import ReconciliationStatus
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.client_receipt_reconciliation_repository import (
+        ClientReceiptMySqlUnitOfWork, MySqlClientReceiptReconciliationRepository,
+    )
+    from infrastructure.mysql.subsidy_confirmation_repository import persist_confirmed_refund
+    from shared_kernel.money import MoneyNTD
+    from subsystems.client_finance.reconciliation_workflow import (
+        ClientReconciliationApplyRequest, ClientReconciliationWorkflow, ReconciliationSelection,
+    )
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+
+    case, name, _ = seed(connection, False, scheme, paid=False, total=48000, single_receivable=True)
+    correlation = CorrelationId(case + ':settlement')
+    actor = ActorContext('synthetic')
+    if payout_first and scheme == 'advance':
+        # An existing formal same-case obligation can be settled independently.
+        # Without it the preflight must wait for verified advance cash.
+        refund = confirmed_subsidy_return_plan(case, MoneyNTD(12000), date(2026, 9, 10))
+        persist_confirmed_refund(connection, case, refund, actor, IdempotencyKey(case + ':original-refund'),
+                                 correlation, 'synthetic:original-refund')
+        connection.commit()
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO finance_import_batches(format_id,sheet_name,header_row,row_count) VALUES('sinopac','synthetic',1,1)")
+        batch = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO finance_import_rows(dedup_fingerprint,batch_id,format_id,transaction_date,credit,"
+            "direction,bank_references,warnings,raw_payload,classification_type) VALUES "
+            "(%s,%s,'sinopac','2026-09-02',48000,'incoming','{}','[]','{}','client_receipt')",
+            (hashlib.sha256(case.encode()).hexdigest(), batch),
+        )
+        receipt_row_id = int(cursor.lastrowid)
+        target = case + ':first'
+        cursor.execute(
+            "INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,"
+            "canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,"
+            "evidence,available_actions,actor,reason) VALUES(%s,%s,1,1,'client_receipt','manual_review',%s,%s,"
+            "'[]','[]','synthetic','same-case match')",
+            (batch, receipt_row_id, 'a' * 64, json.dumps([target])),
+        )
+    connection.commit()
+
+    payout_batch = bank_source(connection, tmp_path, case, name, scheme)
+    workspace = build_accounting_workspace(connection)
+    initial = workspace.query(case)
+    assert initial.scheme == 'unknown' and not initial.subsidy_plan.events
+    assert initial.scheme_case_total_ntd == 48000 and initial.subsidy_ntd == 12000
+    app = application(connection)
+
+    def reconcile_receipt():
+        repository = MySqlClientReceiptReconciliationRepository(connection)
+        workflow = ClientReconciliationWorkflow(repository, lambda: ClientReceiptMySqlUnitOfWork(connection))
+        selection = ReconciliationSelection(case, None, (str(receipt_row_id),), (target,))
+        preview = workflow.preview(selection)
+        assert preview.candidate.status == ReconciliationStatus.EXACT
+        command = ClientReconciliationApplyRequest(
+            selection, ExpectedVersion(preview.account_version), preview.fingerprint, IdempotencyKey(case + ':receipt'),
+            actor, '確認同案客戶款', correlation,
+        )
+        repository.bind_apply_request(command)
+        try:
+            receipt = workflow.apply(command)
+            assert workflow.apply(command) == receipt
+        finally:
+            repository.clear_apply_request()
+
+    def reconcile_payout():
+        before = snapshot(connection, case)
+        preview = app.preview_batch(payout_batch, correlation)
+        assert snapshot(connection, case) == before
+        assert len(preview.dispatchable_rows) == 1, [row.pending_reason for row in preview.rows]
+        command = FinanceImportApplyRequest(
+            payout_batch, ExpectedVersion(preview.batch_version), preview.fingerprint, IdempotencyKey(case + ':payout'),
+            actor, '確認同案台新補助出款', correlation,
+        )
+        receipt = app.apply_batch(command)
+        assert receipt.reconciled_count == 1
+        assert app.apply_batch(command) == receipt
+
+    first, second = (reconcile_payout, reconcile_receipt) if payout_first else (reconcile_receipt, reconcile_payout)
+    first()
+    interim = workspace.query(case)
+    assert interim.scheme == 'unknown' and not interim.subsidy_plan.events
+    assert interim.scheme_pending_reason == ('subsidy_receipt_missing' if payout_first else 'subsidy_payout_missing')
+    second()
+    final = workspace.query(case)
+    assert final.scheme == scheme and final.subsidy_plan.version == 1
+    assert final.subsidy_plan.confirmation_source == 'bank'
+    assert {identity.partition(':')[0] for identity in final.scheme_evidence_identities} == {'client', 'bank'}
+    assert not final.ongoing_completed
+
+
+def test_confirmed_direct_preserves_normal_refund_entry_and_receipt(connection):
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.case_manual_supplement_repository import MySqlCaseManualSupplementRepository
+    from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
+
+    case, _, _ = seed(connection, False, 'direct', total=48000)
+    workspace = build_accounting_workspace(connection)
+    initial = workspace.query(case)
+    assert initial.scheme == 'unknown' and initial.can_confirm_direct
+    workspace.confirm_arrangement(case, 'confirm_direct', '經辦確認政府直退客戶', 0, case + ':direct', 'synthetic')
+    direct = workspace.query(case)
+    assert direct.scheme == 'direct' and direct.subsidy_payments == ()
+    assert direct.subsidy_plan.events == ()
+
+    target = case + ':normal-refund'
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,"
+            "before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,"
+            "idempotency_key,actor,reason) VALUES(%s,%s,'refund','payable_to_client','established',0,500,"
+            "'2026-10-19',%s,0,%s,'synthetic','original general refund')",
+            (target, case, target, target),
+        )
+        cursor.execute(
+            "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,"
+            "due_date,status,current_event_id,projection_version) VALUES(%s,%s,'refund','payable_to_client',"
+            "500,'2026-10-19','open',%s,0)",
+            (target, case, cursor.lastrowid),
+        )
+    connection.commit()
+
+    refund = CaseManualSupplementService(MySqlCaseManualSupplementRepository(connection))
+    result = refund.execute(case, 'sinopac', 'client_refund', target, 500, '2026-10-20',
+                            '確認一般退款已出款', case + ':normal-refund', 'synthetic')
+    assert result.reconciled
+    connection.commit()
+    final = workspace.query(case)
+    assert final.scheme == 'direct' and final.arrangement == direct.arrangement
+    assert final.reconciled_subsidy_evidence.customer_received == 48000
+    assert any(item.identity == target and item.settled for item in final.client_items)
+    assert not any(item.obligation_type == 'subsidy_return' for item in final.client_items)

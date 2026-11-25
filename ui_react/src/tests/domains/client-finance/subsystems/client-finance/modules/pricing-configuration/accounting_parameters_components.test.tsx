@@ -253,6 +253,98 @@ describe('AccountingParametersDrawer component', () => {
     expect(screen.getByLabelText('補助用盡後月嫂時薪')).toHaveValue(420);
   });
 
+  it('saves pre-service birth-only changes without creating a manual rate override', async () => {
+    mockBirthCorrection();
+    const initial = { ...mockPricing, terms: { ...mockPricing.terms, payroll: { covered: 350, excess: 305 } } };
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(initial);
+    const handleClose = vi.fn();
+    render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen
+      onClose={handleClose} onCommitted={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /雙胞胎/ }));
+    expect(screen.getByLabelText('補助用盡後月嫂時薪')).toHaveValue(305);
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案帳務參數並重算' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認胎數並儲存' }));
+    await waitFor(() => expect(handleClose).toHaveBeenCalledOnce());
+    expect(clientRegistryClient.apply).toHaveBeenCalledOnce();
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+  });
+
+  it('reads saved historical birth and pending accounting without an independent pricing write', async () => {
+    mockBirthCorrection();
+    const historical = (value: '單胞胎' | '雙胞胎'): ClientRegistryDetail => {
+      const registered = registryBirthCount(value);
+      return { ...registered, beclass: { ...registered.beclass, birth_count_correction_mode: 'historical_service_completed' } };
+    };
+    const pending = ['historical_pricing_birth_bound_policy_required'];
+    const initial = { ...mockPricing, historical: true, terms: { ...mockPricing.terms, payroll: { covered: 350, excess: 305 } } };
+    const reread = { ...initial, revision: 2, accounting_pending: pending };
+    vi.mocked(clientRegistryClient.query).mockResolvedValueOnce(historical('單胞胎'))
+      .mockRejectedValueOnce(new Error('formal read unavailable'))
+      .mockResolvedValueOnce(historical('雙胞胎'));
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValueOnce(initial).mockResolvedValue(reread);
+    vi.mocked(clientRegistryClient.preview).mockResolvedValueOnce({
+      owner: 'client_beclass', aggregate_identity: mockPricing.case_no, current_version: 7,
+      before: { multi_birth_count: '單胞胎' }, after: twinChange, preview_fingerprint: birthFingerprint,
+      historical_impact: {
+        client_updates: [], staff_updates: [], persons: [], client_delta: 0, subsidy_delta: 0, client_exempt: false, pending,
+      },
+    });
+    vi.mocked(clientRegistryClient.apply).mockResolvedValueOnce({
+      owner: 'client_beclass', aggregate_identity: mockPricing.case_no, resulting_version: 8,
+      changed_fields: ['multi_birth_count'], preview_fingerprint: birthFingerprint,
+      readback: twinChange, idempotency_key: 'birth-key', replayed: false, accounting_pending: pending,
+    });
+    const committed = vi.fn();
+    render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen onClose={vi.fn()} onCommitted={committed} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /雙胞胎/ }));
+    expect(screen.getByLabelText('補助用盡後月嫂時薪')).toHaveValue(305);
+    fireEvent.click(screen.getByRole('button', { name: '預覽歷史胎數更正' }));
+    const confirm = await screen.findByRole('button', { name: '確認胎數並儲存' });
+    expect(screen.getByRole('region', { name: '帳務影響' })).toHaveTextContent('缺少本案綁定的正式胎數費率');
+    expect(clientRegistryClient.apply).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
+
+    fireEvent.click(await screen.findByRole('button', { name: '重新讀取已儲存資料' }));
+    expect(await screen.findByText('正式胎數現為雙胞胎。')).toBeVisible();
+    expect(screen.getByText(/缺少本案綁定的正式胎數費率/)).toBeVisible();
+    expect(clientRegistryClient.query).toHaveBeenCalledTimes(3);
+    expect(clientRegistryClient.apply).toHaveBeenCalledOnce();
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+    expect(committed).toHaveBeenCalledOnce();
+  });
+
+  it('confirms a historical manual rate separately with the pricing preview fingerprint', async () => {
+    const initial = { ...mockPricing, historical: true };
+    const terms = { ...initial.terms, payroll: { ...initial.terms.payroll, excess: 420 } };
+    const fingerprint = 'c'.repeat(64);
+    const registered = registryBirthCount('單胞胎');
+    vi.mocked(clientRegistryClient.query).mockResolvedValue({
+      ...registered, beclass: { ...registered.beclass, birth_count_correction_mode: 'historical_service_completed' },
+    });
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce({ ...initial, revision: 2, terms });
+    vi.mocked(accountingPricingClient.previewCase).mockResolvedValueOnce({
+      current: initial, candidate: terms, before: initial.impact, after: initial.impact, preview_fingerprint: fingerprint,
+      historical_plan: { client_updates: [], staff_updates: [], persons: [], client_delta: 0, subsidy_delta: 0, client_exempt: false, pending: [] },
+    });
+    vi.mocked(accountingPricingClient.applyCase).mockResolvedValueOnce({ revision: 2 });
+    render(<AccountingParametersDrawer caseNo={initial.case_no} isOpen onClose={vi.fn()} onCommitted={vi.fn()} />);
+
+    fireEvent.change(await screen.findByLabelText('補助用盡後月嫂時薪'), { target: { value: '420' } });
+    expect(screen.getByRole('button', { name: /雙胞胎/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '預覽歷史計價更正' }));
+    const confirm = await screen.findByRole('button', { name: '確認歷史計價更正' });
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
+
+    expect(await screen.findByText('歷史計價更正已儲存。')).toBeVisible();
+    expect(accountingPricingClient.applyCase).toHaveBeenCalledExactlyOnceWith(
+      initial.case_no, terms, initial.revision, '', expect.any(String), fingerprint,
+    );
+    expect(clientRegistryClient.apply).not.toHaveBeenCalled();
+  });
+
   it('retries only pricing after the confirmed BeClass correction has committed', async () => {
     mockBirthCorrection();
     vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(mockPricing);

@@ -19,6 +19,7 @@ from api.error_contracts import typed_http_error
 from api.schemas.accounting_pricing import (
     CasePricingApplyBody, CasePricingPreviewBody, CasePricingPreviewView, CasePricingView,
     PricingCatalogView, PricingImpactView, PricingReceiptView, CasePricingTermsBody, SavePricingPolicyBody,
+    HistoricalRepricingPlanView,
 )
 from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import AdminPrincipal
@@ -51,7 +52,8 @@ def _error(error):
 
 def _case_view(facts, impact):
     return CasePricingView(case_no=facts.case_no, revision=facts.revision, source=facts.source,
-        terms=CasePricingTermsBody.model_validate(facts.terms), impact=PricingImpactView.model_validate(impact))
+        terms=CasePricingTermsBody.model_validate(facts.terms), impact=PricingImpactView.model_validate(impact),
+        historical=facts.historical, accounting_pending=list(facts.accounting_pending))
 
 
 @router.get("", response_model=BaseResponse[PricingCatalogView])
@@ -94,7 +96,9 @@ def preview_case(case_no: str, body: CasePricingPreviewBody, principal: Principa
         return BaseResponse(data=CasePricingPreviewView(current=_case_view(preview.facts, preview.before),
             candidate=CasePricingTermsBody.model_validate(preview.candidate),
             before=PricingImpactView.model_validate(preview.before), after=PricingImpactView.model_validate(preview.after),
-            preview_fingerprint=preview.fingerprint), message="個案計價影響預覽")
+            preview_fingerprint=preview.fingerprint,
+            historical_plan=HistoricalRepricingPlanView.model_validate(preview.historical_plan)
+            if preview.historical_plan is not None else None), message="個案計價影響預覽")
     except (ValueError, OperationalError) as error:
         raise _error(error) from error
 
@@ -104,6 +108,8 @@ def apply_case(case_no: str, body: CasePricingApplyBody, principal: Principal, a
     try:
         revision = application.apply_case(case_no, body.terms.domain(), body.expected_revision,
             body.preview_fingerprint, principal.username, body.reason.strip(), key)
-        return BaseResponse(data=PricingReceiptView(revision=revision), message="本案人工計價已儲存")
+        pending = list(application.repository.accounting_pending)
+        return BaseResponse(data=PricingReceiptView(revision=revision, accounting_pending=pending),
+            message="本案計價已儲存，部分帳務待核對" if pending else "本案人工計價已儲存")
     except (ValueError, IntegrityError, OperationalError) as error:
         raise _error(error) from error

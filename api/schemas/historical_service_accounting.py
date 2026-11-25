@@ -1,8 +1,9 @@
 """Strict HTTP contract for historical per-caregiver service-day accounting."""
 
-from datetime import date
+from datetime import date, time
+from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 
 class HistoricalCaregiverDaysBody(BaseModel):
@@ -34,10 +35,29 @@ class HistoricalAttributionDaysBody(BaseModel):
     actual_service_days: StrictInt = Field(gt=0)
 
 
+class HistoricalAssignmentServiceFactBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assignment_identity: str = Field(min_length=1, max_length=191)
+    staff_id: StrictInt = Field(gt=0)
+    actual_start_date: date
+    actual_end_date: date
+    service_start_time: time
+    service_end_time: time
+    service_hours_per_day: Decimal = Field(gt=0, le=24, multiple_of=0.5, allow_inf_nan=False)
+    service_end_day_offset: StrictInt = Field(default=0, ge=0, le=1)
+
+
 class HistoricalAttributionPreviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    caregivers: list[HistoricalAttributionDaysBody] = Field(min_length=2, max_length=20)
+    caregivers: list[HistoricalAttributionDaysBody] = Field(max_length=20)
     evidence: str = Field(min_length=1, max_length=500)
+    service_facts: list[HistoricalAssignmentServiceFactBody] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def require_days_or_service_facts(self) -> "HistoricalAttributionPreviewBody":
+        if not self.caregivers and not self.service_facts:
+            raise ValueError("historical_attribution_days_required")
+        return self
 
 
 class HistoricalAttributionApplyBody(HistoricalAttributionPreviewBody):
@@ -55,6 +75,11 @@ class HistoricalServiceAccountingAssignmentView(BaseModel):
     policy_version: str
     policy_kind: str
     hourly_rate_ntd: int
+    actual_service_days: int | None = None
+    actual_service_hours: str | None = None
+    adopted_start_date: date | None = None
+    adopted_end_date: date | None = None
+    service_fact: dict[str, str | int] | None = None
 
 
 class HistoricalServiceAccountingQueryView(BaseModel):
@@ -115,8 +140,8 @@ class HistoricalServiceAccountingPreviewView(BaseModel):
     staff_obligation_amount_ntd: int
     client_obligation_amount_ntd: int
     client_service_receivable_ntd: int
-    client_subsidy_hours: int
-    client_self_pay_service_hours: int
+    client_subsidy_hours: float
+    client_self_pay_service_hours: float
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

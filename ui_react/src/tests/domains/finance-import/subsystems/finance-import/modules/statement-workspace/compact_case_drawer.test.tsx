@@ -33,7 +33,7 @@ import type {FinanceBankTransaction} from '../../../../../../../api/finance_impo
 import {differenceResolutionClient} from '../../../../../../../api/client_finance/difference_resolution_client';
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{listBankTransactions:vi.fn(),pairBankTransaction:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
-vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn(),saveSubsidyPlan:vi.fn(),subsidyPlan:vi.fn(),previewSubsidyPlan:vi.fn()}}));
+vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn(),saveSubsidyPlan:vi.fn(),subsidyPlan:vi.fn(),previewSubsidyPlan:vi.fn(),confirmArrangement:vi.fn()}}));
 vi.mock('../../../../../../../api/line_order_groups/payment_overdue_reminder_client',()=>({paymentOverdueReminderClient:{case:vi.fn(),sendCase:vi.fn()}}));
 vi.mock('../../../../../../../api/orders/order_query_client',()=>({ordersQueryClient:{getOrderDetail:vi.fn()}}));
 vi.mock('../../../../../../../api/client_registry/client_registry_client',()=>({clientRegistryClient:{query:vi.fn()}}));
@@ -132,13 +132,78 @@ it('方案未定仍顯示補助，預檢缺件只阻擋建款且先說明本次�
  expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
 });
 
-it('已依明細確認的方案直接顯示確認來源，無須再人工選擇',async()=>{
- const data=facts();data.subsidy_plan={case_no:caseNo,version:1,events:[{version:1,scheme:'advance',actor:'synthetic',created_at:'2026-11-09T00:00:00Z',source:'bank',bank_row_identity:'finance-import-row:11'}]};
- vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+it.each([
+ ['receipt', 'split', '依正式客戶實收確認方案', 'client:11'],
+ ['bank', 'advance', '依正式補助出款確認方案', 'bank:12'],
+] as const)('正式 %s 來源可查閱，來源失效後只顯示待確認',async(source,scheme,label,identity)=>{
+ const data:CaseAccounting={...facts(),scheme,scheme_evidence_identities:[identity],
+  transactions:[{identity:'client-entry:11:first',item_identity:'first',occurred_on:'2026-11-06',
+   kind:'receipt',amount_ntd:36000,bank:'sinopac'}],
+  bank_facts:[{identity:'bank:12',occurred_on:'2026-11-09',direction:'out',amount_ntd:12000,cases:[caseNo],bank:'taishin',cash_flow:'RT'}],
+  subsidy_plan:{case_no:caseNo,version:1,events:[{version:1,scheme,actor:'synthetic',created_at:'2026-11-09T00:00:00Z',source}]}};
+ vi.mocked(financeAccountingClient.query).mockResolvedValueOnce(data).mockResolvedValue({
+  ...data,scheme:'unknown',scheme_pending_reason:'subsidy_confirmation_evidence_changed',scheme_evidence_identities:[],
+ });
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
- expect(await screen.findByText('依銀行明細確認方案')).toBeVisible();
+ expect(await screen.findByText(label)).toBeVisible();
+ expect(screen.getByText(new RegExp(identity))).toHaveTextContent(source==='receipt'?'2026-11-06 · 客戶入款':'2026-11-09 · NT$ 12,000');
  expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
+ act(()=>notifyCaseAccountingChanged(caseNo));
+ expect(await screen.findByText('原確認證據已變動，歷史方案保留，請核對目前有效的收付款。')).toBeVisible();
+ expect(screen.queryByText(label)).not.toBeInTheDocument();
+ expect(screen.queryByText(new RegExp(identity))).not.toBeInTheDocument();
 });
+
+it('政府直接退給客戶經逐案確認，正式回執後重讀案件，保留一般退款與原補助退款紀錄',async()=>{
+ const data=facts();
+ const confirmed={case_no:caseNo,version:1,events:[{version:1,action:'confirm_direct' as const,
+  actor:'synthetic',created_at:'2026-11-09T00:00:00Z',reason:'合成證據已查核'}]};
+ const refund={identity:'refund',direction:'payable' as const,label:'一般退款',party:'合成客戶',
+  expected_ntd:800,actual_ntd:0,remaining_ntd:800,has_payment:false,version:'1',due_date:null,obligation_type:'refund'};
+ vi.mocked(financeAccountingClient.query).mockResolvedValueOnce({...data,scheme:'unknown',can_confirm_direct:true,
+  arrangement:{case_no:caseNo,version:0,events:[]}})
+  .mockResolvedValue({...data,scheme:'direct',arrangement:confirmed,
+   client_items:[refund,{...refund,identity:'older-subsidy',label:'原帳補助',expected_ntd:12000,actual_ntd:1000,
+    remaining_ntd:11000,has_payment:true,obligation_type:'subsidy_return'}]});
+ vi.mocked(financeAccountingClient.confirmArrangement).mockResolvedValue({case_no:caseNo,applied_version:1,arrangement:confirmed});
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ fireEvent.click(await screen.findByRole('button',{name:'設定補助退款方案'}));
+ const submit=screen.getByRole('button',{name:'確認政府直接退給客戶'});
+ expect(submit).toBeDisabled();
+ fireEvent.change(screen.getByLabelText('直退確認原因'),{target:{value:'合成證據已查核'}});
+ fireEvent.click(submit);
+ expect(await screen.findByText('人工確認')).toBeVisible();
+ expect(financeAccountingClient.confirmArrangement).toHaveBeenCalledWith(caseNo,{
+  action:'confirm_direct',reason:'合成證據已查核',expected_version:0,
+ },expect.any(String));
+ expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
+ expect(screen.getByRole('row',{name:/客戶退款.*一般退款/})).toHaveTextContent('待退 NT$ 800');
+ const history=screen.getByRole('row',{name:/補助款退還客戶.*原帳補助/});
+ expect(history).toHaveTextContent('唯讀查閱');
+ expect(history).toHaveTextContent('已退 NT$ 1,000');
+ expect(history).not.toHaveTextContent('待退');
+});
+it.each(['client_subsidy_return','client_refund'] as const)('正式直退的單筆核對按原用途處理 %s', async classification=>{
+ const isSubsidy = classification === 'client_subsidy_return';
+ const obligation = {...facts().client_items[0],identity:'original-refund',direction:'payable' as const,
+  label:'原退款',obligation_type:isSubsidy?'subsidy_return':'refund'};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'direct',client_items:[obligation],
+  arrangement:{case_no:caseNo,version:1,events:[{version:1,action:'confirm_direct',actor:'synthetic',
+   created_at:'2026-11-09T00:00:00Z',reason:'原安排'}]}});
+ const row:FinanceBankTransaction={row_id:7,row_identity:'finance-import-row:7',bank:isSubsidy?'taishin':'sinopac',
+  direction:'outgoing',transaction_date:'2026-11-15',reference:'原流水 7',amount_ntd:1200,status:'pending',
+  classification_type:classification,disposition:'business_pending',review_reason:null,available_actions:[],
+  counterparty_name:null,cases:[caseNo],reconciliation_target:{case_no:caseNo,staff_id:null,obligation_identities:[obligation.identity]}};
+ vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({items:[row],pending_count:1,next_before_row_id:null});
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{row,onPosted:vi.fn(),onBusyChange:vi.fn()}}/>);
+ if(isSubsidy){
+  expect(await screen.findByText('本案已確認政府直接退給客戶，工會無補助退款可核銷。')).toBeVisible();
+  expect(screen.queryByLabelText('客戶退款核銷')).not.toBeInTheDocument();
+ }else{
+  expect(await screen.findByLabelText('客戶退款核銷')).toBeVisible();
+ }
+});
+
 function facts():CaseAccounting{return {case_no:caseNo,client_name:'合成客戶',receivable_ntd:30000,received_ntd:20000,payable_ntd:30000,paid_ntd:0,pending_warning_count:0,staff_receivable_ntd:30000,subsidy_ntd:12000,customer_amount_ntd:30000,customer_fully_received:false,scheme:'direct',subsidy_plan:plan,ongoing_completed:false,collection_progress:{stage:'first',sources_complete:true,expected_ntd:15000,received_ntd:14000,remaining_ntd:1000,due_date:'2026-11-01'},client_items:([
  ['deposit',6000,6000,0],['first',15000,14000,1000],['second',9000,0,9000]
 ] as const).map(([stage,expected,actual,remaining])=>({identity:stage,direction:'receivable',label:stage,party:'合成客戶',expected_ntd:expected,actual_ntd:actual,remaining_ntd:remaining,payment_stage:stage,has_payment:actual>0,version:'1',due_date:stage==='second'?'2099-11-16':'2026-11-01'})),staff_items:[{identity:'staff',direction:'payable',label:'服務費',party:'合成月嫂',expected_ntd:30000,actual_ntd:0,has_payment:false,version:'1',due_date:null}],transactions:[{identity:'receipt',item_identity:'first',occurred_on:'2026-11-02',kind:'receipt',amount_ntd:14000,bank:'sinopac'}],warnings:[]};}
@@ -713,7 +778,7 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
       fireEvent.click(screen.getByRole('button', { name: '查看本案帳務' }));
       expect(await screen.findByText('調整本案服務條件／計價')).toBeVisible();
       expect(screen.getByRole('button', { name: '手動補登款項' })).toBeVisible();
-      fireEvent.click(screen.getByRole('button', { name: '返回對核交易' }));
+      fireEvent.click(screen.getByRole('button', { name: '返回核對交易' }));
 
       fireEvent.click(await screen.findByRole('button', { name: /取消結算/ }));
       expect(await screen.findByLabelText('取消實際服務日 1')).toHaveValue('2026-10-10');
@@ -952,7 +1017,7 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
       expect(screen.getByRole('button', { name: '手動補登款項' })).toBeVisible();
 
       // 黑箱：點擊返回核對交易，返回對核視圖
-      fireEvent.click(screen.getByRole('button', { name: '返回對核交易' }));
+      fireEvent.click(screen.getByRole('button', { name: '返回核對交易' }));
       expect(await screen.findByRole('button', { name: '更正出款用途' })).toBeVisible();
 
       // 黑箱：更正出款用途並切換客戶退款

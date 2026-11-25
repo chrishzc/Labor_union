@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
-import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
+import { notifyCaseAccountingChanged, subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
 import { Drawer } from '../components/Drawer';
 import './FinancePage.css';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
@@ -20,9 +20,11 @@ import type { HistoricalPayableAuditItem } from '../api/accounts_payable/account
 import { HistoricalPayableEditor } from '../components/HistoricalPayableReview';
 import type { AccountingRange } from '../api/finance_import/monthly_accounting_client';
 import type { FinanceBankTransaction } from '../api/finance_import/finance_import_query_schemas';
+import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
+import { bankReconciliationUnavailableReason, bankReviewRoute, financeImportReviewReason, isTaishinStaffSubsidy } from '../adapters/finance/finance_import_query_adapter';
 import { SubsidyPeriodWorkbench } from '../components/SubsidyPeriodWorkbench';
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
-import { FinanceBankReconciliationWorkspace } from '../components/FinanceBankReconciliationWorkspace';
+import { BankTransactionFacts, BankTransactionReviewActions, FinanceBankReconciliationWorkspace, SubsidyBankReview } from '../components/FinanceBankReconciliationWorkspace';
 import { PaymentReceiptNoticeWorkbench } from '../components/PaymentReceiptNoticeWorkbench';
 
 export type FinanceTab = 'case-accounting' | 'finance-import' | 'government-list' | 'monthly';
@@ -109,10 +111,16 @@ export const FinancePage: React.FC = () => {
     normalizeFinanceTab(entry.tab, entry.overdue, Boolean(entry.caseNo))
   );
   const [caseDrawer, setCaseDrawer] = useState(entry.caseNo);
+  const [caseFromBankDetail, setCaseFromBankDetail] = useState(false);
   const [payableReview, setPayableReview] = useState<HistoricalPayableAuditItem | null>(null);
   const [bankReview, setBankReview] = useState<FinanceBankTransaction | null>(null);
+  const [bankReviewCurrent, setBankReviewCurrent] = useState<LoadState<FinanceBankTransaction>>({ kind: 'idle' });
+  const [bankCaseView, setBankCaseView] = useState<string | null>(null);
+  const [bankReviewManual, setBankReviewManual] = useState(false);
+  const [bankReviewReturning, setBankReviewReturning] = useState(false);
   const [cancellationPosted, setCancellationPosted] = useState(false);
   const [bankReviewBusy, setBankReviewBusy] = useState(false);
+  const [bankRowActionBusy, setBankRowActionBusy] = useState(false);
   const [caseClientName, setCaseClientName] = useState('');
   const [caseNotice, setCaseNotice] = useState<'deposit' | 'first' | 'second' | undefined>();
   const [monthlyRange, setMonthlyRange] = useState<AccountingRange>(() => ({
@@ -122,36 +130,46 @@ export const FinancePage: React.FC = () => {
   }));
 
   const openCase = (caseNo: string, noticeStage?: 'deposit' | 'first' | 'second') => {
-    setBankReview(null);
-    setPayableReview(null);
-    setCancellationPosted(false);
+    closeCase();
     setCaseClientName('');
     setCaseNotice(noticeStage);
     setCaseDrawer(caseNo);
   };
 
   const openBankReview = (row: FinanceBankTransaction) => {
-    if (row.status !== 'pending' || row.disposition === 'blocked') return;
-    const targetCase = row.reconciliation_target?.case_no;
-    if (!targetCase && (row.classification_type !== 'government_subsidy' || row.direction === 'unknown')) return;
-    if (targetCase) openCase(targetCase);
-    else setCaseDrawer('');
+    if (row.status !== 'pending') return;
+    closeCase();
     setBankReview(row);
+    void refreshBankReview(row);
   };
 
   const closeCase = () => {
+    controllers.current.get('bank-review-row')?.abort();
     setCaseDrawer('');
+    setCaseFromBankDetail(false);
     setPayableReview(null);
     setBankReview(null);
+    setBankReviewCurrent({ kind: 'idle' });
+    setBankCaseView(null);
+    setBankReviewManual(false);
+    setBankReviewReturning(false);
     setCancellationPosted(false);
+    clearScopedBankPreview();
   };
 
   const bankReviewPosted = () => {
-    if (bankReview?.reconciliation_target?.obligation_identities.some(id => id.startsWith('client-cancellation:'))) {
-      setBankReview(null);
+    const row = bankReviewCurrent.kind === 'ready' ? bankReviewCurrent.data : null;
+    const target = row?.reconciliation_target;
+    if (target && row && (row.classification_type === 'client_receipt'
+      || row.classification_type === 'client_subsidy_return' || isTaishinStaffSubsidy(row))) {
+      notifyCaseAccountingChanged(target.case_no);
+      setBankCaseView(target.case_no);
+      return;
+    }
+    closeCase();
+    if (target?.obligation_identities.some(id => id.startsWith('client-cancellation:'))) {
+      setCaseDrawer(target.case_no);
       setCancellationPosted(true);
-    } else {
-      closeCase();
     }
     setReload(value => value + 1);
     requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-bank-reconciliation-focus]')?.focus({ preventScroll: true }));
@@ -173,11 +191,15 @@ export const FinancePage: React.FC = () => {
   const controllers = useRef(new Map<string, AbortController>());
   const sequences = useRef(new Map<string, number>());
   const financeApplyCommandByPreview = useRef(new Map<string, { idempotencyKey: string; correlationId: string; reason: string }>());
+  const financeApplyInFlight = useRef(false);
   const submittedFinanceCommand = batchPreview.kind === 'ready'
     ? financeApplyCommandByPreview.current.get(batchPreview.data.preview_fingerprint)
     : undefined;
   const displayedApplyReason = submittedFinanceCommand?.reason ?? applyReason;
   const confirmedImportReceipt = batchOutcome.kind === 'ready' && batchOutcome.data.status === 'succeeded' ? batchOutcome.data.receipt : null;
+  const bankBatchLocked = reviewRowIdentity !== null && (applyJob.kind === 'loading' || batchOutcome.kind === 'loading'
+    || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'));
+  const bankDrawerBusy = bankReviewBusy || bankRowActionBusy || bankBatchLocked;
 
   useEffect(() => () => controllers.current.forEach((controller) => controller.abort()), []);
 
@@ -209,6 +231,39 @@ export const FinancePage: React.FC = () => {
   const current = (key: string, sequence: number, controller: AbortController) =>
     sequences.current.get(key) === sequence && !controller.signal.aborted;
 
+  const clearScopedBankPreview = () => {
+    if (!reviewRowIdentity) return;
+    controllers.current.get('batch-preview')?.abort();
+    controllers.current.get('batch-outcome')?.abort();
+    setReviewRowIdentity(null);
+    setBatchPreview({ kind: 'idle' });
+    setApplyJob({ kind: 'idle' });
+    setBatchOutcome({ kind: 'idle' });
+  };
+
+  const refreshBankReview = async (row: FinanceBankTransaction, manual = false) => {
+    const request = start('bank-review-row');
+    clearScopedBankPreview();
+    setBankReviewCurrent({ kind: 'loading' });
+    try {
+      const page = await financeImportQueryClient.listBankTransactions({ transaction_status: 'all', row_id: row.row_id },
+        { signal: request.controller.signal });
+      if (!current('bank-review-row', request.sequence, request.controller)) return;
+      const fresh = page.items.find(item => item.row_id === row.row_id);
+      if (!fresh) {
+        setBankReviewCurrent({ kind: 'error', message: '查無原銀行流水，請重新查詢。' });
+        return;
+      }
+      setBankReview(fresh);
+      setBankReviewCurrent({ kind: 'ready', data: fresh });
+      const route = bankReviewRoute(fresh, manual);
+      if (route.kind === 'subsidy-batch') void previewBankBatch(route.batchIdentity, undefined, false, fresh.row_identity);
+    } catch (error) {
+      if (current('bank-review-row', request.sequence, request.controller)) {
+        setBankReviewCurrent({ kind: 'error', message: financeErrorMessage(error, '無法讀取原銀行流水，請重新查詢。') });
+      }
+    }
+  };
 
   const ingestWorkbook = async (original?: IngestionCommand) => {
     if (importBusy || (unconfirmedIngestion && !original)) return;
@@ -288,7 +343,8 @@ export const FinancePage: React.FC = () => {
     }
     catch (error) {
       if (current('batch-preview', request.sequence, request.controller)) {
-        setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') });
+        setBatchPreview({ kind: 'error', message: financeErrorMessage(error, rowIdentity
+          ? '本筆補助出款預檢失敗，請重新查詢。' : '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') });
         setReload(value => value + 1);
       }
     }
@@ -299,11 +355,14 @@ export const FinancePage: React.FC = () => {
 
   const applyImportedBatch = async (checked: FinanceImportBatchPreview, automatic = automaticBatch) => {
     if (!canApplyImportedBatch(checked)) return;
-    if (applyJob.kind === 'loading' || batchOutcome.kind === 'loading') return;
+    if (financeApplyInFlight.current || applyJob.kind === 'loading' || batchOutcome.kind === 'loading') return;
+    const scopedReview = !automatic && reviewRowIdentity !== null;
+    const previewFingerprint = checked.preview_fingerprint;
+    const previousCommand = financeApplyCommandByPreview.current.get(previewFingerprint);
+    financeApplyInFlight.current = true;
     setApplyJob({ kind: 'loading' }); setBatchOutcome({ kind: 'idle' });
     try {
-      const previewFingerprint = checked.preview_fingerprint;
-      const command = financeApplyCommandByPreview.current.get(previewFingerprint)
+      const command = previousCommand
         ?? { idempotencyKey: `ui-finance-apply-${crypto.randomUUID()}`, correlationId: `ui-finance-apply-${crypto.randomUUID()}`, reason: applyReason.trim() };
       financeApplyCommandByPreview.current.set(previewFingerprint, command);
       const accepted = await financeImportMutationClient.apply(checked, command.reason, {
@@ -316,8 +375,22 @@ export const FinancePage: React.FC = () => {
         previewFingerprint: checked.preview_fingerprint,
       });
     } catch (error) {
-      setApplyJob({ kind: 'error', message: financeErrorMessage(error, '匯入是否受理尚未確認。請按「以原操作確認匯入結果」。') });
-      setReload(value => value + 1);
+      if (
+        scopedReview && !previousCommand && error instanceof FinanceImportQueryError && !error.retryable
+        && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 408
+      ) {
+        financeApplyCommandByPreview.current.delete(previewFingerprint);
+        setBatchPreview({ kind: 'error', message: error.message });
+        setApplyJob({ kind: 'idle' });
+      } else if (scopedReview) {
+        const detail = error instanceof Error ? `${error.message} ` : '';
+        setApplyJob({ kind: 'error', message: `${detail}核銷結果尚未確認，請使用原操作重新確認。` });
+      } else {
+        setApplyJob({ kind: 'error', message: financeErrorMessage(error, '匯入是否受理尚未確認。請按「以原操作確認匯入結果」。') });
+        setReload(value => value + 1);
+      }
+    } finally {
+      financeApplyInFlight.current = false;
     }
   };
 
@@ -346,23 +419,26 @@ export const FinancePage: React.FC = () => {
           if (expected && outcome.status !== 'succeeded') {
             financeApplyCommandByPreview.current.delete(expected.previewFingerprint);
           }
+          if (reviewRowIdentity !== null && outcome.status !== 'succeeded') {
+            setBatchPreview({ kind: 'error', message: outcome.status === 'cancelled' ? '本筆核銷作業已取消。' : '本筆核銷作業失敗。' });
+          }
           if (outcome.status === 'succeeded') {
             setApplyReason('');
           }
           setBatchOutcome({ kind: 'ready', data: outcome });
-          setReload((value) => value + 1);
+          if (reviewRowIdentity === null || outcome.status === 'succeeded') setReload(value => value + 1);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, FINANCE_OUTCOME_POLL_DELAY_MS));
       }
       if (current('batch-outcome', request.sequence, request.controller)) {
         setBatchOutcome({ kind: 'error', message: '核銷中，請稍後查詢結果。請勿重複上傳。' });
-        setReload((value) => value + 1);
+        if (reviewRowIdentity === null) setReload(value => value + 1);
       }
     } catch (error) {
       if (current('batch-outcome', request.sequence, request.controller)) {
         setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '無法查詢匯入結果，請稍後再查。') });
-        setReload((value) => value + 1);
+        if (reviewRowIdentity === null) setReload(value => value + 1);
       }
     }
   };
@@ -384,6 +460,20 @@ export const FinancePage: React.FC = () => {
       discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); },
     }
   );
+
+  const reviewedRow = bankReviewCurrent.kind === 'ready' ? bankReviewCurrent.data : null;
+  const reviewRoute = reviewedRow ? bankReviewRoute(reviewedRow, bankReviewManual) : null;
+  const manualReviewRoute = reviewedRow && bankReviewRoute(reviewedRow, true);
+  const scopedBatchPosted = reviewedRow?.row_identity === reviewRowIdentity && batchOutcome.kind === 'ready'
+    && batchOutcome.data.status === 'succeeded' && Boolean(batchOutcome.data.receipt?.reconciled_count);
+  const postedSubsidyCaseNo = scopedBatchPosted && batchPreview.kind === 'ready'
+    ? batchPreview.data.rows.find(item => item.row_identity === reviewRowIdentity)?.subsidy_preflight?.case_no : null;
+  const linkedCaseNo = reviewRoute?.kind === 'case' ? reviewRoute.caseNo
+    : postedSubsidyCaseNo ?? (reviewedRow?.cases.length === 1 ? reviewedRow.cases[0] : null);
+  const refreshReviewedRow = () => {
+    if (bankReview) void refreshBankReview(bankReview, bankReviewManual);
+  };
+  const closeCaseLabel = caseFromBankDetail ? '返回交易明細' : '關閉案件';
 
   return (
     <div data-surface-id="finance.page">
@@ -432,6 +522,7 @@ export const FinancePage: React.FC = () => {
       {activeTab === 'finance-import' && (
         <FinanceBankReconciliationWorkspace
           onCase={openCase}
+          onCaseFromDetail={caseNo => { openCase(caseNo); setCaseFromBankDetail(true); }}
           revision={reload}
           ingestionNeedsLookup={unconfirmedIngestion !== null}
           onLookupIngestion={() => void lookupIngestion()}
@@ -453,7 +544,6 @@ export const FinancePage: React.FC = () => {
           importBusy={importBusy}
           ingestion={ingestion}
           batchPreview={batchPreview}
-          automaticBatch={automaticBatch}
           reviewRowIdentity={reviewRowIdentity}
           applyJob={applyJob}
           batchOutcome={batchOutcome}
@@ -461,7 +551,7 @@ export const FinancePage: React.FC = () => {
           onApply={(preview) => void applyImportedBatch(preview)}
           onObserveApplyOutcome={(jobId, expected) => void observeApplyOutcome(jobId, expected)}
           onReconcile={openBankReview}
-          onPreviewBankBatch={(batchIdentity, selections, rowIdentity) => void previewBankBatch(batchIdentity, selections, false, rowIdentity)}
+          otherDrawerOpen={Boolean(bankReview || caseDrawer)}
           confirmedImportReceipt={confirmedImportReceipt}
           submittedFinanceCommand={submittedFinanceCommand}
         />
@@ -489,19 +579,17 @@ export const FinancePage: React.FC = () => {
           isOpen
           title={caseDrawer + (caseClientName ? ' · ' + caseClientName : '')}
           ariaLabel={'案件帳務 · ' + caseDrawer}
-          closeLabel="關閉案件"
+          closeLabel={closeCaseLabel}
           size="xl"
           className="finance-accounting-drawer"
           onClose={closeCase}
-          closeDisabled={bankReviewBusy}
           footer={
             <button
               type="button"
               className="finance-btn-secondary"
-              disabled={bankReviewBusy}
               onClick={() => requestLeave(closeCase)}
             >
-              關閉案件
+              {closeCaseLabel}
             </button>
           }
         >
@@ -513,7 +601,7 @@ export const FinancePage: React.FC = () => {
             <p role="status">已記錄本次核銷，請查看本案帳務確認最新餘額。</p>
             <button type="button" onClick={() => setCancellationPosted(false)}>查看本案帳務</button>
           </section> : <FinanceCaseAccounting
-            key={bankReview?.row_identity ?? (payableReview ? `${caseDrawer}:${reload}` : caseDrawer)}
+            key={payableReview ? `${caseDrawer}:${reload}` : caseDrawer}
             embedded
             initialCase={caseDrawer}
             initialNoticeStage={caseNotice}
@@ -522,7 +610,6 @@ export const FinancePage: React.FC = () => {
               ? entry.settlementFocus : undefined}
             onPayableReview={payableReview ? undefined : setPayableReview}
             reviewObligation={payableReview && (payableReview.balance_ntd ?? 0) > 0 ? payableReview.obligation_identity ?? undefined : undefined}
-            bankReconciliation={bankReview ? { row: bankReview, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy } : undefined}
             onIdentity={(caseNo, name) => {
               if (caseNo === caseDrawer) setCaseClientName(name);
             }}
@@ -530,16 +617,67 @@ export const FinancePage: React.FC = () => {
           />}
         </Drawer>
       )}
-      {bankReview?.classification_type === 'government_subsidy' && (
-        <Drawer isOpen title="政府整期核對" closeLabel="關閉整期核對" size="wide"
-          onClose={closeCase} closeDisabled={bankReviewBusy}>
-          <p>台新 · {bankReview.transaction_date ?? '日期未提供'} · {bankReview.reference} · NT$ {bankReview.amount_ntd.toLocaleString()}</p>
-          {bankReview.direction !== 'unknown' && (
-            <SubsidyPeriodWorkbench key={bankReview.row_identity}
-              bankSource={{ id: bankReview.row_id, direction: bankReview.direction, amountNtd: bankReview.amount_ntd }}
-              onOpenCase={caseNo => requestLeave(() => openCase(caseNo))}
-              onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />
-          )}
+      {bankReview && (
+        <Drawer isOpen title={bankCaseView ? `案件帳務 · ${bankCaseView}` : '核對交易'}
+          closeLabel="關閉核對交易" size="xl" className="finance-accounting-drawer"
+          onClose={closeCase} closeDisabled={bankDrawerBusy}>
+          {bankCaseView ? <>
+            <div className="finance-reconciliation-return-banner">
+              <span>{bankReview.reference}</span>
+              <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(() => {
+                setBankCaseView(null);
+                setBankReviewReturning(true);
+                refreshReviewedRow();
+              })}>返回核對交易</button>
+            </div>
+            <FinanceCaseAccounting key={bankCaseView} initialCase={bankCaseView} embedded
+              onChanged={() => setReload(value => value + 1)} />
+          </> : <>
+            {reviewRoute?.kind !== 'case' && <BankTransactionFacts row={scopedBatchPosted ? {...bankReview, status:'posted'} : bankReview} />}
+            {bankReviewCurrent.kind === 'loading' && <p role="status">正在查詢原流水及最新核對款項…</p>}
+            {bankReviewCurrent.kind === 'error' && <div role="alert">
+              <p>{bankReviewCurrent.message}</p>
+              <button type="button" className="finance-btn-secondary" onClick={refreshReviewedRow}>重新查詢原流水</button>
+            </div>}
+            {reviewedRow?.status === 'posted' && <p role="status">原流水已核銷，可在交易明細查閱記錄。</p>}
+            {reviewedRow && reviewRoute?.kind === 'unavailable' && reviewedRow.status === 'pending' && (
+              <section className="bank-fact-card" aria-label="未能核對原因">
+                <h4>未能核對原因</h4>
+                <p>{financeImportReviewReason(reviewedRow)}</p>
+                <p>{bankReconciliationUnavailableReason(reviewedRow)}</p>
+              </section>
+            )}
+            {reviewedRow && reviewRoute?.kind === 'case' && <FinanceCaseAccounting key={`${reviewedRow.row_id}:${reviewRoute.caseNo}`}
+              embedded initialCase={reviewRoute.caseNo}
+              bankReconciliation={{ row: reviewedRow, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy,
+                onViewCase: () => setBankCaseView(reviewRoute.caseNo), externalPurposeReview: true, previewRefundOnMount: bankReviewReturning }}
+              onChanged={() => setReload(value => value + 1)} />}
+            {reviewedRow && reviewRoute?.kind === 'government' && <SubsidyPeriodWorkbench key={reviewedRow.row_identity}
+              bankSource={{ id: reviewedRow.row_id, direction: reviewRoute.direction, amountNtd: reviewedRow.amount_ntd }}
+              onOpenCase={caseNo => requestLeave(() => setBankCaseView(caseNo))}
+              onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />}
+            {reviewedRow && reviewRoute?.kind === 'subsidy-batch' && <SubsidyBankReview row={reviewedRow}
+              preview={reviewRowIdentity === reviewedRow.row_identity ? batchPreview : { kind: 'idle' }}
+              job={applyJob} outcome={batchOutcome} submitted={submittedFinanceCommand !== undefined}
+              busy={importBusy || bankRowActionBusy}
+              onPreview={selections => void previewBankBatch(reviewRoute.batchIdentity, selections, false, reviewedRow.row_identity)}
+              onApply={preview => void applyImportedBatch(preview)}
+              onObserve={(jobId, expected) => void observeApplyOutcome(jobId, expected)} />}
+            {!scopedBatchPosted && reviewedRow && reviewRoute?.kind === 'subsidy-batch' && isTaishinStaffSubsidy(reviewedRow)
+              && reviewedRow.reconciliation_unavailable_reason && reviewedRow.staff_subsidy_manual_review_allowed !== true && <p>{bankReconciliationUnavailableReason(reviewedRow)}</p>}
+            {!scopedBatchPosted && reviewedRow?.status === 'pending' && reviewRoute?.kind !== 'case' && reviewedRow.staff_subsidy_manual_review_allowed === true
+              && manualReviewRoute?.kind === 'case' && isTaishinStaffSubsidy(reviewedRow) && (
+              <button type="button" className="finance-btn-secondary" disabled={bankDrawerBusy}
+                onClick={() => { clearScopedBankPreview(); setBankReviewManual(true); }}>單筆人工核對</button>
+            )}
+            {linkedCaseNo && reviewRoute?.kind !== 'case' && <button type="button" className="finance-btn-secondary"
+              disabled={bankDrawerBusy} onClick={() => requestLeave(() => setBankCaseView(linkedCaseNo))}>查看本案帳務</button>}
+            {!scopedBatchPosted && reviewedRow?.status === 'pending' && <BankTransactionReviewActions key={reviewedRow.row_identity} row={reviewedRow}
+              offerPairing={reviewRoute?.kind !== 'case' && reviewedRow.disposition !== 'blocked'}
+              disabled={bankDrawerBusy} onBusyChange={setBankRowActionBusy}
+              onPaired={() => { refreshReviewedRow(); setReload(value => value + 1); }}
+              onExcluded={() => { closeCase(); setReload(value => value + 1); }} />}
+          </>}
         </Drawer>
       )}
     </div>

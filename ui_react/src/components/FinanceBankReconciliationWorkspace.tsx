@@ -12,6 +12,10 @@ import { bankReconciliationUnavailableReason, financeBankReviewPresentation, fin
 import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage, FinanceExcludedBankTransactionPage } from '../api/finance_import/finance_import_query_schemas';
 import { financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
+import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
+import { accountingReason } from './case_accounting_presentation';
+import { subsidyPlanLabels } from './FinanceSubsidyPlanForm';
+import { formatTaipeiDateTime } from '../shared/taipeiTime';
 
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 const purposeLabels: Record<string, string> = {
@@ -38,6 +42,194 @@ const bankShortNameMap: Record<string, string> = {
   sinopac: '永豐',
   taishin: '台新',
 };
+
+export function BankTransactionFacts({ row }: { row: FinanceBankTransaction }) {
+  const memo = row.bank_memo ?? row.pairing_memo;
+  return <section className="bank-fact-card" aria-label="銀行原始交易事實">
+    <span className="eyebrow">銀行原始交易事實</span>
+    <h3>{bankNameMap[row.bank]} · {directionLabel(row.direction)} {financeMoney(row.amount_ntd)}</h3>
+    <p>{row.transaction_date ?? '日期待確認'} · 識別：{row.reference}</p>
+    {row.counterparty_name && <p>交易對象 {row.counterparty_name}</p>}
+    {memo && <p>{memo}</p>}
+    <div className="bank-fact-grid">
+      <div><span>款項用途</span><strong>{bankPurposeLabel(row)}</strong></div>
+      <div><span>處理狀態</span>{row.status === 'posted'
+        ? <span className="bank-chip-green">已核銷 · 唯讀查閱</span>
+        : <span className="bank-chip-amber">{row.disposition === 'blocked' ? '銷帳受阻' : '待核對'}</span>}
+      </div>
+    </div>
+  </section>;
+}
+
+export function BankTransactionReviewActions({ row, offerPairing, disabled, onBusyChange, onPaired, onExcluded }: {
+  row: FinanceBankTransaction;
+  offerPairing: boolean;
+  disabled: boolean;
+  onBusyChange: (busy: boolean) => void;
+  onPaired: () => void;
+  onExcluded: () => void;
+}) {
+  type Candidate = NonNullable<FinanceBankTransaction['pairing_candidates']>[number];
+  const [reviewPurpose, setReviewPurpose] = useState(false);
+  const [selected, setSelected] = useState<Candidate | null>(null);
+  const [reason, setReason] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const active = useRef(false);
+  const isSubsidyReturn = row.classification_type === 'client_subsidy_return';
+  const target = row.reconciliation_target;
+  if (isSubsidyReturn && (
+    row.status !== 'pending' || row.disposition === 'blocked' || !target
+    || target.staff_id !== null || target.obligation_identities.length === 0
+  )) return null;
+
+  const purposeReview = !isSubsidyReturn && row.disposition !== 'blocked' ? row.purpose_review : null;
+  const candidates = reviewPurpose ? purposeReview?.candidates ?? [] : offerPairing && !isSubsidyReturn
+    ? row.pairing_candidates ?? []
+    : [];
+  const run = async (action: () => Promise<number>, onDone: () => void, failure: string) => {
+    if (disabled || active.current) return;
+    active.current = true;
+    onBusyChange(true);
+    setError('');
+    try {
+      await action();
+      setSelected(null);
+      setReviewPurpose(false);
+      onDone();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : failure);
+    } finally {
+      active.current = false;
+      onBusyChange(false);
+    }
+  };
+
+  return <>
+    {!!purposeReview?.candidates.length && <button type="button" className="finance-btn-secondary" disabled={disabled}
+      onClick={() => { setReviewPurpose(value => !value); setSelected(null); setError(''); }}>
+      {reviewPurpose ? '返回核對交易' : '更正出款用途'}
+    </button>}
+    {!!candidates.length && <fieldset className="bank-fact-card" disabled={disabled}>
+      <legend>{reviewPurpose ? '出款用途' : '候選案件'}</legend>
+      {candidates.map(candidate => <p key={`${candidate.case_no}:${candidate.purpose}:${candidate.person_id}`}>
+        <label>
+          <input type="radio" name="bank-case-candidate" checked={selected === candidate} onChange={() => setSelected(candidate)} />
+          {candidate.case_no} · {purposeLabels[candidate.purpose]}
+          {candidate.purpose === 'staff_salary' && ` · ${candidate.person_name ?? `月嫂編號 ${candidate.person_id}`}`}
+          {!reviewPurpose && <> · 預估補助入帳 {candidate.estimated_subsidy_payment_date ?? '—'}
+            {candidate.purpose === 'staff_salary' && <> · 預估薪資入帳 {candidate.estimated_self_funded_staff_due_date ?? '—'}</>}
+          </>}
+        </label>
+      </p>)}
+      <button type="button" className="finance-btn-primary" disabled={!selected || disabled} onClick={() => {
+        if (!selected) return;
+        void run(() => reviewPurpose && purposeReview
+          ? financeImportQueryClient.pairBankTransaction(row.row_id, selected, purposeReview.classification_version)
+          : financeImportQueryClient.pairBankTransaction(row.row_id, selected), onPaired, '配對未確認，請重新查詢。');
+      }}>{reviewPurpose ? '確認用途' : '確認配對'}</button>
+    </fieldset>}
+    {reason === null ? <button type="button" className="finance-btn-secondary" disabled={disabled}
+      onClick={() => { setError(''); setReason(''); }}>移除誤匯入明細</button> : (
+      <section className="bank-fact-card" aria-label="移除誤匯入明細">
+        <label>移除原因<textarea maxLength={500} value={reason} disabled={disabled} onChange={event => setReason(event.target.value)} /></label>
+        <button type="button" className="finance-btn-primary" disabled={disabled || !reason.trim()} onClick={() => void run(
+          () => financeImportQueryClient.excludeBankTransaction(row.row_id, reason.trim()), onExcluded, '移除未確認，請重新查詢。',
+        )}>確認移除</button>
+        <button type="button" className="finance-btn-secondary" disabled={disabled} onClick={() => { setReason(null); setError(''); }}>取消移除</button>
+      </section>
+    )}
+    {error && <p role="alert">{error}</p>}
+  </>;
+}
+
+export function SubsidyBankReview({ row, preview, job, outcome, submitted, busy, onPreview, onApply, onObserve }: {
+  row: FinanceBankTransaction;
+  preview: LoadState<FinanceImportBatchPreview>;
+  job: LoadState<FinanceImportJobAccepted>;
+  outcome: LoadState<FinanceImportBatchOutcome>;
+  submitted: boolean;
+  busy: boolean;
+  onPreview: (selections?: Record<string, string>) => void;
+  onApply: (preview: FinanceImportBatchPreview) => void;
+  onObserve: (jobId: string, expected: { batchIdentity: string; previewFingerprint: string }) => void;
+}) {
+  const rowPreview = preview.kind === 'ready'
+    ? preview.data.rows.find(candidate => candidate.row_identity === row.row_identity) : undefined;
+  const postedCase = outcome.kind === 'ready' && outcome.data.status === 'succeeded' && outcome.data.receipt?.reconciled_count
+    ? rowPreview?.subsidy_preflight?.case_no ?? rowPreview?.selected_staff_subsidy_case : undefined;
+  const [postedAccounting, setPostedAccounting] = useState<LoadState<CaseAccounting>>({ kind: 'idle' });
+  useEffect(() => {
+    setPostedAccounting({ kind: 'idle' });
+    if (!postedCase) return;
+    const controller = new AbortController();
+    setPostedAccounting({ kind: 'loading' });
+    void financeAccountingClient.query(postedCase, controller.signal).then(data => {
+      if (!controller.signal.aborted) setPostedAccounting({ kind: 'ready', data });
+    }).catch(() => {
+      if (!controller.signal.aborted) setPostedAccounting({ kind: 'error', message: '本案最新補助方案讀取失敗，請開啟案件帳務重查。' });
+    });
+    return () => controller.abort();
+  }, [postedCase]);
+
+  if (preview.kind === 'idle' || preview.kind === 'loading') return <p role="status">正在查詢本筆補助出款預檢…</p>;
+  if (preview.kind !== 'ready') return <div role="alert">
+    <p>{preview.kind === 'error' ? preview.message : '查無本筆補助出款預檢。'}</p>
+    <button type="button" className="finance-btn-secondary" disabled={busy} onClick={() => onPreview()}>重新查詢本筆預檢</button>
+  </div>;
+
+  const checked = preview.data;
+  const item = rowPreview;
+  if (!item) return <p role="alert">本次預檢未回傳原交易，請重新查詢原流水。</p>;
+  const plan = item.subsidy_preflight;
+  const canApply = !plan?.confirmation_only && checked.apply_allowed && checked.counts.ready_dispatch > 0 && item.disposition === 'create';
+  const completed = outcome.kind === 'ready' && outcome.data.status === 'succeeded';
+  const pending = job.kind === 'loading' || outcome.kind === 'loading' || (submitted && outcome.kind !== 'ready');
+  return <section className="bank-fact-card" aria-label="補助處理預檢">
+    <h4>本次補助處理預檢</h4>
+    {(item.staff_subsidy_cases?.length ?? 0) > 1 && <fieldset disabled={busy || pending || completed}>
+      <legend>選擇同月補助案件</legend>
+      {item.staff_subsidy_cases?.map(candidate => <button key={candidate.case_no} type="button"
+        aria-pressed={item.selected_staff_subsidy_case === candidate.case_no}
+        onClick={() => onPreview({ [row.row_identity]: candidate.case_no })}>
+        {candidate.case_no} · {candidate.payable_due_date} · {financeMoney(candidate.payable_amount_ntd)}
+      </button>)}
+    </fieldset>}
+    {plan && <>
+      <p><strong>{plan.case_no} · {plan.scheme === 'split' ? '補助轉交月嫂' : '補助款退還客戶'} · 明細候選</strong></p>
+      <p>本案補助 {financeMoney(plan.subsidy_ntd)} · 銀行原實付 {financeMoney(plan.bank_cash_ntd)}</p>
+      {plan.confirmation_only ? <p>服務尚未結束，補助款仍待核對。</p> : <p>
+        本次款項 {financeMoney(plan.payable_amount_ntd)} · 預計付款日 {plan.payable_due_date ?? '待確認'} · 手續費 {financeMoney(plan.transfer_fee_ntd)} · 預計核銷 {financeMoney(plan.settlement_ntd)} · 剩餘 {financeMoney(plan.remaining_ntd)}
+      </p>}
+      {plan.blocker && !plan.confirmation_only && <p role="alert">{/[\u3400-\u9fff]/.test(plan.blocker) ? plan.blocker
+        : financeImportReviewReason({ ...row, recorded_pending_reason: null, dispatch_reason: null, review_reason: plan.blocker })}</p>}
+    </>}
+    {item.pending_reason && !plan?.blocker && <p>{financeImportReviewReason(row, item)}</p>}
+    {!checked.apply_allowed && !!checked.blocking_codes.length && <p role="alert">{financeImportBlockerMessage(checked.blocking_codes)}</p>}
+    {canApply && job.kind === 'idle' && outcome.kind === 'idle' && !submitted && <button type="button"
+      className="finance-btn-primary" disabled={busy} onClick={() => onApply(checked)}>
+      確認核銷本筆交易
+    </button>}
+    {job.kind === 'error' && submitted && <button type="button" className="finance-btn-secondary" disabled={busy}
+      onClick={() => onApply(checked)}>以原操作確認核銷結果</button>}
+    {job.kind === 'ready' && outcome.kind === 'error' && <button type="button" className="finance-btn-secondary" disabled={busy}
+      onClick={() => onObserve(job.data.job_id, { batchIdentity: checked.batch_identity, previewFingerprint: checked.preview_fingerprint })}>
+      重新查詢核銷結果
+    </button>}
+    {job.kind === 'error' && <p role="alert">{job.message}</p>}
+    {outcome.kind === 'error' && <p role="alert">{outcome.message}</p>}
+    {outcome.kind === 'ready' && (outcome.data.status === 'succeeded' ? <p role="status">{outcome.data.receipt?.reconciled_count
+      ? '本筆交易已核銷。' : '本次處理已完成，請查看案件帳務。'}</p> : <p role="alert">未完成核銷，請重新查詢原流水。</p>)}
+    {postedAccounting.kind === 'ready' && <p role="status">{postedSchemeSummary(postedAccounting.data)}</p>}
+    {postedAccounting.kind === 'error' && <p role="alert">{postedAccounting.message}</p>}
+    {(job.kind === 'loading' || outcome.kind === 'loading') && <p role="status">正在確認本筆核銷結果…</p>}
+  </section>;
+}
+
+function postedSchemeSummary(data: CaseAccounting): string {
+  const {scheme, scheme_pending_reason: reason} = data;
+  if (scheme === 'split' || scheme === 'advance' || scheme === 'direct') return `本案補助方案 ${subsidyPlanLabels[scheme]}`;
+  return reason ? accountingReason(reason) : '本案補助方案待確認。';
+}
 
 const historyStatus = {
   saved: '已保存', posting: '核銷處理中', posted: '核銷結果已確認', blocked: '自動核銷受阻',
@@ -181,6 +373,7 @@ function FinanceExcludedTransactionsDrawer({ revision, onClose }: { revision: nu
 
 export interface FinanceBankReconciliationWorkspaceProps {
   onCase: (caseNo: string) => void;
+  onCaseFromDetail?: (caseNo: string) => void;
   revision: number;
   ingestionNeedsLookup?: boolean;
   onLookupIngestion: () => void;
@@ -198,8 +391,7 @@ export interface FinanceBankReconciliationWorkspaceProps {
   onApply: (preview: FinanceImportBatchPreview) => void;
   onObserveApplyOutcome: (jobId: string, expected?: { batchIdentity: string; previewFingerprint: string }) => void;
   onReconcile: (row: FinanceBankTransaction) => void;
-  onPreviewBankBatch?: (batchIdentity: string, selections?: Record<string, string>, rowIdentity?: string) => void;
-  automaticBatch?: boolean;
+  otherDrawerOpen?: boolean;
   reviewRowIdentity?: string | null;
   confirmedImportReceipt: { reconciled_count: number; existing_count: number } | null;
   submittedFinanceCommand?: unknown;
@@ -207,6 +399,7 @@ export interface FinanceBankReconciliationWorkspaceProps {
 
 export function FinanceBankReconciliationWorkspace({
   onCase,
+  onCaseFromDetail = onCase,
   revision,
   ingestionNeedsLookup = false,
   onLookupIngestion,
@@ -224,8 +417,7 @@ export function FinanceBankReconciliationWorkspace({
   onApply,
   onObserveApplyOutcome,
   onReconcile,
-  onPreviewBankBatch,
-  automaticBatch = false,
+  otherDrawerOpen = false,
   reviewRowIdentity,
   confirmedImportReceipt,
   submittedFinanceCommand,
@@ -257,7 +449,30 @@ export function FinanceBankReconciliationWorkspace({
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [targetBankFormat, setTargetBankFormat] = useState<string>('');
   const [viewedRow, setViewedRow] = useState<FinanceBankTransaction | null>(null);
+  const [detailFetch, setDetailFetch] = useState<LoadState<null>>({ kind: 'idle' });
+  const [detailRetry, setDetailRetry] = useState(0);
   const beforeRowId = cursors.at(-1);
+  const viewedRowId = viewedRow?.row_id;
+
+  useEffect(() => {
+    if (!viewedRowId || otherDrawerOpen) return;
+    const controller = new AbortController();
+    setDetailFetch({ kind: 'loading' });
+    void financeImportQueryClient.listBankTransactions({ transaction_status: 'all', row_id: viewedRowId },
+      { signal: controller.signal }).then(data => {
+      if (controller.signal.aborted) return;
+      const fresh = data.items.find(row => row.row_id === viewedRowId);
+      if (!fresh) {
+        setDetailFetch({ kind: 'error', message: '查無原銀行流水的最新明細。' });
+        return;
+      }
+      setViewedRow(fresh);
+      setDetailFetch({ kind: 'ready', data: null });
+    }).catch(() => {
+      if (!controller.signal.aborted) setDetailFetch({ kind: 'error', message: '銀行交易明細暫時無法取得。' });
+    });
+    return () => controller.abort();
+  }, [viewedRowId, otherDrawerOpen, revision, detailRetry]);
 
   useEffect(() => {
     if (dates.start && dates.end && dates.start > dates.end) {
@@ -286,84 +501,15 @@ export function FinanceBankReconciliationWorkspace({
   const pendingRows = page?.items.filter(row => row.status === 'pending') ?? [];
   const postedRows = page?.items.filter(row => row.status === 'posted') ?? [];
   const previewRows = new Map(batchPreview.kind === 'ready' ? batchPreview.data.rows.map(row => [row.row_identity, row]) : []);
-  const reviewPreviewRows = batchPreview.kind === 'ready'
-    ? batchPreview.data.rows.filter(row => !reviewRowIdentity || row.row_identity === reviewRowIdentity) : [];
   const postingStopped = batchPreview.kind === 'ready' && !batchPreview.data.apply_allowed
     ? 'preview_blocked'
     : batchOutcome.kind === 'ready' && (batchOutcome.data.status === 'failed' || batchOutcome.data.status === 'cancelled')
       ? 'apply_failed'
       : undefined;
-  const viewedTransaction = viewedRow && (page?.items.find(row => row.row_id === viewedRow.row_id) ?? viewedRow);
-  const [pairing, setPairing] = useState<FinanceBankTransaction | null>(null);
-  const [reviewingPurpose, setReviewingPurpose] = useState(false);
-  const [selectedPair, setSelectedPair] = useState<NonNullable<FinanceBankTransaction['pairing_candidates']>[number] | null>(null);
-  const [excludeReason, setExcludeReason] = useState<string | null>(null);
-  const [rowActionBusy, setRowActionBusy] = useState(false);
-  const [rowActionError, setRowActionError] = useState('');
-  const openPairing = (row: FinanceBankTransaction, reviewPurpose = false) => {
-    setViewedRow(null);
-    setExcludeReason(null);
-    setSelectedPair(null);
-    setRowActionError('');
-    setPairing(row);
-    setReviewingPurpose(reviewPurpose);
-  };
-  const confirmPairing = async () => {
-    if (!pairing || !selectedPair || rowActionBusy) return;
-    setRowActionBusy(true);
-    setRowActionError('');
-    try {
-      if (reviewingPurpose && pairing.purpose_review) {
-        await financeImportQueryClient.pairBankTransaction(
-          pairing.row_id, selectedPair, pairing.purpose_review.classification_version,
-        );
-      } else {
-        await financeImportQueryClient.pairBankTransaction(pairing.row_id, selectedPair);
-      }
-      const result = await financeImportQueryClient.listBankTransactions({transaction_status:'all', row_id:pairing.row_id});
-      const fresh = result.items.find(row => row.row_id === pairing.row_id);
-      setPairing(null);
-      setRetry(value => value + 1);
-      if (fresh?.staff_subsidy_batch_identity && onPreviewBankBatch) openSubsidyReview(fresh);
-      else if (fresh?.reconciliation_target) onReconcile(fresh);
-      else onCase(selectedPair.case_no);
-    } catch (error) {
-      setRowActionError(error instanceof Error ? error.message : '配對未確認，請重新查詢。');
-    } finally {
-      setRowActionBusy(false);
-    }
-  };
-  const excludeViewedRow = async () => {
-    if (!viewedTransaction || !excludeReason?.trim() || rowActionBusy) return;
-    setRowActionBusy(true);
-    setRowActionError('');
-    try {
-      await financeImportQueryClient.excludeBankTransaction(viewedTransaction.row_id, excludeReason.trim());
-      setExcludeReason(null);
-      setViewedRow(null);
-      setRetry(value => value + 1);
-    } catch (error) {
-      setRowActionError(error instanceof Error ? error.message : '移除未確認，請重新查詢。');
-    } finally {
-      setRowActionBusy(false);
-    }
-  };
+  const viewedTransaction = otherDrawerOpen ? null : viewedRow;
   const detailTitle = viewedTransaction?.status === 'posted' ? '已核銷交易明細' : '待核對交易明細';
-  const subsidyReviewBusy = importBusy || batchPreview.kind === 'loading' || applyJob.kind === 'loading'
+  const reviewBusy = importBusy || batchPreview.kind === 'loading' || applyJob.kind === 'loading'
     || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready');
-  const importPanelRef = useRef<HTMLDivElement>(null);
-
-  const openSubsidyReview = (row: FinanceBankTransaction) => {
-    if (!row.staff_subsidy_batch_identity) return;
-    setViewedRow(null);
-    setShowImportPanel(true);
-    onPreviewBankBatch?.(row.staff_subsidy_batch_identity, undefined, row.row_identity);
-    requestAnimationFrame(() => importPanelRef.current?.scrollIntoView?.({ block: 'nearest' }));
-  };
-  const openManualStaffSubsidy = (row: FinanceBankTransaction) => {
-    setViewedRow(null);
-    onReconcile(row);
-  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -416,7 +562,7 @@ export function FinanceBankReconciliationWorkspace({
 
       {/* 2. 受控檔案上傳列 (點擊匯入或常駐支援) */}
       <div
-        ref={importPanelRef}
+
         className="bank-reconcile-import-panel"
         style={{ display: showImportPanel || financeWorkbook || ingestionNeedsLookup ? 'flex' : 'none' }}
         data-surface-id="finance.finance-import.upload-panel"
@@ -489,60 +635,6 @@ export function FinanceBankReconciliationWorkspace({
         </div>
 
         {/* 上傳與審查即時結果 */}
-        {!automaticBatch && batchPreview.kind === 'ready' && reviewPreviewRows.some(row =>
-          row.staff_subsidy_cases != null || row.pending_reason === 'staff_subsidy_case_selection_invalid') && (
-          <section aria-label="月嫂補助案件歸屬">
-            {reviewPreviewRows.map(row => {
-              if ((row.staff_subsidy_cases?.length ?? 0) < 2) {
-                if (row.staff_subsidy_cases == null && row.pending_reason !== 'staff_subsidy_case_selection_invalid') return null;
-                if (row.pending_reason === 'due_date_missing' || row.pending_reason === 'bank_transaction_date_missing') {
-                  return <p key={row.row_identity}>
-                    {row.pending_reason === 'due_date_missing' ? '缺少預計補助撥款日' : '缺少銀行交易日'}
-                  </p>;
-                }
-                if (row.pending_reason === 'outgoing_staff_payout_month_no_match') {
-                  return <p key={row.row_identity}>查無同月補助案件</p>;
-                }
-                if (row.pending_reason === 'staff_subsidy_case_selection_invalid') {
-                  return <p key={row.row_identity}>原選定案件已不符合條件，請重新核對。</p>;
-                }
-                return null;
-              }
-              return <fieldset key={row.row_identity}>
-                <legend>選擇同月補助案件</legend>
-                {row.staff_subsidy_cases?.map(candidate => (
-                  <button key={candidate.case_no} type="button"
-                    aria-pressed={row.selected_staff_subsidy_case === candidate.case_no}
-                    disabled={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
-                    onClick={() => {
-                      const selections = Object.fromEntries(batchPreview.data.rows.flatMap(item =>
-                        item.selected_staff_subsidy_case ? [[item.row_identity, item.selected_staff_subsidy_case]] : []));
-                      selections[row.row_identity] = candidate.case_no;
-                      onPreviewBankBatch?.(batchPreview.data.batch_identity, selections, row.row_identity);
-                    }}>
-                    {candidate.case_no} · {candidate.payable_due_date} · NT$ {candidate.payable_amount_ntd.toLocaleString()}
-                  </button>
-                ))}
-              </fieldset>;
-            })}
-          </section>
-        )}
-        {!automaticBatch && batchPreview.kind==='ready'&&reviewPreviewRows.some(row=>row.subsidy_preflight)&&<section aria-label="補助處理預檢">
-          <h4>本次補助處理預檢</h4><p>確認套用後，即可查看給付金額與核銷結果。</p>
-          {reviewPreviewRows.map(row=>{const p=row.subsidy_preflight;if(!p)return null;const amount=(n:number|bigint|null)=>n==null?'待確認':n.toLocaleString()+' 元';return <div key={row.row_identity}>
-            <strong>{p.case_no}：{p.scheme==='split'?'補助轉交月嫂':'補助退還先墊款客戶'}</strong>
-            <p>本案補助 {amount(p.subsidy_ntd)}；銀行原實付 {amount(p.bank_cash_ntd)}。</p>
-            {p.confirmation_only?<p>服務尚未結束。本次只確認補助方案，給付金額仍待確認。</p>:<p>本次款項 {amount(p.payable_amount_ntd)}，日期 {p.payable_due_date??'待確認'}；手續費 {amount(p.transfer_fee_ntd)}；預計核銷 {amount(p.settlement_ntd)}，剩餘 {amount(p.remaining_ntd)}。</p>}
-            {p.blocker&&!p.confirmation_only&&<p role="alert">{/[\u3400-\u9fff]/.test(p.blocker)?p.blocker:financeImportReviewReason({classification_type:row.classification_type,direction:'outgoing',available_actions:row.available_actions,disposition:row.disposition,review_reason:p.blocker},row)}</p>}
-          </div>;})}
-          {batchPreview.data.counts.ready_dispatch > 0 && applyJob.kind === 'idle' && batchOutcome.kind === 'idle' && submittedFinanceCommand === undefined && (
-            <button type="button" className="finance-btn-primary" disabled={importBusy}
-              onClick={() => onApply(batchPreview.data)}>
-              {reviewRowIdentity ? '確認核銷本筆交易' : '確認套用本次明細'}
-            </button>
-          )}
-          {batchPreview.data.counts.ready_dispatch === 0 && <p>本次沒有通過預檢的可套用動作，請先核對上述原因。</p>}
-        </section>}
         {ingestion.kind === 'error' && <p className="finance-state error" role="alert">{ingestion.message}</p>}
         {ingestionNeedsLookup && (
           <button type="button" className="finance-btn-secondary" disabled={importBusy} onClick={onLookupIngestion}>
@@ -554,6 +646,7 @@ export function FinanceBankReconciliationWorkspace({
             以原操作重送同一檔案
           </button>
         )}
+        {!reviewRowIdentity && <>
         {batchPreview.kind === 'error' && <p className="finance-state error" role="alert">{batchPreview.message}</p>}
         {batchOutcome.kind === 'error' && <p className="finance-state error" role="alert">{batchOutcome.message}</p>}
         {applyJob.kind === 'error' && Boolean(submittedFinanceCommand) && batchPreview.kind === 'ready' && (
@@ -602,6 +695,7 @@ export function FinanceBankReconciliationWorkspace({
             )}
           </div>
         )}
+        </>}
       </div>
 
       {page?.pending_count != null && (
@@ -756,46 +850,13 @@ export function FinanceBankReconciliationWorkspace({
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        {row.disposition === 'blocked' ? (
-                          <span style={{ fontSize: '0.78rem', color: '#dc2626' }}>銷帳受阻</span>
-                        ) : row.pairing_candidates?.length ? (
-                          <button type="button" className="bank-btn-action" onClick={() => openPairing(row)}>核對交易</button>
-                        ) : row.staff_subsidy_batch_identity && onPreviewBankBatch ? (
-                          <>
-                            <button type="button" className="bank-btn-action" disabled={subsidyReviewBusy}
-                              onClick={() => openSubsidyReview(row)}>
-                              {row.classification_type === 'client_subsidy_return' ? '核對交易' : '核對月嫂補助'}
-                            </button>
-                            {row.reconciliation_target && <button type="button" className="bank-btn-action"
-                              disabled={subsidyReviewBusy} onClick={() => openManualStaffSubsidy(row)}>
-                              單筆人工核對
-                            </button>}
-                          </>
-                        ) : (row.reconciliation_target || (row.classification_type === 'government_subsidy' && row.direction !== 'unknown')) ? (
-                          <button
-                            type="button"
-                            className="bank-btn-action"
-                            disabled={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
-                            onClick={() => onReconcile(row)}
-                            aria-label={`核對交易 ${row.reference}`}
-                            title={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ? '匯入處理中，請稍候' : undefined}
-                          >
-                            核對交易
-                          </button>
-                        ) : row.cases.length === 1 ? (
-                          <>
-                            <button type="button" className="bank-btn-action" onClick={() => onCase(row.cases[0])}>
-                              {row.review_reason === 'taishin_memo_case_requires_manual_scheme' ? '確認補助方案' : '查看案件帳務'}
-                            </button>
-                            <small className="bank-reconcile-sub">{row.reconciliation_unavailable_reason === 'purpose_unconfirmed'
-                              ? '款項用途待確認；設定方案不會自動建立或核銷款項。'
-                              : bankReconciliationUnavailableReason(row)}</small>
-                          </>
-                        ) : <span className="bank-reconcile-sub">{bankReconciliationUnavailableReason(row)}</span>}
-                        {row.purpose_review && (
-                          <button type="button" className="bank-btn-action" onClick={() => openPairing(row, true)}>
-                            更正出款用途
-                          </button>
+                        <button type="button" className="bank-btn-action" disabled={reviewBusy}
+                          onClick={() => onReconcile(row)} aria-label={`核對交易 ${row.reference}`}>
+                          核對交易
+                        </button>
+                        {!row.reconciliation_target && !row.staff_subsidy_batch_identity
+                          && row.classification_type !== 'government_subsidy' && (
+                          <small className="bank-reconcile-sub">{bankReconciliationUnavailableReason(row)}</small>
                         )}
                         <button
                           type="button"
@@ -881,123 +942,35 @@ export function FinanceBankReconciliationWorkspace({
       {historyOpen && <FinanceImportHistory revision={revision} onClose={() => setHistoryOpen(false)} />}
       {excludedOpen && <FinanceExcludedTransactionsDrawer revision={revision} onClose={() => setExcludedOpen(false)} />}
 
-      {pairing && <Drawer isOpen title={reviewingPurpose ? '更正出款用途' : '核對交易 · 人工配對'}
-        ariaLabel={reviewingPurpose ? '更正出款用途' : '人工配對'}
-        closeDisabled={rowActionBusy} onClose={() => setPairing(null)}
-        footer={<button type="button" className="finance-btn-primary" disabled={!selectedPair || rowActionBusy}
-          onClick={() => void confirmPairing()}>{reviewingPurpose ? '確認用途' : '確認配對'}</button>}>
-        <div className="beclass-pairing-columns" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(14rem,1fr))',gap:'1rem'}}>
-          <section className="bank-fact-card" aria-label="原銀行流水">
-            <h4>原銀行流水</h4>
-            <p>{pairing.reference} · {pairing.transaction_date} · {financeMoney(pairing.amount_ntd)}</p>
-            {pairing.pairing_memo && <p>{pairing.pairing_memo}</p>}
-            <p>{reviewingPurpose ? '請核對原始備註，選擇本筆出款的用途及對象。' : pairing.review_reason === 'bank_case_suffix_not_found' ? '備註六碼查無案件，請核對姓名及候選案件。' : '請確認本筆流水所屬案件及對象。'}</p>
-          </section>
-          <fieldset className="bank-fact-card" disabled={rowActionBusy}>
-            <legend>{reviewingPurpose ? '出款用途' : '候選案件'}</legend>
-            {(reviewingPurpose ? pairing.purpose_review?.candidates : pairing.pairing_candidates)?.map(candidate => {
-              const key = `${candidate.case_no}:${candidate.purpose}:${candidate.person_id}`;
-              return (
-                <p key={key}>
-                  <label>
-                    <input type="radio" name="bank-case-candidate"
-                      checked={selectedPair === candidate} onChange={() => setSelectedPair(candidate)} />
-                    {candidate.case_no} · {purposeLabels[candidate.purpose]}
-                    {candidate.purpose === 'staff_salary' && ` · ${candidate.person_name ?? `月嫂編號 ${candidate.person_id}`}`}
-                    {!reviewingPurpose && <>
-                      {' · 預估補助入帳 '}{candidate.estimated_subsidy_payment_date ?? '—'}
-                      {' · 預估薪資入帳 '}{candidate.estimated_self_funded_staff_due_date ?? '—'}
-                    </>}
-                  </label>
-                </p>
-              );
-            })}
-          </fieldset>
-        </div>
-        {rowActionError && <p role="alert">{rowActionError}</p>}
-      </Drawer>}
-
-      {/* 7. WF-04 已核銷交易唯讀明細抽屜 */}
       {viewedTransaction && (
         <Drawer
           isOpen
-          closeDisabled={rowActionBusy}
-          onClose={() => { setViewedRow(null); setExcludeReason(null); setRowActionError(''); }}
+          onClose={() => setViewedRow(null)}
           closeLabel="返回"
           ariaLabel={detailTitle}
           title={detailTitle}
-          footer={
-            <>
-              {viewedTransaction.purpose_review && (
-                <button type="button" className="bank-btn-action" onClick={() => openPairing(viewedTransaction, true)}>
-                  更正出款用途
-                </button>
-              )}
-              {viewedTransaction.status === 'pending' && Boolean(viewedTransaction.pairing_candidates?.length) &&
-                <button type="button" className="finance-btn-primary" disabled={rowActionBusy}
-                  onClick={() => openPairing(viewedTransaction)}>核對交易</button>}
-              {viewedTransaction.status === 'pending' && viewedTransaction.disposition !== 'blocked'
-                && !viewedTransaction.pairing_candidates?.length && !viewedTransaction.staff_subsidy_batch_identity
-                && (viewedTransaction.reconciliation_target
-                  || (viewedTransaction.classification_type === 'government_subsidy' && viewedTransaction.direction !== 'unknown')) &&
-                <button type="button" className="finance-btn-primary" disabled={rowActionBusy || importBusy}
-                  onClick={() => { setViewedRow(null); setExcludeReason(null); onReconcile(viewedTransaction); }}>核對交易</button>}
-              {viewedTransaction.status === 'pending' && excludeReason === null &&
-                <button type="button" className="finance-btn-secondary" onClick={() => { setRowActionError(''); setExcludeReason(''); }}>
-                  移除誤匯入明細
-                </button>}
-              {viewedTransaction.status === 'pending' && viewedTransaction.disposition !== 'blocked'
-                && viewedTransaction.staff_subsidy_batch_identity && onPreviewBankBatch && (
-                  <button type="button" className="finance-btn-primary" disabled={subsidyReviewBusy}
-                    onClick={() => openSubsidyReview(viewedTransaction)}>
-                    {viewedTransaction.classification_type === 'client_subsidy_return' ? '核對交易' : '核對月嫂補助'}
-                  </button>
-                )}
-              {viewedTransaction.status === 'pending' && viewedTransaction.disposition !== 'blocked'
-                && viewedTransaction.staff_subsidy_batch_identity && viewedTransaction.reconciliation_target && (
-                  <button type="button" className="finance-btn-secondary" disabled={subsidyReviewBusy}
-                    onClick={() => openManualStaffSubsidy(viewedTransaction)}>
-                    單筆人工核對
-                  </button>
-                )}
-              <button type="button" className="finance-btn-secondary" disabled={rowActionBusy}
-                onClick={() => { setViewedRow(null); setExcludeReason(null); setRowActionError(''); }}>
-                返回
-              </button>
-            </>
-          }
+          footer={<>
+            {viewedTransaction.status === 'pending' && (
+              <button type="button" className="finance-btn-primary" disabled={reviewBusy}
+                onClick={() => onReconcile(viewedTransaction)}>核對交易</button>
+            )}
+            <button type="button" className="finance-btn-secondary" onClick={() => setViewedRow(null)}>返回</button>
+          </>}
         >
-          {excludeReason !== null && <section className="bank-fact-card" aria-label="移除誤匯入明細">
-            <label>移除原因<textarea maxLength={500} value={excludeReason} disabled={rowActionBusy}
-              onChange={event => setExcludeReason(event.target.value)} /></label>
-            <button type="button" className="finance-btn-primary" disabled={rowActionBusy || !excludeReason.trim()}
-              onClick={() => void excludeViewedRow()}>確認移除</button>
-            <button type="button" className="finance-btn-secondary" disabled={rowActionBusy}
-              onClick={() => { setExcludeReason(null); setRowActionError(''); }}>返回明細</button>
-          </section>}
-          {rowActionError && <p role="alert">{rowActionError}</p>}
-          <div className="bank-fact-card">
-            <span className="eyebrow">銀行原始交易事實</span>
-            <h3>
-              {bankNameMap[viewedTransaction.bank ?? ''] ?? '銀行交易'} ·{' '}
-              {directionLabel(viewedTransaction.direction)} {financeMoney(viewedTransaction.amount_ntd)}
-            </h3>
-            <p>
-              {viewedTransaction.transaction_date ?? '日期待確認'} · 識別：{viewedTransaction.reference}
-            </p>
-            <div className="bank-fact-grid">
-              <div>
-                <span>款項用途</span>
-                <strong>{bankPurposeLabel(viewedTransaction)}</strong>
-              </div>
-              <div>
-                <span>處理狀態</span>
-                {viewedTransaction.status === 'posted'
-                  ? <span className="bank-chip-green">已核銷 · 唯讀查閱</span>
-                  : <span className="bank-chip-amber">{viewedTransaction.disposition === 'blocked' ? '銷帳受阻' : '待核對'}</span>}
-              </div>
-            </div>
-          </div>
+          <BankTransactionFacts row={viewedTransaction} />
+          <section className="bank-fact-card" aria-label="核對紀錄">
+            <h4>核對紀錄</h4>
+            {(detailFetch.kind === 'idle' || detailFetch.kind === 'loading') && <p role="status">正在查詢本筆核對紀錄…</p>}
+            {detailFetch.kind === 'error' && <div role="alert">
+              <p>{detailFetch.message}</p>
+              <button type="button" className="finance-btn-secondary" onClick={() => setDetailRetry(value => value + 1)}>重新查詢明細</button>
+            </div>}
+            {detailFetch.kind === 'ready' && (viewedTransaction.reconciliation_records?.length ? <ul>
+              {viewedTransaction.reconciliation_records.map((record, index) => <li key={`${record.owning_domain}:${record.recorded_at}:${index}`}>
+                {record.owning_domain === 'client_finance' ? '客戶款項核銷' : '月嫂款項核銷'} · {financeMoney(record.amount_ntd)} · {formatTaipeiDateTime(record.recorded_at, true)}
+              </li>)}
+            </ul> : <p>本筆沒有可查閱的核對紀錄。</p>)}
+          </section>
           {viewedTransaction.status === 'pending' && (
             <section className="bank-fact-card" aria-label="未自動核銷原因">
               <h4>未自動核銷原因</h4>
@@ -1017,10 +990,7 @@ export function FinanceBankReconciliationWorkspace({
                     key={caseNo}
                     type="button"
                     className="finance-btn-secondary"
-                    onClick={() => {
-                      setViewedRow(null);
-                      onCase(caseNo);
-                    }}
+                    onClick={() => onCaseFromDetail(caseNo)}
                   >
                     開啟案件 {caseNo}
                   </button>

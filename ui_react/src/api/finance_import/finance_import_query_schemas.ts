@@ -45,7 +45,15 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
       requires_selection: z.boolean().optional(),
     }).nullish(),
     reconciliation_unavailable_reason: z.string().nullish(),
+    staff_subsidy_manual_review_allowed: z.boolean().optional(),
     staff_subsidy_batch_identity: z.string().nullish(),
+    client_subsidy_batch_identity: z.string().nullish(),
+    bank_memo: z.string().nullish(),
+    reconciliation_records: z.array(z.strictObject({
+      owning_domain: z.enum(['client_finance', 'staff_payables']),
+      amount_ntd: z.number().int().positive(),
+      recorded_at: z.string(),
+    })).optional(),
     pairing_candidates: z.array(financeBankPairingCandidateSchema).optional(),
     purpose_review: z.strictObject({
       classification_version: z.number().int().nonnegative(),

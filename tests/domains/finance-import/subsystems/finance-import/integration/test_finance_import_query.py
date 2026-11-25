@@ -764,10 +764,12 @@ def test_taishin_subsidy_entry_uses_unique_original_memo_instead_of_the_legacy_r
         'memo':memo,'classification_type':'client_subsidy_return','transaction_status':'pending',
         'disposition':'business_pending','review_reason':old_reason,'matched_identity_ids':'[]','target_identities':'[]',
         'bank_references':'{}','counterparty_name':None,'available_actions':'[]','safe_reference':'SYNTHETIC-SUBSIDY-61',
+        'batch_identity':'finance-import-batch:synthetic-refund',
     }
     original=deepcopy(source);cursor=Cursor()
     [row]=_enrich_bank_transactions(cursor,[source],{})
     assert source==original and row['review_reason']==old_reason
+    assert row['staff_subsidy_batch_identity'] is None
     if allowed:
         assert row['reconciliation_target']=={
             'case_no':'115000001','obligation_identities':[f'subsidy:{i}' for i in range(count)],'staff_id':None,
@@ -1132,3 +1134,93 @@ def test_bank_transactions_populates_purpose_review_for_outgoing_rows() -> None:
             {"case_no": "115000009", "purpose": "client_refund", "person_id": 7},
         ),
     }
+
+
+@pytest.mark.parametrize(
+    ("importer_receipt", "owner", "event_type", "event_row_id", "status", "expected_owner"),
+    [
+        (True, "staff_payables", "payout", 41, "posted", "client_finance"),
+        (False, "staff_payables", "payout", 41, "posted", "staff_payables"),
+        (False, "client_finance", "receipt", 41, "posted", "client_finance"),
+        (False, "client_finance", "refund", 41, "posted", "client_finance"),
+        (False, "client_finance", "subsidy_return", 41, "posted", "client_finance"),
+        (False, "client_finance", "subsidy_advance", 41, "posted", "client_finance"),
+        (False, "staff_payables", "payout", 99, "pending", None),
+        (False, "client_finance", "receipt", 99, "posted", None),
+        (False, None, None, None, "pending", None),
+        (False, None, None, None, "posted", None),
+        (False, "staff_payables", "return", 41, "posted", None),
+        (False, "staff_payables", "reversal", 41, "posted", None),
+        (False, "client_finance", "adjustment", 41, "posted", None),
+        (False, "client_finance", "reversal", 41, "posted", None),
+        (False, "client_finance", "refund_reversal", 41, "posted", None),
+        (False, "client_finance", "subsidy_return_reversal", 41, "posted", None),
+        (False, "client_finance", "subsidy_advance_reversal", 41, "posted", None),
+    ],
+)
+def test_bank_transaction_detail_reads_formal_reconciliation_records(
+    importer_receipt: bool, owner: str | None, event_type: str | None,
+    event_row_id: int | None, status: str, expected_owner: str | None,
+) -> None:
+    source = {
+        "row_id": 41, "transaction_date": "2026-10-15", "format_id": "sinopac",
+        "direction": "outgoing", "debit": Decimal("37485"), "credit": None,
+        "sheet_name": "bank", "source_row": 1, "counterparty_name": "SYNTHETIC",
+        "memo": "SYNTHETIC", "classification_type": "non_business_review",
+        "transaction_status": status, "disposition": "business_pending",
+        "review_reason": "initial_bank_classification", "matched_identity_ids": "[]",
+        "target_identities": "[]", "available_actions": "[]", "safe_reference": "SYNTHETIC",
+    }
+    with sqlite3.connect(":memory:") as database:
+        database.row_factory = sqlite3.Row
+        database.executescript("""
+            CREATE TABLE finance_import_reconciliation_receipts (
+                id INTEGER PRIMARY KEY, finance_import_row_id INTEGER, owning_domain TEXT,
+                amount_ntd INTEGER, created_at TEXT
+            );
+            CREATE TABLE client_ledger_entries (
+                finance_import_row_id INTEGER, entry_type TEXT, amount_ntd INTEGER, created_at TEXT
+            );
+            CREATE TABLE staff_payout_events (
+                finance_import_row_id INTEGER, event_type TEXT, amount_ntd INTEGER, created_at TEXT
+            );
+        """)
+        if importer_receipt:
+            database.execute(
+                "INSERT INTO finance_import_reconciliation_receipts VALUES (1,41,'client_finance',1200,?)",
+                ("2026-10-16T08:00:00",),
+            )
+        if owner is not None:
+            table = "client_ledger_entries" if owner == "client_finance" else "staff_payout_events"
+            database.execute(
+                f"INSERT INTO {table} VALUES (?,?,?,?)",
+                (event_row_id, event_type, 3200, "2026-10-17T09:30:00"),
+            )
+
+        class _DetailCursor(_Cursor):
+            def execute(self, statement: str, params: tuple[object, ...]) -> None:
+                if "COUNT(*) AS total" in statement:
+                    self.rows = [{"total": int(status == "pending")}]
+                elif statement.lstrip().startswith("WITH proofs AS"):
+                    self.rows = [source]
+                elif statement.startswith("SELECT row_id,case_no FROM"):
+                    self.rows = []
+                else:
+                    self.rows = [
+                        {**dict(row), "created_at": datetime.fromisoformat(row["created_at"])}
+                        for row in database.execute(statement.replace("%s", "?"), params).fetchall()
+                    ]
+
+        result = FinanceImportQueryService(_Connection(_DetailCursor([]))).bank_transactions(
+            bank=None, direction=None, status=status, start=None, end=None, search="",
+            limit=1, before_row_id=None, row_id=41,
+        )
+
+    [item] = result["items"]
+    expected = [] if expected_owner is None else [{
+        "owning_domain": expected_owner,
+        "amount_ntd": 1200 if importer_receipt else 3200,
+        "recorded_at": "2026-10-16T08:00:00" if importer_receipt else "2026-10-17T09:30:00",
+    }]
+    assert item["reconciliation_records"] == expected
+    assert item["amount_ntd"] == 37485

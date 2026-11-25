@@ -48,7 +48,7 @@ def _error(error):
     if isinstance(error, ValueError) and str(error).startswith("invalid_accounting_"):
         return typed_http_error(422, "validation", "invalid_accounting_range", "請選擇有效的起訖月份、案件類別及統計口徑，起始月份不可晚於結束月份。", "finance-workspace")
     if isinstance(error, ArrangementNotReady):
-        return typed_http_error(422, "validation", str(error), "請確認各期已收齊、應繳工會等於案件總額，且補助未經工會。資料不足、衝突或尚無可撤回安排時，請保留待確認。", "finance-workspace")
+        return typed_http_error(422, "validation", str(error), "請核對已核銷客戶實收、案件總額和補助流向。直付的確認與撤回均使用逐案直付安排。", "finance-workspace")
     if isinstance(error, AccountingConflict) and str(error).startswith("arrangement_"):
         return typed_http_error(409, "conflict", "arrangement_source_changed", "安排已由其他人更正，或原操作內容不同。請重新讀取並保留本次輸入後核對。", "finance-workspace")
     if isinstance(error, (AccountingConflict, StatementCommandConflict)):
@@ -80,6 +80,9 @@ def _case_view(case):
     payload = asdict(case)
     payload.pop("funding")
     payload.pop("customer_paid_ntd")
+    payload.pop("reconciled_subsidy_evidence")
+    payload.pop("scheme_case_total_ntd")
+    payload["scheme_evidence_identities"] = list(payload["scheme_evidence_identities"])
     payload["zero_stages"] = list(payload["zero_stages"])
     payload["accounting_pending_reasons"] = list(payload["accounting_pending_reasons"])
     payload["stale_payment_evidence_identities"] = list(payload["stale_payment_evidence_identities"])

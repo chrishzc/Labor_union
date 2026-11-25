@@ -4,7 +4,7 @@
  */
 import type { FinanceBankTransaction, FinanceImportBatchSummary, FinanceImportManifest, FinanceImportReviewPage, FinanceImportRunPage } from '../../api/finance_import/finance_import_query_schemas';
 import type { FinanceImportBatchPreview } from '../../api/finance_import/finance_import_mutation_client';
-import { SINOPAC_PAYOUT_REASON_MESSAGES, TAISHIN_PAYOUT_REASON_MESSAGES } from '../../api/staff_payables/staff_payout_remediation_errors';
+import { SINOPAC_PAYOUT_REASON_MESSAGES, TAISHIN_PAYOUT_REASON_MESSAGES, staffPayoutBlockerMessage } from '../../api/staff_payables/staff_payout_remediation_errors';
 import { REFUND_BLOCKERS, SINOPAC_REFUND_BLOCKERS, TAISHIN_SUBSIDY_REFUND_BLOCKERS } from '../../api/finance_import/finance_import_correction_client';
 
 const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
@@ -102,10 +102,46 @@ const RECONCILIATION_UNAVAILABLE_LABELS: Readonly<Record<string, string>> = {
   no_same_month_items: '本案沒有與銀行交易同月的待核銷款項。',
   items_not_unique: '本案同月有多筆待核銷款項，無法唯一指定。',
   no_eligible_item: '找不到可帶入核對的款項。',
+  subsidy_service_not_completed: '本案尚未完成服務，請先至案件帳務確認服務與款項狀態。',
 };
 
 export function bankReconciliationUnavailableReason(row: FinanceBankTransaction): string {
-  return RECONCILIATION_UNAVAILABLE_LABELS[row.reconciliation_unavailable_reason ?? ''] ?? '對應款項待確認';
+  const code = row.reconciliation_unavailable_reason;
+  if (row.classification_type === 'client_subsidy_return' && code === 'no_open_items') {
+    return '尚無可供核對的正式客戶補助退款款項。請至本案帳務查閱補助來源與退款資料。';
+  }
+  return RECONCILIATION_UNAVAILABLE_LABELS[code ?? '']
+    ?? (isTaishinStaffSubsidy(row) ? staffPayoutBlockerMessage(code === 'bank_fact_not_eligible' ? 'outgoing_bank_fact_not_eligible' : code, row.bank) : undefined)
+    ?? '對應款項待確認';
+}
+
+type BankReviewRoute = { kind: 'case'; caseNo: string } | { kind: 'subsidy-batch'; batchIdentity: string }
+  | { kind: 'government'; direction: 'incoming' | 'outgoing' } | { kind: 'unavailable' };
+
+export function isTaishinStaffSubsidy(row: FinanceBankTransaction): boolean {
+  return row.bank === 'taishin' && ['staff_payout', 'staff_salary', 'staff_legacy_subsidy'].includes(row.classification_type);
+}
+
+export function bankReviewRoute(row: FinanceBankTransaction, manual = false): BankReviewRoute {
+  if (row.status !== 'pending' || row.disposition === 'blocked') return { kind: 'unavailable' };
+  const target = row.reconciliation_target;
+  if (row.classification_type === 'client_subsidy_return') {
+    if (row.client_subsidy_batch_identity) return { kind: 'subsidy-batch', batchIdentity: row.client_subsidy_batch_identity };
+    return target && target.staff_id === null
+      ? { kind: 'case', caseNo: target.case_no } : { kind: 'unavailable' };
+  }
+  if (row.classification_type === 'government_subsidy') {
+    return row.direction !== 'unknown' ? { kind: 'government', direction: row.direction } : { kind: 'unavailable' };
+  }
+  if (isTaishinStaffSubsidy(row)) {
+    if (row.direction !== 'outgoing') return { kind: 'unavailable' };
+    if (manual && target?.staff_id && target.obligation_identities.length && row.staff_subsidy_manual_review_allowed === true) {
+      return { kind: 'case', caseNo: target.case_no };
+    }
+    if (row.staff_subsidy_batch_identity) return { kind: 'subsidy-batch', batchIdentity: row.staff_subsidy_batch_identity };
+    return { kind: 'unavailable' };
+  }
+  return target ? { kind: 'case', caseNo: target.case_no } : { kind: 'unavailable' };
 }
 
 type ReviewDisposition = Pick<FinanceImportReviewPage['items'][number], 'classification_type' | 'direction' | 'available_actions' | 'disposition'>;

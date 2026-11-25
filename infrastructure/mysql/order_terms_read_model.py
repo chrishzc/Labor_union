@@ -214,6 +214,18 @@ def _contract_charge_days(cursor, case_no, schedule_rows, lock):
 
 def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow_planned: bool = True):
     """Price confirmed/planned days without creating official Scheduling facts."""
+    days = load_client_pricing_charge_days(cursor, order_row, lock=lock, allow_planned=allow_planned)
+    if not days and not allow_planned:
+        return None, None
+    source = _load_client_finance(cursor, order_row, lock)
+    if order_row.get("actual_start_date") is not None:
+        from dataclasses import replace
+        source = replace(source, effective_start_date=order_row["actual_start_date"],
+            payment_terms=replace(source.payment_terms, first_payment_due_date=order_row["actual_start_date"]))
+    return _materialize_contract_client_finance_facts(order_row, days, source), source
+
+
+def load_client_pricing_charge_days(cursor, order_row, *, lock: bool, allow_planned: bool = True) -> tuple[ClientChargeDay, ...]:
     case_no = str(order_row["case_no"])
     aggregate = select_scheduling_aggregate(cursor, case_no, lock=lock)
     generation = _select_generation(cursor, aggregate, lock)
@@ -222,7 +234,7 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
             tuple(ClientChargeDay(row["work_date"], False)
                   for row in schedules if bool(row["is_work_day"])))
     if not days and not allow_planned:
-        return None, None
+        return ()
     if not days:
         _, dates = _select_confirmed_service_dates(cursor, case_no, lock)
         if not dates:
@@ -242,12 +254,7 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
             Decimal(str(order_row["service_hours_per_day"])), lock=lock,
         )
         days = tuple(ClientChargeDay(row["work_date"], False, row["holiday_hours"], row["holiday_hour_segments"]) for row in financial_days)
-    source = _load_client_finance(cursor, order_row, lock)
-    if order_row.get("actual_start_date") is not None:
-        from dataclasses import replace
-        source = replace(source, effective_start_date=order_row["actual_start_date"],
-            payment_terms=replace(source.payment_terms, first_payment_due_date=order_row["actual_start_date"]))
-    return _materialize_contract_client_finance_facts(order_row, days, source), source
+    return days
 
 
 def _committed_charge_days(cursor, case_no, lock):

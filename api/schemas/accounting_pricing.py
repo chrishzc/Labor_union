@@ -70,15 +70,15 @@ class SavePricingPolicyBody(PricingModel):
 
 
 class PricingImpactView(PricingModel):
-    covered_hours: float
-    excess_hours: float
-    client_amount: int
+    covered_hours: float | None
+    excess_hours: float | None
+    client_amount: int | None
     staff_covered_amount: int | None
     staff_excess_amount: int | None
-    staff_total_amount: int
-    subsidy_amount: int
-    subsidy_return_amount: int
-    case_total_amount: int
+    staff_total_amount: int | None
+    subsidy_amount: int | None
+    subsidy_return_amount: int | None
+    case_total_amount: int | None
     union_income_amount: int | None
 
 
@@ -88,6 +88,8 @@ class CasePricingView(PricingModel):
     source: str
     terms: CasePricingTermsBody
     impact: PricingImpactView
+    historical: bool = False
+    accounting_pending: list[str] = Field(default_factory=list)
 
 
 class CasePricingPreviewBody(PricingModel):
@@ -100,13 +102,44 @@ class CasePricingApplyBody(CasePricingPreviewBody):
     reason: str = Field(default="", max_length=500)
 
 
+class HistoricalAmountUpdateView(PricingModel):
+    identity: str
+    computed: int
+    effective: int
+    before_computed: int
+    before_effective: int
+    mode: Literal['automatic', 'manual']
+
+
+class HistoricalPersonPricingView(PricingModel):
+    assignment_identity: str
+    staff_id: int
+    staff_name: str
+    hours: float | None
+    before_amount: int | None
+    after_amount: int | None
+    delta: int | None
+
+
+class HistoricalRepricingPlanView(PricingModel):
+    client_updates: list[HistoricalAmountUpdateView]
+    staff_updates: list[HistoricalAmountUpdateView]
+    persons: list[HistoricalPersonPricingView]
+    pending: list[str]
+    client_exempt: bool
+    client_delta: int | None
+    subsidy_delta: int | None
+
+
 class CasePricingPreviewView(PricingModel):
     current: CasePricingView
     candidate: CasePricingTermsBody
     before: PricingImpactView
     after: PricingImpactView
     preview_fingerprint: str
+    historical_plan: HistoricalRepricingPlanView | None = None
 
 
 class PricingReceiptView(PricingModel):
     revision: int
+    accounting_pending: list[str] = Field(default_factory=list)

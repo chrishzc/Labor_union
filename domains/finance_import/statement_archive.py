@@ -29,35 +29,69 @@ def bank_import_type(format_id: str, direction: str) -> str:
     return "legacy"
 
 
-def direct_arrangement_ready(total, customer_amount, subsidy, fully_received, cash_flows):
-    return (fully_received is True and total is not None and customer_amount == total
-            and subsidy is not None and subsidy > 0 and cash_flows is not None
-            and all(cash_flows[flow] == 0 for flow in ("G", "PT", "RT")))
+@dataclass(frozen=True)
+class ReconciledSubsidyEvidence:
+    receipts: tuple[tuple[str, int], ...] = ()
+    staff_payouts: tuple[str, ...] = ()
+    customer_refunds: tuple[str, ...] = ()
+    government_received: bool = False
+    ambiguous: bool = False
+
+    @property
+    def customer_received(self) -> int:
+        return sum(amount for _, amount in self.receipts)
 
 
-def direct_arrangement_conflict(total, customer_amount, government_received, staff_subsidy_paid, client_subsidy_returned):
-    return ((total is not None and customer_amount is not None and total != customer_amount)
-            or any(amount > 0 for amount in (government_received, staff_subsidy_paid, client_subsidy_returned)))
+@dataclass(frozen=True)
+class SubsidySchemeDecision:
+    scheme: str = "unknown"
+    source: str | None = None
+    evidence_identities: tuple[str, ...] = ()
+    pending_reason: str | None = None
 
 
-def case_accounting_scheme(total, customer_amount, subsidy, fully_received, government_received, *,
-                           direct_confirmed=False, bank_sources_complete=True, direct_conflict=False,
-                           full_subsidy=False):
-    """Classify only uniquely supported cash arrangements; no identity routing."""
-    if full_subsidy:
-        return "split" if total is not None and total > 0 and subsidy == total and customer_amount == 0 and not direct_confirmed and not direct_conflict else "unknown"
-    if fully_received is False:
-        return "waiting"
-    if fully_received is not True or any(value is None for value in (total, customer_amount, subsidy)) or subsidy <= 0:
-        return "unknown"
-    if direct_confirmed:
-        return "direct" if customer_amount == total and bank_sources_complete and not direct_conflict and government_received == 0 else "unknown"
-    if customer_amount == total - subsidy:
-        return "split"
-    if customer_amount == total and government_received > 0:
-        return "advance"
-    # Absence of government cash never proves a direct-to-customer arrangement.
-    return "unknown"
+def case_accounting_scheme(
+    total: int | None, subsidy: int | None, evidence: ReconciledSubsidyEvidence,
+) -> SubsidySchemeDecision:
+    received = evidence.customer_received
+    reason = None
+    if evidence.ambiguous:
+        reason = "subsidy_evidence_ambiguous"
+    elif evidence.staff_payouts and evidence.customer_refunds:
+        reason = "subsidy_payout_conflict"
+    elif total is None:
+        reason = "subsidy_case_total_unknown"
+    elif subsidy is None:
+        reason = "subsidy_amount_unknown"
+    elif not 0 < subsidy <= total:
+        reason = "subsidy_amount_invalid"
+    elif received > total:
+        reason = "subsidy_receipt_over_total"
+    elif received <= 0:
+        reason = "subsidy_receipt_missing"
+    elif received == total:
+        receipts = tuple(identity for identity, _ in evidence.receipts)
+        if evidence.staff_payouts:
+            return SubsidySchemeDecision("split", "bank", (*receipts, *evidence.staff_payouts))
+        if evidence.customer_refunds:
+            return SubsidySchemeDecision("advance", "bank", (*receipts, *evidence.customer_refunds))
+        reason = "subsidy_payout_missing"
+    elif total - received == subsidy:
+        if evidence.customer_refunds:
+            reason = "subsidy_payout_conflict"
+        else:
+            return SubsidySchemeDecision("split", "receipt", tuple(identity for identity, _ in evidence.receipts))
+    else:
+        reason = "subsidy_receipt_difference_mismatch"
+    return SubsidySchemeDecision(pending_reason=reason)
+
+
+def direct_arrangement_ready(
+    total: int | None, subsidy: int | None, evidence: ReconciledSubsidyEvidence,
+) -> bool:
+    return (total is not None and total > 0 and evidence.customer_received == total
+            and subsidy is not None and 0 < subsidy <= total and not evidence.ambiguous
+            and not evidence.government_received and not evidence.staff_payouts and not evidence.customer_refunds)
 
 
 @dataclass(frozen=True)
@@ -123,6 +157,15 @@ class SubsidyPlanEvent:
     created_at: str
     source: str = "manual"
     bank_row_identity: str | None = None
+    receipt_identity: str | None = None
+
+    @property
+    def evidence_identity(self) -> str | None:
+        if self.source == "receipt":
+            return self.receipt_identity
+        if self.source == "bank" and self.bank_row_identity:
+            return self.bank_row_identity.replace("finance-import-row:", "bank:", 1)
+        return None
 
 
 @dataclass(frozen=True)

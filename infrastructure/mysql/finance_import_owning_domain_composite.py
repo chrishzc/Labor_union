@@ -268,9 +268,6 @@ class MySqlFinanceImportOwningDomainComposite:
         if isinstance(candidate, CanonicalFinanceImportRow) and candidate.subsidy_preflight is not None:
             from infrastructure.mysql.subsidy_confirmation_repository import apply_subsidy_confirmation
             apply_subsidy_confirmation(self._connection, candidate, context)
-            if candidate.subsidy_preflight.confirmation_only:
-                return FinanceImportDispatchResult(candidate.row_identity, FinanceDispatchOutcome.PENDING,
-                    reason_code='subsidy_scheme_confirmed_service_not_completed')
         if candidate.classification_type is _CLIENT_RECEIPT:
             return self._post_client_receipt(candidate, context)
         if candidate.classification_type is _CLIENT_REFUND:

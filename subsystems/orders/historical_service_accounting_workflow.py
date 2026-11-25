@@ -5,7 +5,7 @@ Description: 保存歷史訂單實際服務天數與帳務比較結果。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from decimal import Decimal
 from typing import Callable, Protocol
@@ -17,6 +17,7 @@ from domains.client_finance.historical_obligation_calculation import (
 from domains.orders.historical_service_accounting import (
     HistoricalActualServiceDaysCandidate,
     HistoricalActualServiceDaysInput,
+    HistoricalAssignmentServiceFact,
     HistoricalServiceAssignmentFacts,
     build_historical_actual_service_days_candidate,
 )
@@ -35,12 +36,15 @@ from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
+from shared_kernel.ports import UnitOfWork
+from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
 from domains.payroll.installments import allocate_historical_subsidy, confirmed_subsidy_installments
 from subsystems.payroll.terms_impact import (
-    HistoricalPayrollAllocation, HistoricalPayrollAssignment, PayrollTermsImpactCandidate,
+    HistoricalPayrollAllocation, HistoricalPayrollAssignment, PayrollTermsImpactCandidate, PayrollTermsSourceFacts,
     build_historical_payroll_attribution_impact,
 )
+from subsystems.client_finance.pricing_configuration import HistoricalRepricingPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +54,11 @@ class HistoricalServiceAccountingAssignmentFacts:
     staff_name: str
     rate_snapshot: AssignmentRateSnapshot
     effective_adjustment: MoneyNTD
+    actual_service_days: int | None = None
+    actual_service_hours: Decimal | None = None
+    service_fact: HistoricalAssignmentServiceFact | None = None
+    adopted_start_date: date | None = None
+    adopted_end_date: date | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.assignment_identity, "assignment identity", 191)
@@ -58,6 +67,16 @@ class HistoricalServiceAccountingAssignmentFacts:
             raise ValueError("historical_actual_service_days_assignment_mismatch")
         if not isinstance(self.effective_adjustment, MoneyNTD):
             raise TypeError("payroll adjustment must be MoneyNTD")
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalServiceAccountingBaseline:
+    event_id: int
+    total_actual_service_days: int
+    total_actual_service_hours: Decimal
+    historical_floor_fee_ntd: int
+    client_obligation_amount_ntd: int
+    staff_obligation_amount_ntd: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +100,8 @@ class HistoricalServiceAccountingFacts:
     staff_payment_due_date: date | None
     attribution_adopted: bool = False
     accounting_pending: tuple[str, ...] = ()
+    service_baseline: HistoricalServiceAccountingBaseline | None = None
+    partial_service_facts_version: int | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.service_hours_per_day, float):
@@ -120,6 +141,7 @@ class HistoricalServiceAccountingFacts:
 class ConfirmHistoricalServiceDaysIntent:
     case_no: str
     caregivers: tuple[HistoricalActualServiceDaysInput, ...]
+    service_facts: tuple[HistoricalAssignmentServiceFact, ...] = ()
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -130,11 +152,12 @@ class HistoricalAttributionIntent:
     case_no: str
     days_by_staff: tuple[tuple[int, int], ...]
     evidence: str
+    service_facts: tuple[HistoricalAssignmentServiceFact, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class HistoricalAttributionPreview:
-    comparison: HistoricalServiceAccountingCandidate
+    comparison: HistoricalServiceAccountingCandidate | HistoricalServiceFactsCorrectionCandidate
     payroll: PayrollTermsImpactCandidate | None
     fingerprint: PreviewFingerprint
     reopen: bool
@@ -142,6 +165,7 @@ class HistoricalAttributionPreview:
     funding: tuple[tuple[int, str, int, int, date | None], ...] = ()
     original_funding: tuple[tuple[int, str, int, int, date | None], ...] = ()
     accounting_pending: tuple[str, ...] = ()
+    volume_repricing: HistoricalRepricingPlan | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +174,13 @@ class HistoricalServiceAccountingCandidate:
     service_days: HistoricalActualServiceDaysCandidate
     payroll: HistoricalCasePayrollCandidate
     client_finance: HistoricalClientObligationCandidate
+    fingerprint: PreviewFingerprint
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalServiceFactsCorrectionCandidate:
+    facts: HistoricalServiceAccountingFacts
+    service_facts: tuple[HistoricalAssignmentServiceFact, ...]
     fingerprint: PreviewFingerprint
 
 
@@ -176,9 +207,9 @@ class HistoricalServiceAccountingReceipt:
     resulting_historical_day_revision: int
     resulting_client_finance_version: int
     resulting_payroll_version: int
-    total_actual_service_days: int
-    client_obligation_amount_ntd: int
-    staff_obligation_amount_ntd: int
+    total_actual_service_days: int | None
+    client_obligation_amount_ntd: int | None
+    staff_obligation_amount_ntd: int | None
     preview_fingerprint: PreviewFingerprint
     replayed: bool = False
     accounting_pending: tuple[str, ...] = ()
@@ -201,6 +232,24 @@ class HistoricalServiceAccountingRepository(Protocol):
         self, case_no: str, *, for_update: bool
     ) -> HistoricalServiceAccountingFacts: ...
 
+    def lock_attribution_order(self, case_no: str) -> None: ...
+
+    def load_attribution(self, case_no: str, staff_ids: tuple[int, ...], *, for_update: bool) -> tuple[
+        HistoricalServiceAccountingFacts, PayrollTermsSourceFacts, int, dict[int, str],
+        tuple[tuple[int, int], ...], tuple[tuple[str, int, int, int], ...],
+        tuple[tuple[int, StaffFundingPortion], ...], tuple[str, ...],
+    ]: ...
+
+    def persist_attribution(
+        self, intent: HistoricalAttributionIntent, preview: HistoricalAttributionPreview,
+        command: PreviewFingerprint, *, actor: ActorContext, reason: str,
+        key: IdempotencyKey, correlation: CorrelationId,
+    ) -> HistoricalServiceAccountingReceipt: ...
+
+    def preview_service_volume(
+        self, case_no: str, before: dict[str, Decimal], after: dict[str, Decimal], *, for_update: bool,
+    ) -> HistoricalRepricingPlan: ...
+
     def find_receipt(
         self, key: IdempotencyKey
     ) -> StoredHistoricalServiceAccountingReceipt | None: ...
@@ -216,7 +265,7 @@ class HistoricalServiceAccountingWorkflow:
     def __init__(
         self,
         repository: HistoricalServiceAccountingRepository,
-        unit_of_work_factory: Callable[[], object],
+        unit_of_work_factory: Callable[[], UnitOfWork],
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
@@ -225,8 +274,10 @@ class HistoricalServiceAccountingWorkflow:
         require_canonical_text(case_no, "case number", 50)
         return self._repository.load(case_no, for_update=False)
 
-    def preview_attribution(self, intent: HistoricalAttributionIntent, *, lock=False) -> HistoricalAttributionPreview:
+    def preview_attribution(self, intent: HistoricalAttributionIntent, *, lock: bool = False) -> HistoricalAttributionPreview:
         require_canonical_text(intent.evidence, "service evidence", 500)
+        if intent.service_facts:
+            return self._preview_completed_service_facts(intent, lock=lock)
         days = dict(intent.days_by_staff)
         if len(days) != len(intent.days_by_staff) or len(days) < 2 or any(
             staff_id <= 0 or count <= 0 for staff_id, count in intent.days_by_staff
@@ -258,7 +309,7 @@ class HistoricalServiceAccountingWorkflow:
         service_intent = ConfirmHistoricalServiceDaysIntent(intent.case_no, tuple(
             HistoricalActualServiceDaysInput(item.assignment_identity, item.staff_id, days[item.staff_id])
             for item in proposed.assignments
-        ))
+        ), intent.service_facts)
         comparison = _candidate(proposed, service_intent, attribution=True)
         if pending:
             return HistoricalAttributionPreview(
@@ -268,17 +319,19 @@ class HistoricalServiceAccountingWorkflow:
                 }), facts.lifecycle_status is OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
                 accounting_pending=pending,
             )
+        payroll_candidate = comparison.payroll
+        payroll_assignments = proposed.assignments
         keys = {item.assignment_identity: f"historical:{facts.historical_day_revision + 1}:{item.staff_id}"
                 for item in proposed.assignments}
         impact = build_historical_payroll_attribution_impact(
             source, HistoricalPayrollAllocation(intent.case_no, tuple(
                 HistoricalPayrollAssignment(keys[item.assignment_identity],
                     int(item.assignment_identity.removeprefix("assignment:")) if item.staff_id in existing else None)
-                for item in proposed.assignments
-            )), replace(comparison.payroll, assignments=tuple(
-                replace(item, assignment_identity=keys[item.assignment_identity]) for item in comparison.payroll.assignments
+                for item in payroll_assignments
+            )), replace(payroll_candidate, assignments=tuple(
+                replace(item, assignment_identity=keys[item.assignment_identity]) for item in payroll_candidate.assignments
             )), tuple(replace(item.rate_snapshot, assignment_identity=keys[item.assignment_identity])
-                       for item in proposed.assignments),
+                       for item in payroll_assignments),
             PayrollTerms(facts.contracted_service_days, _decimal_hours(facts.service_hours_per_day), facts.contractual_floor_fee),
             f"historical-attribution:{intent.case_no}:{facts.historical_day_revision + 1}",
         )
@@ -288,23 +341,27 @@ class HistoricalServiceAccountingWorkflow:
                    for item in impact.frozen_settlements)
         )
         funding = []
-        original_funding = tuple(
-            (staff_id, portion.funding_kind, portion.amount_ntd, portion.settled_ntd, portion.due_date)
-            for staff_id, portion in previous_funding
-        )
+        original_funding: list[tuple[int, str, int, int, date | None]] = []
+        for staff_id, portion in previous_funding:
+            settled_ntd = portion.settled_ntd
+            if settled_ntd is None:
+                raise ValueError("historical_attribution_source_payout_conflict")
+            original_funding.append(
+                (staff_id, portion.funding_kind, portion.amount_ntd, settled_ntd, portion.due_date)
+            )
         if previous_funding:
             subsidy = allocate_historical_subsidy(
                 sum(portion.amount_ntd for _, portion in previous_funding if portion.funding_kind == "subsidy"), days,
             )
-            paid = {(staff_id, portion.funding_kind): portion.settled_ntd for staff_id, portion in previous_funding}
+            paid = {(staff_id, kind): settled for staff_id, kind, _, settled, _ in original_funding}
             due_dates = {(staff_id, portion.funding_kind): portion.due_date for staff_id, portion in previous_funding}
-            for item in comparison.payroll.assignments:
+            for item in payroll_candidate.assignments:
                 for portion in confirmed_subsidy_installments(
                     item.total_payable.amount, subsidy[item.staff_id], source.staff_payment_due_date, facts.completed_on,
                 ):
                     pair = item.staff_id, portion.funding_kind
                     already_paid = paid.get(pair, 0)
-                    if already_paid is None or already_paid > portion.amount:
+                    if already_paid > portion.amount:
                         raise ValueError("historical_attribution_source_payout_conflict")
                     funding.append((*pair, portion.amount, already_paid, due_dates.get(pair, portion.due_date)))
         return HistoricalAttributionPreview(comparison, impact, fingerprint_payload({
@@ -312,15 +369,100 @@ class HistoricalServiceAccountingWorkflow:
             "staff_payables": payable_versions, "manual_amounts": manual_amounts, "evidence": intent.evidence,
             "funding": tuple((*row[:-1], row[-1].isoformat() if row[-1] else None) for row in funding),
             "original_funding": tuple((*row[:-1], row[-1].isoformat() if row[-1] else None) for row in original_funding),
-        }), reopen, manual_amounts, tuple(funding), original_funding)
+        }), reopen, manual_amounts, tuple(funding), tuple(original_funding),
+            ())
 
-    def apply_attribution(self, intent, fingerprint, *, actor, reason, key, correlation, adopt_calculated_amounts=False):
+    def _preview_completed_service_facts(
+        self, intent: HistoricalAttributionIntent, *, lock: bool,
+    ) -> HistoricalAttributionPreview:
+        facts = self._repository.load(intent.case_no, for_update=lock)
+        if facts.lifecycle_status is not OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED:
+            raise ValueError("historical_completed_service_correction_status_invalid")
+        days = dict(intent.days_by_staff)
+        existing = {item.staff_id: item for item in facts.assignments}
+        identities = {item.assignment_identity: item.staff_id for item in facts.assignments}
+        if (len(days) != len(intent.days_by_staff) or set(days) - set(existing)
+                or len({item.assignment_identity for item in intent.service_facts}) != len(intent.service_facts)
+                or any(identities.get(item.assignment_identity) != item.staff_id for item in intent.service_facts)):
+            raise ValueError("historical_completed_service_assignment_mismatch")
+        if any(count != existing[staff_id].actual_service_days for staff_id, count in days.items()):
+            raise ValueError("historical_completed_service_days_must_be_preserved")
+        if any(item.actual_service_days is None or item.actual_service_hours is None for item in facts.assignments):
+            return self._preview_partial_service_facts(facts, intent, lock=lock)
+        comparison = _candidate(facts, ConfirmHistoricalServiceDaysIntent(
+            intent.case_no, tuple(HistoricalActualServiceDaysInput(
+                item.assignment_identity, item.staff_id, item.actual_service_days) for item in facts.assignments
+                if item.actual_service_days is not None),
+            intent.service_facts,
+        ), attribution=True)
+        plan = self._repository.preview_service_volume(
+            intent.case_no,
+            {item.assignment_identity: item.actual_service_hours for item in facts.assignments
+             if item.actual_service_hours is not None},
+            {item.assignment_identity: item.actual_service_hours for item in comparison.service_days.allocations},
+            for_update=lock,
+        )
+        return HistoricalAttributionPreview(
+            comparison, None, fingerprint_payload({
+                "comparison": comparison.fingerprint.value, "financial_plan": plan.fingerprint,
+                "evidence": intent.evidence,
+            }), False, accounting_pending=plan.pending, volume_repricing=plan,
+        )
+
+    def _preview_partial_service_facts(
+        self, facts: HistoricalServiceAccountingFacts, intent: HistoricalAttributionIntent, *, lock: bool,
+    ) -> HistoricalAttributionPreview:
+        selected = {item.assignment_identity: item for item in intent.service_facts}
+        periods_by_identity = {item.assignment_identity: item.service_fact for item in facts.assignments
+                               if item.service_fact is not None}
+        periods_by_identity.update(selected)
+        periods = tuple(periods_by_identity[item.assignment_identity] for item in facts.assignments
+                        if item.assignment_identity in periods_by_identity)
+        before = {item.assignment_identity: item.actual_service_hours for item in facts.assignments
+                  if item.actual_service_hours is not None}
+        after = dict(before)
+        for item in facts.assignments:
+            if item.assignment_identity not in selected:
+                continue
+            if item.actual_service_days is None:
+                after.pop(item.assignment_identity, None)
+            else:
+                after[item.assignment_identity] = selected[item.assignment_identity].service_hours_per_day * item.actual_service_days
+        plan = self._repository.preview_service_volume(facts.case_no, before, after, for_update=lock)
+        missing = tuple("historical_completed_service_volume_unresolved:" + item.assignment_identity
+                        for item in facts.assignments
+                        if item.actual_service_days is None or item.assignment_identity not in after)
+        pending = tuple(dict.fromkeys((*plan.pending, *missing)))
+        plan = replace(plan, pending=pending)
+        comparison = HistoricalServiceFactsCorrectionCandidate(facts, periods, fingerprint_payload({
+            "case_no": facts.case_no, "lifecycle_version": facts.lifecycle_version,
+            "historical_day_revision": facts.historical_day_revision,
+            "baseline": asdict(facts.service_baseline) if facts.service_baseline else None,
+            "partial_service_facts_version": facts.partial_service_facts_version,
+            "client_finance_version": facts.client_finance_version,
+            "payroll_version": facts.payroll_version,
+            "assignments": tuple((item.assignment_identity, item.staff_id, item.actual_service_days,
+                                  str(item.actual_service_hours) if item.actual_service_hours is not None else None)
+                                 for item in facts.assignments),
+            "service_facts": tuple(item.canonical_payload() for item in periods),
+        }))
+        return HistoricalAttributionPreview(comparison, None, fingerprint_payload({
+            "comparison": comparison.fingerprint.value, "financial_plan": plan.fingerprint,
+            "evidence": intent.evidence, "pending": pending,
+        }), False, accounting_pending=pending, volume_repricing=plan)
+
+    def apply_attribution(
+        self, intent: HistoricalAttributionIntent, fingerprint: PreviewFingerprint, *,
+        actor: ActorContext, reason: str, key: IdempotencyKey, correlation: CorrelationId,
+        adopt_calculated_amounts: bool = False,
+    ) -> HistoricalServiceAccountingReceipt:
         require_canonical_text(reason, "reason", 500)
         command = fingerprint_payload({
             "kind": "historical-service-attribution", "case_no": intent.case_no,
             "days": tuple(sorted(intent.days_by_staff)), "evidence": intent.evidence,
             "preview": fingerprint.value, "reason": reason, "actor": actor.actor_id,
             "adopt_calculated_amounts": adopt_calculated_amounts,
+            "service_facts": tuple(item.canonical_payload() for item in intent.service_facts),
         })
         with self._unit_of_work_factory() as unit:
             self._repository.lock_attribution_order(intent.case_no)
@@ -328,7 +470,7 @@ class HistoricalServiceAccountingWorkflow:
             if previous is not None:
                 if previous.command_fingerprint != command:
                     raise ValueError("historical_attribution_idempotency_conflict")
-                return previous.receipt
+                return _replayed(previous.receipt)
             preview = self.preview_attribution(intent, lock=True)
             if preview.fingerprint != fingerprint:
                 raise ValueError("historical_attribution_preview_stale")
@@ -396,9 +538,21 @@ def _candidate(
         raise ValueError("historical_attribution_formal_workflow_required")
     allowed = {OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED}
     if attribution:
-        allowed.update({OrderLifecycleStatus.HISTORICAL_IN_SERVICE, OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED})
+        allowed.update({OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+                        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED})
+    if intent.service_facts and facts.lifecycle_status is not OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED:
+        raise ValueError("historical_completed_service_correction_status_invalid")
     if facts.lifecycle_status not in allowed:
         raise ValueError("historical_order_lifecycle_transition_invalid")
+    days_by_identity = {item.assignment_identity: item.actual_service_days for item in intent.caregivers}
+    service_facts: list[HistoricalAssignmentServiceFact] = []
+    for item in facts.assignments:
+        service_fact = next(
+            (value for value in intent.service_facts if value.assignment_identity == item.assignment_identity),
+            item.service_fact,
+        )
+        if service_fact is not None:
+            service_facts.append(service_fact)
     service_days = build_historical_actual_service_days_candidate(
         case_no=facts.case_no,
         assignments=tuple(
@@ -409,6 +563,13 @@ def _candidate(
         contracted_service_days=facts.contracted_service_days,
         service_hours_per_day=_decimal_hours(facts.service_hours_per_day),
         contractual_floor_fee_ntd=facts.contractual_floor_fee.amount,
+        service_facts=tuple(service_facts),
+        adopted_service_hours=tuple(
+            (item.assignment_identity, item.actual_service_hours)
+            for item in facts.assignments
+            if item.actual_service_hours is not None
+            and days_by_identity.get(item.assignment_identity) == item.actual_service_days
+        ),
     )
     payroll = build_historical_case_payroll_candidate(
         tuple(
@@ -420,6 +581,8 @@ def _candidate(
                     for allocation in service_days.allocations
                     if allocation.assignment_identity == item.assignment_identity
                 ),
+                next(allocation.actual_service_hours for allocation in service_days.allocations
+                     if allocation.assignment_identity == item.assignment_identity),
             )
             for item in facts.assignments
         ),
@@ -442,6 +605,7 @@ def _candidate(
         actual_service_days=service_days.total_actual_service_days,
         service_hours_per_day=_decimal_hours(facts.service_hours_per_day),
         historical_floor_fee=MoneyNTD(service_days.historical_floor_fee_ntd),
+        actual_service_hours=service_days.total_actual_service_hours,
     )
     payload = {
         "case_no": facts.case_no,
@@ -490,6 +654,7 @@ def _command_fingerprint(
                 request.expected_client_finance_version,
                 request.expected_payroll_version,
             ),
+            "service_facts": tuple(item.canonical_payload() for item in request.intent.service_facts),
             "preview_fingerprint": request.preview_fingerprint.value,
             "idempotency_key": request.idempotency_key.value,
             "actor": request.actor.actor_id,
@@ -511,10 +676,14 @@ def _replayed(
         receipt.staff_obligation_amount_ntd,
         receipt.preview_fingerprint,
         True,
+        receipt.accounting_pending,
     )
 
 
-def _error(request, category, code, current_version=None):
+def _error(
+    request: ApplyHistoricalServiceAccounting, category: ErrorCategory,
+    code: str, current_version: int | None = None,
+) -> HistoricalServiceAccountingError:
     from shared_kernel.identities import ExpectedVersion
 
     return HistoricalServiceAccountingError(
