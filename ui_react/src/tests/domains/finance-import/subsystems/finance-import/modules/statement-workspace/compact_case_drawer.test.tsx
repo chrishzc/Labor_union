@@ -21,8 +21,6 @@ import {caseVirtualAccountClient} from '../../../../../../../api/client_finance/
 import {accountingPricingClient} from '../../../../../../../api/client_finance/accounting_pricing_client';
 import {clientReceiptQueryClient} from '../../../../../../../api/client_finance/client_receipt_query_client';
 import {ApiHttpError} from '../../../../../../../api/shared/typed_errors';
-import {transport} from '../../../../../../../api/shared/transport';
-import {sessionClient} from '../../../../../../../api/auth/session_client';
 import {notifyCaseAccountingChanged} from '../../../../../../../api/shared/case_accounting_changes';
 import {financeImportQueryClient} from '../../../../../../../api/finance_import/finance_import_query_client';
 import {clientReceiptReconciliationClient} from '../../../../../../../api/client_finance/client_receipt_reconciliation_client';
