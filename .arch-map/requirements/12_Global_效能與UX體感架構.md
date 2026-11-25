@@ -58,10 +58,10 @@ timeout 不等於失敗；前端以相同 idempotency key 查詢 receipt／retry
 
 ### 3.4 資料中心資訊架構
 
-資料中心包含 `資料匯入` 與 `NAS 檔案` 等分頁，日常個案與人員資料維護收斂於以 `case_no` 為中心的客戶名冊與以 `staff_id` 為中心的月嫂名冊，並可經 [Entry Point Governance](19_Global_Entry_Point_Governance.md) 定義之路由與 alias 進入。
+資料匯入、客戶名冊（以 `case_no` 為主）與月嫂名冊（以 `staff_id` 為主）依 [管理端正式入口清冊](19_Global_Entry_Point_Governance.md#21-現行導航與頁面清冊) 進入。獨立檔案管理入口已退役；受控檔案從原業務功能存取，不建立替代頁面。
 
 - 分頁切換屬 local navigation，不得重送 mutation、清空未送出草稿或讓舊 response 覆蓋新分頁；tab／tabpanel 需具可程式判讀之焦點與 selected state。
-- NAS 介面僅維持資料夾與檔案名稱的檔案總管式投影，不在畫面另列層級、用途、所屬案件／人員、版本、大小、更新時間、實體 NAS path、digest 全值、Preview fingerprint 或 raw cursor。
+- 業務畫面只顯示其 owner 契約允許的檔案資訊。實體儲存路徑、完整 digest、Preview fingerprint、raw cursor 不顯示；檔案讀取與儲存邊界依 [受控檔案正式規格](30_Controlled_File_Storage_NAS正式規格.md)。
 
 ### 3.5 管理端未儲存變更與離頁
 
@@ -85,7 +85,7 @@ timeout 不等於失敗；前端以相同 idempotency key 查詢 receipt／retry
 
 - 已認證、enabled 且具對應 owner permission 的工會內部管理 UI，對畫面實際需要的一般業務資料（以及 verified applicant 查看自己 owner scope 的自助 readback）直接呈現 owner typed Query 提供的完整一般業務值，不使用局部姓名／電話／地址遮罩。
 - 完整值顯示仍受 bounded ViewModel、cursor pagination、rate limit、audit、capability 與 server-side filtering 約束。
-- credential、secret、完整銀行帳號驗證輸入以外的一般查詢投影（依各 owner 規範）、raw provider payload、NAS 實體 locator 與 raw error／log／receipt／evidence 仍嚴禁穿透 UI。
+- credential、secret、完整銀行帳號驗證輸入以外的一般查詢投影（依各 owner 規範）、raw provider payload、受控檔案實體 locator 與 raw error／log／receipt／evidence 仍嚴禁穿透 UI。
 
 ### 4.1 Payload、協定與條件查詢
 

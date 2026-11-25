@@ -118,7 +118,7 @@ Windows 選項 7 安全升級切換後暫留原庫，供本次維護驗收與必
 ## 6. 驗收標準
 
 1. **`FRESH-01～05`**：compact profile（371 tables＋canonical seeds）於空庫 bootstrap 與 `reset_DB` 結果與 full canonical 一致；register 內退役表不進新庫，既有庫存在退役表不報錯而保留物件之欄位／約束 tamper 立即 fail closed。
-2. **初始化與 Windows 三維護入口**：驗證缺庫 1049 建立、非空 1049／`RESET union_db` 明確確認與防重、三支批處理目標確認／取消／hash 負向案例；安全升級驗證本機 MySQL 完整 `dump → restore → upgrade → 原庫零異動 → 原憑證登入 → .env 原子替換`，備份復原依 [§5.3](#windows-same-name-restore) 的 `NAS-REST-01～03` 驗證。排程時間修改驗證 409 stale，介面不外洩敏感資訊。
+2. **初始化與 Windows 三維護入口**：分別驗證缺庫（errno `1049`）經互動確認建立，以及已有非空庫時須選 `R` 並輸入 `RESET union_db` 才進清空重建；核對明確確認與防重、三支批處理目標確認／取消／hash 負向案例；安全升級驗證本機 MySQL 完整 `dump → restore → upgrade → 原庫零異動 → 原憑證登入 → .env 原子替換`，備份復原依 [§5.3](#windows-same-name-restore) 的 `NAS-REST-01～03` 驗證。排程時間修改驗證 409 stale，介面不外洩敏感資訊。
 3. **Windows 安全升級舊庫清理**
    - **S**：隔離 MySQL 已成功切換新庫並通過上線驗收，原庫已有可還原的備份，且無服務使用原庫。
    - **T**：維護人員在保有原庫復原資料的前提下釋放舊庫空間。
