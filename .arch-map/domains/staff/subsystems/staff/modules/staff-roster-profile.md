@@ -5,7 +5,7 @@
 - subsystem: `staff`
 
 ## Responsibility
-提供選定單一月嫂的 bounded、authenticated 個人、聯絡與銀行帳戶投影及 owner-routed mutation；管理 UI 可讀完整身分證與緊急聯絡電話，但銀行帳號固定只讀末四碼，且不輸出 IP、LINE User ID 或 raw source。Staff Profile 與 Staff Bank Account 各自維持 version、Preview／Apply、稽核與 readback。
+提供選定單一月嫂的 bounded、authenticated 個人、聯絡與銀行帳戶投影及 owner-routed mutation；管理 UI 可讀完整身分證與緊急聯絡電話；月嫂銀行帳號在有完整值時顯示 `account_no`，沒有才回退 `account_last4`。不輸出 IP、LINE User ID 或 raw source。Staff Profile 與 Staff Bank Account 各自維持 version、Preview／Apply、稽核與 readback。
 
 Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。月嫂在原「我的資料」申請一併送件，管理員依目前版本裁切、退回或手動發布。客戶只看推薦授權範圍內的姓名與發布圖片，依照片、證照、其他、客戶反饋順序顯示有圖片的橫列。客戶反饋各項可有多張圖片，無須填寫到期日，也不發送到期提醒。
 
@@ -76,9 +76,9 @@ Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。�
 - 名冊主頁預設「現役月嫂」，以「已退役月嫂」分頁分開呈現；`/roster` optional `lifecycle_state=active|retired` 在 cursor／limit 前依 Staff-owned lifecycle 篩選，省略維持原查詢，不增加回應欄位或逐人查詢。退役／復職的正式 readback 同步移除原分頁清單列；搜尋與排序沿用目前分頁。
 - `/summaries` 同樣支援 optional `lifecycle_state=active|retired`，供排班及代班的新選項使用 active；省略仍保留全部人員，`StaffIdentityProvider` 不套用篩選，以保留歷史案件的退役人員名稱與公會編號。
 - 既有 PDF 履歷沿受控檔案保存、版本管理與管理者下載。客戶確認使用個人網頁連結。姓名取自 Staff Profile，照片取自 Staff 個人網頁的目前發布版本。到期提醒由 LINE durable delivery 投遞。
-- 規格 33 §3.2：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
+- [規格 33 §4.2](../../../../../requirements/33_案件與月嫂整合名冊正式規格.md#42-月嫂名冊與公會編號)：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
 - `.arch-map/requirements/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
-- `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md`
+- [規格 33 §6「月嫂銀行帳戶顯示契約」](../../../../../requirements/33_案件與月嫂整合名冊正式規格.md#6-月嫂銀行帳戶顯示契約)：授權 Profile 與名冊 Reader 讀取兩個欄位，名冊優先顯示完整帳號。此讀取權責不擴及事件、回執、日誌、錯誤、匯出或歷史出款快照。
 - `.arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md`
 - Profile、Bank Account 與資格修改皆為一次點擊儲存；`reason` 為選填備註，省略預設空字串。內部仍使用既有 Preview／Apply，保留 actor／before／after／receipt／idempotency，無人工預覽或核對勾選門檻（Global §2.4）。
 
