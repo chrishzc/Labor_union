@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 import re
 
 import pymysql
@@ -26,10 +25,6 @@ class IncompleteRootPreview:
 
 
 def _connection(connection_factory: ConnectionFactory, database: str):
-    if os.getenv("APP_ENV", "").strip().lower() not in {"development", "dev", "local", "test"}:
-        raise IncompleteRootResetError("development_required")
-    if database != "union_db" and not re.fullmatch(r"lu_test_[a-z0-9_]+", database):
-        raise IncompleteRootResetError("local_database_required")
     conn = connection_factory()
     if str(getattr(conn, "host", "")).lower() not in {"localhost", "127.0.0.1", "::1"}:
         conn.close()

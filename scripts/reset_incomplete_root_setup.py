@@ -13,8 +13,6 @@ from subsystems.access.incomplete_root_reset import (
 
 
 MESSAGES = {
-    "development_required": "僅允許 development／local／test 環境。",
-    "local_database_required": "僅允許本機 union_db 或 lu_test_* 資料庫。",
     "loopback_required": "僅允許 localhost 資料庫，不處理 NAS 或遠端資料庫。",
     "database_mismatch": "實際連線資料庫與確認目標不同，已停止。",
     "root_missing": "目前沒有 root，請直接開啟網站建立帳號。",

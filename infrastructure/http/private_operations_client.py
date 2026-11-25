@@ -41,8 +41,6 @@ LOCAL_PRIVATE_API_VARIABLES = (
     "INTERNAL_API_BASE_URL",
     "INTERNAL_SERVICE_SHARED_KEY",
     "INTERNAL_SERVICE_AUTH_MODE",
-    "INTERNAL_SERVICE_TOKEN_FILE",
-    "INTERNAL_API_CA_FILE",
     "INTERNAL_API_MAX_ATTEMPTS",
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -109,8 +107,6 @@ class PrivateOperationsClient:
         shared_key: str | None = None,
         timeout_seconds: float = 55.0,
         auth_mode: str | None = None,
-        token_file: str | None = None,
-        ca_file: str | None = None,
         max_attempts: int | None = None,
         retry_base_seconds: float = 0.5,
         retry_max_seconds: float = 5.0,
@@ -138,13 +134,6 @@ class PrivateOperationsClient:
             local_environment,
             "local_shared_key",
         )
-        self._token_file = _configured_value(
-            token_file,
-            "INTERNAL_SERVICE_TOKEN_FILE",
-            local_environment,
-            "",
-        )
-        self._ca_file = _configured_value(ca_file, "INTERNAL_API_CA_FILE", local_environment, "")
         self._max_attempts = max_attempts or int(
             _configured_value(
                 None,
@@ -214,7 +203,6 @@ class PrivateOperationsClient:
                 self._base_url + path,
                 headers=self._request_headers(),
                 timeout=self._timeout_seconds,
-                **({"verify": self._ca_file or True} if self._auth_mode == "nas_service_token" else {}),
             )
         except requests.RequestException as error:
             raise PrivateOperationError(
@@ -230,7 +218,6 @@ class PrivateOperationsClient:
                 json=payload,
                 headers=self._request_headers(),
                 timeout=self._timeout_seconds,
-                **({"verify": self._ca_file or True} if self._auth_mode == "nas_service_token" else {}),
             )
         except requests.RequestException as error:
             raise PrivateOperationError(
@@ -243,19 +230,6 @@ class PrivateOperationsClient:
         headers = {"X-Internal-Service-Name": self._service_name}
         if self._auth_mode == "local_shared_key" and self._shared_key:
             headers["X-Internal-Service-Key"] = self._shared_key
-            return headers
-        if self._auth_mode == "nas_service_token":
-            if not self._base_url.startswith("https://"):
-                raise PrivateOperationError("Private machine operations require HTTPS.", retryable=False,
-                                            code="internal_service_https_required")
-            try:
-                token = Path(self._token_file).read_text(encoding="utf-8").strip()
-                if len(token) < 32 or any(character.isspace() for character in token):
-                    raise ValueError("invalid machine credential")
-            except (OSError, ValueError):
-                raise PrivateOperationError("Worker machine credential is unavailable.", retryable=False,
-                                            code="internal_service_authentication_unavailable") from None
-            headers["Authorization"] = f"Bearer {token}"
             return headers
         raise PrivateOperationError(
             "Private API authentication is not configured.",

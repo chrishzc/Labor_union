@@ -28,7 +28,7 @@ class ConfigurationBlocked(ValueError):
 def _check_overrides(settings):
     names = set(settings) | set(os.environ)
     for name in names:
-        if name in {"APP_ENV", "DEPLOYMENT_PROFILE", KEYRING, ACTIVE} or name.startswith("DB_"):
+        if name in {"DEPLOYMENT_PROFILE", KEYRING, ACTIVE} or name.startswith("DB_"):
             if name in os.environ and os.environ[name] != (settings.get(name) or ""):
                 raise ConfigurationBlocked("程序環境變數與 .env 不同，請先排除設定覆寫後重試。")
 
@@ -37,14 +37,12 @@ def _runtime(env_file):
     load_dotenv(env_file, override=False)
     from infrastructure.mysql.mysql_adapter import _database_config_from_environment, get_connection
     config = _database_config_from_environment()
-    if os.getenv("APP_ENV", "").lower() not in {"development", "dev", "local", "test"}:
-        raise ConfigurationBlocked("僅允許本機 development／local／test 環境。")
     if (str(config["host"]).lower() not in {"localhost", "127.0.0.1", "::1"}
             or os.getenv("DEPLOYMENT_PROFILE", "").lower() == "nas"):
         raise ConfigurationBlocked("僅允許本機資料庫，不處理 NAS 或遠端主機。")
-    database = config["database"]
-    if database != "union_db" and not re.fullmatch(r"lu_test_[a-z0-9_]+", database):
-        raise ConfigurationBlocked("僅允許 union_db 或 lu_test_* 資料庫。")
+    database = (config.get("database") or "").strip()
+    if not database:
+        raise ConfigurationBlocked("請先在 .env 設定 DB_DATABASE。")
     return database, get_connection
 
 

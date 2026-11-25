@@ -77,7 +77,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 顯示 `passed` 後完整重啟網站，即可建立 root、掃描 QR Code、驗證綁定、保存復原碼，再返回登入。
 
 工具將隨機金鑰保存於本機 `.env`，不顯示金鑰，也不寫入 MySQL。
-有效金鑰會原樣保留；僅本機 development／local／test 且帳號、TOTP、session 及 challenge 資料全空時，才允許建立金鑰。
+有效金鑰會原樣保留；僅本機資料庫且帳號、TOTP、session 及 challenge 資料全空時，才允許建立金鑰。
 若已有帳號或驗證資料，會拒絕替換，應恢復原金鑰。請妥善保管 `.env`，不要貼出或提交 Git。
 預覽可執行 `python -m scripts.configure_initial_totp_key`，不加 `--apply` 不會寫檔。
 
@@ -87,7 +87,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 工具會顯示本機資料庫、root id 與版本；只有輸入畫面指定的完整確認文字才會清除該初始帳號。
 完成後重新啟動網站，即可重新設定帳號密碼，並依「建立 root → QR Code → TOTP 驗證 → 保存復原碼 → 返回登入」完成設定。
 
-僅允許本機 development／local／test 的 `union_db` 或 `lu_test_*`，且帳號安全版本必須仍為初始值 `1`。曾更換帳密／安全設定、已綁定／使用過 TOTP、登入過、已有其他管理員或業務資料引用時拒絕重置。
+僅允許本機資料庫，且帳號安全版本必須仍為初始值 `1`。曾更換帳密／安全設定、已綁定／使用過 TOTP、登入過、已有其他管理員或業務資料引用時拒絕重置。
 業務資料、稽核紀錄及加密金鑰保留；不需提供舊帳密。取消不會異動資料。
 只想先檢查時，執行 `python -m scripts.reset_incomplete_root_setup`；加上 `--apply` 才會進入確認操作。
 

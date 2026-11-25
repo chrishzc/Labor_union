@@ -1,7 +1,6 @@
 """Interactive Windows host adapter for Access-owned root account maintenance."""
 
 import getpass
-import ipaddress
 import os
 import subprocess
 import sys
@@ -10,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pymysql
-from dotenv import dotenv_values
 
 from scripts.nas_database_maintenance import MaintenanceBlocked, digest, load_settings
 from subsystems.access.root_account_maintenance import (
@@ -38,20 +36,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _target_settings(root: Path):
     env_file = root / ".env"
-    pin_file = root / ".env.nas-maintenance"
-    if not pin_file.is_file():
-        raise RootMaintenanceRejected("未設定 NAS 維護目標。")
-    pins = dotenv_values(pin_file, encoding="utf-8", interpolate=False)
-    # Reuse the Windows NAS TLS and runtime settings parser. Root maintenance
+    # Reuse the shared MySQL and TLS settings parser. Root maintenance
     # needs neither backup credentials nor access to the backup directory.
     settings = load_settings(env_file, settings_file=None)
     runtime = settings["runtime"]
-    host, port, database = settings["host"], settings["port"], settings["database"]
-    if (pins.get("NAS_MAINTENANCE_ENABLED") != "1"
-            or pins.get("NAS_EXPECTED_HOST") != host
-            or pins.get("NAS_EXPECTED_PORT") != str(port)
-            or not all(runtime.get(key) for key in ("DB_HOST", "DB_DATABASE", "DB_USER"))):
-        raise RootMaintenanceRejected("目前資料庫與已登記的 NAS 維護目標不符。")
+    if not all(runtime.get(key) for key in ("DB_HOST", "DB_DATABASE", "DB_USER")):
+        raise RootMaintenanceRejected("請先在 .env 設定資料庫連線資訊（DB_HOST、DB_DATABASE、DB_USER）。")
     settings_keys = (
         "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD", "DB_PASSWORD_FILE",
         "DB_SSL_MODE", "DB_SSL_CA", "DB_SSL_CERT", "DB_SSL_KEY",
@@ -59,22 +49,6 @@ def _target_settings(root: Path):
     )
     if any(key in os.environ and os.environ[key] != runtime.get(key) for key in settings_keys):
         raise RootMaintenanceRejected("目前執行環境與部署設定不同。")
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        address = None
-    loopback = host.casefold().rstrip(".") == "localhost" or bool(address and address.is_loopback)
-    if loopback:
-        if runtime.get("APP_ENV") not in {"development", "test"} or not database.startswith("lu_test_"):
-            raise RootMaintenanceRejected("本機維護僅限明確指定的隔離測試庫。")
-    elif (
-        (address is not None and (address.is_unspecified or address.is_multicast))
-        or not (database == "union_db" or database.startswith("lu_nas_"))
-        or runtime["DB_USER"].casefold() == "root"
-    ):
-        raise RootMaintenanceRejected("正式維護需要核准的 NAS 資料庫及專用資料庫身分。")
-    if settings["ssl_mode"] != "VERIFY_IDENTITY":
-        raise RootMaintenanceRejected("維護需要驗證伺服器身分的 MySQL TLS 連線。")
     if bool(runtime.get("DB_SSL_CERT")) != bool(runtime.get("DB_SSL_KEY")):
         raise RootMaintenanceRejected("MySQL 用戶端憑證與私鑰須成對設定。")
     return settings
@@ -100,13 +74,9 @@ def _connection_factory(settings):
                 **settings["tls"],
             )
         except (pymysql.MySQLError, OSError):
-            raise RootMaintenanceRejected("無法驗證 MySQL TLS 連線或資料庫身分。") from None
+            raise RootMaintenanceRejected("無法連線至 MySQL 資料庫，請確認服務狀態與連線設定。") from None
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SHOW SESSION STATUS LIKE 'Ssl_cipher'")
-                status = cursor.fetchone()
-                if not status or not status[1]:
-                    raise RootMaintenanceRejected("資料庫連線未使用 TLS。")
                 cursor.execute("SELECT DATABASE(), UTC_TIMESTAMP(6)")
                 target, database_time = cursor.fetchone()
                 if target != settings["database"]:
@@ -180,9 +150,8 @@ def _selected_change(cipher):
 def _interactive(root: Path) -> None:
     _require_stopped_runtime(root)
     env_file = root / ".env"
-    pin_file = root / ".env.nas-maintenance"
     settings = _target_settings(root)
-    original = (digest(env_file), digest(pin_file))
+    original = digest(env_file)
     runtime = settings["runtime"]
     cipher = totp_cipher_from_settings(
         runtime.get("ACCESS_CONTROL_TOTP_KEYRING") or "",
@@ -204,7 +173,7 @@ def _interactive(root: Path) -> None:
     if input("輸入 Y 確認變更：").strip().upper() != "Y":
         return
     _require_stopped_runtime(root)
-    if original != (digest(env_file), digest(pin_file)):
+    if original != digest(env_file):
         raise RootMaintenanceRejected("部署設定已變更，請重新驗證維護目標。")
     try:
         recovery_codes = apply_root_change(connect, grant, change)

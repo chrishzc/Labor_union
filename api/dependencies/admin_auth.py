@@ -24,8 +24,6 @@ from subsystems.line.capabilities import LineCapability
 from subsystems.access.integration_capabilities import IntegrationCapability
 
 
-DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test"}
-
 ACCESS_CONTROL_PROFILES = frozenset(
     {"local_auth", "local_developer_session", "production"}
 )
@@ -50,9 +48,7 @@ def admin_auth_is_enabled() -> bool:
 
 
 def ensure_development_line_configuration() -> None:
-    """開發環境啟動時自動確認並初始化 6 大基準 LINE 設定（Rich Menu、通知規則、LIFF等），防止空設定。"""
-    if os.getenv("APP_ENV", "").strip().lower() not in DEVELOPMENT_ENVIRONMENTS:
-        return
+    """啟動時自動確認並補齊缺少的 5 份基準 LINE JSON 設定（範本、排程、Rich Menu、LIFF、通知規則）。"""
     try:
         from pathlib import Path
         import json
@@ -84,7 +80,7 @@ def ensure_development_line_configuration() -> None:
             app.bootstrap_missing(
                 definitions,
                 actor,
-                reason="開發環境自動初始化基準設定",
+                reason="啟動時自動補齊基準 LINE 設定",
                 correlation_id=CorrelationId("line-configuration-bootstrap"),
             )
     except Exception:

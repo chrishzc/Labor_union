@@ -1,7 +1,9 @@
-"""Knowledge application construction and portable development catalog bootstrap."""
+"""Knowledge application construction and portable catalog bootstrap."""
 
 import hashlib
 import os
+
+import pymysql
 
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
 from infrastructure.mysql.mysql_adapter import get_connection
@@ -76,25 +78,40 @@ def import_builtin_knowledge_catalog(
     }
 
 
-def ensure_builtin_knowledge_catalog() -> None:
-    """Restore bundled QA content and initial enabled state without overwriting edits."""
-    if os.getenv("APP_ENV", "").strip().lower() not in {"dev", "development", "local"}:
-        return
+def _lookup_catalog_seed_actor_id() -> int | None:
     username = os.getenv("DEV_ROOT_USERNAME", "").strip().lower()
-    if not username:
-        return
-    connection = get_connection()
+    try:
+        connection = get_connection()
+    except (pymysql.MySQLError, OSError):
+        return None
     try:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT id FROM admin_users WHERE username=%s", (username,))
-            row = cursor.fetchone()
+            row = None
+            if username:
+                cursor.execute("SELECT id FROM admin_users WHERE username=%s", (username,))
+                row = cursor.fetchone()
+            if row is None:
+                cursor.execute(
+                    "SELECT u.id FROM admin_root_account r "
+                    "JOIN admin_users u ON u.id = r.admin_user_id "
+                    "WHERE r.singleton_key = 1 AND u.enabled = 1"
+                )
+                row = cursor.fetchone()
+    except pymysql.MySQLError:
+        return None
     finally:
         connection.close()
-    if row is None:
+    return int(row["id"]) if row is not None else None
+
+
+def ensure_builtin_knowledge_catalog() -> None:
+    """Restore bundled QA content and initial enabled state without overwriting edits."""
+    actor_id = _lookup_catalog_seed_actor_id()
+    if actor_id is None:
         # A fresh installation must reach the shared root-setup page first.
         return
     import_builtin_knowledge_catalog(
-        ActorContext(str(row["id"])),
+        ActorContext(str(actor_id)),
         "builtin-line-common-qa-v1",
         "builtin-line-common-qa-v1",
     )

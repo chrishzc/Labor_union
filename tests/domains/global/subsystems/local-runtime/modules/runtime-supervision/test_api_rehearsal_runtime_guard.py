@@ -25,8 +25,44 @@ def test_api_lifespan_runs_bounded_seeds_then_validates_runtime_without_workers(
     assert calls == ["knowledge_seed", "line_seed", "validated", "running"]
 
 
+import pytest
+
+
 def test_api_main_has_no_embedded_worker_startup() -> None:
     source = inspect.getsource(main)
 
     assert "start_architecture_outbox_worker" not in source
     assert "start_security_audit_retention_worker" not in source
+
+
+@pytest.mark.parametrize("environment", ["production", "development"])
+def test_startup_backfills_five_baseline_line_configs_in_all_environments(monkeypatch, environment) -> None:
+    from api.dependencies.admin_auth import ensure_development_line_configuration
+    from domains.line.configuration import LineConfigurationKind
+    from subsystems.line import configuration_application
+
+    captured: dict[str, object] = {}
+
+    class StubApplication:
+        def __init__(self, _unit_of_work_factory) -> None:
+            pass
+
+        def bootstrap_missing(self, definitions, actor, *, reason, correlation_id) -> dict[object, int]:
+            captured["definitions"] = definitions
+            captured["actor"] = actor
+            captured["reason"] = reason
+            captured["correlation_id"] = correlation_id
+            return {}
+
+    monkeypatch.setenv("APP_ENV", environment)
+    monkeypatch.setattr(configuration_application, "LineConfigurationApplication", StubApplication)
+
+    ensure_development_line_configuration()
+
+    assert set(captured["definitions"]) == {
+        LineConfigurationKind.MESSAGE_TEMPLATES,
+        LineConfigurationKind.MESSAGE_SCHEDULES,
+        LineConfigurationKind.RICH_MENUS,
+        LineConfigurationKind.LIFF,
+        LineConfigurationKind.NOTIFICATION_RULES,
+    }

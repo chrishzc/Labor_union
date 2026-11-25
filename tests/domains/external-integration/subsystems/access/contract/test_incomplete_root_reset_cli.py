@@ -36,12 +36,31 @@ def test_remote_configuration_never_opens_a_connection(entry, monkeypatch):
     entry[1].assert_not_called()
 
 
-def test_production_cannot_reach_the_reset_writer(monkeypatch):
+def test_production_and_custom_database_reach_loopback_reset_check(monkeypatch):
+    from unittest.mock import MagicMock
+
     monkeypatch.setenv("APP_ENV", "production")
-    factory = Mock()
-    with pytest.raises(IncompleteRootResetError, match="development_required"):
-        reset_incomplete_root_setup(connection_factory=factory, target_database="union_db", expected_account_id=7, expected_version=1)
-    factory.assert_not_called()
+    conn = MagicMock(host="127.0.0.1")
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [{"database_name": "custom_union_db"}, None]
+    with pytest.raises(IncompleteRootResetError, match="root_missing"):
+        reset_incomplete_root_setup(
+            connection_factory=lambda: conn,
+            target_database="custom_union_db",
+            expected_account_id=7,
+            expected_version=1,
+        )
+    conn.close.assert_called_once()
+
+    remote_conn = MagicMock(host="nas.example.test")
+    with pytest.raises(IncompleteRootResetError, match="loopback_required"):
+        reset_incomplete_root_setup(
+            connection_factory=lambda: remote_conn,
+            target_database="custom_union_db",
+            expected_account_id=7,
+            expected_version=1,
+        )
+    remote_conn.close.assert_called_once()
 
 
 def test_driver_errors_are_not_echoed(entry, capsys):

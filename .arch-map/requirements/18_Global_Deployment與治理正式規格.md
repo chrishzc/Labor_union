@@ -21,7 +21,7 @@
 8. Schema 變更必須使用 preserve-data release manifest、backup、candidate、validation、switch 與 recovery receipt。
 9. Release 未通過 post-start readback 不得標示完成。
 10. 部署位置變更不得改變 Domain ownership、typed API contract、transaction 或資料語意。
-11. Production Private Operations caller 如啟用獨立機器憑證模式須使用各 Worker 獨立憑證與私人 HTTPS；local shared key 僅限 loopback `local_auth` 本機監督器內使用，不得暴露至公開邊界。
+11. Private Operations caller 統一使用 loopback `local_shared_key` 驗證（至少 32 字元之共享金鑰並搭配 `X-Internal-Service-Name` 操作端點綁定），不得暴露至公開邊界。
 12. 外部副作用只由已提交的 outbox、inbox 或 durable job 執行。
 13. 技術 log 與營運觀測資料以正向 allowlist 管理，最長保留 30 天；所有業務根事實、事件與稽核證據不受本政策刪除。
 
@@ -32,7 +32,7 @@
 - **工會 Windows 主機（應用層與管理入口）**：以根目錄 `Windows管理.bat`（`scripts/launchers/manage_windows.ps1` → `supervise_local_runtime.ps1`）統一先啟動根目錄 `docker-compose.yml` 內的本機 MySQL 8.0 與 Redis 7 容器，通過唯讀 schema 檢查後啟動並監督 FastAPI、React 入口、背景 Workers、LINE Webhook 與 Cloudflare Tunnel（詳見 `scripts/launchers/WINDOWS-REMOTE.md`）。主機間程式交付使用 `scripts/package_windows_runtime.py` 產生排除秘密與 runtime 資料的來源雜湊部署包。
 - **本機 Docker 容器（MySQL 8.0、Redis 7 與公開 LINE 待審隔離專區）**：透過根目錄 `docker-compose.yml` 統一編排 MySQL 8.0（`db` 服務／`mysql_db` 容器與 `mysql-data` 持久化資料卷）、Redis 7（`redis` 服務／`union_redis` 容器），以及 `registration` profile 的公開 LINE 待審專區（`registration-redis`、`registration-intake` 與 `registration-token-verifier`），所有對主機暴露之通訊埠均強制只綁定 `127.0.0.1` loopback（`3306`、`6379`、`6380`、`8080`），不對區域網路或網際網路公開。
 - **本機 SQL 備份與保留資料升級**：Windows 管理入口選項 `6 備份`、`7 安全升級`、`8 復原備份`（`scripts/nas_database_maintenance.py`）直接以本機 `127.0.0.1` 執行線上一致性匯出、全新副本 `upgrade` 驗證切換與災難還原；本機儲存目錄與跨機離線備份複本由維護人員依環境配置並定期異地複製。詳細維護契約見 [Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md)。
-- **API 隔離組成與機器憑證邊界**：`api/main.py`（含 `api/routes/admin_setup.py` 首次 root 建帳）、`api/nas_apps.py` 與 `api/routes/nas_line_operations.py` 維持管理與公開 LINE 分離組成及私人入口 `/internal/v1/line-operations`。
+- **API 組成與啟動補齊**：`api/main.py`（含 `api/routes/admin_setup.py` 首次 root 建帳）與 `api/nas_apps.py` 組合管理與公開 LINE 路由；管理端啟動時（包含 `production`）會自動補齊缺少的 5 份基準 LINE JSON 設定，並在已有 root 帳號時自動匯入內建知識庫內容。
 
 ### 3.1 Public edge、Application zone 與 Data zone
 

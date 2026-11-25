@@ -136,9 +136,10 @@ def test_semantic_readback_reports_managed_qa_identity() -> None:
 class _AdminCursor:
     def __enter__(self): return self
     def __exit__(self, *_): return None
-    def execute(self, sql, parameters):
-        assert "FROM admin_users" in sql
-        assert parameters == ("root-admin",)
+    def execute(self, sql, parameters=None):
+        if parameters is not None:
+            assert "FROM admin_users" in sql
+            assert parameters == ("root-admin",)
     def fetchone(self): return {"id": 7}
 
 
@@ -194,15 +195,31 @@ def test_development_startup_seeds_all_bundled_questions_without_manual_import(m
     assert {command.item_id for command in application.publish_commands} == expected_enabled_ids
 
 
-def test_non_development_startup_does_not_seed_catalog(monkeypatch) -> None:
+def test_production_startup_seeds_bundled_catalog_using_persisted_root_account(monkeypatch) -> None:
+    class RootLookupCursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): return None
+        def execute(self, sql, parameters=None):
+            assert "FROM admin_root_account" in sql
+            assert parameters is None
+        def fetchone(self): return {"id": 11}
+
+    class RootConnection(_AdminConnection):
+        def cursor(self): return RootLookupCursor()
+
+    connection = RootConnection()
+    application = _CatalogApplication()
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setattr(
-        knowledge_dependencies,
-        "get_connection",
-        lambda: (_ for _ in ()).throw(AssertionError("production startup must not seed")),
-    )
+    monkeypatch.delenv("DEV_ROOT_USERNAME", raising=False)
+    monkeypatch.setattr(knowledge_dependencies, "get_connection", lambda: connection)
+    monkeypatch.setattr(knowledge_dependencies, "get_knowledge_application", lambda: application)
 
     knowledge_dependencies.ensure_builtin_knowledge_catalog()
+
+    assert connection.closed is True
+    assert application.commands is not None and len(application.commands) == 54
+    assert {command.actor.actor_id for command in application.commands} == {"11"}
+    assert application.publish_commands is not None and len(application.publish_commands) == 40
 
 
 def test_fresh_install_without_legacy_admin_skips_catalog_and_releases_connection(monkeypatch) -> None:

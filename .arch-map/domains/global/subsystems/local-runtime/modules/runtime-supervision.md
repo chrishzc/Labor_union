@@ -5,7 +5,7 @@
 - subsystem: `local-runtime`
 
 ## Responsibility
-以單一 owned Windows supervisor 啟動並監督 FastAPI、React 與各背景 worker。僅在本機 `local_auth` supervisor 模式下，Private API shared key 依序沿用明確 process value、本機 `.env` 現有值，僅兩者都缺少時產生當次臨時值，並由所有 child 共用。API ready 後先通過無副作用認證握手，才能啟動 worker。
+以單一 owned Windows supervisor 啟動並監督 FastAPI、React 與各背景 worker。Private API 統一使用 `local_shared_key`（不限 `APP_ENV`）：`supervise_local_runtime.ps1` 依序沿用明確 process value、本機 `.env` 現有值，僅兩者都缺少時產生當次臨時值，並由所有 child 共用。API ready 後先通過無副作用認證握手，才能啟動 worker。
 
 ## Implementation
 - primary: `scripts/launchers/supervise_local_runtime.ps1`
@@ -22,10 +22,10 @@
 - Compose: `docker-compose.yml` — 單一工會主機統一編排 MySQL 8.0（`db`／`mysql_db`）、Redis 7（`redis`／`union_redis`）與 `registration` profile（`registration-redis`、`registration-intake`、`registration-token-verifier`），所有對主機發布連接埠均僅綁定 `127.0.0.1` loopback。
 - local-bypass Docker transport: `scripts/launchers/local_react_gateway.py`
 - LINE worker check: `scripts/run_line_worker.py` 的 `--check` 只執行 Private API 認證握手，不進入任何 work cycle。
-- Isolated API composition & setup surface: `api/nas_apps.py` — 管理與對外 LINE API 分離組成；management 沿用 `api.main` 掛載的 Access-owned `api/routes/admin_setup.py`，不另掛安裝模式。保留受驗證 LIFF 申請／日誌／照片入口與 canonical knowledge catalog startup，並於公開 `line_app()` 掛載 `ResponseCompressionMiddleware`（排除 XLSX 封裝）與排空連線池。
+- Isolated API composition & setup surface: `api/nas_apps.py` — 管理與對外 LINE API 分離組成；management 沿用 `api.main` 掛載的 Access-owned `api/routes/admin_setup.py`，不另掛安裝模式，並於啟動時自動補齊基準 LINE 設定與內建知識庫。`line_app()` 直接掛載受驗證 LIFF 入口、`line_table_images.router`、`ResponseCompressionMiddleware`（排除 XLSX 封裝）與排空連線池。
 - Windows setup proxy: `scripts/windows_remote_runtime.py` — setup API 使用已驗證的 Host 與 request scheme 供 API 同源檢查，外來 forwarded headers 仍剔除；不擁有 root 狀態或建帳 writer。
-- Machine auth: `infrastructure/runtime/worker_credentials.py`、`api/dependencies/internal_service_auth.py`、`infrastructure/http/private_operations_client.py`；逐 Worker token、API 只有 verifier、HTTPS／CA、憑證決定 service（`test_nas_worker_credentials.py`）。`scripts/run_service_monitor.py` 的內部探測使用相同私人 CA。
-- LIFF operation bridge: `api/routes/nas_line_operations.py`、`infrastructure/http/line_operations_client.py` 與 `api/nas_apps.py` 明確組合接案回覆、訂金、服務說明／回饋、手機工會管理及其既有子路由。公開端只轉送原 JSON 契約，管理端私人入口 `/internal/v1/line-operations` 以 `line-operations-proxy` 獨立機器憑證保護，仍執行原 LINE 憑證／綁定／能力／本人範圍／版本與冪等驗證。測試 `test_nas_line_operations.py` 位於本 Module root。
+- Machine auth: `api/dependencies/internal_service_auth.py`、`infrastructure/http/private_operations_client.py`；統一以 `local_shared_key` 驗證內部操作與服務識別綁定，非 `local_shared_key` 模式 fail closed。測試見 `test_private_runtime_operations.py`。
+- LINE public app composition: `api/nas_apps.py` 直接組合接案回覆、訂金、服務說明／回饋、手機工會管理、表格圖片及其既有子路由（含 `staff_leave_intake` 延後結果驗證路由與 410 退役端點）。測試 `test_nas_line_operations.py` 位於本 Module root。
 - Single-host Docker stateful deployment: `docker-compose.yml` — 同機部署 MySQL 8.0（`db` 容器 `mysql_db`、`mysql-data` 資料卷、UTF-8／UTC 設定與 `127.0.0.1:3306` loopback 綁定）、Redis 7（`redis` 容器 `union_redis`、`127.0.0.1:6379` loopback 綁定），以及可由 `--profile registration` 啟用之隔離待審容器（`registration-redis` `127.0.0.1:6380`、`registration-intake` `127.0.0.1:8080` 與 `registration-token-verifier`）；`test_nas_test_bundle.py` 與 `test_docker_compose_local_security.py` 驗證單機 Compose 安全契約與來源封裝秘密過濾。
 - Windows 遠端專用入口：`scripts/launchers/start_windows_remote.bat`、`scripts/windows_remote_runtime.py`，操作由 `scripts/launchers/WINDOWS-REMOTE.md` 承接。建置驗證靜態 artifact（`scripts/build_react_admin_artifact.py` 洗滌非白名單 `VITE_*` 變數並由 `.vite/manifest.json` 寫入 `immutable_assets`，`infrastructure/runtime/react_admin_artifact.py` 向後相容舊版 v1 產物回復），僅 loopback 5173 的 `/test/` 與 `/test/api/`（靜態資源經 `ResponseCompressionMiddleware` Gzip 壓縮，僅已驗證內容版本化純 JS／CSS 發出 `private, max-age=31536000, immutable` 與內部資格標頭，API 代理剝除該標頭並維持 `no-store`）；Gateway 不擁有業務規則，API 保留原授權／writer。supervisor 只在明確 artifact 環境 binding 時改用靜態 Gateway，不啟動 Vite；原 DB gate／worker／cleanup 不變。`--prepare` 不啟動服務、不接觸 DB 或 Cloudflare。測試 `test_windows_remote_runtime.py` 位於既有 Module root。
 - Windows Cloudflare 連線：`deployment/windows-remote/path-router.mjs` 只轉送 root `/test` segment 至獨立受 Access 保護的 origin，不改 root DNS／既有 Tunnel；上游 `fetch` 維持 `no-store`（edge bypass），僅通過路徑、方法、200 狀態、MIME、無 Cookie／redirect 與內部資格證明之純 JS／CSS 設定瀏覽器私有 `immutable` 並剝除內部標頭，其餘一律 `no-store`。`start_windows_remote.bat --connect` 由原 supervisor 監督 API、static gateway 與 token-file cloudflared；背景工作／推播沿用本機標準啟動規則，不因遠端連線額外停用。`test_windows_remote_router.mjs` 與既有 Python supervisor／gateway tests 共用本 Module test root。
