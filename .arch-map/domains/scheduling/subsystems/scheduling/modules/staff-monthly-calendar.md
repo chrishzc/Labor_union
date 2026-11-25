@@ -32,7 +32,7 @@
 
 - 名冊先讀完 bounded Staff summary cursor 全部頁面，再依 Staff-owned `union_no` 自然升冪排列，未設定排最後；日曆、排查與代班選單使用「公會編號 姓名」，搜尋比對公會編號，不以內部 STF 代碼代替。
 - 排班主頁的可選名單使用 `/staff/summaries?lifecycle_state=active`，初頁與後續 cursor 均保留篩選。歷史案件、completed assignment 與單人月份 Query 保持唯讀可查；全域歷史人員標籤仍從未篩選摘要解析，不刪除歷史 root。
-- `GET /api/v1/staff/{staff_id}/monthly-schedule` — `api/routes/staff_monthly_schedule.py` 與 `api/schemas/staff_monthly_schedule.py`。
+- `GET /api/v1/staff/{staff_id}/monthly-schedule` — `api/routes/staff_monthly_schedule.py` 與 `api/schemas/staff_monthly_schedule.py`。 前端由 `ui_react/src/api/scheduling/staff_monthly_schedule_client.ts` 以 strict schema 驗證月份資料；不符合契約的回應走補充支線失敗，不當成空月或正式班次。
 - 多筆逐日班次及可追溯的起訖共供工會甘特與 `line/static/staff_schedule.html`；跨日續班沿用原服務日。LINE 用同案、指派及服務日定位既有請假表單。
 - `historical_assignment` — completed legacy assignment 的唯讀 provenance projection；不宣稱 daily schedule ownership。
 - `historical_reservation` — 工會月曆以共用檔期資料呈現歷史未服務案的唯讀預定區段，涵蓋重啟後待排班期間。
