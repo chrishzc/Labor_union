@@ -4,13 +4,19 @@ from dataclasses import asdict, dataclass, is_dataclass, replace
 import json
 from datetime import date
 from decimal import Decimal
-from typing import Callable, ContextManager, Protocol
+from typing import Callable, ContextManager, Literal, Protocol
 
 from domains.client_finance.pricing_policy import CasePricingTerms, PricingPolicy, calculate_case_total_amount, calculate_holiday_premium, whole_ntd
 from domains.payroll.tiered_rates import TieredPayrollRate, price_hours
+from domains.payroll.calculation import AssignmentRateSnapshot
+from domains.payroll.historical_calculation import historical_service_salary
 from domains.government_subsidy.pricing import subsidy_claim_amount
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.fingerprints import PreviewFingerprint
+
+
+HistoricalRateAuthority = Literal['legacy', 'policy', 'manual']
 
 
 class PricingConflict(ValueError):
@@ -68,16 +74,27 @@ class PricingServiceDay:
 
 @dataclass(frozen=True)
 class PricingImpact:
-    covered_hours: Decimal
-    excess_hours: Decimal
-    client_amount: int
+    covered_hours: Decimal | None
+    excess_hours: Decimal | None
+    client_amount: int | None
     staff_covered_amount: int | None
     staff_excess_amount: int | None
-    staff_total_amount: int
-    subsidy_amount: int
-    subsidy_return_amount: int
-    case_total_amount: int = 0
+    staff_total_amount: int | None
+    subsidy_amount: int | None
+    subsidy_return_amount: int | None
+    case_total_amount: int | None = 0
     union_income_amount: int | None = None
+
+
+@dataclass(frozen=True)
+class HistoricalPricingPerson:
+    assignment_identity: str
+    staff_id: int
+    staff_name: str
+    hours: Decimal | None
+    actual_service_days: int | None
+    adjustment: int = 0
+    rate_snapshot: AssignmentRateSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +113,12 @@ class CasePricingFacts:
     frozen_case_total: int | None = None
     formal_staff_amount: int | None = None
     formal_client_amount: int | None = None
+    historical_people: tuple[HistoricalPricingPerson, ...] = ()
+    historical: bool = False
+    accounting_pending: tuple[str, ...] = ()
+    financial_sources_digest: str = ""
+    historical_plan: "HistoricalRepricingPlan | None" = None
+    accounting_carry: tuple["HistoricalAccountingCarry", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,6 +128,7 @@ class CasePricingPreview:
     before: PricingImpact
     after: PricingImpact
     fingerprint: str
+    historical_plan: "HistoricalRepricingPlan | None" = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +150,27 @@ class HistoricalAmountUpdate:
 
 
 @dataclass(frozen=True)
+class HistoricalPersonPricing:
+    assignment_identity: str
+    staff_id: int
+    staff_name: str
+    hours: Decimal | None
+    before_amount: int | None
+    after_amount: int | None
+    delta: int | None
+
+
+@dataclass(frozen=True)
+class HistoricalAccountingCarry:
+    component: Literal['client', 'subsidy', 'payroll']
+    identity: str
+    basis_amount: int | None
+    pending: tuple[str, ...]
+    financial_sources_digest: str
+    subsidy_claim_basis: int | None = None
+
+
+@dataclass(frozen=True)
 class HistoricalRepricingPlan:
     case_no: str
     client_version: int
@@ -134,6 +179,18 @@ class HistoricalRepricingPlan:
     staff_updates: tuple[HistoricalAmountUpdate, ...]
     source_versions: tuple[int, ...] = ()
     new_deposit: tuple[str, str | None] | None = None
+    persons: tuple[HistoricalPersonPricing, ...] = ()
+    pending: tuple[str, ...] = ()
+    client_exempt: bool = False
+    client_delta: int | None = 0
+    subsidy_delta: int | None = 0
+    financial_sources_digest: str = ""
+    carry: tuple[HistoricalAccountingCarry, ...] = ()
+    rate_authority: HistoricalRateAuthority | None = None
+
+    @property
+    def fingerprint(self) -> str:
+        return _fingerprint(self)
 
     @property
     def client_changed(self):
@@ -142,6 +199,16 @@ class HistoricalRepricingPlan:
     @property
     def payroll_changed(self):
         return any(i.computed != i.before_computed or i.effective != i.before_effective for i in self.staff_updates)
+
+
+@dataclass(frozen=True)
+class HistoricalBirthCorrectionPreview:
+    fingerprint: PreviewFingerprint
+    impact: HistoricalRepricingPlan
+    facts: CasePricingFacts
+    terms: CasePricingTerms
+    before_birth_count: str | None
+    after_birth_count: str
 
 
 def build_historical_deposit_floor_fee_plan(case_no, client_version, service_basis, source, new_deposit, delta):
@@ -187,22 +254,54 @@ def build_historical_repricing_plan(facts, terms, client_sources, staff_source, 
 
 
 class PricingRepository(Protocol):
+    accounting_pending: tuple[str, ...]
     def catalog(self, *, lock: bool = False) -> PricingCatalog: ...
     def case(self, case_no: str, *, lock: bool = False) -> CasePricingFacts: ...
+    def historical_plan(self, facts: CasePricingFacts, terms: CasePricingTerms, *, lock: bool) -> HistoricalRepricingPlan: ...
     def receipt(self, key: str, actor: str, command_hash: str) -> int | None: ...
     def save_policy(self, policy: PricingPolicy, revision: int, actor: str, reason: str) -> None: ...
     def save_case(self, facts: CasePricingFacts, terms: CasePricingTerms, actor: str, reason: str, key: str) -> None: ...
     def save_receipt(self, key: str, actor: str, command_hash: str, revision: int) -> None: ...
 
 
-def _base_pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingImpact:
+def legacy_historical_service_salary(person: HistoricalPricingPerson, hours: Decimal) -> int:
+    snapshot = person.rate_snapshot
+    if (snapshot is None or snapshot.assignment_identity != person.assignment_identity
+            or snapshot.hourly_rate.amount <= 0):
+        raise PricingConflict('case_pricing_payroll_snapshot_required')
+    return historical_service_salary(hours, snapshot.hourly_rate).amount
+
+
+def _base_pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts, *,
+        use_legacy_person_rates: bool = False) -> PricingImpact:
     if facts.historical_service_hours is not None:
         hours = facts.historical_service_hours
         covered, excess = terms.split_hours(hours)
         staff_covered, staff_excess = price_hours(((hours, False),),
             TieredPayrollRate(terms.payroll.covered, terms.payroll.excess, terms.subsidy_hours, terms.rule.value == "social"))
-        return PricingImpact(covered, excess, terms.client_charge(hours) + facts.floor_fee,
-            staff_covered, staff_excess, staff_covered + staff_excess + facts.floor_fee + facts.payroll_adjustment,
+        if facts.historical_people and all(person.hours is not None for person in facts.historical_people):
+            consumed = Decimal(0)
+            staff_covered = staff_excess = 0
+            for person in facts.historical_people:
+                if person.hours is None:
+                    continue
+                if use_legacy_person_rates and facts.source == 'legacy':
+                    covered_hours = min(person.hours, max(Decimal(0), terms.subsidy_hours - consumed))
+                    covered_amount = legacy_historical_service_salary(person, covered_hours)
+                    excess_amount = legacy_historical_service_salary(person, person.hours - covered_hours)
+                else:
+                    covered_amount, excess_amount = price_hours(((person.hours, False),),
+                        TieredPayrollRate(terms.payroll.covered, terms.payroll.excess, terms.subsidy_hours, terms.rule.value == "social"), consumed)
+                staff_covered += covered_amount
+                staff_excess += excess_amount
+                consumed += person.hours
+        full_subsidy = facts.historical and terms.is_full_subsidy(hours) is True
+        staff_total = staff_covered + staff_excess + facts.floor_fee + facts.payroll_adjustment
+        if facts.historical and (not facts.historical_people or any(person.hours is None for person in facts.historical_people)):
+            staff_covered = staff_excess = staff_total = None
+        return PricingImpact(covered, excess, 0 if full_subsidy else terms.client_charge(hours) + facts.floor_fee,
+            staff_covered, staff_excess, staff_total,
+            calculate_case_total_amount(terms, ((hours, False),), facts.floor_fee) if full_subsidy else
             subsidy_claim_amount(hours, terms.subsidy_hours, terms.payroll.covered), terms.subsidy_return(hours))
     service_hours = tuple((day.hours, day.double_pay) for day in sorted(facts.days, key=lambda item: item.occurred_on))
     total_hours = sum((hours for hours, _ in service_hours), Decimal(0))
@@ -235,7 +334,9 @@ def _holiday_premium(terms: CasePricingTerms, facts: CasePricingFacts, *, payrol
     ), payroll=payroll)
 
 
-def case_total_amount(facts: CasePricingFacts) -> int:
+def case_total_amount(facts: CasePricingFacts) -> int | None:
+    if facts.historical and facts.historical_service_hours is None:
+        return None
     if facts.frozen_case_total is not None:
         return facts.frozen_case_total
     if facts.historical_service_hours is not None:
@@ -245,10 +346,13 @@ def case_total_amount(facts: CasePricingFacts) -> int:
     ) + _holiday_premium(facts.terms, facts)
 
 
-def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingImpact:
+def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts, *,
+        use_legacy_person_rates: bool = False) -> PricingImpact:
+    if facts.historical and facts.historical_service_hours is None:
+        return PricingImpact(None, None, None, None, None, None, None, None, None)
     if terms != facts.terms:
         facts = replace(facts, frozen_amounts=None, frozen_case_total=None)
-    base = _base_pricing_impact(terms, facts)
+    base = _base_pricing_impact(terms, facts, use_legacy_person_rates=use_legacy_person_rates)
     client_premium = _holiday_premium(terms, facts)
     staff_premium = _holiday_premium(terms, facts, payroll=True)
     total = case_total_amount(replace(facts, terms=terms))
@@ -257,8 +361,8 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
     subsidy = base.subsidy_amount
     if full_subsidy and facts.historical_service_hours is None:
         subsidy = calculate_case_total_amount(terms, tuple((day.hours, False) for day in facts.days), facts.floor_fee)
-    staff_total = base.staff_total_amount + staff_premium
-    income = None if full_subsidy and client_premium else total - staff_total + facts.payroll_adjustment
+    staff_total = base.staff_total_amount + staff_premium if base.staff_total_amount is not None else None
+    income = None if staff_total is None or (full_subsidy and client_premium) else total - staff_total + facts.payroll_adjustment
     if facts.frozen_amounts is not None:
         client_amount, staff_total = facts.frozen_amounts
         return replace(base, client_amount=client_amount, staff_total_amount=staff_total,
@@ -274,14 +378,15 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
         consumed += day.hours
     staff_covered_premium = whole_ntd(covered_premium_amount)
     return replace(base, client_amount=base.client_amount + (0 if full_subsidy else client_premium),
-        staff_covered_amount=(base.staff_covered_amount or 0) + staff_covered_premium,
-        staff_excess_amount=(base.staff_excess_amount or 0) + staff_premium - staff_covered_premium,
+        staff_covered_amount=base.staff_covered_amount + staff_covered_premium if base.staff_covered_amount is not None else None,
+        staff_excess_amount=base.staff_excess_amount + staff_premium - staff_covered_premium if base.staff_excess_amount is not None else None,
         staff_total_amount=staff_total, subsidy_amount=subsidy, case_total_amount=total,
         union_income_amount=income)
 
 
 def current_pricing_impact(facts: CasePricingFacts) -> PricingImpact:
-    result = pricing_impact(facts.terms, facts)
+    result = pricing_impact(facts.terms, facts,
+        use_legacy_person_rates=facts.historical_service_hours is not None and facts.source == 'legacy')
     if (facts.source == "legacy"
             and normalize_subsidy_policy_identity(facts.terms.identity_name) in {"補助市民", "原住民"}
             and any(day.double_pay or day.holiday_hours for day in facts.days)):
@@ -325,7 +430,9 @@ class PricingConfigurationApplication:
         return facts, current_pricing_impact(facts)
 
     def preview_case(self, case_no: str, terms: CasePricingTerms, expected_revision: int) -> CasePricingPreview:
-        return self._preview(self.repository.case(case_no), terms, expected_revision)
+        facts = self.repository.case(case_no)
+        plan = self.repository.historical_plan(facts, terms, lock=False) if facts.historical else None
+        return self._preview(facts, terms, expected_revision, plan)
 
     def _validate_case_terms(self, facts, terms, expected_revision):
         if facts.revision != expected_revision:
@@ -334,27 +441,33 @@ class PricingConfigurationApplication:
             raise ValueError("case_pricing_identity_rule_immutable")
         terms.validate_subsidy_rates()
 
-    def _preview(self, facts, terms, expected_revision):
+    def _preview(self, facts, terms, expected_revision, plan=None):
         self._validate_case_terms(facts, terms, expected_revision)
         fingerprint = _fingerprint({"case_no": facts.case_no, "revision": facts.revision,
             "owner_versions": facts.versions, "candidate": terms, "days": facts.days,
             "floor_fee": facts.floor_fee, "payroll_adjustment":facts.payroll_adjustment,
             "legacy_client_amount":facts.legacy_client_amount, "before": facts.terms,
-            "historical_service_hours": facts.historical_service_hours})
-        return CasePricingPreview(facts, terms, current_pricing_impact(facts), pricing_impact(terms, facts), fingerprint)
+            "historical_service_hours": facts.historical_service_hours,
+            "historical_people": facts.historical_people, "financial_sources_digest": facts.financial_sources_digest,
+            "historical_plan": plan})
+        return CasePricingPreview(facts, terms, current_pricing_impact(facts), pricing_impact(terms, facts), fingerprint, plan)
 
     def apply_case(self, case_no, terms, expected_revision, preview_fingerprint, actor, reason, key):
         reason = reason.strip()
         command = _fingerprint({"case_no": case_no, "terms": terms,
             "revision": expected_revision, "preview": preview_fingerprint, "reason": reason})
         with self.unit_factory() as unit:
-            facts = self.repository.case(case_no, lock=True)
             replay = self.repository.receipt(key, actor, command)
             if replay is not None:
                 return replay
+            facts = self.repository.case(case_no, lock=True)
             self._validate_case_terms(facts, terms, expected_revision)
-            if preview_fingerprint is not None and self._preview(facts, terms, expected_revision).fingerprint != preview_fingerprint:
+            plan = self.repository.historical_plan(facts, terms, lock=True) if facts.historical else None
+            if facts.historical and preview_fingerprint is None:
+                raise PricingConflict("case_pricing_preview_required")
+            if preview_fingerprint is not None and self._preview(facts, terms, expected_revision, plan).fingerprint != preview_fingerprint:
                 raise PricingConflict("case_pricing_preview_stale")
+            facts = replace(facts, historical_plan=plan)
             self.repository.save_case(facts, terms, actor, reason, key)
             self.repository.save_receipt(key, actor, command, facts.revision + 1)
             unit.commit()

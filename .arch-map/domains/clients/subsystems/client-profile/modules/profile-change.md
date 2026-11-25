@@ -49,9 +49,9 @@
 - `ui_react/src/components/RosterTableLayout.tsx`、`ui_react/src/components/RosterTableLayout.css` — 共用可調欄距、自訂顯示與凍結欄位抽象（`lu.roster.layout.client.v1`）。
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
 
-## 目標接線：歷史服務完成後更正
+## 歷史服務完成後更正
 
-名冊與帳務抽屜以同一後端更正資格啟用胎數，不自行看狀態或直接解除服務鎖。BeClass correction 保存有效胎數，歷史分支轉入歷史差額更正，不能直接重用目前依一般 Scheduling facts 計薪的 financial sync 分支。Orders Terms 一般編輯不解鎖，實際服務資料用歷史更正。此段是目標接線，非目前實作。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
+名冊與帳務抽屜消費同一後端胎數更正資格。BeClass effective value 及 correction event 保存單胞胎／雙胞胎，不改原問卷或舊 `baby_info`。歷史服務完成的新例外經既有 Preview／Apply 顯示正式差額與待核對，確認後讀回兩個 owner。歷史 financial sync 交歷史計價差額 writer，不進一般 Scheduling 計薪分支。Orders Terms 一般編輯仍受服務鎖限制，實際服務資料沿歷史服務歸屬更正；其他狀態的原有可編輯範圍保留。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
 
 ## Dependencies
 - outbound: `case-import/pairing-current-facts` — 有效退款帳戶及原問卷補正沿既有BeClass correction writer；一般查閱與事件／回執遮蔽帳號。

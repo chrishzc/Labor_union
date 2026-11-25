@@ -20,6 +20,78 @@ const current: CasePricing = { case_no: 'synthetic-case', revision: 0, source: '
 
 beforeEach(() => { vi.resetAllMocks(); });
 
+describe('歷史服務完成個案計價', () => {
+  it('服務量缺證據時顯示待核對，不把未知的整案金額當成零', async () => {
+    const historical: CasePricing = { ...current, historical: true, impact: { ...current.impact,
+      covered_hours: null, excess_hours: null, client_amount: null, subsidy_amount: null,
+      subsidy_return_amount: null, case_total_amount: null, staff_total_amount: null } };
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(historical);
+    vi.mocked(accountingPricingClient.previewCase).mockImplementation(async (_case, candidate) => ({
+      current: historical, candidate, before: historical.impact, after: historical.impact,
+      preview_fingerprint: 'c'.repeat(64), historical_plan: { client_updates: [], staff_updates: [], persons: [],
+        pending: ['historical_pricing_total_service_hours_required'], client_exempt: false, client_delta: null, subsidy_delta: null },
+    }));
+    render(<UnsavedChangesProvider><CasePricingAdjustmentPanel caseNo="synthetic-case" revision={0} onCommitted={vi.fn(async () => {})} onStateChange={vi.fn()} /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('月嫂用盡後時薪'), { target: { value: '360' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽歷史計價更正' }));
+    await screen.findByRole('region', { name: '歷史計價更正預覽' });
+    expect(within(screen.getByRole('row', { name: /客戶應收計算額/ })).getAllByRole('cell', { name: '待核對' })).toHaveLength(3);
+    expect(within(screen.getByRole('row', { name: /補助計算額/ })).getAllByRole('cell', { name: '待核對' })).toHaveLength(3);
+    expect(screen.getByText('整案服務時數尚未確認，客戶與補助差額待核對。')).toBeInTheDocument();
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+  });
+
+  it('先預覽逐人差額，確認後使用原預覽並讀回待核對結果', async () => {
+    const historical: CasePricing = { ...current, historical: true, accounting_pending: [] };
+    const pending = ['historical_pricing_original_installments_required'];
+    const committed = vi.fn(async () => {});
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(historical);
+    vi.mocked(accountingPricingClient.previewCase).mockImplementation(async (_case, candidate) => ({
+      current: historical, candidate, before: historical.impact,
+      after: { ...historical.impact, staff_total_amount: 56400 }, preview_fingerprint: 'a'.repeat(64),
+      historical_plan: { client_updates: [], staff_updates: [], pending, client_exempt: false,
+        client_delta: 0, subsidy_delta: 0,
+        persons: [{ assignment_identity: 'assignment:1', staff_id: 1, staff_name: '甲月嫂', hours: 80, before_amount: 28000, after_amount: 28400, delta: 400 },
+          { assignment_identity: 'assignment:2', staff_id: 2, staff_name: '乙月嫂', hours: 40, before_amount: 14000, after_amount: 14000, delta: 0 }] },
+    }));
+    vi.mocked(accountingPricingClient.applyCase).mockImplementation(async (_case, terms) => {
+      vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({ ...historical, revision: 1, terms, accounting_pending: pending });
+      return { revision: 1, accounting_pending: pending };
+    });
+    render(<UnsavedChangesProvider><CasePricingAdjustmentPanel caseNo="synthetic-case" revision={0} onCommitted={committed} onStateChange={vi.fn()} /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('月嫂用盡後時薪'), { target: { value: '360' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽歷史計價更正' }));
+    await screen.findByRole('region', { name: '歷史計價更正預覽' });
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+    expect(within(screen.getByRole('row', { name: /甲月嫂/ })).getByRole('cell', { name: 'NT$ 28,400' })).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /乙月嫂/ })).getByRole('cell', { name: '40' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '確認歷史計價更正' }));
+    await screen.findByText('更正及可確認差額已儲存並讀回；部分帳務仍待核對。');
+    expect(accountingPricingClient.applyCase).toHaveBeenCalledWith('synthetic-case', expect.objectContaining({ payroll: { covered: 350, excess: 360 } }), 0, '', expect.any(String), 'a'.repeat(64));
+    expect(committed).toHaveBeenCalledTimes(1);
+    expect(accountingPricingClient.queryCase).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('缺少可唯一辨識的原客戶期款，客戶端差額待核對。')).toBeInTheDocument();
+    expect(screen.queryByText('本案人工計價已儲存並確認；帳務已同步。')).not.toBeInTheDocument();
+  });
+
+  it('預覽後修改參數須重新預覽，免自備不顯示待建期款', async () => {
+    const historical: CasePricing = { ...current, historical: true };
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(historical);
+    vi.mocked(accountingPricingClient.previewCase).mockImplementation(async (_case, candidate) => ({
+      current: historical, candidate, before: current.impact, after: current.impact, preview_fingerprint: 'b'.repeat(64),
+      historical_plan: { client_updates: [], staff_updates: [], persons: [], pending: [], client_exempt: true, client_delta: 0, subsidy_delta: 0 },
+    }));
+    render(<UnsavedChangesProvider><CasePricingAdjustmentPanel caseNo="synthetic-case" revision={0} onCommitted={vi.fn(async () => {})} onStateChange={vi.fn()} /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('月嫂用盡後時薪'), { target: { value: '360' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽歷史計價更正' }));
+    await screen.findByText('本案已確認免自備，無須新增客戶期款。');
+    fireEvent.change(screen.getByLabelText('補助時數上限（小時）'), { target: { value: '100' } });
+    expect(screen.queryByRole('region', { name: '歷史計價更正預覽' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '預覽歷史計價更正' })).toBeEnabled();
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+  });
+});
+
 describe('Standalone accounting parameter policy', () => {
   it('renames a legacy draft by its rule while preserving historical amounts and custom identities', async () => {
     const policy = { effective_on: '2026-10-29', identities: [

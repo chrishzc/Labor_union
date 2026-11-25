@@ -3,10 +3,11 @@ File: pricing_configuration_repository.py
 Description: 管理 MySQL 帳務計價政策、個案覆寫與歷史案件重算計畫持久化。
 """
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import json
+from typing import Literal, TypedDict
 from zoneinfo import ZoneInfo
 
 from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
@@ -16,9 +17,13 @@ from domains.payroll.tiered_rates import TieredPayrollRate
 from infrastructure.mysql.case_category_query import BOUND_POLICY_IDENTITY_SQL
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.client_finance.pricing_configuration import (
     CasePricingFacts, PolicyVersion, PricingCatalog, PricingConflict, PricingServiceDay, pricing_impact, pricing_payload,
     HistoricalAmountFacts, build_historical_deposit_floor_fee_plan, build_historical_repricing_plan,
+    HistoricalPricingPerson, HistoricalPersonPricing, HistoricalAmountUpdate, HistoricalRepricingPlan,
+    HistoricalBirthCorrectionPreview, HistoricalAccountingCarry, HistoricalRateAuthority,
+    legacy_historical_service_salary,
 )
 
 
@@ -43,11 +48,28 @@ LEFT JOIN JSON_TABLE(p.policy_json,'$.identities[*]' COLUMNS (
  payroll_excess VARCHAR(30) PATH '$.payroll.excess'
 )) i ON BINARY i.identity_name=BINARY {BOUND_POLICY_IDENTITY_SQL}
 LEFT JOIN case_pricing_events e ON e.id=o.pricing_override_event_id AND e.case_no=o.case_no
-WHERE o.pricing_policy_id IS NOT NULL OR o.pricing_override_event_id IS NOT NULL"""
+ AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.historical_accounting.rate_authority')),'manual')<>'legacy'
+WHERE o.pricing_policy_id IS NOT NULL OR e.id IS NOT NULL"""
 
 
 def _object(value):
     return value if isinstance(value, dict) else json.loads(value)
+
+
+def _event_rate_authority(payload: object) -> HistoricalRateAuthority:
+    if not isinstance(payload, dict):
+        raise ValueError('case_pricing_rate_authority_invalid')
+    accounting = payload.get('historical_accounting', {})
+    if not isinstance(accounting, dict):
+        raise ValueError('case_pricing_rate_authority_invalid')
+    authority = accounting.get('rate_authority')
+    if authority is None or authority == 'manual':
+        return 'manual'
+    if authority == 'policy':
+        return 'policy'
+    if authority == 'legacy':
+        return 'legacy'
+    raise ValueError('case_pricing_rate_authority_invalid')
 
 
 def terms_from_payload(value):
@@ -160,9 +182,13 @@ def load_case_pricing(cursor, order_row, *, lock=False):
         row = cursor.fetchone()
         if row is None:
             raise ValueError("case_pricing_override_missing")
-        override = terms_from_payload(row["pricing_json"])
-        if policy_id is None:
-            return override
+        payload = _object(row['pricing_json'])
+        if _event_rate_authority(payload) == 'legacy':
+            event_id = None
+        else:
+            override = terms_from_payload(payload)
+            if policy_id is None:
+                return override
     if policy_id is None:
         return None
     cursor.execute("SELECT policy_json FROM accounting_pricing_policies WHERE id=%s" + suffix, (policy_id,))
@@ -199,33 +225,80 @@ def citizen_reclassification_terms(cursor, order_row, *, lock=False):
 def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None):
     """Borrow confirmed historical volume, without manufacturing calendar days."""
     from infrastructure.mysql.order_terms_read_model import select_order
-    from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
+    from infrastructure.mysql.historical_service_accounting_repository import (
+        MySqlHistoricalServiceAccountingRepository, _select_historical_default_payroll_policy,
+    )
     with connection.cursor() as cursor:
         order = order if order is not None else select_order(cursor, case_no, lock=lock)
         if str(order['status']) not in ('歷史訂單－服務完成', '歷史訂單－帳務完成'):
             return None
         source = MySqlHistoricalServiceAccountingRepository(connection).load(case_no, for_update=lock)
-        if len(source.assignments) != 1:
-            raise PricingConflict('historical_pricing_unique_assignment_required')
-        cursor.execute('SELECT actual_service_days FROM historical_service_day_items WHERE event_id='
-            '(SELECT MAX(id) FROM historical_service_day_events WHERE case_no=%s)', (case_no,))
-        items = cursor.fetchall()
+        suffix = ' FOR UPDATE' if lock else ''
+        cursor.execute('SELECT i.assignment_id,i.staff_id,i.actual_service_days,i.actual_service_hours '
+            'FROM historical_service_day_projections p JOIN historical_service_day_items i '
+            'ON i.event_id=p.current_event_id WHERE p.case_no=%s ORDER BY i.item_ordinal' + suffix, (case_no,))
+        items = tuple(cursor.fetchall())
         days = sum(int(item['actual_service_days']) for item in items) if items else source.contracted_service_days
-        hours = Decimal(days) * Decimal(source.service_hours_per_day)
+        hours = (sum((Decimal(str(item['actual_service_hours'])) for item in items), Decimal(0))
+                 if items and all(item['actual_service_hours'] is not None for item in items)
+                 else Decimal(days) * Decimal(source.service_hours_per_day))
+        indexed = {f"assignment:{item['assignment_id']}": item for item in items}
+        people = tuple(HistoricalPricingPerson(
+            assignment.assignment_identity, assignment.staff_id, assignment.staff_name,
+            Decimal(str(indexed[assignment.assignment_identity]['actual_service_hours']))
+            if assignment.assignment_identity in indexed and indexed[assignment.assignment_identity]['actual_service_hours'] is not None
+            else Decimal(int(indexed[assignment.assignment_identity]['actual_service_days'])) * source.service_hours_per_day
+            if assignment.assignment_identity in indexed else hours if len(source.assignments) == 1 else None,
+            int(indexed[assignment.assignment_identity]['actual_service_days']) if assignment.assignment_identity in indexed
+            else days if len(source.assignments) == 1 else None, assignment.effective_adjustment.amount,
+            assignment.rate_snapshot)
+            for assignment in source.assignments)
+        if any(person.hours is None for person in people):
+            hours = None
         floor = int((Decimal(source.contractual_floor_fee.amount) * days / source.contracted_service_days).quantize(Decimal(1), rounding=ROUND_HALF_UP))
         terms = load_case_pricing(cursor, order, lock=lock)
         if terms is None:
             rule, cap = _legacy_rule_and_cap(source.client_identity_status)
-            staff_rate = source.assignments[0].rate_snapshot.hourly_rate.amount
+            cursor.execute('SELECT hourly_rate_ntd FROM case_payroll_rate_policy_snapshots WHERE case_no=%s' + suffix, (case_no,))
+            payroll_policy = cursor.fetchone()
+            staff_rate = int(payroll_policy['hourly_rate_ntd']) if payroll_policy else (
+                source.assignments[0].rate_snapshot.hourly_rate.amount if len(source.assignments) == 1
+                else _select_historical_default_payroll_policy(cursor, case_no, lock).hourly_rate.amount)
+            if staff_rate <= 0:
+                raise PricingConflict('case_pricing_payroll_snapshot_required')
             terms = CasePricingTerms(source.client_identity_status, rule, cap,
                 HourlyRates(source.client_hourly_rate.amount, source.client_hourly_rate.amount), HourlyRates(staff_rate, staff_rate))
         cursor.execute('SELECT aggregate_version FROM scheduling_aggregates WHERE case_no=%s' + (' FOR UPDATE' if lock else ''), (case_no,))
         scheduling = cursor.fetchone()
+        accounting = {}
+        rate_authority: HistoricalRateAuthority = 'policy' if order.get('pricing_policy_id') else 'legacy'
+        if order.get('pricing_override_event_id'):
+            cursor.execute('SELECT pricing_json FROM case_pricing_events WHERE id=%s' + suffix, (order['pricing_override_event_id'],))
+            event = cursor.fetchone()
+            if event:
+                payload = _object(event['pricing_json'])
+                rate_authority = _event_rate_authority(payload)
+                accounting = payload.get('historical_accounting', {})
+        cursor.execute('SELECT e.resulting_day_revision,e.result_snapshot FROM historical_service_day_events e '
+            "WHERE e.case_no=%s AND JSON_TYPE(JSON_EXTRACT(e.result_snapshot,'$.financial_correction'))='OBJECT' "
+            'ORDER BY e.resulting_day_revision DESC LIMIT 1' + suffix, (case_no,))
+        service_event = cursor.fetchone()
+        if service_event:
+            service_plan = _object(service_event['result_snapshot']).get('financial_correction')
+            pricing_versions = accounting.get('source_versions', ())
+            if service_plan and (not pricing_versions or int(service_event['resulting_day_revision']) > int(pricing_versions[4])):
+                accounting = service_plan
+        carry = tuple(HistoricalAccountingCarry(
+            item['component'], item['identity'], item['basis_amount'], tuple(item['pending']),
+            item['financial_sources_digest'], item.get('subsidy_claim_basis'))
+            for item in accounting.get('carry', ()))
     return CasePricingFacts(case_no, int(order.get('pricing_revision', 0)),
         (source.lifecycle_version, source.client_finance_version, source.payroll_version,
          int(scheduling['aggregate_version']) if scheduling else -1, source.historical_day_revision, source.adoption_receipt_id),
-        terms, 'manual' if order.get('pricing_override_event_id') else 'policy' if order.get('pricing_policy_id') else 'legacy',
-        (), floor, source.assignments[0].effective_adjustment.amount, None, hours)
+        terms, rate_authority,
+        (), floor, sum(person.adjustment for person in people), historical_service_hours=hours,
+        historical_people=people, historical=str(order['status']) == '歷史訂單－服務完成',
+        accounting_pending=tuple(accounting.get('pending', ())), accounting_carry=carry)
 
 
 def historical_deposit_floor_fee_plan(cursor, order, proposed_fee, *, lock):
@@ -263,7 +336,7 @@ def historical_deposit_floor_fee_plan(cursor, order, proposed_fee, *, lock):
 
 def _historical_client_amount_rows(cursor, case_no, stages, suffix):
     placeholders = ','.join('%s' for _ in stages)
-    cursor.execute('SELECT o.obligation_identity,o.obligation_type,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+    cursor.execute('SELECT o.obligation_identity,o.obligation_type,o.current_event_id,o.status,o.due_date,o.amount_due_ntd,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
         'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
         'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
         "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.source_obligation_identity IS NULL "
@@ -272,36 +345,278 @@ def _historical_client_amount_rows(cursor, case_no, stages, suffix):
     return cursor.fetchall()
 
 
-def _historical_amount_facts(row):
+class HistoricalAmountRow(TypedDict):
+    obligation_identity: str
+    nominal: int
+    computed_ntd: int | None
+    effective_ntd: int | None
+    amount_mode: str | None
+
+
+class HistoricalClientAmountRow(HistoricalAmountRow):
+    obligation_type: str
+
+
+class HistoricalStaffAmountRow(HistoricalAmountRow):
+    assignment_id: int | None
+    staff_id: int
+
+
+def _historical_amount_facts(row: HistoricalAmountRow) -> HistoricalAmountFacts:
     computed = int(row['computed_ntd'] if row['computed_ntd'] is not None else row['nominal'])
     effective = int(row['effective_ntd'] if row['effective_ntd'] is not None else row['nominal'])
     return HistoricalAmountFacts(row['obligation_identity'], computed, effective, row['amount_mode'] or 'automatic')
 
 
-def historical_repricing_plan(connection, facts, terms, *, lock=True):
+def _amount_update(source: HistoricalAmountFacts, delta: int) -> HistoricalAmountUpdate:
+    computed = source.computed + delta
+    effective = source.effective if source.mode == 'manual' else computed
+    if min(computed, effective) < 0:
+        raise PricingConflict('historical_pricing_amount_conflict')
+    return HistoricalAmountUpdate(source.identity, computed, effective, source.computed, source.effective, source.mode)
+
+
+def historical_repricing_plan(connection, facts: CasePricingFacts, terms: CasePricingTerms, *, lock: bool = True,
+                              after_facts: CasePricingFacts | None = None,
+                              include_payroll: bool = True,
+                              use_legacy_person_rates: bool = False) -> HistoricalRepricingPlan:
     """Apply a price delta to evidenced original installments, never regenerate them."""
     suffix = ' FOR UPDATE' if lock else ''
     with connection.cursor() as cursor:
         client_rows = _historical_client_amount_rows(cursor, facts.case_no, ('deposit', 'first', 'second'), suffix)
-        if not client_rows or len({r['obligation_type'] for r in client_rows}) != len(client_rows):
+        if not facts.historical and (not client_rows or len({r['obligation_type'] for r in client_rows}) != len(client_rows)):
             raise PricingConflict('historical_pricing_original_installments_required')
-        cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+        cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.staff_id,o.current_event_id,o.status,o.amount_due_ntd,o.due_date,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
             'FROM staff_obligations o JOIN staff_obligation_events e ON e.id=o.current_event_id '
             'LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
-            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_kind='service_pay' AND o.direction='payable_to_staff'" + suffix, (facts.case_no,))
+            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_kind='service_pay' AND o.direction='payable_to_staff' AND o.source_obligation_identity IS NULL" + suffix, (facts.case_no,))
         staff_rows = cursor.fetchall()
-        if len(staff_rows) != 1:
+        if not facts.historical and len(staff_rows) != 1:
             raise PricingConflict('historical_pricing_original_payable_required')
         cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
             'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
             'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
             "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_type='subsidy_return' AND o.source_obligation_identity IS NULL" + suffix, (facts.case_no,))
         subsidy_rows = cursor.fetchall()
-        if len(subsidy_rows) > 1:
+        if not facts.historical and len(subsidy_rows) > 1:
             raise PricingConflict('historical_pricing_original_subsidy_return_required')
+        if facts.historical:
+            cursor.execute("SELECT m.receipt_id,m.amount_ntd AS member_amount_ntd,e.amount_ntd,e.paid_on FROM government_subsidy_period_members m "
+                "JOIN government_subsidy_period_entries e ON e.id=m.receipt_id "
+                "WHERE m.case_no=%s AND e.reversal_of_id IS NULL AND NOT EXISTS "
+                "(SELECT 1 FROM government_subsidy_period_entries r WHERE r.reversal_of_id=e.id)" + suffix, (facts.case_no,))
+            period_sources = tuple(cursor.fetchall())
+            cursor.execute("SELECT i.id FROM subsidy_claim_batch_items i WHERE i.case_no=%s AND ("
+                "COALESCE((SELECT SUM(CASE WHEN a.allocation_type='receipt' THEN a.allocated_amount "
+                "WHEN a.allocation_type='reversal' THEN -a.allocated_amount ELSE 0 END) "
+                "FROM government_subsidy_allocations a WHERE a.claim_item_id=i.id),0)>0 "
+                "OR EXISTS(SELECT 1 FROM government_subsidy_overpayment_offsets x WHERE x.claim_item_id=i.id))" + suffix, (facts.case_no,))
+            claim_sources = tuple(cursor.fetchall())
+            cursor.execute('SELECT l.id,l.entry_type,l.amount_ntd,l.occurred_on,l.reversal_of_entry_id,'
+                'a.obligation_identity,a.amount_ntd AS allocated_ntd FROM client_ledger_entries l '
+                'LEFT JOIN client_ledger_obligation_allocations a ON a.ledger_entry_id=l.id '
+                'WHERE l.case_no=%s ORDER BY l.id,a.allocation_ordinal' + suffix, (facts.case_no,))
+            client_cash = tuple(cursor.fetchall())
+            cursor.execute('SELECT o.obligation_identity,p.id,p.event_type,p.amount_ntd,p.occurred_on,'
+                'p.reversal_of_event_id,l.allocated_amount_ntd FROM staff_obligations o '
+                'JOIN staff_payout_obligation_links l ON l.obligation_identity=o.obligation_identity '
+                'JOIN staff_payout_events p ON p.id=l.payout_event_id '
+                'WHERE o.case_no=%s ORDER BY p.id,l.allocation_ordinal' + suffix, (facts.case_no,))
+            payroll_cash = tuple(cursor.fetchall())
+            cursor.execute('SELECT obligation_identity,obligation_type,status,current_event_id '
+                "FROM client_obligations WHERE case_no=%s AND status<>'cancelled' "
+                "AND direction='receivable_from_client' AND source_obligation_identity IS NULL "
+                "AND obligation_type NOT IN ('deposit','first','second') ORDER BY obligation_identity" + suffix, (facts.case_no,))
+            unknown_client_sources = tuple(cursor.fetchall())
+            from infrastructure.mysql.client_payments_query_repository import _historical_payment_terms
+            from infrastructure.mysql.order_terms_read_model import select_order
+            payment_evidence = _historical_payment_terms(cursor, select_order(cursor, facts.case_no, lock=lock), None)
+            client_source_pending = tuple(payment_evidence.pending_reasons)
+            client_exempt = (not client_rows and not unknown_client_sources and not client_cash
+                and not client_source_pending and payment_evidence.full_subsidy_eligibility is True)
+            digest = fingerprint_payload(pricing_payload({'client': client_rows, 'payroll': staff_rows,
+                'subsidy': subsidy_rows, 'period': period_sources, 'claims': claim_sources,
+                'client_cash': client_cash, 'payroll_cash': payroll_cash, 'unknown_client': unknown_client_sources,
+                'client_pending': client_source_pending,
+                'bank_candidates': payment_evidence.pending_bank_row_identities})).value
+            return _partial_historical_repricing_plan(facts, terms, after_facts or facts,
+                tuple(client_rows), tuple(staff_rows), tuple(subsidy_rows),
+                bool(period_sources or claim_sources), digest, include_payroll,
+                client_exempt=client_exempt, unknown_client_sources=bool(unknown_client_sources),
+                client_source_pending=client_source_pending, use_legacy_person_rates=use_legacy_person_rates)
     return build_historical_repricing_plan(facts, terms, tuple(_historical_amount_facts(r) for r in client_rows),
         _historical_amount_facts(staff_rows[0]),
         subsidy_source=_historical_amount_facts(subsidy_rows[0]) if subsidy_rows else None)
+
+
+def _person_amounts(terms: CasePricingTerms, facts: CasePricingFacts, *,
+        use_legacy_person_rates: bool = False) -> dict[str, int]:
+    from domains.orders.floor_fee import allocate_largest_remainder
+    from domains.payroll.tiered_rates import price_hours
+    people = facts.historical_people
+    if not people:
+        return {}
+    if facts.floor_fee and any(person.actual_service_days is None or person.actual_service_days <= 0 for person in people):
+        return {}
+    floor = (allocate_largest_remainder(MoneyNTD(facts.floor_fee),
+        {person.assignment_identity: person.actual_service_days for person in people if person.actual_service_days is not None})
+        if facts.floor_fee else {})
+    amounts: dict[str, int] = {}
+    consumed: Decimal | None = Decimal(0)
+    for person in people:
+        if person.hours is None:
+            if consumed is not None and consumed < terms.subsidy_hours:
+                consumed = None
+            continue
+        own_rate = use_legacy_person_rates and facts.source == 'legacy'
+        if not own_rate and consumed is None and terms.payroll.covered != terms.payroll.excess:
+            continue
+        if own_rate:
+            salary = legacy_historical_service_salary(person, person.hours)
+        else:
+            covered, excess = price_hours(((person.hours, False),), payroll_tiers(terms), consumed or Decimal(0))
+            salary = covered + excess
+        if consumed is not None:
+            consumed += person.hours
+        amounts[person.assignment_identity] = (salary
+            + (floor[person.assignment_identity].amount if floor else 0) + person.adjustment)
+    return amounts
+
+
+def _partial_historical_repricing_plan(facts: CasePricingFacts, terms: CasePricingTerms,
+        after_facts: CasePricingFacts, client_rows: tuple[HistoricalClientAmountRow, ...],
+        staff_rows: tuple[HistoricalStaffAmountRow, ...], subsidy_rows: tuple[HistoricalAmountRow, ...],
+        settled_subsidy: bool, digest: str, include_payroll: bool, *,
+        client_exempt: bool = False, unknown_client_sources: bool = False,
+        client_source_pending: tuple[str, ...] = (),
+        use_legacy_person_rates: bool = False) -> HistoricalRepricingPlan:
+    before = pricing_impact(facts.terms, facts)
+    after = pricing_impact(terms, after_facts, use_legacy_person_rates=use_legacy_person_rates)
+    pending: list[str] = []
+    carry: list[HistoricalAccountingCarry] = []
+    previous = {(item.component, item.identity): item for item in facts.accounting_carry}
+    birth_blockers = {'historical_pricing_birth_original_value_required', 'historical_pricing_birth_bound_policy_required'}
+    def defer(component: Literal['client', 'subsidy', 'payroll'], identity: str,
+              basis: int | None, reasons: tuple[str, ...], subsidy_claim_basis: int | None = None) -> None:
+        prior = previous.get((component, identity))
+        reasons = tuple(dict.fromkeys(reasons))
+        pending.extend(reasons)
+        carry.append(HistoricalAccountingCarry(component, identity,
+            prior.basis_amount if prior else basis, reasons,
+            prior.financial_sources_digest if prior else digest,
+            prior.subsidy_claim_basis if prior else subsidy_claim_basis))
+    client_updates: list[HistoricalAmountUpdate] = []
+    staff_updates: list[HistoricalAmountUpdate] = []
+    client_prior = previous.get(('client', facts.case_no))
+    client_basis = client_prior.basis_amount if client_prior else (
+        before.client_amount if facts.historical_service_hours is not None else None)
+    volume_known = after_facts.historical_service_hours is not None
+    client_delta = (after.client_amount - client_basis
+        if client_basis is not None and after.client_amount is not None else None)
+    client_exempt = client_exempt and volume_known and terms.is_full_subsidy(after_facts.historical_service_hours) is True
+    if client_prior and (client_basis is None or birth_blockers.intersection(client_prior.pending)):
+        client_delta = None
+        defer('client', facts.case_no, None, client_prior.pending)
+    elif client_basis is None:
+        defer('client', facts.case_no, None, ('historical_pricing_original_calculation_basis_required',))
+    elif not volume_known:
+        defer('client', facts.case_no, client_basis, ('historical_pricing_total_service_hours_required',))
+    elif unknown_client_sources or len({row['obligation_type'] for row in client_rows}) != len(client_rows):
+        defer('client', facts.case_no, client_basis, ('historical_pricing_original_installments_ambiguous',))
+    elif not client_rows and not client_exempt:
+        defer('client', facts.case_no, client_basis,
+            ('historical_pricing_original_installments_required', *client_source_pending))
+    elif client_rows and client_delta is not None:
+        remainder = client_delta
+        proposed: list[HistoricalAmountUpdate] = []
+        for row in reversed(client_rows):
+            source = _historical_amount_facts(row)
+            applied = max(-source.computed, remainder) if remainder < 0 else remainder
+            proposed.append(_amount_update(source, applied))
+            remainder -= applied
+        if remainder:
+            defer('client', facts.case_no, client_basis, ('historical_pricing_client_amount_unresolved',))
+        else:
+            client_updates.extend(proposed)
+    subsidy_prior = previous.get(('subsidy', facts.case_no))
+    subsidy_basis = subsidy_prior.basis_amount if subsidy_prior else (
+        before.subsidy_return_amount if facts.historical_service_hours is not None else None)
+    claim_basis = subsidy_prior.subsidy_claim_basis if subsidy_prior else (
+        before.subsidy_amount if facts.historical_service_hours is not None else None)
+    subsidy_delta = (after.subsidy_return_amount - subsidy_basis
+        if subsidy_basis is not None and after.subsidy_return_amount is not None else None)
+    if subsidy_prior and (subsidy_basis is None or birth_blockers.intersection(subsidy_prior.pending)):
+        subsidy_delta = None
+        defer('subsidy', facts.case_no, None, subsidy_prior.pending, claim_basis)
+    elif subsidy_basis is None:
+        defer('subsidy', facts.case_no, None,
+            ('historical_pricing_original_calculation_basis_required',), claim_basis)
+    elif not volume_known:
+        defer('subsidy', facts.case_no, subsidy_basis,
+            ('historical_pricing_total_service_hours_required',), claim_basis)
+    elif settled_subsidy and (subsidy_delta or after.subsidy_amount != claim_basis):
+        defer('subsidy', facts.case_no, subsidy_basis,
+            ('case_pricing_settled_subsidy_correction_required',), claim_basis)
+    elif len(subsidy_rows) > 1:
+        defer('subsidy', facts.case_no, subsidy_basis,
+            ('historical_pricing_original_subsidy_return_ambiguous',), claim_basis)
+    elif subsidy_rows and subsidy_delta is not None:
+        try:
+            client_updates.append(_amount_update(_historical_amount_facts(subsidy_rows[0]), subsidy_delta))
+        except PricingConflict:
+            defer('subsidy', facts.case_no, subsidy_basis,
+                ('historical_pricing_subsidy_amount_unresolved',), claim_basis)
+    elif subsidy_delta:
+        defer('subsidy', facts.case_no, subsidy_basis,
+            ('historical_pricing_original_subsidy_return_required',), claim_basis)
+    after_people = _person_amounts(terms, after_facts, use_legacy_person_rates=use_legacy_person_rates)
+    persons: list[HistoricalPersonPricing] = []
+    for person in after_facts.historical_people:
+        originals = tuple(row for row in staff_rows if row['assignment_id'] is not None and
+            int(row['assignment_id']) == int(person.assignment_identity.removeprefix('assignment:'))
+            and int(row['staff_id']) == person.staff_id)
+        source = _historical_amount_facts(originals[0]) if len(originals) == 1 else None
+        calculated = after_people.get(person.assignment_identity)
+        update = None
+        person_prior = previous.get(('payroll', person.assignment_identity))
+        if person_prior and birth_blockers.intersection(person_prior.pending):
+            defer('payroll', person.assignment_identity, None, person_prior.pending)
+        elif calculated is None:
+            if include_payroll:
+                defer('payroll', person.assignment_identity, None,
+                    ('historical_pricing_person_service_hours_required:' + person.assignment_identity,))
+        elif source is None:
+            if include_payroll:
+                code = 'historical_pricing_original_payable_ambiguous:' if len(originals) > 1 else 'historical_pricing_original_payable_required:'
+                defer('payroll', person.assignment_identity, calculated, (code + person.assignment_identity,))
+        else:
+            try:
+                update = _amount_update(source, calculated - source.computed)
+                if include_payroll:
+                    staff_updates.append(update)
+            except PricingConflict:
+                if include_payroll:
+                    defer('payroll', person.assignment_identity, calculated,
+                        ('historical_pricing_payroll_amount_unresolved:' + person.assignment_identity,))
+        persons.append(HistoricalPersonPricing(person.assignment_identity, person.staff_id,
+            person.staff_name, person.hours, source.effective if source else None,
+            update.effective if update else None,
+            update.effective - source.effective if update is not None and source is not None else None))
+    if include_payroll and not after_facts.historical_people:
+        pending.append('historical_pricing_assignments_required')
+    for person in after_facts.historical_people:
+        if person.hours is None or person.actual_service_days is None:
+            marker = 'historical_completed_service_volume_unresolved:' + person.assignment_identity
+            if marker in facts.accounting_pending:
+                pending.append(marker)
+    for item in facts.accounting_carry:
+        if item.component == 'payroll' and (not include_payroll or
+                item.identity not in {person.assignment_identity for person in after_facts.historical_people}):
+            carry.append(item)
+            pending.extend(item.pending)
+    return HistoricalRepricingPlan(facts.case_no, facts.versions[1], facts.versions[2],
+        tuple(client_updates), tuple(staff_updates), facts.versions, None, tuple(persons),
+        tuple(dict.fromkeys(pending)), client_exempt, client_delta, subsidy_delta, digest, tuple(carry))
 
 
 def persist_historical_repricing(connection, plan, actor, reason, key):
@@ -312,9 +627,97 @@ def persist_historical_repricing(connection, plan, actor, reason, key):
         staff_apply(connection, plan, actor, reason, key)
 
 
+def preview_historical_service_volume_correction(connection, *, case_no: str,
+        before_hours_by_assignment: dict[str, Decimal], after_hours_by_assignment: dict[str, Decimal],
+        for_update: bool = False) -> HistoricalRepricingPlan:
+    facts = load_historical_pricing_facts(connection, case_no, lock=for_update)
+    if facts is None or not facts.historical:
+        raise PricingConflict('historical_order_source_status_invalid')
+    expected = {person.assignment_identity for person in facts.historical_people}
+    if not set(before_hours_by_assignment) <= expected or not set(after_hours_by_assignment) <= expected:
+        raise PricingConflict('historical_actual_service_days_assignment_mismatch')
+    before_people = tuple(replace(person, hours=before_hours_by_assignment.get(person.assignment_identity))
+                          for person in facts.historical_people)
+    after_people = tuple(replace(person, hours=after_hours_by_assignment.get(person.assignment_identity))
+                         for person in facts.historical_people)
+    before = replace(facts, historical_people=before_people,
+        historical_service_hours=(sum(before_hours_by_assignment.values(), Decimal(0))
+            if set(before_hours_by_assignment) == expected else None))
+    after = replace(facts, historical_people=after_people,
+        historical_service_hours=(sum(after_hours_by_assignment.values(), Decimal(0))
+            if set(after_hours_by_assignment) == expected else None))
+    return historical_repricing_plan(connection, before, facts.terms, lock=for_update,
+        after_facts=after, include_payroll=True, use_legacy_person_rates=facts.source == 'legacy')
+
+
+def preview_historical_birth_correction(connection, *, case_no: str, before_birth_count: str | None,
+        after_birth_count: str, for_update: bool = False) -> HistoricalBirthCorrectionPreview:
+    from infrastructure.mysql.order_terms_read_model import select_order
+    facts = load_historical_pricing_facts(connection, case_no, lock=for_update)
+    if facts is None or not facts.historical:
+        raise PricingConflict('historical_order_source_status_invalid')
+    with connection.cursor() as cursor:
+        order = select_order(cursor, case_no, lock=for_update)
+        policy_id = order.get('pricing_policy_id')
+        terms = facts.terms
+        if facts.source == 'policy' and policy_id is not None and before_birth_count in {'單胞胎', '雙胞胎'}:
+            cursor.execute('SELECT policy_json FROM accounting_pricing_policies WHERE id=%s' +
+                (' FOR UPDATE' if for_update else ''), (policy_id,))
+            policy = policy_from_payload(cursor.fetchone()['policy_json'])
+            after_terms = policy.for_case(str(order['client_identity_status']), twins=after_birth_count == '雙胞胎')
+            terms = replace(facts.terms, client=after_terms.client, payroll=after_terms.payroll)
+        authority: HistoricalRateAuthority = ('policy' if facts.source == 'policy' else
+            'manual' if facts.source == 'manual' else 'legacy')
+        plan = replace(historical_repricing_plan(connection, facts, terms, lock=for_update),
+            rate_authority=authority)
+        if before_birth_count not in {'單胞胎', '雙胞胎'} or authority == 'legacy':
+            code = ('historical_pricing_birth_original_value_required'
+                    if before_birth_count not in {'單胞胎', '雙胞胎'}
+                    else 'historical_pricing_birth_bound_policy_required')
+            bases = {(item.component, item.identity): item for item in (*facts.accounting_carry, *plan.carry)}
+            before = pricing_impact(facts.terms, facts)
+            basis_entries: tuple[tuple[Literal['client', 'subsidy', 'payroll'], str, int | None], ...] = (
+                    ('client', facts.case_no, before.client_amount),
+                    ('subsidy', facts.case_no, before.subsidy_return_amount),
+                    *(('payroll', person.assignment_identity, None) for person in facts.historical_people))
+            for component, identity, basis in basis_entries:
+                prior = bases.get((component, identity))
+                bases[(component, identity)] = HistoricalAccountingCarry(component, identity,
+                    prior.basis_amount if prior else basis,
+                    tuple(dict.fromkeys((*(prior.pending if prior else ()), code))),
+                    prior.financial_sources_digest if prior else plan.financial_sources_digest,
+                    prior.subsidy_claim_basis if prior else before.subsidy_amount if component == 'subsidy' else None)
+            plan = replace(plan, client_updates=(), staff_updates=(), carry=tuple(bases.values()),
+                client_delta=None, subsidy_delta=None,
+                persons=tuple(replace(person, after_amount=None, delta=None) for person in plan.persons),
+                pending=tuple(dict.fromkeys((*plan.pending, code))))
+    fingerprint = fingerprint_payload(pricing_payload({'case_no': case_no, 'facts_versions': facts.versions,
+        'revision': facts.revision, 'before': before_birth_count, 'after': after_birth_count,
+        'terms': terms, 'plan': plan}))
+    return HistoricalBirthCorrectionPreview(fingerprint, plan, facts, terms, before_birth_count, after_birth_count)
+
+
+def apply_historical_birth_correction(connection, *, preview: HistoricalBirthCorrectionPreview,
+        actor: str, reason: str, idempotency_key: str) -> None:
+    current = preview_historical_birth_correction(connection, case_no=preview.facts.case_no,
+        before_birth_count=preview.before_birth_count, after_birth_count=preview.after_birth_count, for_update=True)
+    if current.fingerprint != preview.fingerprint:
+        raise PricingConflict('case_pricing_preview_stale')
+    MySqlPricingConfigurationRepository(connection).save_case(
+        replace(current.facts, historical_plan=current.impact), current.terms, actor, reason,
+        'historical-birth-pricing:' + idempotency_key)
+
+
 class MySqlPricingConfigurationRepository:
     def __init__(self, connection):
         self.connection = connection
+        self.accounting_pending: tuple[str, ...] = ()
+
+    def historical_plan(self, facts: CasePricingFacts, terms: CasePricingTerms, *, lock: bool) -> HistoricalRepricingPlan:
+        resolved = 'historical_pricing_birth_bound_policy_required'
+        facts = replace(facts, accounting_carry=tuple(replace(item,
+            pending=tuple(code for code in item.pending if code != resolved)) for item in facts.accounting_carry))
+        return replace(historical_repricing_plan(self.connection, facts, terms, lock=lock), rate_authority='manual')
 
     def catalog(self, *, lock=False):
         with self.connection.cursor() as cursor:
@@ -334,14 +737,17 @@ class MySqlPricingConfigurationRepository:
             return None
         if row["actor"] != actor or row["command_hash"] != command_hash:
             raise PricingConflict("pricing_idempotency_conflict")
-        return int(_object(row["result_json"])["revision"])
+        payload = _object(row["result_json"])
+        self.accounting_pending = tuple(payload.get('accounting_pending', ()))
+        return int(payload["revision"])
 
     def save_receipt(self, key, actor, command_hash, revision):
         with self.connection.cursor() as cursor:
             cursor.execute("INSERT INTO accounting_pricing_receipts(idempotency_key,command_hash,actor,result_json,created_at_utc) VALUES(%s,%s,%s,%s,UTC_TIMESTAMP(6))",
-                (key, command_hash, actor, json.dumps({"revision": revision})))
+                (key, command_hash, actor, json.dumps({"revision": revision, 'accounting_pending': self.accounting_pending})))
 
     def save_policy(self, policy, revision, actor, reason):
+        self.accounting_pending = ()
         with self.connection.cursor() as cursor:
             cursor.execute("INSERT INTO accounting_pricing_policies(id,effective_on,policy_json,actor,reason,created_at_utc) VALUES(%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))",
                 (revision, policy.effective_on, _json(policy), actor, reason))
@@ -459,8 +865,8 @@ class MySqlPricingConfigurationRepository:
         from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
         before, after = pricing_impact(facts.terms, facts), pricing_impact(terms, facts)
         with self.connection.cursor() as cursor:
-            if not identity_reclassification and before.subsidy_amount != after.subsidy_amount:
-                cursor.execute("SELECT m.receipt_id FROM government_subsidy_period_members m "
+            if not identity_reclassification and not facts.historical and before.subsidy_amount != after.subsidy_amount:
+                cursor.execute("SELECT m.receipt_id,m.amount_ntd AS member_amount_ntd,e.amount_ntd,e.paid_on FROM government_subsidy_period_members m "
                     "JOIN government_subsidy_period_entries e ON e.id=m.receipt_id "
                     "WHERE m.case_no=%s AND e.reversal_of_id IS NULL AND NOT EXISTS "
                     "(SELECT 1 FROM government_subsidy_period_entries r WHERE r.reversal_of_id=e.id) LIMIT 1 FOR UPDATE", (facts.case_no,))
@@ -473,15 +879,22 @@ class MySqlPricingConfigurationRepository:
                     "OR EXISTS(SELECT 1 FROM government_subsidy_overpayment_offsets x WHERE x.claim_item_id=i.id)) LIMIT 1 FOR UPDATE", (facts.case_no,))
                 if cursor.fetchone() is not None:
                     raise PricingConflict("case_pricing_settled_subsidy_correction_required")
+            plan = facts.historical_plan
+            if facts.historical and plan is None:
+                plan = historical_repricing_plan(self.connection, facts, terms, lock=True)
+            self.accounting_pending = plan.pending if plan is not None else ()
+            payload = pricing_payload(terms)
+            if plan is not None:
+                payload['historical_accounting'] = pricing_payload(plan)
             cursor.execute("INSERT INTO case_pricing_events(case_no,resulting_revision,pricing_json,actor,reason,created_at_utc) VALUES(%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))",
-                (facts.case_no, facts.revision+1, _json(terms), actor, reason))
+                (facts.case_no, facts.revision+1, _json(payload), actor, reason))
             event_id = int(cursor.lastrowid)
             cursor.execute("UPDATE orders SET pricing_override_event_id=%s,pricing_revision=pricing_revision+1,lifecycle_version=lifecycle_version+1 WHERE case_no=%s AND pricing_revision=%s",
                 (event_id, facts.case_no, facts.revision))
             if cursor.rowcount != 1:
                 raise PricingConflict("case_pricing_stale")
-            if facts.historical_service_hours is not None:
-                plan = historical_repricing_plan(self.connection, facts, terms)
+            if facts.historical or facts.historical_service_hours is not None:
+                plan = plan or historical_repricing_plan(self.connection, facts, terms)
                 persist_historical_repricing(self.connection, plan, actor, reason, key)
                 return
             order = select_order(cursor, facts.case_no, lock=True)

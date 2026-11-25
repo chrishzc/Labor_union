@@ -26,15 +26,20 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `ui_react/src/pages/AccountingParametersPage.tsx`
 - `ui_react/src/pages/AccountingParametersPage.css`
 - `ui_react/src/components/CasePricingAdjustmentPanel.tsx`
+- `ui_react/src/components/HistoricalCorrectionAccounting.tsx` — 名冊與帳務抽屜共用的 typed 歷史差額及待核對投影。
 - `ui_react/src/components/AccountingParametersCard.tsx`
 - AccountingParametersCard 僅顯示正式 CasePricing terms／impact 及傳入 owner 金額；讀取失敗或缺來源時維持待確認，不補 0 小時、160 小時、預設費率或在瀏覽器重算總額。應繳與應付金額各自優先顯示傳入的正式帳務金額；該欄未傳入時才顯示已提供的 CasePricing impact 對應金額。缺 CasePricing 時顯示計價依據待確認，已傳入的正式金額仍照常顯示。
 - `ui_react/src/components/AccountingParametersBar.tsx`
 - `ui_react/src/components/AccountingParametersDrawer.tsx`
 - `ui_react/src/components/AccountingParameters.css`
 
-## 目標接線：歷史服務完成後更正
+## 歷史服務完成後更正
 
-保留個案計價入口。替換歷史計價目前「唯一指派／唯一月嫂原應付」的整體前置判斷，改用按指派的正式服務量與各 owner 的可計算結果。Preview 分開回傳可確認差額與待核對原因；已證實無客戶義務為無須處理，不是缺原期款。Apply 沿既有數額更正流程處理可確認部分，保留原款身分、現金及核銷。此段是目標接線，非目前實作。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
+歷史計價以 `HistoricalPricingPerson` 保存各採納指派的已確認服務量，以 `HistoricalRepricingPlan` 區分客戶、逐人應付、補助差額與待核對。缺少某人的原應付不再阻擋其他可確認部分。已證實免自備且沒有原客戶義務時不補建期款；原期款或歸屬缺證據則列待核對。Preview 唯讀並綁定原帳來源與 owner versions，Apply 交既有 Client Finance／Payroll 數額更正 writer，在原外層交易保存差額與結果。待核對保存於既有 pricing event，查詢及重送讀回正式結果。原款身分、收付、核銷、付款日與費率快照保留。驗收依[歷史服務完成後更正](../../../../../requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-completed-fact-correction)。
+
+`HistoricalAccountingCarry` 沿既有 pricing event 與歷史天數事件的財務計畫保存未處理的計算基準與來源。後續胎數、服務資料或個案計價更正接續同一基準，補證後才能清除對應待核對，不能只算最近一次變更或以無變更操作消除舊差額。服務量或原計算基準未知時，預覽金額與差額為 `null`，不以零元冒充已確認。
+
+未綁個案政策或人工計價的歷史案件，服務資料更正沿各指派的正式費率快照計算，未改的指派不套用他人的時數或費率。明確儲存個案計價才採用承辦人確認的整案費率。胎數更正依正式費率來源判斷，人工費率不因數值恰好等於政策費率就被替換；缺正式新費率時保存更正與待核對，不把畫面建議值升格為正式價格。
 
 ## Contracts
 - Reporting borrows read-only `case_total_amount` from complete current `CasePricingFacts`; Domain `calculate_case_total_amount` retains covered service before funding and one fixed floor fee. It does not reuse salary or receipt totals — `15` §15.4 / `04` §0 Reporting 唯讀投影.

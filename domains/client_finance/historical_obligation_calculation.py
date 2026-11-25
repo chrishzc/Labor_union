@@ -23,12 +23,12 @@ class HistoricalClientObligationCandidate:
     client_policy_version: str
     client_hourly_rate: MoneyNTD
     actual_service_days: int
-    actual_service_hours: int
+    actual_service_hours: float
     historical_floor_fee: MoneyNTD
     service_receivable: MoneyNTD
     total_receivable: MoneyNTD
-    subsidy_hours: int
-    self_pay_service_hours: int
+    subsidy_hours: float
+    self_pay_service_hours: float
     fingerprint: PreviewFingerprint
 
 
@@ -38,8 +38,9 @@ def build_historical_client_obligation_candidate(
     client_policy_version: str,
     client_hourly_rate: MoneyNTD,
     actual_service_days: int,
-    service_hours_per_day: float | int,
+    service_hours_per_day: Decimal | float | int,
     historical_floor_fee: MoneyNTD,
+    actual_service_hours: Decimal | None = None,
 ) -> HistoricalClientObligationCandidate:
     """Calculate the historical client obligation without payment-stage dates."""
 
@@ -54,7 +55,13 @@ def build_historical_client_obligation_candidate(
     if not isinstance(historical_floor_fee, MoneyNTD):
         raise TypeError("historical floor fee must be MoneyNTD")
     policy_identity = normalize_subsidy_policy_identity(identity_status)
-    total_hours = actual_service_days * service_hours_per_day
+    if actual_service_hours is not None and (
+        not isinstance(actual_service_hours, Decimal) or not actual_service_hours.is_finite()
+        or actual_service_hours <= 0 or actual_service_hours % Decimal("0.5")
+    ):
+        raise ValueError("historical_completed_service_hours_invalid")
+    total_hours = (Decimal(actual_service_days) * Decimal(str(service_hours_per_day))
+                   if actual_service_hours is None else actual_service_hours)
     coverage = derive_subsidy_coverage(
         identity_status,
         Decimal(total_hours),
@@ -79,10 +86,10 @@ def build_historical_client_obligation_candidate(
         "client_policy_version": client_policy_version,
         "client_hourly_rate_ntd": client_hourly_rate.amount,
         "actual_service_days": actual_service_days,
-        "actual_service_hours": total_hours,
+        "actual_service_hours": float(total_hours),
         "historical_floor_fee_ntd": historical_floor_fee.amount,
-        "subsidy_hours": int(coverage.subsidy_hours),
-        "self_pay_service_hours": int(coverage.self_pay_service_hours),
+        "subsidy_hours": float(coverage.subsidy_hours),
+        "self_pay_service_hours": float(coverage.self_pay_service_hours),
         "service_receivable_ntd": service_receivable.amount,
         "total_receivable_ntd": total_receivable.amount,
     }
@@ -91,12 +98,12 @@ def build_historical_client_obligation_candidate(
         client_policy_version=client_policy_version,
         client_hourly_rate=client_hourly_rate,
         actual_service_days=actual_service_days,
-        actual_service_hours=total_hours,
+        actual_service_hours=float(total_hours),
         historical_floor_fee=historical_floor_fee,
         service_receivable=service_receivable,
         total_receivable=total_receivable,
-        subsidy_hours=int(coverage.subsidy_hours),
-        self_pay_service_hours=int(coverage.self_pay_service_hours),
+        subsidy_hours=float(coverage.subsidy_hours),
+        self_pay_service_hours=float(coverage.self_pay_service_hours),
         fingerprint=fingerprint_payload(payload),
     )
 

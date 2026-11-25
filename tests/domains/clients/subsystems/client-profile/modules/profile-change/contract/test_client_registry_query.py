@@ -1,6 +1,7 @@
 """Case-centered Client registry read-composition contract."""
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -17,7 +18,9 @@ from api.routes.client_registry import (
     get_client_registry,
     get_client_registry_change_history,
     list_client_registry,
+    preview_beclass_correction,
 )
+from api.schemas.client_registry import BeClassCorrectionPreviewRequest
 from domains.client_finance.obligation_planning import (
     ClientChargeDay,
     ClientFinanceTermsFacts,
@@ -28,8 +31,11 @@ from infrastructure.mysql.client_registry_query_repository import (
     _client_service_received_total,
     _finance_values,
 )
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.case_import.beclass_correction_workflow import BeClassBirthCountCorrectionMode
+from subsystems.client_finance.pricing_configuration import HistoricalPersonPricing, HistoricalRepricingPlan
 from subsystems.client_profile.registry_query import (
     ClientRegistryContractError,
     ClientRegistryQueryApplication,
@@ -52,7 +58,7 @@ class _Repository:
             "beclass_status": "ready", "beclass_record_id": 12,
             "beclass_source_kind": "imported", "beclass_version": 3,
             "beclass_values": {"name": "王小明", "phone": "0922222222", "multi_birth_count": "雙胞胎"},
-            "beclass_financial_fields_locked": True,
+            "beclass_birth_count_correction_mode": BeClassBirthCountCorrectionMode.LOCKED,
             "order_information_values": {
                 "multi_birth_count": "雙胞胎", "dietary_habits": "不吃牛肉",
             },
@@ -240,7 +246,9 @@ def test_registry_rejects_invalid_sort_before_it_reaches_repository_and_custom_s
 def test_registry_http_composition_identifies_each_field_owner_and_editability(virtual_account,historical_completed):
     class _FinanceRepository(_Repository):
         def load_detail(self, case_no):
-            return {**super().load_detail(case_no), 'finance_status': 'ready', 'finance_values': {
+            return {**super().load_detail(case_no),
+                "beclass_birth_count_correction_mode": BeClassBirthCountCorrectionMode.HISTORICAL_SERVICE_COMPLETED
+                if historical_completed else BeClassBirthCountCorrectionMode.LOCKED, 'finance_status': 'ready', 'finance_values': {
                 'virtual_account': virtual_account, 'service_unit_price_ntd': 300,
                 'service_hours': 160, 'customer_payable_total_ntd': 48000,
                 'deposit_amount_ntd': 12000, 'first_payment_amount_ntd': 24000,
@@ -284,10 +292,43 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability(v
     }
     assert payload["beclass"]["field_capabilities"]["phone"]["owner"] == "client_beclass"
     assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["options"] == ("單胞胎", "雙胞胎")
-    assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["editable"] is False
-    assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["reason"] == "multi_birth_count_locked_after_service_start"
+    assert payload["beclass"]["birth_count_correction_mode"] == (
+        "historical_service_completed" if historical_completed else "locked"
+    )
+    assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["editable"] is historical_completed
+    assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["reason"] == (
+        None if historical_completed else "multi_birth_count_locked_after_service_start"
+    )
     assert payload["order_information"]["values"]["multi_birth_count"] == "雙胞胎"
     assert payload["order_terms"]["field_capabilities"]["planned_start_date"]["owner"] == "order_terms"
+
+
+def test_registry_historical_birth_preview_serializes_person_amounts_and_pending():
+    plan = HistoricalRepricingPlan(
+        "CASE-001", 4, 5, (), (),
+        persons=(HistoricalPersonPricing("assignment:81", 1, "合成月嫂", Decimal(8), 2400, 3600, 1200),),
+        pending=("historical_pricing_original_payable_required:assignment:81",),
+    )
+    changes = {"multi_birth_count": "雙胞胎"}
+    preview = SimpleNamespace(
+        current_version=3,
+        before={"multi_birth_count": "單胞胎"}, after=changes,
+        preview_fingerprint=PreviewFingerprint("a" * 64),
+        historical_pricing=SimpleNamespace(impact=plan),
+    )
+
+    response = preview_beclass_correction(
+        body=BeClassCorrectionPreviewRequest.model_validate({"changes": changes, "expected_version": 3}),
+        case_no="CASE-001",
+        principal=AdminPrincipal(9, "registry-writer", "Registry Writer", "system_admin"),
+        workflow=SimpleNamespace(preview=lambda *_: preview),
+    )
+    payload = response.data.model_dump(mode="json")
+
+    assert payload["before"] == {"multi_birth_count": "單胞胎"}
+    assert payload["after"] == changes
+    assert payload["historical_impact"]["persons"][0]["delta"] == 1200
+    assert payload["historical_impact"]["pending"] == list(plan.pending)
 
 
 @pytest.mark.parametrize("value", ["初生兒", "單胞胎", "雙胞胎"])

@@ -2,20 +2,31 @@
 
 import json
 from contextlib import AbstractContextManager
+from decimal import Decimal
 
 import pytest
 
 from domains.case_import.beclass_correction import BeClassCorrectionError
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
 from domains.case_import.order_information import ORDER_INFORMATION_KEYS, project_order_information
 from domains.case_import.registration_details import REGISTRATION_DETAIL_FIELDS, project_registration_details, mask_beclass_values
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.case_import.beclass_correction_workflow import (
+    BeClassBirthCountCorrectionMode,
+    BeClassCorrectionBlocked,
     BeClassCorrectionConflict,
     BeClassCorrectionSnapshot,
     BeClassCorrectionWorkflow,
     allows_manual_beclass_source,
+    beclass_birth_count_correction_mode,
+)
+from subsystems.client_finance.pricing_configuration import (
+    CasePricingFacts,
+    HistoricalBirthCorrectionPreview,
+    HistoricalRepricingPlan,
 )
 
 
@@ -33,9 +44,9 @@ class _Uow(AbstractContextManager):
 def test_registration_details_projection_and_private_outputs():
     number = chr(65) + "123456789"
     values = project_registration_details({"身分證字號": number.lower(), "三節假日是否願意支付雙倍薪水": "否"})
-    assert values == {"id_number": number, "holiday_double_pay": "否"}
-    assert mask_beclass_values(values) == {"id_number": "**********", "holiday_double_pay": "否"}
-    assert project_registration_details({"身分證字號": "invalid", "三節假日是否願意支付雙倍薪水": "unknown"}) == {"id_number": None, "holiday_double_pay": None}
+    assert values == {"id_number": number, "holiday_double_pay": "否", "ingredient_purchase": None}
+    assert mask_beclass_values(values) == {"id_number": "**********", "holiday_double_pay": "否", "ingredient_purchase": None}
+    assert project_registration_details({"身分證字號": "invalid", "三節假日是否願意支付雙倍薪水": "unknown"}) == {"id_number": None, "holiday_double_pay": None, "ingredient_purchase": None}
 
 
 @pytest.mark.parametrize("holiday_double_pay", ["是", "否", None])
@@ -45,7 +56,7 @@ def test_registration_corrections_share_version_preserve_source_and_do_not_sync_
     repository.original["id_number"] = number
     source_answer = "否" if holiday_double_pay == "是" else "是"
     repository.original["holiday_double_pay"] = source_answer
-    repository.financial_fields_locked = True
+    repository.birth_count_correction_mode = BeClassBirthCountCorrectionMode.LOCKED
     sync = _FinancialSync()
     workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
     current = workflow.query("CASE-001")
@@ -93,12 +104,12 @@ class _Repository:
         self.manual = manual
         self.claims = {}
         self.receipts = {}
-        self.financial_fields_locked = False
+        self.birth_count_correction_mode = BeClassBirthCountCorrectionMode.STANDARD
 
     def load(self, case_no, *, for_update):
         if case_no != "CASE-001":
             return None
-        return {"beclass_record_id": None if self.manual and self.version == 0 else 12, "case_no": case_no, "aggregate_version": self.version, "original": dict(self.original), "corrections": dict(self.corrections), "source_kind": "admin_manual" if self.manual else "imported", "financial_fields_locked": self.financial_fields_locked}
+        return {"beclass_record_id": None if self.manual and self.version == 0 else 12, "case_no": case_no, "aggregate_version": self.version, "original": dict(self.original), "corrections": dict(self.corrections), "source_kind": "admin_manual" if self.manual else "imported", "birth_count_correction_mode": self.birth_count_correction_mode}
 
     def claim(self, *, key, command_fingerprint, **_):
         previous = self.claims.setdefault(key.value, command_fingerprint.value)
@@ -233,7 +244,7 @@ def test_manual_beclass_can_be_created_without_an_imported_record():
 def test_multi_birth_count_is_locked_after_service_starts_but_other_fields_remain_editable():
     repository = _Repository()
     repository.original["multi_birth_count"] = "單胞胎"
-    repository.financial_fields_locked = True
+    repository.birth_count_correction_mode = BeClassBirthCountCorrectionMode.LOCKED
     workflow = BeClassCorrectionWorkflow(repository, _Uow, _FinancialSync())
 
     with pytest.raises(ValueError, match="beclass_multi_birth_count_locked_after_service_start"):
@@ -243,6 +254,117 @@ def test_multi_birth_count_is_locked_after_service_starts_but_other_fields_remai
 
     preview = workflow.preview("CASE-001", {"phone": "0922222222"}, ExpectedVersion(0))
     assert preview.after == {"phone": "0922222222"}
+
+
+@pytest.mark.parametrize(
+    ("status", "locked"),
+    [
+        (OrderLifecycleStatus.IN_SERVICE, False),
+        (OrderLifecycleStatus.COMPLETED, False),
+        (OrderLifecycleStatus.CANCELLED, False),
+        (OrderLifecycleStatus.HISTORICAL_IN_SERVICE, False),
+        (OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED, False),
+        (OrderLifecycleStatus.ESTABLISHED, True),
+    ],
+)
+def test_birth_count_correction_rejects_ineligible_order_states(status, locked):
+    repository = _Repository()
+    repository.original["multi_birth_count"] = "單胞胎"
+    repository.birth_count_correction_mode = beclass_birth_count_correction_mode(status, service_data_locked=locked)
+    sync = _FinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
+    with pytest.raises(BeClassCorrectionBlocked, match="beclass_multi_birth_count_locked_after_service_start"):
+        workflow.preview("CASE-001", {"multi_birth_count": "雙胞胎"}, ExpectedVersion(0))
+    assert repository.version == 0
+    assert not (repository.corrections or repository.claims or repository.receipts or sync.calls)
+
+
+@pytest.mark.parametrize("status", [OrderLifecycleStatus.HISTORICAL_UNSERVED, OrderLifecycleStatus.ESTABLISHED_UNSERVED])
+def test_unserved_without_service_lock_uses_existing_birth_count_correction(status):
+    repository = _Repository()
+    repository.original["multi_birth_count"] = "單胞胎"
+    repository.birth_count_correction_mode = beclass_birth_count_correction_mode(status, service_data_locked=False)
+    sync = _FinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
+    changes = {"multi_birth_count": "雙胞胎"}
+    version = ExpectedVersion(0)
+    preview = workflow.preview("CASE-001", changes, version)
+    receipt = workflow.apply("CASE-001", changes, version, preview.preview_fingerprint, IdempotencyKey("unserved"),
+                             ActorContext("tester"), "", CorrelationId("unserved"))
+    assert preview.historical_pricing is None
+    assert receipt.readback.effective["multi_birth_count"] == "雙胞胎"
+    assert len(sync.calls) == 1
+
+
+class _HistoricalFinancialSync(_FinancialSync):
+    def __init__(self):
+        super().__init__()
+        self.finance_revision = 4
+        self.historical_writes: list[tuple[str | None, str]] = []
+        self.preview_locks: list[bool] = []
+
+    def preview_historical(self, *, case_no: str, before_birth_count: str | None, after_birth_count: str,
+                           for_update: bool) -> HistoricalBirthCorrectionPreview:
+        self.preview_locks.append(for_update)
+        terms = CasePricingTerms("一般市民", IdentityRule.CITIZEN, Decimal(8), HourlyRates(300, 300), HourlyRates(300, 300))
+        facts = CasePricingFacts(case_no, self.finance_revision, (1, 2, 3), terms, "policy", (), 0, historical=True)
+        impact = HistoricalRepricingPlan(case_no, 2, 3, (), (), pending=("historical_pricing_original_payable_required",))
+        return HistoricalBirthCorrectionPreview(
+            fingerprint_payload({"revision": self.finance_revision, "from": before_birth_count, "to": after_birth_count}),
+            impact, facts, terms, before_birth_count, after_birth_count,
+        )
+
+    def apply_historical(self, *, preview: HistoricalBirthCorrectionPreview, actor: ActorContext,
+                         reason: str, idempotency_key: IdempotencyKey) -> None:
+        self.historical_writes.append((preview.before_birth_count, preview.after_birth_count))
+
+
+def test_historical_birth_count_preview_confirms_and_replays_forward_and_reverse():
+    repository = _Repository()
+    repository.original["multi_birth_count"] = "單胞胎"
+    repository.birth_count_correction_mode = beclass_birth_count_correction_mode(
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, service_data_locked=True,
+    )
+    sync = _HistoricalFinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
+    for version, before, after in ((0, "單胞胎", "雙胞胎"), (1, "雙胞胎", "單胞胎")):
+        changes = {"multi_birth_count": after}
+        key = IdempotencyKey(f"birth-change-{version}")
+        preview = workflow.preview("CASE-001", changes, ExpectedVersion(version))
+        assert preview.before == {"multi_birth_count": before}
+        assert preview.after == changes
+        assert preview.historical_pricing is not None
+        assert len(sync.historical_writes) == len(repository.claims) == len(repository.receipts) == repository.version == version
+        receipt = workflow.apply("CASE-001", changes, ExpectedVersion(version), preview.preview_fingerprint, key,
+                                 ActorContext("tester"), "核對胎數", CorrelationId(key.value))
+        replay = workflow.apply("CASE-001", changes, ExpectedVersion(version), preview.preview_fingerprint, key,
+                                ActorContext("tester"), "核對胎數", CorrelationId(key.value))
+        assert receipt.readback.effective["multi_birth_count"] == replay.readback.effective["multi_birth_count"] == after
+        assert receipt.readback.original["multi_birth_count"] == "單胞胎"
+        assert receipt.accounting_pending == replay.accounting_pending == preview.historical_pricing.impact.pending
+        assert replay.replayed
+    assert sync.preview_locks == [False, True, False, True]
+    assert sync.historical_writes == [("單胞胎", "雙胞胎"), ("雙胞胎", "單胞胎")]
+    assert not (sync.calls or sync.snapshot_sync_calls)
+
+
+def test_historical_birth_count_rejects_combined_changes_and_stale_accounting():
+    repository = _Repository()
+    repository.original["multi_birth_count"] = "單胞胎"
+    repository.birth_count_correction_mode = BeClassBirthCountCorrectionMode.HISTORICAL_SERVICE_COMPLETED
+    sync = _HistoricalFinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
+    changes = {"multi_birth_count": "雙胞胎"}
+    with pytest.raises(BeClassCorrectionBlocked, match="historical_birth_correction_requires_separate_command"):
+        workflow.preview("CASE-001", {**changes, "id_number": None}, ExpectedVersion(0))
+    assert not sync.preview_locks
+    preview = workflow.preview("CASE-001", changes, ExpectedVersion(0))
+    sync.finance_revision += 1
+    with pytest.raises(BeClassCorrectionConflict, match="beclass_correction_stale_preview"):
+        workflow.apply("CASE-001", changes, ExpectedVersion(0), preview.preview_fingerprint, IdempotencyKey("stale"),
+                       ActorContext("tester"), "", CorrelationId("stale"))
+    assert repository.version == 0
+    assert not (repository.corrections or repository.receipts or sync.historical_writes)
 
 
 def test_every_canonical_order_status_allows_manual_beclass_source() -> None:
@@ -255,7 +377,7 @@ def test_every_canonical_order_status_allows_manual_beclass_source() -> None:
 
 def test_care_corrections_preserve_original_types_without_financial_effect():
     repository = _Repository()
-    repository.financial_fields_locked = True
+    repository.birth_count_correction_mode = BeClassBirthCountCorrectionMode.LOCKED
     repository.original.update({"dietary_habits": "原始飲食", "parking_space_provided": False, "alcohol_ratio": 0.5})
     sync = _FinancialSync()
     workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
@@ -338,6 +460,7 @@ def test_beclass_mysql_correction_locks_unique_bound_case_not_import_query_numbe
     assert "ORDER BY id LIMIT 2 FOR UPDATE" in statements[1]
     assert "query_no" not in " ".join(statements)
     assert snapshot["corrections"] == {"phone": "0922222222"}
+    assert snapshot["birth_count_correction_mode"] is BeClassBirthCountCorrectionMode.HISTORICAL_SERVICE_COMPLETED
 
 
 def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_order():
@@ -361,7 +484,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_ord
         },
         "corrections": {},
         "source_kind": "admin_manual",
-        "financial_fields_locked": True,
+        "birth_count_correction_mode": BeClassBirthCountCorrectionMode.LOCKED,
     }
 
 
@@ -384,7 +507,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_current_order(
         },
         "corrections": {},
         "source_kind": "admin_manual",
-        "financial_fields_locked": False,
+        "birth_count_correction_mode": BeClassBirthCountCorrectionMode.STANDARD,
     }
 
 
