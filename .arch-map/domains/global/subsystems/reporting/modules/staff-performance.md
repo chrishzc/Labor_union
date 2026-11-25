@@ -34,13 +34,34 @@ Compose monthly, quarterly and annual read-only staff performance. Credit each c
 - No transaction ownership, DB writes, schema changes or external provider effects.
 
 
-### 正式逐日工時與開案認列
+### 正式逐日工時與開案認列 ^reporting-staff-recognition
 
 [需求書 §6.1](../../../../../requirements/34_營運報表與統計口徑正式規格.md#61-口徑與認列規則) 定義月嫂表現的工時：只看各月嫂於期間內的有效工作日；`staff_performance_query_repository.py::list_service_days` 每日取 `Orders.service_hours_per_day`，不讀逐日覆寫。相對地，[週報逐日時數](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-service-daily-hours) 的 SQL 優先取 Scheduling 的 `service_hours_override`。同一正式班次兩份報表可以有不同數字，不能把其中一份當成另一份的驗收基準。
 
 `StaffPerformanceQuery` 另使用實際開案日與開案主責做一次性認列，`total_amount_ntd`（明細整案金額）和 `recognized_amount_ntd`（本期認列額）不可互代。已知開案且主責是另一人時，接手者可有工時，接案件數與認列金額為零；有已知工時但實際開案日未知時，受影響的認列保留 `null`，XLSX 顯示「待確認」。JSON 和 XLSX 分別查詢，`staff-performance.v2` 是格式版本，不是兩次請求共用的資料快照。
 
 交接驗證（尚未實跑）：以固定資料核對兩份查詢及各自 XLSX。例：A 於 10/26 開案，原訂每日 4 小時、整案 NT$12,000；B 接手後，11/02、11/09 兩個 4 小時班次合為 11/02 一個 8 小時正式班次。依現行兩項口徑，該案 B 的週報工時為 8，11 月月嫂表現為 4，B 的 11 月認列為零；A 只在 10 月認列 1 件、NT$12,000。若任一角色要求兩報表工時一致，先確認業務口徑再改需求或程式。既有 `test_handover_has_hours_but_never_takes_the_opening_credit` 與 `test_missing_actual_start_keeps_hours_and_marks_credit_unknown` 使用合成資料，不涵蓋兩份 SQL 的合併班次對照。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-staff-recognition
+  target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^staff-performance-recognition'
+```
+
+### 月嫂表現的 API、畫面與匯出 ^reporting-staff-presentation
+
+| 負責角色 | 正式約定 | 去哪查 |
+| --- | --- | --- |
+| Reporting／後端 | 查詢與 XLSX 都用 `staff-performance.v2`，但各自查詢。將整案總額與本期認列額分欄，不用接手者的服務工時反推案件歸屬。 | `api/routes/operations_reports.py`、`api/schemas/staff_performance.py`、`staff_performance_export.py` |
+| 前端 | 分開顯示接案數、服務工時及本期認列金額。按選定指標排行，只取有已知正值者；前期為零或缺值時不算成長率。切換篩選要清除舊結果，不接納過期回應。 | `StaffPerformancePanel.tsx`、下方 Verification |
+
+需求及 XLSX 四張分頁見 [需求書 §6.2](../../../../../requirements/34_營運報表與統計口徑正式規格.md#staff-performance-presentation)。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-staff-presentation
+  target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^staff-performance-presentation'
+```
 
 ## Verification
 - layout_status: `custom_current`
