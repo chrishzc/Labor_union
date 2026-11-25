@@ -801,7 +801,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  {data.historical_stages&&<>
   {data.full_subsidy&&!data.scheme_conflict&&<p>全額補助／免自備，客戶應付 {money(data.customer_amount_ntd)}</p>}
   {data.accounting_pending_reasons?.map(reason=><p key={reason} role="status">{accountingReason(reason)}</p>)}
-  {!!data.pending_bank_row_identities?.length&&<section aria-label="本案銀行入款待核對"><p>原銀行來源待核對，尚未認列本案實收。</p><ul>{data.pending_bank_row_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
+  {!!data.pending_bank_row_identities?.length&&<section aria-label="本案銀行收付款待核對"><p>原銀行來源待核對，尚未認列本案實收或實付。</p><ul>{data.pending_bank_row_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
   {!!data.stale_payment_evidence_identities?.length&&<section aria-label="歷史付款證據待核對"><p>歷史付款證據已過期待核對</p><ul>{data.stale_payment_evidence_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
   {clientRows.length===0&&<p>{data.full_subsidy&&!data.scheme_conflict?'沒有原期款證據；免自備判定不代表原款已付或帳務結清。':'沒有原期款證據；整案總額僅供查閱，原期款與收付仍待核對。'}</p>}
  </>}

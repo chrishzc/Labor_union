@@ -1,5 +1,5 @@
 const historicalAccountingReasons: Record<string,string> = {
- historical_client_bank_reconciliation_required: '已有本案銀行入款待核對，不能視為沒有收付或自行分配期款。',
+ historical_client_bank_reconciliation_required: '已有本案銀行收付款待核對，不能視為沒有收付或自行分配期款。',
  historical_client_cash_requires_review: '原收付款與免自備判定不相容，請核對原帳。',
  historical_subsidy_limit_missing: '缺少本案有效補助上限，免自備資格待確認。',
  historical_client_identity_missing: '缺少正式歷史身分，免自備資格待確認。',
@@ -28,7 +28,6 @@ const historicalAccountingReasons: Record<string,string> = {
  installment_date_pending: '原應付日期尚未形成。',
  historical_payroll_due_date_missing: '原正式應付缺少到期日，金額與付款紀錄保留。',
  historical_payroll_funding_source_missing: '單筆應付尚缺可證實的付款來源，預計日待確認。',
- historical_payroll_funding_source_missing: '缺少本筆應付的正式付款來源，預計付款日待確認。',
  historical_payroll_installment_date_pending: '原正式來源分期缺少到期日。',
  historical_payroll_assignment_source_missing: '缺少歷史月嫂指派來源。',
  historical_payroll_assignment_source_ambiguous: '歷史月嫂指派來源不唯一，請核對歸屬。',

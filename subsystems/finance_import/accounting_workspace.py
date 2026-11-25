@@ -447,9 +447,11 @@ class AccountingWorkspace:
             direct_confirmed=direct, bank_sources_complete=cash_flows is not None, direct_conflict=conflict,
             full_subsidy=full_subsidy)
         plan = self.plan(case_no) if include_sources and self.plan is not None else None
-        if full_subsidy and not conflict:
+        if conflict:
+            scheme = "unknown"
+        elif full_subsidy:
             scheme = "split"
-        elif not conflict and plan is not None and plan.selected_scheme is not None:
+        elif plan is not None and plan.selected_scheme is not None:
             scheme = plan.selected_scheme
         from domains.client_finance.subsidy_advance import subsidy_advance_due_date
         estimated_subsidy_payment_date = (

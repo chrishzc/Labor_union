@@ -1326,8 +1326,8 @@ it('兩入口保留待核對銀行與過期付款來源，不能視為沒有收�
   pending_bank_row_identities:['bank-row:original-1'],stale_payment_evidence_identities:['original:stale-payment']};
  vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
  wrapper(<><FinanceCaseAccounting initialCase={caseNo} embedded/><ClientRegistryAccountingSummary caseNo={caseNo} revision={0}/></>);
- await waitFor(()=>expect(screen.getAllByRole('region',{name:'本案銀行入款待核對'})).toHaveLength(2));
- for(const section of screen.getAllByRole('region',{name:'本案銀行入款待核對'}))expect(section).toHaveTextContent('bank-row:original-1');
+ await waitFor(()=>expect(screen.getAllByRole('region',{name:'本案銀行收付款待核對'})).toHaveLength(2));
+ for(const section of screen.getAllByRole('region',{name:'本案銀行收付款待核對'}))expect(section).toHaveTextContent('bank-row:original-1');
  for(const section of screen.getAllByRole('region',{name:'歷史付款證據待核對'}))expect(section).toHaveTextContent('original:stale-payment');
  expect(screen.queryByText('全額補助／免自備，客戶應付 NT$ 0')).not.toBeInTheDocument();
  expect(screen.queryByText('全額補助／免自備，客戶應付 0 元')).not.toBeInTheDocument();

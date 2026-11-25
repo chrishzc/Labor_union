@@ -33,7 +33,7 @@ export function ClientRegistryAccountingSummary({caseNo, revision}: {caseNo: str
       {state.data.historical_stages&&<>
         {state.data.full_subsidy&&!state.data.scheme_conflict&&<p>全額補助／免自備，客戶應付 {money(state.data.customer_amount_ntd)}</p>}
         {state.data.accounting_pending_reasons?.map(reason=><p key={reason} role="status">{accountingReason(reason)}</p>)}
-        {!!state.data.pending_bank_row_identities?.length&&<section aria-label="本案銀行入款待核對"><p>原銀行來源待核對，尚未認列本案實收。</p><ul>{state.data.pending_bank_row_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
+        {!!state.data.pending_bank_row_identities?.length&&<section aria-label="本案銀行收付款待核對"><p>原銀行來源待核對，尚未認列本案實收或實付。</p><ul>{state.data.pending_bank_row_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
         {!!state.data.stale_payment_evidence_identities?.length&&<section aria-label="歷史付款證據待核對"><p>歷史付款證據已過期待核對</p><ul>{state.data.stale_payment_evidence_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
         <section aria-label="歷史客戶原款項" tabIndex={0} style={{overflowX:'auto'}}><h4>歷史客戶原款項</h4>
           {originalClientItems.length===0?<p>{state.data.full_subsidy&&!state.data.scheme_conflict

@@ -472,7 +472,10 @@ def test_historical_accounting_keeps_pending_bank_candidate_without_calling_it_r
         assert 'historical_client_bank_reconciliation_required' in terms.pending_reasons
         assert terms.pending_bank_row_identities == (str(bank_id),)
         result = build_accounting_workspace(connection).query(case_no)
-        assert result.full_subsidy is False and result.scheme_conflict is True
+        assert result.full_subsidy is False and result.scheme_conflict is False
+        assert result.customer_amount_ntd is None
+        assert 'historical_client_bank_reconciliation_required' in result.accounting_pending_reasons
+        assert result.pending_bank_row_identities == (str(bank_id),)
         assert result.client_items == () and result.received_ntd is None
         with connection.cursor() as cursor:
             cursor.execute('SELECT reconciliation_status FROM finance_import_rows WHERE id=%s', (bank_id,))
