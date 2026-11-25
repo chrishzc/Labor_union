@@ -683,3 +683,44 @@ def test_ordinary_completion_materializes_confirmed_customer_subsidy_after_payro
         item, = roster.list(query=case, limit=10, after=None).items
     assert item.staff_payment_due_date == date(2026, 11, 15)
     assert [row['due_date'] for row in item.client_obligation_dates if row['obligation_type'] == 'subsidy_return'] == [date(2026, 12, 15)]
+
+
+@pytest.mark.parametrize("import_before_cancellation", [True, False])
+def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_before_cancellation):
+    case, _ = new_case()
+    if import_before_cancellation:
+        row, _ = stage(case, 5000, 13, incoming=True)
+    cancel(case, [])
+    if not import_before_cancellation:
+        row, _ = stage(case, 5000, 13, incoming=True)
+    before = snapshot(case)
+    assert before["ledger"] == []
+    url = '/api/v1/finance-import/corrections'
+    selection = {
+        'row_identity': f'finance-import-row:{row}', 'classification_type': 'client_receipt',
+        'target_obligation_identities': [], 'service_end_case_no': case,
+        'reason': 'confirmed same-case bank receipt', 'evidence': ['synthetic original Sinopac statement'],
+    }
+    review_list = checked(http.get(f'/api/v1/finance-import/bank-transactions?row_id={row}&transaction_status=all'))
+    assert review_list['items'][0]['service_end_receipt_case_no'] == case
+    preview = checked(http.post(url + '/preview', json=selection))
+    assert preview['candidate']['allocations'] == []
+    assert preview['candidate']['service_end_receipt']['new_refund_ntd'] == 5000
+    assert snapshot(case) == before
+    body = {**selection, **{f'expected_{key}_version': preview[f'{key}_version'] for key in
+                            ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
+    key = {'Idempotency-Key': case + ':terminal-late-receipt'}
+    accepted = checked(http.post(url + '/apply', json=body, headers=key), 202)
+    jobs(accepted)
+    outcome = checked(http.get(f"/api/v1/finance-import/jobs/{accepted['job_id']}/correction-outcome"))
+    assert outcome['receipt']['row_identity'] == selection['row_identity']
+    after = snapshot(case)
+    assert after['order'] == before['order'] and after['schedule'] == before['schedule']
+    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', 5000)]
+    assert [item for item in after['client'] if item['direction'] == 'receivable_from_client'] == [
+        item for item in before['client'] if item['direction'] == 'receivable_from_client']
+    assert [(item['status'], item['amount_due_ntd']) for item in after['client']
+            if item['obligation_type'] == 'refund'] == [('open', 5000)]
+    assert checked(http.post(url + '/apply', json=body, headers=key), 202)['replayed'] is True
+    assert http.post(url + '/preview', json=selection).status_code == 409
+    assert snapshot(case) == after

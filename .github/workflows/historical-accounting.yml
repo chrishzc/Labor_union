@@ -75,6 +75,15 @@ jobs:
         run: |
           python -m pytest -vv tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py -k historical_accounting
           python -m pytest -vv tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py
+      - name: Verify late Sinopac receipts through real bank review
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        env:
+          LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_late_${{ github.run_id }}_${{ github.run_attempt }}
+          LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+          LABOR_UNION_TEST_MYSQL_PORT: "3307"
+          LABOR_UNION_TEST_MYSQL_USER: root
+          LABOR_UNION_TEST_MYSQL_PASSWORD: ""
+        run: python -m pytest -vv tests/domains/finance-import/subsystems/finance-import/integration/test_accounting_event_matrix_mysql.py -k terminal_sinopac_receipt
       - name: Verify bank review through isolated money owners
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
