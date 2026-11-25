@@ -54,6 +54,7 @@
 - **Assignment Plan Query**：唯讀回傳現行版本與各 owner version（Finance／Payroll 未建立時回 `NULL`，禁止填 0）。
 - **Actual Start 已有有效排班重算**：以現行 effective assignments 之順序、月嫂與每段既有 `official-service-day count` 為不變輸入（禁止平移舊日或重分配天數），依序由新 `actual_start_date` 逐日重算各段（保留已核准之請假占用／代班 outcome 與假日事實，任一衝突或 lineage 無法承接回 typed conflict 零寫入，並交 Payroll 搬移 1-to-1 `source_assignment_id` 費率快照）。
 - **年度假日設定** ^holiday-annual-settings
+  - 年度清單每筆直接顯示雙倍狀態及「啟用雙倍」或「取消雙倍」按鈕，點擊沿既有權限、Query／Preview／Apply 與版本契約寫入，不開設定抽屜或確認視窗。送出只鎖住該列按鈕並防止連點重送；成功顯示後端讀回狀態，失敗保留原狀態、該列顯示錯誤並可重試。新增假日、日期與名稱修改沿原入口，不併入雙倍切換。全額免自備已排案件不新增警告或阻擋。
   - 管理員選擇年度後直接查詢並顯示該年全部國定假日，匯入完成亦回讀全年。保留排班日曆原區間查詢。逐日保存雙倍開關；新匯入日期預設關閉，重匯既有日期保留人工開關，不以匯入預設值覆寫。匯入沿既有逐日 Query／Preview／Apply、版本及重送契約。
   - 雙倍適用日期只取調整後的實際有效服務日及當日有效時數，取消班、休息日、緩衝日不供計價。歷史案排除與金額規則見 [Client Finance PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing)；設定異動的雙邊帳務保護見 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)。本設定不改排班衝突規則。
 - **Holiday facts**：`SchedulingHolidayQuery` 作為版本化唯讀 port，納入 Preview fingerprint 並在 Apply 重鎖重讀（無法讀取回 `holiday_calendar_unavailable`）。
@@ -175,3 +176,5 @@
 |---|---|---|---|---|
 | HOLIDAY-ANNUAL-01 | 該年有既有開啟日及未匯入新日 | 維護年度假日 | 換年度、匯入後回讀全年，再切換單日 | 全年直接顯示，新日關閉、既有開關保留，單日切換不影響其他日，區間查詢仍可用 |
 | HOLIDAY-EFFECTIVE-01 | 一般單兩個平日各4小時，目標為開啟雙倍假日 | 合併後計價 | 合併至目標並讀回帳務 | 服務量8小時，當日8小時按雙倍適用費率，不採來源平日乘數 |
+| HOLIDAY-INLINE-01 | 同年度兩筆假日皆關閉雙倍，已排班全額免自備案件可涵蓋其中一天 | 直接在年度清單維護單日雙倍 | 點第一筆啟用，等待回讀並重載，再取消雙倍 | 每次操作只送一次該日正式 Apply，僅第一筆顯示後端狀態；第二筆不變，不開抽屜、確認或案件警告，重載保留正式結果 |
+| HOLIDAY-INLINE-02 | 同年度兩筆假日；第一筆送出尚未完成或寫入失敗 | 防連點並重試失敗列 | 連點第一筆，再令寫入失敗，於該列重試 | 送出只鎖第一列按鈕，第二列仍可操作；連點不重送；失敗原狀不變並在原列顯示錯誤，同命令重試不重複入帳，不把失敗顯示成成功 |

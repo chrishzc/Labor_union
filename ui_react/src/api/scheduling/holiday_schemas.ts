@@ -213,6 +213,11 @@ export const HolidayPreviewSchema = z.strictObject({
 });
 
 export const HolidayReceiptSchema = z.strictObject({
+  case_results: z.array(z.strictObject({
+    case_no: z.string().min(1),
+    outcome: z.enum(['repriced', 'preserved_cash_history', 'historical_excluded', 'funding_decision_pending', 'unchanged', 'blocked']),
+    case_total_amount: z.number().int().nullable(),
+  })).optional(),
   receipt_key: z.string().min(1).max(191),
   action: HolidayActionSchema,
   holiday_date: HolidayDateSchema,

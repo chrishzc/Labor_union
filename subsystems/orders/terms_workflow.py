@@ -226,7 +226,7 @@ class ClientFinanceImpactPersistenceCommand:
     reason: str
     correlation_id: Any
     source_event_family: str
-    source_event_id: int
+    source_event_id: int | str
 
 
 @dataclass(frozen=True, slots=True)

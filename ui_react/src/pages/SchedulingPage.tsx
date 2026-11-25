@@ -300,6 +300,11 @@ function HolidayPolicyWorkspace() {
   const submittingRef = useRef(false);
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
   const [, setStoreRevision] = useState(0);
+  const rowRequests = useRef(new Map<string, { request: HolidayApplyRequest; key: string; committed: boolean }>());
+  const rowSubmitting = useRef(new Set<string>());
+  const [rowPending, setRowPending] = useState<ReadonlySet<string>>(new Set());
+  const [rowErrors, setRowErrors] = useState<Readonly<Record<string, string>>>({});
+  const [observedRows, setObservedRows] = useState<Readonly<Record<string, HolidayRow>>>({});
 
   useEffect(() => {
     const unsubscribe = holidayFlowStore.subscribe(() => setStoreRevision((value) => value + 1));
@@ -313,6 +318,44 @@ function HolidayPolicyWorkspace() {
   const draft = holidayFlowStore.get();
   const machine = resolveHolidayMachineState(draft);
   const calendar = draft?.calendar ?? null;
+  useEffect(() => { setObservedRows({}); }, [calendar]);
+  const toggleDoublePay = async (holiday: HolidayRow): Promise<void> => {
+    const date = holiday.holiday_date;
+    if (rowSubmitting.current.has(date)) return;
+    rowSubmitting.current.add(date);
+    setRowPending(new Set(rowSubmitting.current));
+    setRowErrors(previous => { const next = { ...previous }; delete next[date]; return next; });
+    const horizon = { from_date: fromDate, to_date: toDate };
+    try {
+      let pending = rowRequests.current.get(date);
+      if (!pending) {
+        const fresh = await holidayClient.query(horizon);
+        const current = fresh.holidays.find(item => item.holiday_date === date);
+        if (!current) throw new Error('該日假日資料已變更，請重新查詢。');
+        const command: HolidayPreviewRequest = { ...horizon, action: 'upsert', holiday_date: date,
+          holiday_name: current.holiday_name, is_double_pay_default: !holiday.is_double_pay_default };
+        const prepared = await holidayClient.preview(command);
+        pending = { request: { ...command, expected_calendar_version: prepared.command.expected_calendar_version,
+          preview_fingerprint: prepared.preview_fingerprint, reason: '' }, key: crypto.randomUUID(), committed: false };
+        rowRequests.current.set(date, pending);
+      }
+      if (!pending.committed) {
+        await holidayClient.apply(pending.request, { idempotencyKey: pending.key });
+        pending.committed = true;
+      }
+      const readback = await holidayClient.query(horizon);
+      const result = readback.holidays.find(item => item.holiday_date === date);
+      if (!result) throw new Error('無法讀回該日的假日設定，請重試。');
+      setObservedRows(previous => ({ ...previous, [date]: result }));
+      rowRequests.current.delete(date);
+    } catch (error) {
+      if (error instanceof Error && 'status' in error && error.status === 409) rowRequests.current.delete(date);
+      setRowErrors(previous => ({ ...previous, [date]: error instanceof Error ? error.message : '儲存失敗，請重試。' }));
+    } finally {
+      rowSubmitting.current.delete(date);
+      setRowPending(new Set(rowSubmitting.current));
+    }
+  };
   const calendarMatchesHorizon = calendar?.planning_horizon.from_date === fromDate
     && calendar.planning_horizon.to_date === toDate;
   const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
@@ -477,7 +520,9 @@ function HolidayPolicyWorkspace() {
             <p className="holiday-policy-notice">此期間沒有國定假日資料。</p>
           ) : (
             <ul className="holiday-policy-list" style={{ display: 'grid', gap: '10px' }}>
-              {calendar.holidays.map((holiday) => (
+              {calendar.holidays.map(sourceHoliday => {
+                const holiday = observedRows[sourceHoliday.holiday_date] ?? sourceHoliday;
+                return (
                 <li
                   key={holiday.holiday_date}
                   style={{
@@ -503,24 +548,13 @@ function HolidayPolicyWorkspace() {
                   </div>
 
                   <div>
-                    <label>
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        aria-label={`${holiday.holiday_date} 雙倍計價`}
-                        checked={holiday.is_double_pay_default}
-                        disabled={busy}
-                        onChange={event => {
-                          void apply(buildPreviewRequest({
-                            action: 'upsert',
-                            holiday_date: holiday.holiday_date,
-                            holiday_name: holiday.holiday_name,
-                            is_double_pay_default: event.target.checked,
-                          }));
-                        }}
-                      />
-                      雙倍計價
-                    </label>
+                    <span>{holiday.is_double_pay_default ? '雙倍已啟用' : '雙倍未啟用'}</span>
+                    <button type="button" aria-label={`${holiday.holiday_date} ${holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}`}
+                      disabled={rowPending.has(holiday.holiday_date)} onClick={() => void toggleDoublePay(holiday)}>
+                      {holiday.is_double_pay_default ? '取消雙倍' : '啟用雙倍'}
+                    </button>
+                    {rowErrors[holiday.holiday_date] && <p role="alert">{rowErrors[holiday.holiday_date]} <button type="button"
+                      disabled={rowPending.has(holiday.holiday_date)} onClick={() => void toggleDoublePay(holiday)}>重試</button></p>}
                     <button
                       type="button"
                       className="scheduling-action"
@@ -542,7 +576,7 @@ function HolidayPolicyWorkspace() {
                     </button>
                   </div>
                 </li>
-              ))}
+              ); })}
             </ul>
           )}
         </section>
@@ -606,10 +640,7 @@ function HolidayPolicyWorkspace() {
               </label>
             </div>
 
-            <label>
-              <input aria-label="當日雙倍計價" type="checkbox" checked={doublePay} disabled={busy || action === 'delete'} onChange={event => setDoublePay(event.target.checked)} />
-              當日服務時薪雙倍
-            </label>
+
             <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
               變更原因與審核註記（選填）
               <textarea

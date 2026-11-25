@@ -47,4 +47,4 @@
   source: holiday-maintenance-holiday-pricing
   target: ".arch-map/requirements/02_Assignments_Scheduling_Domain.md#^holiday-annual-settings"
 ```
-- 年度設定接線設計，待實作驗證。`SchedulingPage.tsx` 以年度起訖呼叫既有 GET，CSV 入口沿現有逐筆預覽／套用及全年讀回。`SchedulingHolidayQuery` 提供版本化日期及雙倍旗標；`holiday_maintenance.py` 的 Apply 為假日異動協調入口，沿 caller UoW 串接受影響案件的兩方 owner。正式收付保護由各帳務 owner 提供 fresh facts，不由 UI 判斷。API 應回正式收據及重算／保留／待決策的案件結果，前端回讀後端結果，不自行乘二。
+- 年度設定接線設計，待實作驗證。`SchedulingPage.tsx` 以年度起訖呼叫既有 GET。年度列直接顯示雙倍狀態及啟用／取消按鈕，逐列走既有 typed client Query／Preview／Apply／readback，不開抽屜或確認視窗。每列保存送出鎖、錯誤及原命令重送鍵，讀回失敗只重讀，未明 Apply 以同鍵重送；版本衝突重新查詢預覽。成功只更新該列，失敗保留原顯示並提供列內重試。新增、改名及日期修改沿原抽屜入口，與雙倍按鈕分開。CSV 入口沿現有逐筆預覽／套用及全年讀回。`SchedulingHolidayQuery` 提供版本化日期及雙倍旗標；`holiday_maintenance.py` 的 Apply 為假日異動協調入口，沿 caller UoW 串接受影響案件的兩方 owner。正式收付保護由各帳務 owner 提供 fresh facts，不由 UI 判斷。API 應回正式收據及重算／保留／待決策的案件結果，前端回讀後端結果，不自行乘二。

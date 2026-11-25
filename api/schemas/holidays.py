@@ -114,9 +114,16 @@ class HolidayPreviewView(BaseModel):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class HolidayCaseRepricingView(BaseModel):
+    case_total_amount: int | None = None
+    case_no: str
+    outcome: Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "unchanged", "blocked"]
+
+
 class HolidayReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    case_results: list[HolidayCaseRepricingView] = Field(default_factory=list)
     receipt_key: str = Field(min_length=1, max_length=191)
     action: Literal["upsert", "delete"]
     holiday_date: date

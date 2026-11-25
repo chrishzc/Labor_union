@@ -142,6 +142,16 @@ jobs:
           tests/global/integration/test_historical_restart_to_weekly_report_mysql.py
           -k test_historical_restart_reenters_canonical_scheduling_and_weekly_report
 
+      - name: Run disposable MySQL holiday repricing and payment protection
+        if: ${{ !cancelled() && steps.database.outcome == 'success' }}
+        env:
+          APP_ENV: development
+          PRICING_MYSQL: "1"
+        run: >-
+          python -m pytest -q
+          tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
+          -k holiday
+
   weekly-report-frontend:
     name: Weekly report frontend
     runs-on: ubuntu-latest
@@ -190,7 +200,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install backend dependencies
-        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 ruff pyright
+      - name: Lint and type-check holiday pricing boundaries
+        run: |
+          ruff check --select E9,F63,F7,F82 domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py subsystems/client_finance/pricing_configuration.py
+          pyright domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py
       - name: Verify holiday pricing and historical exclusions
         run: >-
           python -m pytest -q

@@ -915,7 +915,7 @@ def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
     return facts.pricing.is_full_subsidy(hours) is True
 
 
-def _daily_charge(facts, charge_day):
+def _daily_charge(facts: ClientFinanceTermsFacts, charge_day: ClientChargeDay) -> MoneyNTD:
     hours = Decimal(str(facts.service_hours_per_day))
     premium = hours if charge_day.is_double_pay else charge_day.holiday_hours
     if facts.pricing is not None:

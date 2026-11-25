@@ -143,9 +143,9 @@ beforeEach(()=>{vi.clearAllMocks();vi.mocked(differenceResolutionClient.staff).m
 describe('精簡案件抽屜',()=>{
  it.each([
   [null, 'NT$ 48,000'],
-  [0, 'NT$ 0'],
-  [42000, 'NT$ 42,000'],
- ] as const)('帳務總額為 %s 時直接顯示金額，缺應付明細時保留核銷狀態',async(accountingTotal,amount)=>{
+  [0, 'NT$ 48,000'],
+  [42000, 'NT$ 48,000'],
+ ] as const)('月嫂應收為 %s 時案件總額仍讀客戶服務定價，缺應付明細時保留核銷狀態',async(accountingTotal,amount)=>{
   vi.mocked(financeAccountingClient.query).mockResolvedValue({
    ...facts(), staff_receivable_ntd:accountingTotal, staff_items:[], payable_ntd:null, paid_ntd:null,
   });

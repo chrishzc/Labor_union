@@ -88,7 +88,6 @@ class _Repository:
         }
 
     def upsert_holiday(self, holiday_date, holiday_name, double_pay):
-        existing = self.holidays.get(holiday_date)
         self.holidays[holiday_date] = HolidayFact(
             holiday_date, holiday_name, double_pay,
         )

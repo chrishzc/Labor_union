@@ -39,6 +39,13 @@ class HolidayPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class HolidayCaseRepricingResult:
+    case_no: str
+    outcome: Literal["repriced", "preserved_cash_history", "historical_excluded", "funding_decision_pending", "unchanged", "blocked"]
+    case_total_amount: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class HolidayReceipt:
     receipt_key: str
     action: Literal["upsert", "delete"]
@@ -50,6 +57,7 @@ class HolidayReceipt:
     previous_calendar_version: str
     resulting_calendar_version: str
     preview_fingerprint: str
+    case_results: tuple[HolidayCaseRepricingResult, ...] = ()
 
 
 class HolidayWorkflowError(Exception):
@@ -88,12 +96,14 @@ class HolidayMaintenanceApplication:
         repository: HolidayMaintenanceRepository,
         unit_of_work_factory: Callable[[], object],
         after_commit: Callable[[], None],
-        reprice: Callable[[HolidayCommand, str, str], None] | None = None,
+        reprice: Callable[[HolidayCommand, str, str], tuple[HolidayCaseRepricingResult, ...] | None] | None = None,
+        before_change: Callable[[HolidayCommand], None] | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._after_commit = after_commit
         self._reprice = reprice
+        self._before_change = before_change
 
     def preview(self, command: HolidayCommand) -> HolidayPreview:
         return preview(self._repository, command)
@@ -117,6 +127,7 @@ class HolidayMaintenanceApplication:
                 actor,
                 reason,
                 self._reprice,
+                self._before_change,
             )
             unit_of_work.commit()
         self._after_commit()
@@ -136,7 +147,8 @@ def apply(
     idempotency_key: str,
     actor: str,
     reason: str,
-    reprice: Callable[[HolidayCommand, str, str], None] | None = None,
+    reprice: Callable[[HolidayCommand, str, str], tuple[HolidayCaseRepricingResult, ...] | None] | None = None,
+    before_change: Callable[[HolidayCommand], None] | None = None,
 ) -> HolidayReceipt:
     request_fingerprint = fingerprint_payload(
         {
@@ -161,6 +173,8 @@ def apply(
         raise HolidayWorkflowError("stale_preview")
 
     changed = _would_change(command, current_preview.before)
+    if changed and before_change is not None:
+        before_change(command)
     if changed and command.action == "delete":
         repository.delete_holiday(command.holiday_date)
     elif changed:
@@ -170,8 +184,12 @@ def apply(
             (command.is_double_pay_default if command.is_double_pay_default is not None
              else bool(current_preview.before and current_preview.before.is_double_pay_default)),
         )
-    if changed and reprice is not None:
-        reprice(command, idempotency_key, actor)
+    case_results: tuple[HolidayCaseRepricingResult, ...] = ()
+    before_enabled = bool(current_preview.before and current_preview.before.is_double_pay_default)
+    after_enabled = (False if command.action == "delete" else
+                     command.is_double_pay_default if command.is_double_pay_default is not None else before_enabled)
+    if changed and before_enabled != after_enabled and reprice is not None:
+        case_results = reprice(command, idempotency_key, actor) or ()
     resulting = repository.query(command.from_date, command.to_date, lock=True)
     receipt = HolidayReceipt(
         idempotency_key,
@@ -184,6 +202,7 @@ def apply(
         calendar.holiday_version,
         resulting.holiday_version,
         preview_fingerprint,
+        case_results,
     )
     repository.save_receipt(
         _FAMILY,
@@ -258,6 +277,7 @@ def _fact_payload(fact: HolidayFact | None) -> dict[str, object] | None:
 
 def _receipt_payload(receipt: HolidayReceipt) -> dict[str, object]:
     return {
+        "case_results": [{"case_no": result.case_no, "outcome": result.outcome, "case_total_amount": result.case_total_amount} for result in receipt.case_results],
         "receipt_key": receipt.receipt_key,
         "action": receipt.action,
         "holiday_date": receipt.holiday_date.isoformat(),
@@ -284,4 +304,5 @@ def _receipt_from_snapshot(snapshot) -> HolidayReceipt:
         payload["previous_calendar_version"],
         payload["resulting_calendar_version"],
         payload["preview_fingerprint"],
+        tuple(HolidayCaseRepricingResult(item["case_no"], item["outcome"], item.get("case_total_amount")) for item in payload.get("case_results", ())),
     )

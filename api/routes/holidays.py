@@ -270,6 +270,7 @@ def _preview_payload(result: holiday_maintenance.HolidayPreview) -> dict:
 
 def _receipt_payload(result: holiday_maintenance.HolidayReceipt) -> dict:
     return {
+        "case_results": [{"case_no": item.case_no, "outcome": item.outcome, "case_total_amount": item.case_total_amount} for item in result.case_results],
         "receipt_key": result.receipt_key,
         "action": result.action,
         "holiday_date": result.holiday_date,

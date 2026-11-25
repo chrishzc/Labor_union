@@ -70,8 +70,8 @@ class PricingImpact:
     covered_hours: Decimal
     excess_hours: Decimal
     client_amount: int
-    staff_covered_amount: int
-    staff_excess_amount: int
+    staff_covered_amount: int | None
+    staff_excess_amount: int | None
     staff_total_amount: int
     subsidy_amount: int
     subsidy_return_amount: int
@@ -92,6 +92,7 @@ class CasePricingFacts:
     legacy_client_amount: int | None = None
     historical_service_hours: Decimal | None = None
     frozen_amounts: tuple[int, int] | None = None
+    frozen_case_total: int | None = None
 
 
 @dataclass(frozen=True)
@@ -232,14 +233,8 @@ def _holiday_premium(terms: CasePricingTerms, facts: CasePricingFacts, *, payrol
 
 
 def case_total_amount(facts: CasePricingFacts) -> int:
-    if facts.frozen_amounts is not None:
-        hours = facts.historical_service_hours if facts.historical_service_hours is not None else sum((day.hours for day in facts.days), Decimal(0))
-        if facts.terms.is_full_subsidy(hours):
-            return facts.frozen_amounts[1] - facts.payroll_adjustment
-        if facts.terms.rule.value == "social":
-            covered, _ = facts.terms.split_hours(hours)
-            return facts.frozen_amounts[0] + whole_ntd(covered * facts.terms.client.covered)
-        return facts.frozen_amounts[0]
+    if facts.frozen_case_total is not None:
+        return facts.frozen_case_total
     if facts.historical_service_hours is not None:
         return calculate_case_total_amount(facts.terms, ((facts.historical_service_hours, False),), facts.floor_fee)
     return calculate_case_total_amount(facts.terms,
@@ -249,7 +244,7 @@ def case_total_amount(facts: CasePricingFacts) -> int:
 
 def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingImpact:
     if terms != facts.terms:
-        facts = replace(facts, frozen_amounts=None)
+        facts = replace(facts, frozen_amounts=None, frozen_case_total=None)
     base = _base_pricing_impact(terms, facts)
     client_premium = _holiday_premium(terms, facts)
     staff_premium = _holiday_premium(terms, facts, payroll=True)
@@ -264,6 +259,7 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
     if facts.frozen_amounts is not None:
         client_amount, staff_total = facts.frozen_amounts
         return replace(base, client_amount=client_amount, staff_total_amount=staff_total,
+            staff_covered_amount=None, staff_excess_amount=None,
             case_total_amount=total, subsidy_amount=subsidy,
             union_income_amount=total - staff_total + facts.payroll_adjustment)
     covered_premium_amount = Decimal(0)
@@ -275,8 +271,8 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
         consumed += day.hours
     staff_covered_premium = whole_ntd(covered_premium_amount)
     return replace(base, client_amount=base.client_amount + (0 if full_subsidy else client_premium),
-        staff_covered_amount=base.staff_covered_amount + staff_covered_premium,
-        staff_excess_amount=base.staff_excess_amount + staff_premium - staff_covered_premium,
+        staff_covered_amount=(base.staff_covered_amount or 0) + staff_covered_premium,
+        staff_excess_amount=(base.staff_excess_amount or 0) + staff_premium - staff_covered_premium,
         staff_total_amount=staff_total, subsidy_amount=subsidy, case_total_amount=total,
         union_income_amount=income)
 

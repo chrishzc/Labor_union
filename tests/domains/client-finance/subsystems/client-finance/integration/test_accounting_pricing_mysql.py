@@ -630,3 +630,179 @@ def test_subsidy_hours_change_updates_open_accounts_and_fresh_contract_preview(c
     repeated, repeated_client, repeated_staff, repeated_ledger, repeated_events, repeated_government = snapshot()
     assert repeated.preview_fingerprint == updated.preview_fingerprint
     assert (repeated_client, repeated_staff, repeated_ledger, repeated_events, repeated_government) == (client_amounts, staff_amounts, ledger, events, government)
+
+
+@pytest.mark.parametrize("cash", ["none", "partial_client", "full_client", "staff_first", "during_reprice", "client_noncash", "child_payout"])
+def test_holiday_toggle_reprices_both_or_preserves_both_real_mysql(client, cash, monkeypatch):
+    from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
+
+    case_no = "holiday-cash-" + cash
+    seed_case(case_no, identity="非市民")
+    bootstrap_case(client, case_no)
+    staff_id = seed_assignment(case_no)
+    path = f"/api/v1/accounting-pricing/cases/{case_no}"
+    current = client.get(path).json()["data"]
+    terms = {**current["terms"], "client": {"covered": 0, "excess": 350},
+             "payroll": {"covered": 0, "excess": 320}}
+    post(client, path + "/apply", {"terms": terms, "expected_revision": current["revision"]}, case_no + ":rates")
+    connection = mysql_adapter.get_connection()
+    def snapshot():
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT e.after_amount_ntd FROM client_obligations o JOIN client_obligation_events e "
+                "ON e.id=o.current_event_id WHERE o.case_no=%s AND o.obligation_type IN ('deposit','first','second') "
+                "ORDER BY o.obligation_identity", (case_no,))
+            customer = tuple(int(row["after_amount_ntd"]) for row in cursor.fetchall())
+            cursor.execute("SELECT e.after_amount_ntd FROM staff_obligations o JOIN staff_obligation_events e "
+                "ON e.id=o.current_event_id WHERE o.case_no=%s AND o.obligation_kind IN ('service_pay','adjustment') "
+                "AND o.status<>'cancelled' ORDER BY o.obligation_identity", (case_no,))
+            staff = tuple(int(row["after_amount_ntd"]) for row in cursor.fetchall())
+            cursor.execute("SELECT * FROM client_ledger_entries WHERE case_no=%s ORDER BY id", (case_no,))
+            ledger = tuple(cursor.fetchall())
+        return customer, staff, ledger
+    try:
+        with MySqlUnitOfWork(connection) as unit:
+            MySqlHolidayRepricing(connection).reprice_case(case_no, case_no + ":initial", "pricing-test")
+            unit.commit()
+        if cash == "client_noncash":
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT obligation_identity,amount_due_ntd FROM client_obligations "
+                    "WHERE case_no=%s AND obligation_type='deposit'", (case_no,))
+                obligation = cursor.fetchone()
+                original = int(obligation["amount_due_ntd"])
+                cursor.execute("INSERT INTO client_finance_noncash_events(case_no,target_identity,target_kind,action,"
+                    "original_ntd,amount_ntd,before_remaining_ntd,after_remaining_ntd,operation_key,command_digest,"
+                    "actor,reason,confirmed_on) VALUES(%s,%s,'obligation','loss',%s,1,%s,%s,%s,%s,"
+                    "'pricing-test','synthetic formal noncash','2026-10-01')",
+                    (case_no, obligation["obligation_identity"], original, original, original - 1, case_no, "a" * 64))
+            connection.commit()
+        if cash not in ("none", "during_reprice", "client_noncash"):
+            with connection.cursor() as cursor:
+                amount = 1 if cash in ("partial_client", "child_payout") else 56000 if cash == "full_client" else 51200
+                incoming = cash not in ("staff_first", "child_payout")
+                cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,credit,debit,"
+                    "direction,bank_references,warnings,raw_payload,classification_type) "
+                    "VALUES(%s,'sinopac','2026-10-01',%s,%s,%s,'{}','[]','{}',%s)",
+                    (uuid4().hex + uuid4().hex, amount if incoming else 0, 0 if incoming else amount,
+                     "incoming" if incoming else "outgoing", "client_receipt" if incoming else "staff_payout"))
+                bank_id = cursor.lastrowid
+                if incoming:
+                    cursor.execute("INSERT INTO client_ledger_entries(case_no,finance_import_row_id,entry_type,amount_ntd,"
+                        "occurred_on,reconciliation_reference,idempotency_key,actor,reason) "
+                        "VALUES(%s,%s,'receipt',%s,'2026-10-01',%s,%s,'pricing-test','synthetic immutable receipt')",
+                        (case_no, bank_id, amount, case_no, case_no))
+                    ledger_id = cursor.lastrowid
+                    cursor.execute("SELECT obligation_identity,amount_due_ntd FROM client_obligations "
+                        "WHERE case_no=%s AND obligation_type IN ('deposit','first','second') "
+                        "AND amount_due_ntd>0 ORDER BY obligation_identity", (case_no,))
+                    remaining = amount
+                    for ordinal, obligation in enumerate(cursor.fetchall(), start=1):
+                        allocated = min(remaining, int(obligation["amount_due_ntd"]))
+                        if allocated:
+                            cursor.execute("INSERT INTO client_ledger_obligation_allocations "
+                                "(ledger_entry_id,obligation_identity,amount_ntd,allocation_ordinal) VALUES(%s,%s,%s,%s)",
+                                (ledger_id, obligation["obligation_identity"], allocated, ordinal))
+                            remaining -= allocated
+                    assert remaining == 0
+                else:
+                    cursor.execute("SELECT obligation_identity FROM staff_obligations WHERE case_no=%s "
+                        "AND obligation_kind='service_pay' AND status<>'cancelled'", (case_no,))
+                    identity = cursor.fetchone()["obligation_identity"]
+                    if cash == "child_payout":
+                        child_identity = case_no + ":child"
+                        cursor.execute("INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,"
+                            "obligation_kind,direction,source_obligation_identity,event_type,before_amount_ntd,after_amount_ntd,"
+                            "due_date,payroll_fingerprint,expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) "
+                            "SELECT %s,assignment_id,case_no,staff_id,'adjustment','payable_to_staff',obligation_identity,"
+                            "'adjustment',0,1,due_date,%s,payroll_version,payroll_version,%s,'pricing-test','synthetic child' "
+                            "FROM staff_obligations WHERE obligation_identity=%s", (child_identity, "a" * 64, child_identity, identity))
+                        event_id = cursor.lastrowid
+                        cursor.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,"
+                            "obligation_kind,direction,source_obligation_identity,amount_due_ntd,due_date,status,current_event_id,payroll_version) "
+                            "SELECT %s,assignment_id,case_no,staff_id,'adjustment','payable_to_staff',obligation_identity,"
+                            "1,due_date,'open',%s,payroll_version FROM staff_obligations WHERE obligation_identity=%s",
+                            (child_identity, event_id, identity))
+                        identity = child_identity
+                        amount = 1
+                    cursor.execute("INSERT INTO staff_payout_events(staff_id,event_type,amount_ntd,occurred_on,"
+                        "bank_account_identity_hash,reconciliation_reference,idempotency_key,actor,reason,finance_import_row_id) "
+                        "VALUES(%s,'payout',%s,'2026-10-01',%s,%s,%s,'pricing-test','synthetic immutable payout',%s)",
+                        (staff_id, amount, "a" * 64, case_no, case_no, bank_id))
+                    cursor.execute("INSERT INTO staff_payout_obligation_links(payout_event_id,obligation_identity,"
+                        "allocated_amount_ntd,allocation_ordinal) VALUES(%s,%s,%s,1)",
+                        (cursor.lastrowid, identity, amount))
+            connection.commit()
+        before = snapshot()
+        assert (sum(before[0]), sum(before[1])) == (56000, 51201 if cash == "child_payout" else 51200)
+        repricing = MySqlHolidayRepricing(connection)
+        application = HolidayMaintenanceApplication(MySqlSchedulingHolidayQuery(connection),
+            lambda: MySqlUnitOfWork(connection), lambda: None, repricing, repricing.prepare)
+        day = date(2026, 10, 3)
+        command = HolidayCommand("upsert", day, "Synthetic holiday", True, day, day)
+        preview = application.preview(command)
+        if cash == "during_reprice":
+            from concurrent.futures import ThreadPoolExecutor
+            from threading import Event
+            from infrastructure.mysql import holiday_repricing
+            reached_guard = Event()
+            original_guard = holiday_repricing.select_order
+            def observe_guard(cursor, target_case, *, lock=False):
+                if target_case == case_no and lock:
+                    reached_guard.set()
+                return original_guard(cursor, target_case, lock=lock)
+            monkeypatch.setattr(holiday_repricing, "select_order", observe_guard)
+            connection.rollback()
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
+                cursor.fetchone()
+                cursor.execute("SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s FOR UPDATE", (case_no,))
+                cursor.fetchone()
+            def apply_in_parallel():
+                other = mysql_adapter.get_connection()
+                try:
+                    reprice = MySqlHolidayRepricing(other)
+                    app = HolidayMaintenanceApplication(MySqlSchedulingHolidayQuery(other),
+                        lambda: MySqlUnitOfWork(other), lambda: None, reprice, reprice.prepare)
+                    return app.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+                        case_no + ":enable", "pricing-test", "synthetic holiday")
+                finally:
+                    other.close()
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(apply_in_parallel)
+                assert reached_guard.wait(15), "holiday reprice did not reach fresh cash guard"
+                with connection.cursor() as cursor:
+                    cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,credit,"
+                        "direction,bank_references,warnings,raw_payload,classification_type) "
+                        "VALUES(%s,'sinopac','2026-10-01',1,'incoming','{}','[]','{}','client_receipt')",
+                        (uuid4().hex + uuid4().hex,))
+                    bank_id = cursor.lastrowid
+                    cursor.execute("INSERT INTO client_ledger_entries(case_no,finance_import_row_id,entry_type,amount_ntd,"
+                        "occurred_on,reconciliation_reference,idempotency_key,actor,reason) "
+                        "VALUES(%s,%s,'receipt',1,'2026-10-01',%s,%s,'pricing-test','synthetic concurrent receipt')",
+                        (case_no, bank_id, case_no, case_no))
+                connection.commit()
+                receipt = future.result(timeout=30)
+            connection.rollback()
+            before = snapshot()
+        else:
+            receipt = application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+                case_no + ":enable", "pricing-test", "synthetic holiday")
+        assert receipt.changed
+        after = snapshot()
+        if cash == "none":
+            assert (sum(after[0]), sum(after[1])) == (58800, 53760)
+            assert sum(after[0]) - sum(after[1]) == 5040
+        else:
+            assert after == before
+        application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+            case_no + ":enable", "pricing-test", "synthetic holiday")
+        assert snapshot() == after
+        off = HolidayCommand("upsert", day, "Synthetic holiday", False, day, day)
+        preview_off = application.preview(off)
+        application.apply(off, preview_off.calendar.holiday_version, preview_off.preview_fingerprint,
+            case_no + ":disable", "pricing-test", "synthetic holiday")
+        assert snapshot() == before
+    finally:
+        connection.close()
