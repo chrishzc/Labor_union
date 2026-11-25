@@ -112,8 +112,9 @@
   target: '.arch-map/requirements/04_Client_Finance_Domain.md#^sinopac-late-receipt-refund'
 ```
 
-- Finance Import 從原單筆核對入口帶入 `row_identity`、原永豐入款事實及已確認案件；Query／Preview 說明無法配對的原因，不寫帳。普通永豐入款仍沿原期款匹配；當已確認同案入款但因零服務取消或提前結束沒有可用期款時，移交 Client Finance 專責結算，不放寬一般無期款入款。提前結束讀 Orders 正式服務結果，不以取消事件為必要條件。
-- Client Finance 的 Apply 在同一外層交易重驗來源、案件、結算版本及既有收付，沿原收款與差額／退款 writer 保存可追溯的正式入款與待退款，回傳正式結果。以同一銀行流水及既有命令規則防重；失敗不留下單邊紀錄。既有出款核對仍只結清正式退款，不把這一路徑當退款出款。
+- Finance Import 從原單筆核對入口帶入 `row_identity`、原永豐入款事實及 `service_end_case_no`。款項仍是待核對；能由原流水唯一查回同案，不代表已正式收款。既有 `POST /api/v1/finance-import/corrections/preview` 說明可否配對及結算估算，不寫帳；同一入口確認走 `corrections/apply`，HTTP 202 只表示受理，須讀回原 correction outcome 才能判定正式結果。普通永豐入款仍沿原期款匹配；當已確認同案入款但因零服務取消或提前結束沒有可用期款時，移交 Client Finance 專責結算，不放寬一般無期款入款。提前結束讀 Orders 正式服務結果，不以取消事件為必要條件。
+- Client Finance 的 Apply 在同一外層交易重驗來源、案件、結算版本及既有收付，沿原收款與差額／退款 writer 保存可追溯的正式入款與待退款，回傳正式結果。以同一銀行流水與既有命令規則防重；同一操作鍵同內容回原收據，異內容回衝突。失敗不留下單邊紀錄。
+- 寫入定位：`FinanceImportCorrectionWorkflow.correct_and_post` 擁有外層交易；Client Finance 由 `client_service_end_receipt_preview.py` 核對歸屬及正式服務證據，再由 `client_service_end_receipt_writer.py` 寫原入款與待退款。現行 writer 重用超收退款投影 SQL，新增待退款的 `due_date` 寫 `NULL`；不把銀行交易日當退款到期日，也不據此宣稱出款配對已驗。既有出款核對仍只結清正式退款，不把這一路徑當退款出款。
 - 前端維持「核對交易」單一入口，預覽分列入款、服務應付、適用費用及待退款；確認後重讀原流水及案件帳務。後端驗匯入順序、重送及錯案拒絕；前端驗入款方向不變、待退款與已出款不混淆。業務計算先用替身測試，只對新增持久化行為補交易回滾與防重契約驗證。
 
 ## Verification
