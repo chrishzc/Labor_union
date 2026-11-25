@@ -15,6 +15,7 @@
 
 ## Contracts
 - `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables owner workflow與結清條件。
+- 依 #16 §2.2–2.3，送出後將受理、背景結果與正式回讀分開：`202` 不顯示已核銷，成功結果須指回同一月嫂帳戶，再重查原選定款項。回讀結果未明不得顯示完成；若只部分核銷，保留未清餘額與警示。只有正式回讀證實選定款項皆結清時，才通知可解除異常。
 - `.arch-map/requirements/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification

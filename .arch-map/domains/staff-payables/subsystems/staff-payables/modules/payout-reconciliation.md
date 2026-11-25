@@ -15,13 +15,14 @@
 - `infrastructure/mysql/staff_payout_repository.py` — 永豐以原始交易參考編號的完整帳號投影付款收款人；台新於Preview／Apply以原始備註姓名唯一確認月嫂，投影typed memo staff proof取代帳號必填，所選義務仍須同人。借用Finance Import的完整帳號及姓名擷取；備註六碼不作台新月嫂定位或銀行帳戶。其他格式的既有帳戶投影不變。
 - `query_staff_funding_portions` 共用原正式分期與按銀行核銷連結的 typed 自備款／補助款餘額；自動配對與正式 Preview／Apply 均按出款銀行限額（包含部分／超付模式），同月不合併跨來源，未知分配不推定。原案件 Query 投影各來源待付與整筆出款手續費，沒有新金融 writer 或 schema。
 - 原 payout Preview／Apply 的 `confirm_subsidy_split` 明確承接單案單筆永豐自備款。Preview 只讀既有案件補助金額 Query；Apply 先鎖案件、客戶／Payroll account、補助來源及原月嫂事實，在原 Staff Payables outer UoW 內借用方案事件 writer、Payroll 缺席分期 writer及原付款 writer。型別 `StaffSubsidySplit` 隨原 preview fingerprint 驗證金額、方案版本、日期及分配；同鍵重播沿原收據。既有方案不同、來源缺失或矛盾拒絕，不改一般獨立方案儲存語意。`api/routes/staff_payout.py`／`api/dependencies/durable_job_handlers.py` 沿原 durable command 轉送旗標，不新增 job 或外部派送。
-- 規格22 §19人工補登另以Finance Import命令收據綁定的同案exact obligations確認月嫂，投影manual_confirmed_staff_id；不要求交易帳號，不改一般銀行來源的帳號／備註驗證。核銷金額、fee、difference、projection、receipt及outbox仍由本owner原workflow負責。
+- 依規格 #22 §6「案件帳務手動補登與自動銷帳」，人工補登另以Finance Import命令收據綁定的同案exact obligations確認月嫂，投影manual_confirmed_staff_id；不要求交易帳號，不改一般銀行來源的帳號／備註驗證。核銷金額、fee、difference、projection、receipt及outbox仍由本owner原workflow負責。
 - Finance Import 的永豐薪資及台新月嫂補助候選，在宣稱可自動核銷前委派本 owner 的同一 Preview；台新先重新驗證原始備註姓名且不要求帳戶，永豐沿原帳戶規則。正式 Apply 仍重驗原版本、來源及分配，不新增核銷 writer 或 transaction owner。
 
 ## Contracts
 - 台新原始備註的唯一月嫂姓名與正式案件／指派關聯，可於原 Preview 投影方案一分期，選填六碼須與該案一致。交易月份由 Finance Import 自動配對檢查；六碼指定案件的跨月流水可走單筆人工核對，沿原 Preview／Apply 重驗對象、案件及款項。Apply 沿原 outer UoW 鎖來源、確認銀行方案及原 Payroll 分期，再核銷原月嫂義務。一般／歷史訂單同用資格，無方案或分期不直接視為無款；未達資格明示阻擋，方案不得使月嫂總應收增加。既有永豐自備款限制保留。
 - `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3。
 - `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md`。
+- #16 §2.2：非同步 Apply 的 `202 JobAccepted` 是受理，不是已核銷。付款事件、義務連結和成功收據在原 owner 的同一交易提交；以背景工作成功收據加正式根資料回讀為核銷證據。不等於所有款都結清，清償狀態以各選定義務回讀為準。
 
 ## Verification
 - integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py` — 既有合成案例核對相同命令重送回傳原收據，不增加寫入。
