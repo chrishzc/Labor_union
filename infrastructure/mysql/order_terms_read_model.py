@@ -232,6 +232,14 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
                 raise ValueError("order_terms_service_days_required")
             dates = tuple(start_date + timedelta(days=i) for i in range(int(service_days)))
         days = tuple(ClientChargeDay(value, False) for value in dates)
+    if generation is not None and not str(order_row.get("status", "")).startswith("歷史"):
+        from infrastructure.mysql.service_date_adjustment_repository import load_holiday_priced_service_dates
+        assignments = _select_assignments(cursor, generation, lock)
+        financial_days = load_holiday_priced_service_dates(
+            cursor, int(generation["id"]), assignments, int(order_row["service_days"]),
+            Decimal(str(order_row["service_hours_per_day"])), lock=lock,
+        )
+        days = tuple(ClientChargeDay(row["work_date"], False, row["holiday_hours"], row["holiday_hour_segments"]) for row in financial_days)
     source = _load_client_finance(cursor, order_row, lock)
     if order_row.get("actual_start_date") is not None:
         from dataclasses import replace

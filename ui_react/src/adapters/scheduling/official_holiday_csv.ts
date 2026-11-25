@@ -202,11 +202,11 @@ export function planOfficialHolidayImport(
   parsed: OfficialHolidayCsvSuccess,
   calendar: HolidayCalendar,
 ): OfficialHolidayImportPlan {
-  const existingKeys = new Set(
-    calendar.holidays.map((holiday) => `${holiday.holiday_date}\u0000${holiday.holiday_name}`),
+  const existingDates = new Set(
+    calendar.holidays.map((holiday) => holiday.holiday_date),
   );
   const pending = parsed.holidays.filter(
-    (holiday) => !existingKeys.has(`${holiday.holiday_date}\u0000${holiday.holiday_name}`),
+    (holiday) => !existingDates.has(holiday.holiday_date),
   );
   return {
     pending,

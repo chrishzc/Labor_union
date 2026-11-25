@@ -52,3 +52,12 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - inbound: `clients/client-profile` — Drawer composes typed workflow only.
 - inbound: `global/reporting` and Client Finance payment queries — reuse the same policy-based case category; case-number spelling does not determine category.
 - inbound: `government-subsidy/reconciliation-register-query` 與 Orders 補助投影 adapter — 重用 `CASE_PRICING_FACTS_SQL` 的有效補助上限／費率，不由消費端重解讀舊政策名稱。
+
+## 國定假日計價接線 ^pricing-configuration-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: pricing-configuration-holiday-pricing
+  target: ".arch-map/requirements/04_Client_Finance_Domain.md#^holiday-service-pricing"
+```
+- 假日計價讀回設計，待實作驗證。`pricing_policy.py` 的案件總額與 obligation planning 使用同一客戶服務費投影。帳務 API 提供案件總額、客戶應收、月嫂應付及工會收入的 owner 結果，`AccountingParametersCard` 與帳務工作台直接呈現；瀏覽器不重算乘數。

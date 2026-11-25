@@ -41,7 +41,7 @@ class HolidayPreviewRequest(BaseModel):
     action: Literal["upsert", "delete"]
     holiday_date: date
     holiday_name: str | None = Field(default=None, max_length=100)
-    is_double_pay_default: Literal[False] = False
+    is_double_pay_default: bool | None = None
     from_date: date | None = None
     to_date: date | None = None
 
@@ -95,7 +95,7 @@ class HolidayPreviewCommandView(BaseModel):
     action: Literal["upsert", "delete"]
     holiday_date: date
     holiday_name: str | None
-    is_double_pay_default: bool
+    is_double_pay_default: bool | None
     from_date: date
     to_date: date
     expected_calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")

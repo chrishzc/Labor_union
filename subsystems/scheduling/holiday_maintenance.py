@@ -25,7 +25,7 @@ class HolidayCommand:
     action: Literal["upsert", "delete"]
     holiday_date: date
     holiday_name: str | None
-    is_double_pay_default: bool
+    is_double_pay_default: bool | None
     from_date: date
     to_date: date
 
@@ -88,10 +88,12 @@ class HolidayMaintenanceApplication:
         repository: HolidayMaintenanceRepository,
         unit_of_work_factory: Callable[[], object],
         after_commit: Callable[[], None],
+        reprice: Callable[[HolidayCommand, str, str], None] | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._after_commit = after_commit
+        self._reprice = reprice
 
     def preview(self, command: HolidayCommand) -> HolidayPreview:
         return preview(self._repository, command)
@@ -114,6 +116,7 @@ class HolidayMaintenanceApplication:
                 idempotency_key,
                 actor,
                 reason,
+                self._reprice,
             )
             unit_of_work.commit()
         self._after_commit()
@@ -133,6 +136,7 @@ def apply(
     idempotency_key: str,
     actor: str,
     reason: str,
+    reprice: Callable[[HolidayCommand, str, str], None] | None = None,
 ) -> HolidayReceipt:
     request_fingerprint = fingerprint_payload(
         {
@@ -163,8 +167,11 @@ def apply(
         repository.upsert_holiday(
             command.holiday_date,
             command.holiday_name or "",
-            command.is_double_pay_default,
+            (command.is_double_pay_default if command.is_double_pay_default is not None
+             else bool(current_preview.before and current_preview.before.is_double_pay_default)),
         )
+    if changed and reprice is not None:
+        reprice(command, idempotency_key, actor)
     resulting = repository.query(command.from_date, command.to_date, lock=True)
     receipt = HolidayReceipt(
         idempotency_key,
@@ -223,7 +230,9 @@ def _preview_from_calendar(
 def _would_change(command: HolidayCommand, before: HolidayFact | None) -> bool:
     if command.action == "delete":
         return True
-    return before is None or before.holiday_name != command.holiday_name
+    return (before is None or before.holiday_name != command.holiday_name
+            or (command.is_double_pay_default is not None
+                and before.is_double_pay_default != command.is_double_pay_default))
 
 
 def _command_payload(command: HolidayCommand) -> dict[str, object]:

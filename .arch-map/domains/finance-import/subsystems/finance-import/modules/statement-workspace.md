@@ -97,3 +97,12 @@
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_archive_mysql.py` — 隔離MySQL驗證410零寫入、原鍵不重放舊新增成功、成功匯出只含正式核銷、歷史備查唯讀不改資料、三種正式補登仍可匯出。
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/`
+
+## 國定假日計價接線 ^statement-workspace-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: statement-workspace-holiday-pricing
+  target: ".arch-map/requirements/22A_案件帳務三方案與補助流向正式規格.md#^case-accounting-schemes"
+```
+- 假日對帳接線設計，待實作驗證。工作台從 Client Finance 與 Payroll 正式金額投影讀取非市民工會收入差額，不以同額不變量誤報異常。正式銀行核銷／月嫂清償來源由原 owner 判定，假日設定入口借用 fresh facts；全額免自備加成差額交既有對帳結果顯示待決策，不假建交易或更改政府補助。

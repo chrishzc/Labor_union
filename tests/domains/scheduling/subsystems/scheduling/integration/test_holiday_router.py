@@ -90,7 +90,7 @@ class _Repository:
     def upsert_holiday(self, holiday_date, holiday_name, double_pay):
         existing = self.holidays.get(holiday_date)
         self.holidays[holiday_date] = HolidayFact(
-            holiday_date, holiday_name, existing.is_double_pay_default if existing else False,
+            holiday_date, holiday_name, double_pay,
         )
 
     def delete_holiday(self, holiday_date):
@@ -300,3 +300,40 @@ def test_holiday_query_reuses_projection_cache_without_opening_db_until_apply_in
     finally:
         configure_holiday_query_cache_backend(route.default_redis_cache_backend)
         invalidate_holiday_query_cache()
+
+
+def test_holiday_toggle_reprices_once_and_omitted_import_preserves_manual_setting():
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand
+    repository = _Repository()
+    connection = _Connection()
+    repriced: list[bool | None] = []
+    application = HolidayMaintenanceApplication(repository, lambda: _UnitOfWork(connection), lambda: None,
+        lambda command, _key, _actor: repriced.append(command.is_double_pay_default))
+    day = date(2026, 1, 1)
+    def save(value, key):
+        command = HolidayCommand("upsert", day, "元旦", value, day, day)
+        preview = application.preview(command)
+        return command, preview, application.apply(command, preview.calendar.holiday_version,
+            preview.preview_fingerprint, key, "tester", "年度設定")
+    command, preview, _ = save(True, "enable")
+    application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+        "enable", "tester", "年度設定")
+    assert repository.holidays[day].is_double_pay_default is True
+    assert repriced == [True]
+    _, _, imported = save(None, "reimport")
+    assert imported.changed is False
+    assert repository.holidays[day].is_double_pay_default is True
+    save(False, "disable")
+    assert repository.holidays[day].is_double_pay_default is False
+    assert repriced == [True, False]
+
+
+def test_holiday_new_import_defaults_off():
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand
+    repository = _Repository()
+    application = HolidayMaintenanceApplication(repository, lambda: _UnitOfWork(_Connection()), lambda: None)
+    day = date(2026, 1, 1)
+    command = HolidayCommand("upsert", day, "元旦", None, day, day)
+    preview = application.preview(command)
+    application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint, "new", "tester", "匯入")
+    assert repository.holidays[day].is_double_pay_default is False

@@ -78,6 +78,8 @@ class PricingImpactView(PricingModel):
     staff_total_amount: int
     subsidy_amount: int
     subsidy_return_amount: int
+    case_total_amount: int
+    union_income_amount: int | None
 
 
 class CasePricingView(PricingModel):

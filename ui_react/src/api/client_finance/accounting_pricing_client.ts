@@ -18,6 +18,7 @@ const version = z.strictObject({ revision: z.number().int().positive(), policy: 
 const catalog = z.strictObject({ revision: z.number().int().nonnegative(), versions: z.array(version) });
 const amount = z.number().int().nonnegative();
 const impact = z.strictObject({ covered_hours: z.number().nonnegative(), excess_hours: z.number().nonnegative(),
+  case_total_amount: amount, union_income_amount: z.number().int().nullable(),
   client_amount: amount, staff_covered_amount: amount, staff_excess_amount: amount, staff_total_amount: amount,
   subsidy_amount: amount, subsidy_return_amount: amount });
 const caseView = z.strictObject({ case_no: z.string(), revision: z.number().int().nonnegative(),

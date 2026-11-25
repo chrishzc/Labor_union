@@ -54,10 +54,14 @@ class ClientFinanceDirection(StrEnum):
 class ClientChargeDay:
     service_date: date
     is_double_pay: bool
+    holiday_hours: Decimal = Decimal(0)
+    holiday_hour_segments: tuple[tuple[Decimal, Decimal], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.service_date, date):
             raise TypeError("client charge service date must be a date")
+        if not self.holiday_hours.is_finite() or self.holiday_hours < 0:
+            raise ValueError("client_holiday_hours_invalid")
         if not isinstance(self.is_double_pay, bool):
             raise TypeError("client charge double-pay marker must be bool")
 
@@ -912,9 +916,15 @@ def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
 
 
 def _daily_charge(facts, charge_day):
+    hours = Decimal(str(facts.service_hours_per_day))
+    premium = hours if charge_day.is_double_pay else charge_day.holiday_hours
     if facts.pricing is not None:
-        consumed = Decimal(facts.charge_days.index(charge_day)) * Decimal(str(facts.service_hours_per_day))
-        return MoneyNTD(facts.pricing.client_charge(Decimal(str(facts.service_hours_per_day)), consumed))
+        consumed = Decimal(facts.charge_days.index(charge_day)) * hours
+        segments = charge_day.holiday_hour_segments or ((Decimal(0), premium),)
+        from domains.client_finance.pricing_policy import calculate_holiday_premium
+        premium_inputs = ((consumed, ()), (hours, segments))
+        return MoneyNTD(facts.pricing.client_charge(hours, consumed)
+                        + calculate_holiday_premium(facts.pricing, premium_inputs))
     if normalize_subsidy_policy_identity(facts.identity_status or '') == '補助市民':
         index = facts.charge_days.index(charge_day)
         remaining = max(0,120-index*facts.service_hours_per_day)
@@ -925,7 +935,7 @@ def _daily_charge(facts, charge_day):
     return (
         MoneyNTD(_whole_ntd(
             facts.payment_terms.client_hourly_rate.amount
-            * facts.service_hours_per_day
+            * (hours + premium)
         ))
     )
 

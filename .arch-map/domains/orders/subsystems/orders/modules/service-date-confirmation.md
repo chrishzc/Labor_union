@@ -77,3 +77,12 @@
 
 ## Change triggers
 - Reconcile when confirmed-date API, restart-pending detection, historical assignment lineage, Scheduling replacement contract, server read-back, or canonical test roots change.
+
+## 國定假日計價接線 ^service-date-confirmation-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: service-date-confirmation-holiday-pricing
+  target: ".arch-map/requirements/02_Assignments_Scheduling_Domain.md#^service-date-merge-split"
+```
+- 假日計價接線設計，待實作驗證。`service_date_adjustment_repository.py` 提供 current effective generation 的有效服務日及 `service_hours_override`，供兩方帳務 owner 取得實際日期與當日時數；原財務日期仍供既有非假日計算、受款人及付款日政策使用。日期調整沿同一 caller UoW 接續計價，不另建帳務 writer。

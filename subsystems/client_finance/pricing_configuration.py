@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Callable, ContextManager, Protocol
 
-from domains.client_finance.pricing_policy import CasePricingTerms, PricingPolicy, calculate_case_total_amount
+from domains.client_finance.pricing_policy import CasePricingTerms, PricingPolicy, calculate_case_total_amount, calculate_holiday_premium, whole_ntd
 from domains.payroll.tiered_rates import TieredPayrollRate, price_hours
 from domains.government_subsidy.pricing import subsidy_claim_amount
 from shared_kernel.fingerprints import fingerprint_payload
@@ -61,6 +61,8 @@ class PricingServiceDay:
     occurred_on: date
     hours: Decimal
     double_pay: bool = False
+    holiday_hours: Decimal = Decimal(0)
+    holiday_hour_segments: tuple[tuple[Decimal, Decimal], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,8 @@ class PricingImpact:
     staff_total_amount: int
     subsidy_amount: int
     subsidy_return_amount: int
+    case_total_amount: int = 0
+    union_income_amount: int | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,7 @@ class CasePricingFacts:
     payroll_adjustment: int = 0
     legacy_client_amount: int | None = None
     historical_service_hours: Decimal | None = None
+    frozen_amounts: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -186,7 +191,7 @@ class PricingRepository(Protocol):
     def save_receipt(self, key: str, actor: str, command_hash: str, revision: int) -> None: ...
 
 
-def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingImpact:
+def _base_pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingImpact:
     if facts.historical_service_hours is not None:
         hours = facts.historical_service_hours
         covered, excess = terms.split_hours(hours)
@@ -209,19 +214,71 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
 
     consumed = Decimal(0)
     client = facts.floor_fee
-    for hours, _ in service_hours:
-        client += terms.client_charge(hours, consumed)
+    for hours, double_pay in service_hours:
+        client += terms.client_charge(hours, consumed) * (2 if double_pay else 1)
         consumed += hours
     return PricingImpact(covered, excess, client, staff_covered,
         staff_excess, staff_total, subsidy_claim_amount(total_hours, terms.subsidy_hours, terms.payroll.covered),
         terms.subsidy_return(total_hours))
 
 
+def _holiday_premium(terms: CasePricingTerms, facts: CasePricingFacts, *, payroll: bool = False) -> int:
+    if facts.historical_service_hours is not None:
+        return 0
+    return calculate_holiday_premium(terms, tuple(
+        (day.hours, day.holiday_hour_segments or ((Decimal(0), day.holiday_hours),))
+        for day in sorted(facts.days, key=lambda item: item.occurred_on)
+    ), payroll=payroll)
+
+
 def case_total_amount(facts: CasePricingFacts) -> int:
+    if facts.frozen_amounts is not None:
+        hours = facts.historical_service_hours if facts.historical_service_hours is not None else sum((day.hours for day in facts.days), Decimal(0))
+        if facts.terms.is_full_subsidy(hours):
+            return facts.frozen_amounts[1] - facts.payroll_adjustment
+        if facts.terms.rule.value == "social":
+            covered, _ = facts.terms.split_hours(hours)
+            return facts.frozen_amounts[0] + whole_ntd(covered * facts.terms.client.covered)
+        return facts.frozen_amounts[0]
     if facts.historical_service_hours is not None:
         return calculate_case_total_amount(facts.terms, ((facts.historical_service_hours, False),), facts.floor_fee)
     return calculate_case_total_amount(facts.terms,
-        tuple((day.hours, day.double_pay) for day in sorted(facts.days, key=lambda item: item.occurred_on)), facts.floor_fee)
+        tuple((day.hours, day.double_pay) for day in sorted(facts.days, key=lambda item: item.occurred_on)), facts.floor_fee
+    ) + _holiday_premium(facts.terms, facts)
+
+
+def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingImpact:
+    if terms != facts.terms:
+        facts = replace(facts, frozen_amounts=None)
+    base = _base_pricing_impact(terms, facts)
+    client_premium = _holiday_premium(terms, facts)
+    staff_premium = _holiday_premium(terms, facts, payroll=True)
+    total = case_total_amount(replace(facts, terms=terms))
+    hours = facts.historical_service_hours if facts.historical_service_hours is not None else sum((day.hours for day in facts.days), Decimal(0))
+    full_subsidy = terms.is_full_subsidy(hours)
+    subsidy = base.subsidy_amount
+    if full_subsidy and facts.historical_service_hours is None:
+        subsidy = calculate_case_total_amount(terms, tuple((day.hours, False) for day in facts.days), facts.floor_fee)
+    staff_total = base.staff_total_amount + staff_premium
+    income = None if full_subsidy and client_premium else total - staff_total + facts.payroll_adjustment
+    if facts.frozen_amounts is not None:
+        client_amount, staff_total = facts.frozen_amounts
+        return replace(base, client_amount=client_amount, staff_total_amount=staff_total,
+            case_total_amount=total, subsidy_amount=subsidy,
+            union_income_amount=total - staff_total + facts.payroll_adjustment)
+    covered_premium_amount = Decimal(0)
+    consumed = Decimal(0)
+    for day in sorted(facts.days, key=lambda item: item.occurred_on):
+        for offset, premium_hours in day.holiday_hour_segments or ((Decimal(0), day.holiday_hours),):
+            covered = min(premium_hours, max(Decimal(0), terms.subsidy_hours - consumed - offset))
+            covered_premium_amount += covered * terms.payroll.covered
+        consumed += day.hours
+    staff_covered_premium = whole_ntd(covered_premium_amount)
+    return replace(base, client_amount=base.client_amount + (0 if full_subsidy else client_premium),
+        staff_covered_amount=base.staff_covered_amount + staff_covered_premium,
+        staff_excess_amount=base.staff_excess_amount + staff_premium - staff_covered_premium,
+        staff_total_amount=staff_total, subsidy_amount=subsidy, case_total_amount=total,
+        union_income_amount=income)
 
 
 def current_pricing_impact(facts):

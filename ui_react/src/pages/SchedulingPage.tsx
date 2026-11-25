@@ -289,12 +289,13 @@ function flowStateLabel(state: string): string {
 }
 
 function HolidayPolicyWorkspace() {
-  const year = taipeiCalendarDate(new Date()).year;
+  const [year, setYear] = useState(() => taipeiCalendarDate(new Date()).year);
   const [fromDate, setFromDate] = useState(`${year}-01-01`);
   const [toDate, setToDate] = useState(`${year}-12-31`);
   const [action, setAction] = useState<HolidayAction>('upsert');
   const [holidayDate, setHolidayDate] = useState(todayIsoDate());
   const [holidayName, setHolidayName] = useState('');
+  const [doublePay, setDoublePay] = useState(false);
   const [reason, setReason] = useState('');
   const submittingRef = useRef(false);
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
@@ -324,7 +325,7 @@ function HolidayPolicyWorkspace() {
       action,
       holiday_date: holidayDate,
       holiday_name: action === 'upsert' ? holidayName.trim() || null : null,
-      is_double_pay_default: false,
+      is_double_pay_default: doublePay,
       from_date: fromDate,
       to_date: toDate,
       ...overrides,
@@ -340,7 +341,7 @@ function HolidayPolicyWorkspace() {
     if (!draft?.preview) return;
     const request = buildPreviewRequest();
     if (request) setHolidayDraft(request);
-  }, [action, fromDate, holidayDate, holidayName, toDate]);
+  }, [action, doublePay, fromDate, holidayDate, holidayName, toDate]);
 
   const query = () => {
     if (!fromDate || !toDate || fromDate > toDate || busy) return;
@@ -351,6 +352,7 @@ function HolidayPolicyWorkspace() {
     setAction('upsert');
     setHolidayDate(holiday.holiday_date);
     setHolidayName(holiday.holiday_name);
+    setDoublePay(holiday.is_double_pay_default);
     setReason('');
     setHolidayDrawerOpen(true);
   };
@@ -359,12 +361,12 @@ function HolidayPolicyWorkspace() {
     setAction('upsert');
     setHolidayDate(todayIsoDate());
     setHolidayName('');
+    setDoublePay(false);
     setReason('');
     setHolidayDrawerOpen(true);
   };
 
-  const apply = async () => {
-    const previewRequest = buildPreviewRequest();
+  const apply = async (previewRequest = buildPreviewRequest()): Promise<void> => {
     if (!previewRequest || busy || submittingRef.current) return;
     submittingRef.current = true;
     try {
@@ -388,7 +390,7 @@ function HolidayPolicyWorkspace() {
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
-  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '雙倍': doublePay ? '開' : '關', '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
 
 
   return (
@@ -414,10 +416,31 @@ function HolidayPolicyWorkspace() {
       </header>
 
       <OfficialHolidayCsvImport disabled={busy} onImported={importYear => {
+        setYear(importYear);
         setFromDate(`${importYear}-01-01`);
         setToDate(`${importYear}-12-31`);
       }} />
 
+      <label>
+        年度
+        <input
+          aria-label="國定假日年度"
+          type="number"
+          min={1900}
+          max={9999}
+          value={year}
+          disabled={busy}
+          onChange={event => {
+            const selected = Number(event.target.value);
+            if (!Number.isInteger(selected) || selected < 1900 || selected > 9999) return;
+            setYear(selected);
+            const horizon = { from_date: `${selected}-01-01`, to_date: `${selected}-12-31` };
+            setFromDate(horizon.from_date);
+            setToDate(horizon.to_date);
+            void queryHolidayFlow(horizon).catch(() => undefined);
+          }}
+        />
+      </label>
       <div className="holiday-policy-horizon">
         <label>
           查詢起日
@@ -480,6 +503,24 @@ function HolidayPolicyWorkspace() {
                   </div>
 
                   <div>
+                    <label>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-label={`${holiday.holiday_date} 雙倍計價`}
+                        checked={holiday.is_double_pay_default}
+                        disabled={busy}
+                        onChange={event => {
+                          void apply(buildPreviewRequest({
+                            action: 'upsert',
+                            holiday_date: holiday.holiday_date,
+                            holiday_name: holiday.holiday_name,
+                            is_double_pay_default: event.target.checked,
+                          }));
+                        }}
+                      />
+                      雙倍計價
+                    </label>
                     <button
                       type="button"
                       className="scheduling-action"
@@ -565,6 +606,10 @@ function HolidayPolicyWorkspace() {
               </label>
             </div>
 
+            <label>
+              <input aria-label="當日雙倍計價" type="checkbox" checked={doublePay} disabled={busy || action === 'delete'} onChange={event => setDoublePay(event.target.checked)} />
+              當日服務時薪雙倍
+            </label>
             <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
               變更原因與審核註記（選填）
               <textarea

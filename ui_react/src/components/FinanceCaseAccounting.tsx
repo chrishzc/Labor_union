@@ -601,13 +601,13 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const selected=data?.full_subsidy&&!data.scheme_conflict?'split':planConfirmed&&(data?.scheme==='split'||data?.scheme==='advance'||data?.scheme==='direct')?data.scheme:undefined;
  const staff=data?[...new Set(data.staff_items.filter(row=>row.direction==='payable').map(row=>row.party))].join('、'):'';
  const staffItems=data?.staff_items.filter(row=>row.direction==='payable')??[];
- const pricingTotal=state.pricing?.case_no===initialCase ? state.pricing.impact.staff_total_amount : null;
+ const pricingTotal=state.pricing?.case_no===initialCase ? state.pricing.impact.case_total_amount : null;
  const staffTransactions=data?.transactions.filter(row=>row.kind==='payout'||staffItems.some(s=>s.identity===row.item_identity))??[];
  const staffPayableTotal=staffItems.reduce((sum,item)=>sum+item.expected_ntd,0);
  const staffPaidTotal=staffItems.reduce((sum,item)=>sum+item.actual_ntd,0);
  const staffRemainingTotal=staffItems.reduce((sum,item)=>sum+(item.remaining_ntd??Math.max(0,item.expected_ntd-item.actual_ntd)),0);
  const isEstablishedUnserved=state.order?.order_status==='成立後未服務';
- const caseTotal=data?.staff_receivable_ntd??(isEstablishedUnserved?staffPayableTotal:pricingTotal);
+ const caseTotal=isEstablishedUnserved?staffPayableTotal:pricingTotal;
 
  const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
  const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];

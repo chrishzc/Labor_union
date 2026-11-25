@@ -39,3 +39,12 @@
 - canonical test placement: architecture_declared by the existing Scheduling Holiday module test root and current test routing.
 
 - test_root: `ui_react/src/tests/scheduling_no_fake_mutation.test.tsx` — 既有 SchedulingPage 假日入口的查詢與零自動 mutation 保護。
+
+## 國定假日計價接線 ^holiday-maintenance-holiday-pricing
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: holiday-maintenance-holiday-pricing
+  target: ".arch-map/requirements/02_Assignments_Scheduling_Domain.md#^holiday-annual-settings"
+```
+- 年度設定接線設計，待實作驗證。`SchedulingPage.tsx` 以年度起訖呼叫既有 GET，CSV 入口沿現有逐筆預覽／套用及全年讀回。`SchedulingHolidayQuery` 提供版本化日期及雙倍旗標；`holiday_maintenance.py` 的 Apply 為假日異動協調入口，沿 caller UoW 串接受影響案件的兩方 owner。正式收付保護由各帳務 owner 提供 fresh facts，不由 UI 判斷。API 應回正式收據及重算／保留／待決策的案件結果，前端回讀後端結果，不自行乘二。

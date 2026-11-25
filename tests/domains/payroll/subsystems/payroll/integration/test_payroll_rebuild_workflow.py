@@ -127,7 +127,7 @@ def test_mysql_service_facts_crossing_decimal_id_boundary_can_be_calculated():
 
 
 @pytest.fixture
-def payroll_schedule_sql():
+def payroll_schedule_sql(monkeypatch):
     import sqlite3
 
     raw = sqlite3.connect(":memory:")
@@ -135,7 +135,8 @@ def payroll_schedule_sql():
     raw.create_function("CONCAT", 2, lambda left, right: str(left) + str(right))
     raw.executescript("""
         CREATE TABLE staff_schedule(assignment_id INTEGER,generation_id INTEGER,work_date TEXT,
-            is_work_day INTEGER,effective_marker INTEGER,service_hours_override INTEGER);
+            is_work_day INTEGER,effective_marker INTEGER,service_hours_override INTEGER,
+            id INTEGER GENERATED ALWAYS AS (assignment_id) VIRTUAL);
         CREATE TABLE case_staff_assignments(id INTEGER PRIMARY KEY,generation_id INTEGER,
             case_no TEXT,staff_id INTEGER);
         CREATE TABLE scheduling_rebuild_lineage(rebuild_event_id INTEGER,new_assignment_id INTEGER,
@@ -143,7 +144,14 @@ def payroll_schedule_sql():
         CREATE TABLE scheduling_command_receipts(rebuild_event_id INTEGER,command_family TEXT);
     """)
 
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from subsystems.scheduling.holiday_calendar_query import HolidayCalendarFacts
+    monkeypatch.setattr(MySqlSchedulingHolidayQuery, "query", lambda self, start, end, *, lock:
+                        HolidayCalendarFacts("sqlite-fixture", "empty", ()))
+
     class Cursor:
+        connection = raw
+
         def execute(self, statement, parameters):
             assert statement.startswith("SELECT ")
             self.result = raw.execute(statement.replace("%s", "?").replace(" FOR UPDATE", ""), parameters)
@@ -164,7 +172,7 @@ def _schedule_payroll(cursor, generation, assignments, *, days=2, hours=4, tiere
     from domains.payroll.tiered_rates import TieredPayrollRate
 
     schedules = mysql_rebuild._load_schedules(
-        cursor, {"effective_generation_id": generation, "service_days": days}, assignments, True,
+        cursor, {"effective_generation_id": generation, "service_days": days, "service_hours_per_day": hours}, assignments, True,
     )
     facts = mysql_rebuild._service_facts(assignments, mysql_rebuild._schedule_index(assignments, schedules))
     rates = tuple(AssignmentRateSnapshot(
@@ -755,3 +763,15 @@ def test_cancelled_generation_rebuild_retains_preview_floor_recipient(payroll_sc
     assert {item.staff_id: item.floor_fee_allocated.amount for item in preview.assignments} == {17: 0, 18: 1}
     assert {item.staff_id: item.floor_fee_allocated.amount for item in formal.assignments} == {17: 0, 18: 1}
     assert formal.total_payable == preview.total_payable
+
+
+def test_historical_schedule_loader_does_not_read_holiday_pricing(monkeypatch):
+    rows = ({"assignment_id": 1, "work_date": date(2026, 10, 10)},)
+    monkeypatch.setattr(mysql_rebuild, "load_payroll_service_dates", lambda *args, **kwargs: rows)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("historical orders must not consult holiday pricing")
+    monkeypatch.setattr(mysql_rebuild, "load_holiday_priced_service_dates", forbidden)
+    assert mysql_rebuild._load_schedules(None, {
+        "effective_generation_id": 1, "service_days": 1, "service_hours_per_day": 8,
+        "order_status": "歷史訂單－服務完成",
+    }, ({"id": 1},), False) == rows

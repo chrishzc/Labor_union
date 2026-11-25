@@ -1,6 +1,9 @@
 """Persist Scheduling date adjustments without replacing assignment or financial facts."""
 
 import json
+from collections.abc import Mapping, Sequence
+from typing import NotRequired, TypedDict
+from pymysql.cursors import DictCursor
 from datetime import date
 from decimal import Decimal
 
@@ -134,6 +137,9 @@ class MySqlServiceDateAdjustmentRepository:
                     if str(error) == "order_version_conflict":
                         raise ValueError("service_date_adjustment_stale_version") from error
                     raise
+            if facts.generation_id is not None:
+                from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+                MySqlHolidayRepricing(self._connection).reprice_case(facts.case_no, key, actor)
             snapshot = {
                 "removed": [service_day_payload(day) for day in change.removed],
                 "inserted": [service_day_payload(day) for day in change.inserted],
@@ -177,6 +183,63 @@ def load_payroll_service_dates(cursor, generation_id, assignments, service_days,
     )
     rows = tuple(cursor.fetchall())
     return _cancellation_floor_identities(cursor, generation_id, service_days, rows, lock=lock)
+
+
+
+class HolidayPricedServiceDate(TypedDict):
+    assignment_id: int
+    work_date: date
+    financial_assignment_identity: NotRequired[str]
+    holiday_hours: Decimal
+    holiday_hour_segments: tuple[tuple[Decimal, Decimal], ...]
+
+
+def load_holiday_priced_service_dates(
+    cursor: DictCursor, generation_id: int, assignments: Sequence[Mapping[str, int]],
+    service_days: int, hours_per_day: Decimal, *, lock: bool,
+) -> tuple[HolidayPricedServiceDate, ...]:
+    """Map effective holiday hours onto the unchanged financial service basis."""
+    financial = load_payroll_service_dates(cursor, generation_id, assignments, service_days, lock=lock)
+    cursor.execute(
+        "SELECT assignment_id,work_date,service_hours_override FROM staff_schedule "
+        "WHERE generation_id=%s AND effective_marker=1 AND is_work_day=1 "
+        "ORDER BY assignment_id,work_date,id" + (" FOR UPDATE" if lock else ""),
+        (generation_id,),
+    )
+    effective = tuple(cursor.fetchall())
+    if not effective:
+        return tuple(dict(row, holiday_hours=Decimal(0), holiday_hour_segments=()) for row in financial)
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    calendar = MySqlSchedulingHolidayQuery(cursor.connection).query(
+        min(row["work_date"] for row in effective), max(row["work_date"] for row in effective), lock=lock,
+    )
+    enabled = {day.holiday_date for day in calendar.holidays if day.is_double_pay_default}
+    result = []
+    for assignment in assignments:
+        assignment_id = int(assignment["id"])
+        chunks = [(Decimal(str(row["service_hours_override"] if row["service_hours_override"] is not None
+                               else hours_per_day)), row["work_date"] in enabled)
+                  for row in effective if int(row["assignment_id"]) == assignment_id]
+        index = 0
+        remaining = chunks[0][0] if chunks else Decimal(0)
+        for row in financial:
+            if int(row["assignment_id"]) != assignment_id:
+                continue
+            needed = Decimal(str(hours_per_day))
+            premium = Decimal(0)
+            segments: list[tuple[Decimal, Decimal]] = []
+            while needed > 0 and index < len(chunks):
+                used = min(needed, remaining)
+                if chunks[index][1]:
+                    premium += used
+                    segments.append((Decimal(str(hours_per_day)) - needed, used))
+                needed -= used
+                remaining -= used
+                if remaining == 0:
+                    index += 1
+                    remaining = chunks[index][0] if index < len(chunks) else Decimal(0)
+            result.append(dict(row, holiday_hours=premium, holiday_hour_segments=tuple(segments)))
+    return tuple(sorted(result, key=lambda row: (row["work_date"], row["assignment_id"])))
 
 
 def load_unadjusted_service_dates(cursor, generation_id, assignment_ids, service_days, *, lock):

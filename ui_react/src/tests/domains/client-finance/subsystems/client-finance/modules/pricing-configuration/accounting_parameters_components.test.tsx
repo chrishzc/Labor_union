@@ -52,7 +52,7 @@ const mockPricing: CasePricing = {
     client_amount: 12000,
     staff_covered_amount: 54000,
     staff_excess_amount: 18000,
-    staff_total_amount: 72000,
+    case_total_amount: 72000, union_income_amount: 0, staff_total_amount: 72000,
     subsidy_amount: 42000,
     subsidy_return_amount: 0,
   },
@@ -150,6 +150,18 @@ describe('AccountingParametersCard component', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /調整帳務參數/ }));
     expect(handleOpenEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads separate case total and union income from backend and preserves unknown income', () => {
+    const pricing: CasePricing = { ...mockPricing, impact: {
+      ...mockPricing.impact, case_total_amount: 5600, client_amount: 5600,
+      staff_total_amount: 5120, union_income_amount: 480,
+    } };
+    const { rerender } = render(<AccountingParametersCard caseNo={pricing.case_no} pricing={pricing} onOpenEdit={vi.fn()} />);
+    expect(screen.getByText(/案件總額 NT\$ 5,600 ｜ 工會收入 NT\$ 480/)).toBeVisible();
+    expect(screen.getByText(/月嫂基準應付 NT\$ 5,120/)).toBeVisible();
+    rerender(<AccountingParametersCard caseNo={pricing.case_no} pricing={{ ...pricing, impact: { ...pricing.impact, union_income_amount: null } }} onOpenEdit={vi.fn()} />);
+    expect(screen.getByText(/工會收入 待確認/)).toBeVisible();
   });
 
   it('shows the registered singleton at a 450 hourly rate', () => {

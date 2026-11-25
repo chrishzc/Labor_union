@@ -16,7 +16,7 @@ from subsystems.orders.terms_workflow import (
 )
 
 
-def persist_client_finance_terms_impact(cursor, command) -> None:
+def persist_client_finance_terms_impact(cursor, command, *, synchronize_government: bool = True) -> None:
     terms_changed=bool(_persist_payment_terms(cursor, command))
     from infrastructure.mysql.client_difference_repository import persist_controlled_client_amount
     cancellation = getattr(command.candidate, "cancellation_settlement", None)
@@ -47,7 +47,7 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
     if cancellation:
         _save_cancellation_settlement(cursor, command, cancellation)
     _append_outbox(cursor, command)
-    if cancellation is None:
+    if cancellation is None and synchronize_government:
         from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
         synchronize_government_case_amount(cursor,command.candidate.case_no,command.idempotency_key.value,command.actor.actor_id,command.reason)
     # Cancellation borrows this writer before Orders saves its terminal facts.
