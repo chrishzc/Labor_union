@@ -49,6 +49,7 @@ class ClientServiceEndReceiptPreview:
     balance: LateServiceEndReceiptBalance
     open_balances: tuple[LateReceiptOpenBalance, ...]
     fingerprint: PreviewFingerprint
+    cancellation_event_id: int | None = None
 
 
 def preview_client_service_end_receipt(
@@ -97,7 +98,7 @@ def preview_client_service_end_receipt(
         resolved = resolve_client_virtual_account(cursor, account_code)
         if resolved["result"] != "resolved" or resolved["case_no"] != case_no:
             raise ValueError("late_service_end_receipt_case_not_verified")
-        service_due, fee, end_evidence = _terminal_charge_facts(connection, cursor, order, lock=lock)
+        service_due, fee, end_evidence, cancellation_event_id = _terminal_charge_facts(connection, cursor, order, lock=lock)
         cursor.execute(
             "SELECT obligation_identity,obligation_type,direction,amount_due_ntd,current_event_id "
             "FROM client_obligations WHERE case_no=%s AND status='open' AND amount_due_ntd>0 "
@@ -125,22 +126,32 @@ def preview_client_service_end_receipt(
             "canonical_fact_version": int(row["canonical_fact_version"]),
             "account_version": int(account["aggregate_version"]),
             "order_version": int(order["lifecycle_version"]), "service_due": service_due, "fee": fee,
-            "end_evidence": end_evidence, "balance": asdict(balance),
+            "end_evidence": end_evidence, "cancellation_event_id": cancellation_event_id, "balance": asdict(balance),
             "open_balances": tuple(asdict(i) for i in open_balances),
-        }),
+        }), cancellation_event_id,
     )
 
 
 def _terminal_charge_facts(
     connection: Any, cursor: Any, order: Mapping[str, Any], *, lock: bool,
-) -> tuple[int, int, str]:
+) -> tuple[int, int, str, int | None]:
     case_no = str(order["case_no"])
     status = str(order["status"])
     if status in {OrderLifecycleStatus.CANCELLED, OrderLifecycleStatus.ESTABLISHED_UNSERVED}:
         settlement = query_cancellation_accounting(connection, case_no)
         if settlement is None or settlement.service_due_ntd != 0:
             raise ValueError("late_service_end_receipt_cancellation_not_verified")
-        return 0, settlement.fee_ntd, "active_zero_service_cancellation"
+        cursor.execute(
+            "SELECT r.cancellation_event_id FROM order_lifecycle_control_state s "
+            "JOIN order_cancellation_apply_receipts r ON r.case_no=s.case_no "
+            "AND r.cancellation_control_event_id=s.current_event_id WHERE s.case_no=%s "
+            "AND s.control_type='cancellation' AND s.control_key='order_cancelled' AND s.state='active'",
+            (case_no,),
+        )
+        active = cursor.fetchone()
+        if active is None:
+            raise ValueError("late_service_end_receipt_cancellation_not_verified")
+        return 0, settlement.fee_ntd, "active_zero_service_cancellation", int(active["cancellation_event_id"])
 
     if (status != OrderLifecycleStatus.COMPLETED
             or order.get("actual_start_date") is None or order.get("actual_end_date") is None):
@@ -167,4 +178,4 @@ def _terminal_charge_facts(
             or any(not order["actual_start_date"] <= day.service_date <= order["actual_end_date"]
                    for day in facts.charge_days)):
         raise ValueError("late_service_end_receipt_actual_service_not_verified")
-    return sum(stage.amount.amount for stage in _build_stage_plans(facts)), 0, f"terms:{int(shortening['id'])}"
+    return sum(stage.amount.amount for stage in _build_stage_plans(facts)), 0, f"terms:{int(shortening['id'])}", None

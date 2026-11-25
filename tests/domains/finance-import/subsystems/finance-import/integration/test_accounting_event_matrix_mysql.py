@@ -723,4 +723,57 @@ def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_be
             if item['obligation_type'] == 'refund'] == [('open', 5000)]
     assert checked(http.post(url + '/apply', json=body, headers=key), 202)['replayed'] is True
     assert http.post(url + '/preview', json=selection).status_code == 409
+    from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting
+    connection = mysql_adapter.get_connection()
+    try:
+        readback = query_cancellation_accounting(connection, case)
+        assert readback is not None and readback.net_received_ntd == 5000
+        assert readback.refund_due_ntd == 5000 and readback.bank_refunded_ntd == 0
+    finally:
+        connection.close()
     assert snapshot(case) == after
+
+
+def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation():
+    case, _ = new_case(days=3)
+    seed_service(case, 3)
+    bid, _ = stage(case, 5000, 14, incoming=True)
+    terms_url = f'/api/v1/orders/{case}/terms'
+    initial = checked(http.get(terms_url))
+    assignment = rows('SELECT id FROM case_staff_assignments WHERE case_no=%s', (case,))[0]['id']
+    service_date = '2026-10-01'
+    terms = {
+        'proposed_terms': {**initial['terms'], 'service_days': 1},
+        'replacement_service_dates': [service_date],
+        'replacement_allocations': [{'assignment_id': assignment, 'service_days': 1, 'service_dates': [service_date]}],
+        'allow_started_service_change': True,
+    }
+    plan = checked(http.post(terms_url + '/preview', json=terms))
+    applied_terms = {**terms, **{f'expected_{k}_version': plan[f'{k}_version'] for k in
+                                 ('order', 'scheduling', 'client_finance', 'payroll')},
+                     'preview_fingerprint': plan['preview_fingerprint'],
+                     'requires_formal_apply': plan['requires_formal_apply'], 'reason': 'synthetic actual early end'}
+    checked(http.post(terms_url + '/apply', json=applied_terms, headers={'Idempotency-Key': case + ':shorten'}))
+    if snapshot(case)['order'][0]['status'] != '訂單完成':
+        complete(case)
+    before = snapshot(case)
+    assert before['order'][0]['status'] == '訂單完成'
+    assert [str(row['work_date']) for row in before['schedule']] == [service_date]
+    assert not rows('SELECT id FROM order_cancellation_apply_receipts WHERE case_no=%s', (case,))
+    url = '/api/v1/finance-import/corrections'
+    selection = {'row_identity': f'finance-import-row:{bid}', 'classification_type': 'client_receipt',
+                 'target_obligation_identities': [], 'service_end_case_no': case,
+                 'evidence': ['synthetic bank receipt after actual service'], 'reason': 'confirmed exact case'}
+    preview = checked(http.post(url + '/preview', json=selection))
+    # This fixture's standard rate is NT$300/h, one verified eight-hour day.
+    summary = preview['candidate']['service_end_receipt']
+    assert summary['service_due_ntd'] == 2400 and summary['new_refund_ntd'] == 2600
+    assert snapshot(case) == before
+    body = {**selection, **{f'expected_{k}_version': preview[f'{k}_version'] for k in
+                            ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
+    jobs(checked(http.post(url + '/apply', json=body, headers={'Idempotency-Key': case + ':late-early-end'}), 202))
+    after = snapshot(case)
+    assert after['order'] == before['order'] and after['schedule'] == before['schedule']
+    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', 5000)]
+    assert [(item['status'], item['amount_due_ntd']) for item in after['client']
+            if item['obligation_type'] == 'refund'] == [('open', 2600)]

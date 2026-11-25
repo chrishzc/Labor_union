@@ -494,19 +494,36 @@ def query_cancellation_accounting(connection, case_no, *, cancellation_event_id=
             "WHERE receipt.id=%s", (row["id"],),
         )
         current_cash = facts["net_received_ntd"] + int(cursor.fetchone()["amount"])
+        cursor.execute(
+            "SELECT JSON_EXTRACT(result_snapshot,'$.late_service_end_receipt') AS settlement "
+            "FROM client_finance_apply_receipts WHERE case_no=%s "
+            "AND JSON_EXTRACT(result_snapshot,'$.late_service_end_receipt.cancellation_event_id')=%s "
+            "ORDER BY resulting_account_version,id",
+            (case_no, facts.get("cancellation_event_id")),
+        )
+        late_receipts = tuple(row["settlement"] for row in cursor.fetchall())
+        late_receipts = tuple(json.loads(value) if isinstance(value, (str, bytes)) else value for value in late_receipts)
+        if late_receipts:
+            current_cash = query_case_net_cash(cursor, case_no)
+    refund_due = facts["refund_due_ntd"] + sum(item["new_refund_ntd"] for item in late_receipts)
+    refund_ids = tuple(dict.fromkeys(item for item in (
+        facts["obligation_identity"] if facts["refund_due_ntd"] else None,
+        *(item["refund_identity"] for item in late_receipts),
+    ) if item is not None))
     current_fee_received = cancellation_fee_collected(facts["fee_ntd"], facts["service_due_ntd"], current_cash)
     bank_refunded = transfer_fee = None
-    if facts["refund_due_ntd"] and facts["obligation_identity"]:
+    if refund_ids:
         with connection.cursor() as cursor:
+            refund_placeholders = ",".join("%s" for _ in refund_ids)
             cursor.execute(
                 "SELECT a.amount_ntd AS allocated, entry.amount_ntd AS bank_amount, entry.entry_type, "
                 "(SELECT SUM(other.amount_ntd) FROM client_ledger_obligation_allocations other "
                 "WHERE other.ledger_entry_id=entry.id) AS total_allocated "
                 "FROM client_ledger_obligation_allocations a JOIN client_ledger_entries entry ON entry.id=a.ledger_entry_id "
                 "LEFT JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id "
-                "WHERE a.obligation_identity=%s AND (entry.entry_type='refund' "
+                f"WHERE a.obligation_identity IN ({refund_placeholders}) AND (entry.entry_type='refund' "
                 "OR (entry.entry_type IN ('reversal','refund_reversal') AND original.entry_type='refund'))",
-                (facts["obligation_identity"],),
+                refund_ids,
             )
             bank_refunded = transfer_fee = 0
             for entry in cursor.fetchall():
@@ -521,8 +538,10 @@ def query_cancellation_accounting(connection, case_no, *, cancellation_event_id=
                 transfer_fee += sign * fee
     return ClientCancellationAccounting(
         date.fromisoformat(facts["processed_on"]), facts["service_due_ntd"], facts["fee_ntd"],
-        facts["net_received_ntd"], current_fee_received, facts["refund_due_ntd"],
-        facts["additional_charge_due_ntd"], facts["obligation_identity"], bank_refunded, transfer_fee,
+        current_cash if late_receipts else facts["net_received_ntd"], current_fee_received, refund_due,
+        (max(0, facts["service_due_ntd"] + facts["fee_ntd"] - current_cash)
+         if late_receipts else facts["additional_charge_due_ntd"]),
+        (refund_ids[0] if len(refund_ids) == 1 else facts["obligation_identity"]), bank_refunded, transfer_fee,
         max(0, facts["service_due_ntd"] - current_cash), facts["fee_ntd"] - current_fee_received,
     )
 

@@ -779,6 +779,8 @@ def test_late_sinopac_owner_preview_requires_real_case_and_prices_earned_service
                 self.row = bank
             elif "FROM order_terms_apply_receipts" in sql:
                 self.row = {"id": 1}
+            elif "FROM order_lifecycle_control_state" in sql:
+                self.row = {"cancellation_event_id": 12}
             elif "FROM client_obligations" not in sql:
                 raise AssertionError(sql)
 

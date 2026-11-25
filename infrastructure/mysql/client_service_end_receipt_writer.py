@@ -117,6 +117,7 @@ def apply_client_service_end_receipt(
         _mark_bank_row_reconciled(cursor, preview.row_id, token)
         snapshot = {
             "ledger_entry_id": entry_id, "bank_row_id": preview.row_id, "refund_identity": refund,
+            "cancellation_event_id": preview.cancellation_event_id,
             "service_due_ntd": preview.service_due_ntd, "fee_ntd": preview.fee_ntd,
             **asdict(preview.balance),
         }
