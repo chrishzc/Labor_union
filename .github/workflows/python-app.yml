@@ -213,6 +213,8 @@ jobs:
           tests/domains/payroll/subsystems/payroll/integration/test_payroll_rebuild_workflow.py
           tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_payroll_calculation.py
           tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/
+          tests/domains/payroll/subsystems/payroll/integration/test_terms_impact.py
+          tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py
       - name: Verify current specification hygiene
         run: python scripts/validate_spec_hygiene.py
       - name: Verify whitespace

@@ -315,6 +315,7 @@ def test_holiday_toggle_reprices_once_and_omitted_import_preserves_manual_settin
         return command, preview, application.apply(command, preview.calendar.holiday_version,
             preview.preview_fingerprint, key, "tester", "年度設定")
     command, preview, _ = save(True, "enable")
+    assert route._preview_payload(preview)["payroll_impact"] == "reprice_unpaid_cases"
     application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
         "enable", "tester", "年度設定")
     assert repository.holidays[day].is_double_pay_default is True

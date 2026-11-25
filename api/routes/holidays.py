@@ -245,6 +245,10 @@ def _fact_payload(fact: HolidayFact) -> dict:
 
 def _preview_payload(result: holiday_maintenance.HolidayPreview) -> dict:
     command = result.command
+    previous_double = bool(result.before and result.before.is_double_pay_default)
+    resulting_double = False if command.action == "delete" else (
+        command.is_double_pay_default if command.is_double_pay_default is not None else previous_double
+    )
     return {
         "command": {
             "action": command.action,
@@ -263,7 +267,7 @@ def _preview_payload(result: holiday_maintenance.HolidayPreview) -> dict:
         "source_identity": result.calendar.source_identity,
         "calendar_version": result.calendar.holiday_version,
         "schedule_impact": "none",
-        "payroll_impact": "none",
+        "payroll_impact": "reprice_unpaid_cases" if previous_double != resulting_double else "none",
         "preview_fingerprint": result.preview_fingerprint,
     }
 

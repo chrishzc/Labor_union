@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -725,8 +725,17 @@ def _load_client_finance(cursor, order_row, lock, *, historical_registry=False):
     if pricing is not None:
         rate = pricing.client.covered if pricing.subsidy_hours > 0 else pricing.client.excess
         source = replace(source, payment_terms=replace(source.payment_terms, client_hourly_rate=MoneyNTD(rate)), pricing=pricing)
-    return replace(source,effective_start_date=order_row.get('actual_start_date'))
+    return replace(source, effective_start_date=order_row.get('actual_start_date'),
+                   double_pay_dates=_enabled_holiday_dates(cursor, order_row, lock))
 
+
+
+def _enabled_holiday_dates(cursor: Any, order_row: Mapping[str, object], lock: bool) -> tuple[date, ...]:
+    if str(order_row.get("status", "")).startswith("歷史"):
+        return ()
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    calendar = MySqlSchedulingHolidayQuery(cursor.connection).query(date(1000, 1, 1), date.max, lock=lock)
+    return tuple(day.holiday_date for day in calendar.holidays if day.is_double_pay_default)
 
 def _select_client_payment_terms(cursor, case_no, lock):
     cursor.execute(
@@ -848,7 +857,7 @@ def _load_payroll(cursor, order_row, assignment_rows, lock, *, allow_missing_pay
 
         "GROUP BY recovery.staff_id" + _lock_clause(lock), (case_no,),
     )
-    return replace(source, recovery_balances=tuple(
+    return replace(source, double_pay_dates=_enabled_holiday_dates(cursor, order_row, lock), recovery_balances=tuple(
         PayrollRecoveryBalance(int(row["staff_id"]), MoneyNTD(_integer_ntd(row["remaining_ntd"])))
         for row in cursor.fetchall()
     ))

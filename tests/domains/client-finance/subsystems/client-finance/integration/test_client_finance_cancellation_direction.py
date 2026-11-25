@@ -615,3 +615,48 @@ def test_cancellation_writer_persists_subsidy_return_as_separate_client_payable(
         14_400,
         date(2026, 10, 15),
     )
+
+
+@pytest.mark.parametrize("rate,expected", [(300, 8200), (350, 9400)])
+def test_formal_terms_candidate_uses_enabled_holiday_in_original_single_write_plan(rate, expected):
+    day = date(2026, 1, 1)
+    source = ClientFinanceTermsSourceFacts("HOLIDAY-NEW", 2,
+        ClientPaymentTerms(0, MoneyNTD(rate), day, day, None), (day,), ())
+    terms = OrderTerms(day, 2, 8, MoneyNTD(1000), ServiceTimeTerms(None, None, None))
+    assignment = AssignmentCandidate("new-assignment", None, 7, 1, day, date(2026, 1, 2),
+        (day, date(2026, 1, 2)), 16)
+    scheduling = SchedulingGenerationCandidate("HOLIDAY-NEW", 1, 0, 1, (), (assignment,), ())
+    candidate = build_client_finance_terms_impact(source, terms, scheduling, "holiday-new")
+    assert candidate.expected_account_version == 2
+    assert candidate.resulting_account_version == 3
+    assert sum(stage.amount.amount for stage in candidate.stage_plans) == expected
+
+
+@pytest.mark.parametrize("status", ["歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成"])
+def test_historical_terms_source_does_not_consume_current_holiday_calendar(status, monkeypatch):
+    from infrastructure.mysql.order_terms_read_model import _enabled_holiday_dates
+    import infrastructure.mysql.scheduling_holiday_query as holiday_adapter
+    def unavailable_calendar(connection):
+        raise AssertionError("historical case must not query current holidays")
+    monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", unavailable_calendar)
+    assert _enabled_holiday_dates(SimpleNamespace(connection=object()), {"status": status}, False) == ()
+
+
+@pytest.mark.parametrize("lock", [False, True])
+def test_general_terms_source_borrows_enabled_holidays_with_matching_lock_mode(lock, monkeypatch):
+    from infrastructure.mysql.order_terms_read_model import _enabled_holiday_dates
+    import infrastructure.mysql.scheduling_holiday_query as holiday_adapter
+    calls = []
+    enabled, disabled = date(2026, 1, 1), date(2027, 1, 1)
+    class CalendarQuery:
+        def __init__(self, connection):
+            self.connection = connection
+        def query(self, start, end, *, lock):
+            calls.append(lock)
+            return SimpleNamespace(holidays=(
+                SimpleNamespace(holiday_date=enabled, is_double_pay_default=True),
+                SimpleNamespace(holiday_date=disabled, is_double_pay_default=False),
+            ))
+    monkeypatch.setattr(holiday_adapter, "MySqlSchedulingHolidayQuery", CalendarQuery)
+    assert _enabled_holiday_dates(SimpleNamespace(connection=object()), {"status": "訂單成立"}, lock) == (enabled,)
+    assert calls == [lock]

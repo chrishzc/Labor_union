@@ -787,7 +787,8 @@ def _materialize_terms_facts(source_facts, order_terms, scheduling):
 
 
 def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
-    charge_days = _charge_days(service_dates)
+    charge_days = tuple(replace(day, is_double_pay=day.service_date in source_facts.double_pay_dates)
+                        for day in _charge_days(service_dates))
     client_service_charge_waived = False
     if source_facts.identity_status is not None and source_facts.pricing is None:
         coverage = derive_subsidy_coverage(

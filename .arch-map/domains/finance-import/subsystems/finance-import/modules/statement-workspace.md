@@ -105,4 +105,4 @@
   source: statement-workspace-holiday-pricing
   target: ".arch-map/requirements/22A_案件帳務三方案與補助流向正式規格.md#^case-accounting-schemes"
 ```
-- 假日對帳接線設計，待實作驗證。工作台從 Client Finance 與 Payroll 正式金額投影讀取非市民工會收入差額，不以同額不變量誤報異常。正式銀行核銷／月嫂清償來源由原 owner 判定，假日設定入口借用 fresh facts；全額免自備加成差額交既有對帳結果顯示待決策，不假建交易或更改政府補助。
+- 假日對帳接線接線由下列 owner 實作，驗證見既有測試入口。工作台從 Client Finance 與 Payroll 正式金額投影讀取非市民工會收入差額，不以同額不變量誤報異常。正式銀行核銷／月嫂清償來源由原 owner 判定，假日設定入口借用 fresh facts；全額免自備加成差額交既有對帳結果顯示待決策，不假建交易或更改政府補助。

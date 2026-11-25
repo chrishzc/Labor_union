@@ -208,7 +208,7 @@ export const HolidayPreviewSchema = z.strictObject({
   source_identity: z.string().min(1),
   calendar_version: HolidayFingerprintSchema,
   schedule_impact: z.literal('none'),
-  payroll_impact: z.literal('none'),
+  payroll_impact: z.enum(['none', 'reprice_unpaid_cases']),
   preview_fingerprint: HolidayFingerprintSchema,
 });
 

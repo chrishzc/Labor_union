@@ -126,3 +126,15 @@ def test_cancellation_floor_fee_follows_source_assignment_instead_of_candidate_o
         rate_snapshot(item.assignment_identity, "policy-v1", PayrollPolicyKind.CITIZEN) for item in formal_facts
     ), PayrollTerms(2, 8, MoneyNTD(1)))
     assert {item.staff_id: item.floor_fee_allocated.amount for item in formal.assignments} == preview
+
+
+@pytest.mark.parametrize("kind,expected", [(PayrollPolicyKind.CITIZEN, 8200), (PayrollPolicyKind.NON_CITIZEN, 8680)])
+def test_first_formal_candidate_includes_enabled_holiday_without_extra_writer(kind, expected):
+    from dataclasses import replace
+    from subsystems.payroll.terms_impact import build_payroll_handover_impact
+    source = replace(_source_facts(), double_pay_dates=(date(2026, 1, 1),),
+        source_terms=(replace(_source_facts().source_terms[0], policy_kind=kind),))
+    candidate = build_payroll_handover_impact(source, _scheduling(), _terms(), "holiday-first-formal")
+    assert candidate.expected_payroll_version == 3
+    assert candidate.resulting_payroll_version == 4
+    assert sum(action.amount.amount for action in candidate.actions) == expected

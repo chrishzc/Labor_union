@@ -110,7 +110,7 @@ class HolidayPreviewView(BaseModel):
     source_identity: str
     calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     schedule_impact: Literal["none"]
-    payroll_impact: Literal["none"]
+    payroll_impact: Literal["none", "reprice_unpaid_cases"]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

@@ -851,7 +851,7 @@ def test_holiday_merge_and_restore_use_effective_eight_hours_and_preserve_paid_t
         receipt = workflow.apply(case_no, intent, versions=preview.facts.versions, preview_fingerprint=preview.fingerprint, key=case_no + ":merge", actor="pricing-test")
         impact = client.get(path).json()["data"]["impact"]
         assert (impact["case_total_amount"], impact["client_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == ((28000, 28000, 25600, 2400) if cash else (30800, 30800, 28160, 2640))
-        reverse = ServiceDateAdjustmentIntent((), (), reverse_receipt_id=receipt.receipt_id)
+        reverse = ServiceDateAdjustmentIntent((date(2026, 10, 25),), (), reverse_receipt_id=receipt.receipt_id)
         preview = workflow.preview(case_no, reverse)
         connection.rollback()
         workflow.apply(case_no, reverse, versions=preview.facts.versions, preview_fingerprint=preview.fingerprint, key=case_no + ":restore", actor="pricing-test")
