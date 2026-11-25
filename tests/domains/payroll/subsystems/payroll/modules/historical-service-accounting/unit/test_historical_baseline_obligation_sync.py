@@ -88,11 +88,77 @@ class ReadOnlyConnection:
 def _availability_source(**values):
     return {"assignment_id": 17, "staff_id": 3, "staff_name": "合成月嫂甲",
             "service_days": 5, "service_hours": Decimal("40"), "hourly_rate_ntd": 300,
-            "source_end_date": date(2026, 11, 30), "assignment_valid": True, **values}
+            "source_end_date": date(2026, 11, 30), "assignment_valid": True,
+            "pairing_evidence_count": 1, **values}
 
 
 def _availability_root(**values):
     return {**_ORDER, "adoption_receipt_id": 91, "day_event_id": None, **values}
+
+
+@pytest.mark.parametrize("source_kind,day_event_id,reason", [
+    ("duplicate_months", None, "historical_payroll_assignment_source_ambiguous"),
+    ("collapsed_duplicate_months", 42, "historical_payroll_assignment_source_ambiguous"),
+    ("missing_assignment", None, "historical_payroll_assignment_source_missing"),
+    ("invalid_assignment", None, "historical_payroll_assignment_source_missing"),
+    ("missing_end", None, "historical_payroll_end_date_missing"),
+])
+def test_staff_availability_never_estimates_installments_from_unproven_person_end_date(
+    source_kind, day_event_id, reason,
+):
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+
+    source_rows = {
+        "duplicate_months": (_availability_source(source_end_date=date(2026, 10, 31)),
+                             _availability_source(source_end_date=date(2026, 12, 31))),
+        "collapsed_duplicate_months": (_availability_source(source_end_date=None, pairing_evidence_count=2),),
+        "missing_assignment": (),
+        "invalid_assignment": (_availability_source(assignment_valid=False),),
+        "missing_end": (_availability_source(source_end_date=None),),
+    }[source_kind]
+    original = {"assignment_id": 17, "staff_id": 3, "staff_name": "合成月嫂甲",
+                "obligation_identity": "staff-existing:17", "due_date": date(2027, 3, 8),
+                "expected_ntd": 12000, "has_installments": True, "missing_installment_date": True,
+                "missing_client_date": True, "missing_subsidy_date": True}
+    root = _availability_root(day_event_id=day_event_id, actual_end_date=date(2027, 1, 31),
+                              staff_payment_due_date=date(2027, 5, 9))
+    connection = ReadOnlyConnection(root, source_rows, (original,))
+
+    result = query_case_staff_accounting_availability(connection, "CASE-1")
+
+    assert result[0].status == "formal"
+    assert result[0].obligation_identities == ("staff-existing:17",)
+    assert reason in result[0].pending_reasons
+    assert result[0].estimated_self_pay_date is None
+    assert result[0].estimated_subsidy_date is None
+    assert original["due_date"] == date(2027, 3, 8)
+    assert root["staff_payment_due_date"] == date(2027, 5, 9)
+
+
+@pytest.mark.parametrize("missing_client,missing_subsidy,self_pay,subsidy_date", [
+    (False, True, None, "2027-02-15"),
+    (True, False, "2027-01-15", None),
+])
+def test_staff_availability_unique_person_end_estimates_only_the_missing_funding_date(
+    missing_client, missing_subsidy, self_pay, subsidy_date,
+):
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+
+    original = {"assignment_id": 17, "staff_id": 3, "staff_name": "合成月嫂甲",
+                "obligation_identity": "staff-existing:17", "due_date": date(2027, 3, 8),
+                "expected_ntd": 12000, "has_installments": True, "missing_installment_date": True,
+                "missing_client_date": missing_client, "missing_subsidy_date": missing_subsidy}
+    connection = ReadOnlyConnection(
+        _availability_root(actual_end_date=date(2027, 1, 31)),
+        (_availability_source(source_end_date=date(2026, 12, 31)),), (original,),
+    )
+
+    result = query_case_staff_accounting_availability(connection, "CASE-1")
+
+    assert result[0].estimated_self_pay_date == self_pay
+    assert result[0].estimated_subsidy_date == subsidy_date
+    assert result[0].pending_reasons == ("historical_payroll_installment_date_pending",)
+    assert original["due_date"] == date(2027, 3, 8)
 
 
 def test_staff_availability_keeps_formal_payable_when_service_basis_is_missing():

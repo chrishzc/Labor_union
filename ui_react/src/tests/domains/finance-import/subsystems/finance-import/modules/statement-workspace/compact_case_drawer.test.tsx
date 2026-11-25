@@ -1298,6 +1298,49 @@ it('多人中一位來源缺項仍保留他人正式應付與原日期',async()=
  expect(differenceResolutionClient.syncHistoricalBaseline).not.toHaveBeenCalled();
 });
 
+it.each([false,true])('兩入口對唯一結束日來源 %s 保留正式應付，只呈現有證據的缺期預計日',async unique=>{
+ const base=facts();
+ const payable={...base.staff_items[0],party:'來源待核對月嫂',due_date:'2027-03-08',remaining_ntd:30000,
+  funding_portions:[
+   {funding_kind:'client' as const,amount_ntd:18000,due_date:'2027-04-08',settled_ntd:0,remaining_ntd:18000},
+   {funding_kind:'subsidy' as const,amount_ntd:12000,due_date:null,settled_ntd:0,remaining_ntd:12000},
+  ]};
+ const data:CaseAccounting={...base,historical_stages:true,staff_items:[payable,
+  {...base.staff_items[0],identity:'other-formal',party:'其他正式月嫂',expected_ntd:4000,due_date:'2027-05-08',remaining_ntd:4000}],
+  staff_accounting_availability:[
+   {assignment_id:17,staff_id:3,party:'來源待核對月嫂',obligation_identities:['staff'],status:'formal',
+    pending_reasons:unique?['historical_payroll_installment_date_pending']:
+     ['historical_payroll_assignment_source_ambiguous','historical_payroll_installment_date_pending','historical_payroll_end_date_missing'],
+    estimated_self_pay_date:null,estimated_subsidy_date:unique?'2027-02-15':null,recorded_due_date:null},
+   {assignment_id:18,staff_id:4,party:'其他正式月嫂',obligation_identities:['other-formal'],status:'formal',
+    pending_reasons:[],estimated_self_pay_date:null,estimated_subsidy_date:null,recorded_due_date:null},
+  ]};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ wrapper(<><FinanceCaseAccounting initialCase={caseNo} embedded/><ClientRegistryAccountingSummary caseNo={caseNo} revision={0}/></>);
+ await waitFor(()=>expect(screen.getAllByRole('region',{name:'歷史月嫂應付依據'})).toHaveLength(2));
+ for(const region of screen.getAllByRole('region',{name:'歷史月嫂應付依據'})){
+  const source=within(region);
+  expect(source.getByText('來源待核對月嫂')).toBeVisible();
+  expect(source.getByText('其他正式月嫂')).toBeVisible();
+  expect(source.queryByText(/自備款預計付款日/)).not.toBeInTheDocument();
+  if(unique)expect(source.getByText('補助款預計付款日 2027-02-15')).toBeVisible();
+  else{
+   expect(source.getByText('歷史月嫂指派來源不唯一，請核對歸屬。')).toBeVisible();
+   expect(source.queryByText(/補助款預計付款日/)).not.toBeInTheDocument();
+  }
+ }
+ const drawer=within(screen.getByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'}));
+ expect(drawer.getByRole('row',{name:/來源待核對月嫂/})).toHaveTextContent('2027-03-08');
+ expect(drawer.getByRole('row',{name:/來源待核對月嫂/})).toHaveTextContent('NT$ 30,000');
+ expect(drawer.getByRole('row',{name:/其他正式月嫂/})).toHaveTextContent('2027-05-08');
+ const registry=within(screen.getByRole('region',{name:'補助及退款方案摘要（唯讀）'}));
+ expect(registry.getByText(/來源待核對月嫂／服務費：30,000 元，應付日 2027-03-08/)).toBeVisible();
+ expect(registry.getByText(/其他正式月嫂／服務費：4,000 元，應付日 2027-05-08/)).toBeVisible();
+ expect(payable.funding_portions[0].due_date).toBe('2027-04-08');
+ expect(payable.funding_portions[1].due_date).toBeNull();
+ expect(differenceResolutionClient.syncHistoricalBaseline).not.toHaveBeenCalled();
+});
+
 it('歷史帳務 API 契約經 strict client 解碼後交抽屜呈現，拒絕未定義付款證據',async()=>{
  const {financeAccountingClient:actualClient}=await vi.importActual<typeof import('../../../../../../../api/finance_import/finance_accounting_client')>('../../../../../../../api/finance_import/finance_accounting_client');
  const raw={...facts(),historical_stages:true,full_subsidy_eligibility:null,accounting_pending_reasons:[],

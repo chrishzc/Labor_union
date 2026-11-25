@@ -500,6 +500,136 @@ def test_historical_accounting_keeps_pending_bank_candidate_without_calling_it_r
         connection.close()
 
 
+@pytest.mark.parametrize('target_scope', ['explicit_case', 'client_only'])
+def test_historical_accounting_bank_candidates_preserve_exact_case_precedence(database, target_scope):
+    from api.dependencies.admin_auth import require_admin
+    from api.dependencies.finance_import import get_accounting_workspace
+    from api.routes.finance_statement_workspace import router as accounting_router
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.historical_client_payment_repository import MySqlHistoricalClientPaymentRepository
+
+    suffix = uuid4().hex[:10]
+    case_a, case_b = 'history-shared-a-' + suffix, 'history-shared-b-' + suffix
+    for case_no in (case_a, case_b):
+        seed_historical_accounting_case(case_no, '補助市民', 80, 120)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT client_id FROM orders WHERE case_no=%s', (case_a,))
+            client_id = cursor.fetchone()['client_id']
+            cursor.execute('UPDATE orders SET client_id=%s WHERE case_no=%s', (client_id, case_b))
+            targets = [f'client:{client_id}', case_a] if target_scope == 'explicit_case' else [f'client:{client_id}']
+            cursor.execute("INSERT INTO finance_import_batches(format_id,sheet_name,header_row,row_count) VALUES('sinopac','synthetic-shared-client',1,1)")
+            batch_id = cursor.lastrowid
+            cursor.execute("INSERT INTO finance_import_rows(batch_id,dedup_fingerprint,format_id,transaction_date,credit,direction,bank_references,warnings,raw_payload,classification_type,reconciliation_status) VALUES(%s,%s,'sinopac','2025-12-20',400,'incoming','{}','[]','{}','client_receipt','pending')", (batch_id, uuid4().hex + uuid4().hex))
+            bank_id = cursor.lastrowid
+            cursor.execute("INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,evidence,available_actions,actor,reason) VALUES(%s,%s,1,1,'client_receipt','manual_review',%s,%s,'[]','[]','synthetic','shared client attribution regression')", (batch_id, bank_id, 'a' * 64, json.dumps(targets)))
+        connection.commit()
+
+        def snapshot():
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT * FROM finance_import_rows WHERE id=%s', (bank_id,))
+                bank = cursor.fetchall()
+                cursor.execute('SELECT * FROM finance_import_classification_events WHERE finance_import_row_id=%s', (bank_id,))
+                classification = cursor.fetchall()
+                cursor.execute('SELECT * FROM client_ledger_entries WHERE case_no IN (%s,%s)', (case_a, case_b))
+                ledger = cursor.fetchall()
+                cursor.execute('SELECT * FROM client_obligations WHERE case_no IN (%s,%s)', (case_a, case_b))
+                return bank, classification, ledger, cursor.fetchall()
+
+        before = snapshot()
+        app = FastAPI()
+        app.include_router(accounting_router)
+        app.dependency_overrides[require_admin] = lambda: object()
+        app.dependency_overrides[get_accounting_workspace] = lambda: build_accounting_workspace(connection)
+        with TestClient(app) as http:
+            response_a = http.get(f'/cases/{case_a}/accounting')
+            response_b = http.get(f'/cases/{case_b}/accounting')
+        assert response_a.status_code == response_b.status_code == 200
+        data_a, data_b = response_a.json()['data'], response_b.json()['data']
+        assert data_a['pending_bank_row_identities'] == ([str(bank_id)] if target_scope == 'explicit_case' else [])
+        assert data_a['full_subsidy'] is (target_scope == 'client_only')
+        assert data_a['customer_amount_ntd'] == (0 if target_scope == 'client_only' else None)
+        assert data_b['pending_bank_row_identities'] == []
+        assert data_b['full_subsidy'] is True and data_b['customer_amount_ntd'] == 0
+        assert 'historical_client_bank_reconciliation_required' not in data_b['accounting_pending_reasons']
+        for data in (data_a, data_b):
+            assert data['received_ntd'] is None and data['paid_ntd'] is None
+            assert data['client_items'] == [] and data['transactions'] == [] and data['zero_stages'] == []
+        manual = MySqlHistoricalClientPaymentRepository(connection)
+        for case_no in (case_a, case_b):
+            assert str(bank_id) in manual.load(case_no, for_update=False).normal_bank_candidate_identities
+        assert snapshot() == before
+        assert before[0][0]['reconciliation_status'] == 'pending'
+        assert not before[2] and not before[3]
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize('ambiguous_end_source', [True, False])
+def test_historical_accounting_requires_unique_assignment_end_for_missing_installment_date(database, ambiguous_end_source):
+    from api.dependencies.admin_auth import require_admin
+    from api.dependencies.finance_import import get_accounting_workspace
+    from api.routes.finance_statement_workspace import router as accounting_router
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+
+    case_no = 'history-end-source-' + uuid4().hex[:10]
+    staff_id, assignment_id = seed_historical_accounting_case(case_no, '一般市民', 80, 40, with_staff=True)
+    connection = mysql_adapter.get_connection()
+    identity = case_no + ':formal-staff'
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE orders SET actual_end_date='2027-02-28',staff_payment_due_date='2027-04-07' WHERE case_no=%s", (case_no,))
+            if ambiguous_end_source:
+                cursor.execute("SELECT id FROM historical_order_adoption_receipts WHERE case_no=%s AND outcome='adopted' ORDER BY id DESC LIMIT 1", (case_no,))
+                receipt_id = cursor.fetchone()['id']
+                cursor.execute("INSERT INTO historical_order_pairing_evidence(receipt_id,caregiver_ordinal,staff_name,staff_id,resolution,source_start_date,source_end_date,assignment_id,issue_codes) VALUES(%s,2,'Synthetic Historical Staff',%s,'assignment_candidate','2026-11-01','2026-11-30',%s,'[]')", (receipt_id, staff_id, assignment_id))
+            cursor.execute('INSERT INTO payroll_case_accounts(case_no,aggregate_version) VALUES(%s,1)', (case_no,))
+            cursor.execute("INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,28000,'2026-11-05',%s,0,1,%s,'synthetic','original dated amount')", (identity, assignment_id, case_no, staff_id, 'd' * 64, identity + ':event'))
+            event_id = cursor.lastrowid
+            cursor.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,amount_due_ntd,due_date,status,current_event_id,payroll_version) VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',28000,'2026-11-05','open',%s,1)", (identity, assignment_id, case_no, staff_id, event_id))
+            cursor.execute("INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) VALUES(%s,'client',14000,'2026-11-03'),(%s,'subsidy',14000,NULL)", (identity, identity))
+        connection.commit()
+
+        def snapshot():
+            with connection.cursor() as cursor:
+                result = {}
+                for table in ('orders', 'staff_obligations', 'staff_obligation_events', 'client_ledger_entries'):
+                    cursor.execute(f'SELECT * FROM {table} WHERE case_no=%s', (case_no,))
+                    result[table] = cursor.fetchall()
+                cursor.execute('SELECT * FROM staff_obligation_installments WHERE obligation_identity=%s ORDER BY funding_kind', (identity,))
+                result['installments'] = cursor.fetchall()
+                cursor.execute('SELECT evidence.* FROM historical_order_pairing_evidence evidence JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id WHERE receipt.case_no=%s ORDER BY evidence.caregiver_ordinal', (case_no,))
+                result['end_sources'] = cursor.fetchall()
+                return result
+
+        before = snapshot()
+        app = FastAPI()
+        app.include_router(accounting_router)
+        app.dependency_overrides[require_admin] = lambda: object()
+        app.dependency_overrides[get_accounting_workspace] = lambda: build_accounting_workspace(connection)
+        with TestClient(app) as http:
+            response = http.get(f'/cases/{case_no}/accounting')
+        assert response.status_code == 200, response.text
+        data = response.json()['data']
+        assert len(data['staff_items']) == len(data['staff_accounting_availability']) == 1
+        formal = data['staff_items'][0]
+        available = data['staff_accounting_availability'][0]
+        assert formal['identity'] == identity and formal['expected_ntd'] == 28000
+        assert formal['due_date'] == '2026-11-05'
+        assert [(part['funding_kind'], part['amount_ntd'], part['due_date']) for part in formal['funding_portions']] == [
+            ('client', 14000, '2026-11-03'), ('subsidy', 14000, None),
+        ]
+        assert available['obligation_identities'] == [identity] and available['status'] == 'formal'
+        assert available['estimated_self_pay_date'] is None
+        assert available['estimated_subsidy_date'] == (None if ambiguous_end_source else '2026-12-15')
+        assert ('historical_payroll_assignment_source_ambiguous' in available['pending_reasons']) is ambiguous_end_source
+        assert snapshot() == before
+        assert before['orders'][0]['staff_payment_due_date'] == date(2027, 4, 7)
+    finally:
+        connection.close()
+
+
 def test_historical_accounting_estimates_unique_formal_single_subsidy_payment_without_writes(database):
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
 
