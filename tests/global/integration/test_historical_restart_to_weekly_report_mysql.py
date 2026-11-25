@@ -246,6 +246,7 @@ def _create_matching_plan(connection, database: str, case_no: str, staff_id: int
         "test",
         "2026-09-03",
         facts_port=MySqlSegmentedAvailabilityFactsRepository(connect),
+        event_key=f"{case_no}-matching-plan",
     )
     plan_id = int(result["plan_id"])
     cursor = connection.cursor()

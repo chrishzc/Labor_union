@@ -164,4 +164,3 @@ def test_legacy_initial_holiday_recomputes_entitlement_even_when_funding_limit_i
     candidate = build_payroll_handover_impact(source, _scheduling(), replace(_terms(), floor_fee=MoneyNTD(500)), "unknown-limit")
     assert sum(action.amount.amount for action in candidate.actions) == 7700
     assert candidate.resulting_payroll_version == candidate.expected_payroll_version + 1
-

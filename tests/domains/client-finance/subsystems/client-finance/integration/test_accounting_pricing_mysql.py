@@ -1127,7 +1127,7 @@ def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, mode,
             preview_fingerprint=preview.fingerprint, key=case_no + ":merge", actor="pricing-test")
         expected = (5600, {first_staff: 2560, second_staff: 2560}) if enabled and mode != "failed" else (2800, {first_staff: 1280, second_staff: 1280})
         assert _holiday_ledger_totals(connection, case_no) == expected
-        result = receipt.accounting_result
+        result = receipt.case_result
         assert result.outcome in ({"failed"} if mode == "failed" else {"repriced", "unchanged"})
         if mode == "failed":
             assert result.reason_code == "synthetic_date_reprice_failure"
@@ -1135,7 +1135,7 @@ def test_holiday_cross_assignment_merge_keeps_both_original_payees(client, mode,
                 cursor.execute("SELECT result_snapshot FROM service_date_adjustment_receipts WHERE id=%s", (receipt.receipt_id,))
                 recorded = cursor.fetchone()["result_snapshot"]
                 recorded = json.loads(recorded) if isinstance(recorded, str) else recorded
-                assert recorded["accounting_result"]["reason_code"] == "synthetic_date_reprice_failure"
+                assert recorded["case_result"]["reason_code"] == "synthetic_date_reprice_failure"
         if enabled and mode != "failed":
             assert (result.case_total_amount, result.client_receivable_amount, result.staff_payable_amount,
                     result.case_total_amount - result.staff_payable_amount) == (5600, 5600, 5120, 480)
