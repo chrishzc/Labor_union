@@ -217,7 +217,7 @@ def get_finance_import_ingestion_service():
 def get_finance_import_query_service():
     from functools import partial
     from infrastructure.mysql.client_registry_query_repository import load_registry_payment_estimates
-    from infrastructure.mysql.subsidy_confirmation_repository import match_client_subsidy_month
+    from infrastructure.mysql.subsidy_confirmation_repository import match_client_subsidy_month, qualify_staff_subsidy_manual_review
 
     connection = get_connection()
     try:
@@ -225,6 +225,7 @@ def get_finance_import_query_service():
             connection,
             match_client_month=partial(match_client_subsidy_month, connection),
             load_payment_estimates=load_registry_payment_estimates,
+            qualify_staff_subsidy_manual_review=partial(qualify_staff_subsidy_manual_review, connection),
         )
     finally:
         connection.close()

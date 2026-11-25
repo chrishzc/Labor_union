@@ -73,7 +73,7 @@ it('previews before confirmation and requires a matching terminal receipt before
   expect(corrections.apply).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '確認核銷' }));
   await waitFor(() => expect(corrections.apply).toHaveBeenCalledOnce());
-  expect(await screen.findByText('更正收據尚未確認，不能判定完成。')).toBeInTheDocument();
+  expect(await screen.findByText('更正收據尚未確認，不能判定完成。 請重新查詢更正結果。')).toBeInTheDocument();
   vi.mocked(corrections.queryOutcome).mockResolvedValue({ status: 'succeeded', receipt: { row_identity: 'row:1', batch_identity: 'batch:1', preview_fingerprint: 'a'.repeat(64) } } as never);
   fireEvent.click(screen.getByText('重新查詢更正結果'));
   expect(await screen.findByText('帳務更正完成，已確認核銷收據。')).toBeInTheDocument();
@@ -243,7 +243,7 @@ it('offers a partial customer refund from the original bank row, including not-y
     classification_type: 'client_refund', target_obligation_identities: ['refund:1'],
     allow_partial_refund_recovery: true, allow_refund_overage_recovery: false,
   }));
-  expect(await screen.findByText('更正收據尚未確認，不能判定完成。')).toBeInTheDocument();
+  expect(await screen.findByText('更正收據尚未確認，不能判定完成。 請重新查詢更正結果。')).toBeInTheDocument();
   vi.mocked(corrections.queryOutcome).mockResolvedValue({status: 'succeeded', receipt: {
     row_identity: 'row:1', batch_identity: 'batch:1', preview_fingerprint: 'a'.repeat(64),
   }} as never);

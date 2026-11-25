@@ -54,6 +54,9 @@ jobs:
         run: >-
           python -m pytest -vv
           tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py
+          tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_query.py
+          tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_repository_recovery.py
+          tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py
           tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_owning_domain_composite.py
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_source_projection.py
           tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_baseline_obligation_sync.py
@@ -72,6 +75,22 @@ jobs:
         run: |
           python -m pytest -vv tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py -k historical_accounting
           python -m pytest -vv tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py
+      - name: Verify bank review through isolated money owners
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        env:
+          DB_DATABASE: lu_test_subsidy_b_${{ github.run_id }}_${{ github.run_attempt }}
+          SUBSIDY_CONFIRMATION_MYSQL: "1"
+        run: |
+          python - <<'PY'
+          import os
+          from argparse import Namespace
+          from scripts.bootstrap_disposable_mysql_schema import bootstrap
+          database = os.environ['DB_DATABASE']
+          assert database.startswith('lu_test_subsidy_b_')
+          bootstrap(Namespace(host='127.0.0.1', port=3307, user='root', password='',
+                              database=database, confirm_database=database))
+          PY
+          python -m pytest -vv tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py -k 'test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation or test_staff_subsidy_without_suffix_cannot_bypass_cross_month_guard or test_staff_subsidy_cross_month_qualification_preserves_manual_amount_choices or test_shared_name_with_suffix_cannot_manually_reconcile_another_month or (test_bank_preview_then_apply_confirms_builds_and_settles_once and advance)'
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -88,9 +107,105 @@ jobs:
           -t 隔離
       - name: Check Python types and lint at the affected boundaries
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        env:
+          FINANCE_TYPE_BASE_SHA: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
         run: |
-          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py api/schemas/finance_import.py api/routes/finance_statement_workspace.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/finance_import_owning_domain_composite.py infrastructure/mysql/accounts_payable_export_sources.py infrastructure/mysql/payroll_rebuild_repository.py infrastructure/mysql/finance_import_repository.py infrastructure/mysql/historical_staff_payout_repository.py subsystems/finance_import/query.py subsystems/orders/historical_adoption_workflow.py
+          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/subsidy_confirmation_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py subsystems/finance_import/query.py api/schemas/finance_import.py api/dependencies/finance_import.py api/routes/finance_statement_workspace.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/finance_import_owning_domain_composite.py infrastructure/mysql/accounts_payable_export_sources.py infrastructure/mysql/payroll_rebuild_repository.py infrastructure/mysql/finance_import_repository.py infrastructure/mysql/historical_staff_payout_repository.py subsystems/orders/historical_adoption_workflow.py
           pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/accounts_payable_export_sources.py
+          python - <<'PY'
+          import ast
+          from collections import Counter
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+
+          files = (
+              'subsystems/finance_import/query.py',
+              'infrastructure/mysql/subsidy_confirmation_repository.py',
+              'infrastructure/mysql/staff_payout_repository.py',
+              'api/dependencies/finance_import.py',
+              'api/schemas/finance_import.py',
+          )
+          candidate = Path.cwd().resolve()
+          temporary = Path(os.environ['RUNNER_TEMP']).resolve()
+          base = temporary / 'finance-type-base'
+          checker = shutil.which('pyright')
+          if checker is None:
+              raise SystemExit('Installed Pyright executable is missing')
+
+          def diagnostics(root: Path, label: str) -> Counter[tuple[str, str, str, str, str]]:
+              result = subprocess.run(
+                  [checker, '--outputjson', *files], cwd=root,
+                  capture_output=True, text=True, check=False,
+              )
+              (temporary / f'finance-type-{label}.json').write_text(result.stdout, encoding='utf-8')
+              (temporary / f'finance-type-{label}.stderr').write_text(result.stderr, encoding='utf-8')
+              if result.returncode not in (0, 1) or 'fatal' in result.stderr.lower():
+                  raise RuntimeError(f'{label}: Pyright failed ({result.returncode}): {result.stderr}')
+              report = json.loads(result.stdout)
+              summary = report['summary']
+              entries = report['generalDiagnostics']
+              if (not isinstance(entries, list)
+                      or not isinstance(summary['filesAnalyzed'], int)
+                      or summary['filesAnalyzed'] < len(files)
+                      or summary['errorCount'] != sum(item['severity'] == 'error' for item in entries)
+                      or result.returncode != int(summary['errorCount'] > 0)):
+                  raise RuntimeError(f'{label}: incomplete or inconsistent Pyright output')
+              owners: dict[str, list[tuple[int, int, str]]] = {}
+              for relative in files:
+                  source = (root / relative).read_text(encoding='utf-8')
+                  spans: list[tuple[int, int, str]] = []
+
+                  def visit(node: ast.AST, names: tuple[str, ...] = ()) -> None:
+                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                          names = (*names, node.name)
+                          start = min([node.lineno, *(item.lineno for item in node.decorator_list)])
+                          if node.end_lineno is None:
+                              raise RuntimeError(f'{label}: missing AST range in {relative}')
+                          spans.append((start, node.end_lineno, '.'.join(names)))
+                      for child in ast.iter_child_nodes(node):
+                          visit(child, names)
+
+                  visit(ast.parse(source, filename=relative))
+                  owners[relative] = spans
+              counts: Counter[tuple[str, str, str, str, str]] = Counter()
+              for item in entries:
+                  relative = Path(item['file']).resolve().relative_to(root).as_posix()
+                  if relative not in owners:
+                      raise RuntimeError(f'{label}: unexpected diagnostic file {relative}')
+                  line = item['range']['start']['line'] + 1
+                  matches = [span for span in owners[relative] if span[0] <= line <= span[1]]
+                  owner = min(matches, key=lambda span: span[1] - span[0])[2] if matches else '<module>'
+                  severity = item['severity']
+                  message = item['message']
+                  rule = item.get('rule', '')
+                  if severity not in {'error', 'warning', 'information'} or not isinstance(message, str) or not isinstance(rule, str):
+                      raise RuntimeError(f'{label}: malformed Pyright diagnostic')
+                  counts[(relative, owner, rule, message, severity)] += 1
+              print(f'{label}: {summary["filesAnalyzed"]} files analyzed, {summary["errorCount"]} errors')
+              return counts
+
+          subprocess.run(
+              ['git', 'worktree', 'add', '--detach', str(base), os.environ['FINANCE_TYPE_BASE_SHA']],
+              cwd=candidate, check=True,
+          )
+          try:
+              baseline = diagnostics(base, 'base')
+              current = diagnostics(candidate, 'candidate')
+              added = current - baseline
+              removed = baseline - current
+              new_errors = sum(count for key, count in added.items() if key[-1] == 'error')
+              removed_errors = sum(count for key, count in removed.items() if key[-1] == 'error')
+              print(f'Additional five-file scope: {new_errors} new errors, {removed_errors} removed errors')
+              for (relative, owner, rule, message, severity), count in sorted(added.items()):
+                  print(f'{relative}::{owner}: {severity} [{rule}] ({count} new): {message}')
+              if new_errors:
+                  raise SystemExit('New Pyright errors in the additional five-file scope')
+          finally:
+              subprocess.run(['git', 'worktree', 'remove', str(base)], cwd=candidate, check=True)
+          PY
       - name: Check completed historical correction boundaries
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -100,6 +215,8 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           python scripts/validate_spec_hygiene.py
+          python scripts/validate_spec_hygiene.py --path .arch-map/requirements/22B_帳務差額處置與工作台UI正式規格.md
+          python scripts/validate_spec_hygiene.py --path .arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md
           git diff --check ${{ github.event.pull_request.base.sha || 'HEAD^' }} HEAD
 
   frontend:
@@ -121,8 +238,10 @@ jobs:
         run: >-
           npm test --
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
-          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/bank_reconciliation_workspace.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/import_retry.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/finance-import-correction/finance_import_correction_form.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_pricing.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_parameters_components.test.tsx
           src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx

@@ -713,7 +713,7 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
       fireEvent.click(screen.getByRole('button', { name: '查看本案帳務' }));
       expect(await screen.findByText('調整本案服務條件／計價')).toBeVisible();
       expect(screen.getByRole('button', { name: '手動補登款項' })).toBeVisible();
-      fireEvent.click(screen.getByRole('button', { name: '返回對核交易' }));
+      fireEvent.click(screen.getByRole('button', { name: '返回核對交易' }));
 
       fireEvent.click(await screen.findByRole('button', { name: /取消結算/ }));
       expect(await screen.findByLabelText('取消實際服務日 1')).toHaveValue('2026-10-10');
@@ -952,7 +952,7 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
       expect(screen.getByRole('button', { name: '手動補登款項' })).toBeVisible();
 
       // 黑箱：點擊返回核對交易，返回對核視圖
-      fireEvent.click(screen.getByRole('button', { name: '返回對核交易' }));
+      fireEvent.click(screen.getByRole('button', { name: '返回核對交易' }));
       expect(await screen.findByRole('button', { name: '更正出款用途' })).toBeVisible();
 
       // 黑箱：更正出款用途並切換客戶退款
