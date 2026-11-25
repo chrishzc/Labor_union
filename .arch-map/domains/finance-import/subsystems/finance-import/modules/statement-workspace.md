@@ -61,7 +61,7 @@
 - `db/schema_parts/241_finance_case_accounting_markers.sql`、`db/schema_parts/1063_finance_case_accounting_markers.sql`
 
 - shared composition: `infrastructure/mysql/accounting_workspace_repository.py::build_accounting_workspace` — 案件、清冊與原 owner 退款同步共用 Client Finance 正式繳款來源。僅略過確認為零的缺席期款，工作台與補助交接使用同一應繳、實收結果，既有金融歷史衝突保留。
-- 歷史案件由 Client Finance typed payment terms 明示沿原正式期款 grain 彙總應繳與實收，不套一般訂單三期齊備門檻、不補造缺席期款；完全沒有正式期款仍保持未知。相同金額供明細補助建款預檢與收款進度使用。
+- 歷史案件由 Client Finance typed payment terms 明示沿原正式款項身分彙總應繳與實收，不套一般訂單三期齊備門檻、不補造缺席期款。同一期多筆、未知期別、未分配款及歷史付款證據逐筆保留。`full_subsidy_eligibility` 區分不適用與來源未知；免自備僅為唯讀呈現，衝突與缺項由 `accounting_pending_reasons` 明示，不改結清證據或付款紀錄。
 
 - `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — 沿原 append-only 方案事件；伺服器保留 `bank-subsidy:<row-id>:<command-digest>` operation key 記錄銀行確認來源，人工命令不能使用該命名空間。不新增 schema 或回填歷史資料。
 
@@ -97,3 +97,5 @@
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_archive_mysql.py` — 隔離MySQL驗證410零寫入、原鍵不重放舊新增成功、成功匯出只含正式核銷、歷史備查唯讀不改資料、三種正式補登仍可匯出。
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/`
+- integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py`，隔離 MySQL 查詢及帳務 API 回應由專項 CI 暫存傳入 `compact_case_drawer.test.tsx`，核對歷史免自備與原款項契約；不以 UI mock 取代後端驗證。
+- `.github/workflows/historical-accounting.yml` 執行本案 Python、隔離 MySQL、React、型別與 lint 專項。

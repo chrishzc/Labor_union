@@ -93,7 +93,10 @@ def is_full_subsidy_case(identity_status: str | None, service_hours: Decimal | N
     """FULL-01: use the case's effective limit, never a fixed identity threshold."""
     if identity_status is None:
         return None
-    if normalize_subsidy_policy_identity(identity_status) not in {"補助市民", "原住民"}:
+    identity = normalize_subsidy_policy_identity(identity_status)
+    if identity not in _SUBSIDY_HOUR_CAPS:
+        return None
+    if identity not in {"補助市民", "原住民"}:
         return False
     if service_hours is None or subsidy_limit is None:
         return None
