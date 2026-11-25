@@ -129,12 +129,17 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 - 根目錄由維運人員於主機磁碟預先建立並設定適當存取權限；程式於首次寫入時自動建立 `01`～`05`（含 `04_LINE選單資源 (media)/rich_menus`）與 `_staging`（唯讀 Query 與 dry run 不建立資料夾）；未填 `union_no` 之月嫂以 `ID{staff.id}` 命名快照（後續更名不搬移原有檔案）；不合法路徑字元轉底線且嚴防 root escape。
 - 新正式受控附件於原 outer transaction 保存 finalize intent，commit 後由 bounded finalize runner 歸檔至 `01`～`04` 新 locator；未綁定 LINE 原始媒體位於 `_staging/line_media`。
 - 明確設定本機絕對儲存路徑時，新上傳的客戶服務契約及月嫂委任契約歸檔至 `01`，客戶審核／建檔時確認的存摺封面歸檔至 `02`，月嫂履歷、證照及體檢文件歸檔至 `03`。登錄時建立 finalize intent，由背景工作歸檔並維持原檔案識別的下載能力。新上傳的 LINE 選單素材由既有媒體資產流程直接寫入 `04/rich_menus/`，以資產識別讀取。既有檔案位置照原紀錄讀取。
-- **共用根下的備份目錄**：`05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一受控根目錄（或由 `NAS_BACKUP_DIR` 另行指定獨立目錄）。本項只描述共用根內的目錄；Windows 維護入口的備份目的目錄選擇見 [單機 Docker MySQL 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md) §5，異地備份與跨磁碟保存由維護人員另行設定複寫。
+- **備份目錄不等於附件根目錄**：使用共用根時，資料庫備份位於 `CONTROLLED_FILE_STORAGE_ROOT/05_資料庫冷備份 (db_backups)/YYYY-MM/`，但仍由資料庫維護入口管理。`NAS_BACKUP_DIR` 是既有備份路徑設定名稱，不要求另部署 NAS，也不會改變契約、存摺等附件的受控根目錄。維護入口擇定備份路徑的優先序及未設定時的行為只見 [單機 Docker MySQL 初始化與維護復原 §5](10A_NAS_Fresh初始化與維護復原規格.md)。異地備份與跨磁碟保存由維護人員另行設定複寫。
   - Global migration 使用 `_partial/` 與 `_maintenance/`。備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過後封裝為單一 `.zip` 發布（並向下相容讀取 `_receipts/YYYY-MM/` 三檔格式）。
   - 一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
 - 實體檔案命名固定為 `[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`；透過 `FileSystemControlledFileStorage.readiness()` Fail-Closed 保護寫入一致性。新歸檔的存摺封面採用登錄當時的正式客戶姓名，附客戶編號以區分同名客戶。過長的姓名截短至可完整表示於前 180 個 UTF-8 bytes 的字元。既有存摺封面仍依原儲存位置讀取。
 
 ## 9. 驗收標準
+
+| ID | S：情境與前提 | T：任務 | A：操作 | R：可觀察結果 |
+| --- | --- | --- | --- | --- |
+| CFS-WINDOWS-ROOT-01 | Windows 正式主機有可寫的受控附件根，另依 §5 指定備份目的地，沒有獨立 NAS | 分別保存受控附件與 DB 備份 | 歸檔一份合成附件；在隔離維護環境用備份入口存放合成庫備份；再讀回兩邊 | 附件仍寫到受控根的業務目錄，備份只寫到維護設定選定的目的地；一般附件入口不能讀取備份專區。 |
+| CFS-WINDOWS-ROOT-02 | Windows 正式附件根未設定，但維護入口依 §5 可以解析備份目的地 | 確認備份設定不是附件儲存的替代值 | 分別檢查附件 readiness／嘗試保存附件，以及執行維護預檢 | 附件不得轉存專案暫存或備份路徑；維護入口仍依 §5 判斷備份路徑及可用性，不能反推附件已就緒。 |
 
 1. source contract／focused tests、shared MySQL Apply／replay／constraint／fail-closed 通過。
 2. authenticated browser list／detail／download／readiness 與未授權／missing／hash mismatch fail-closed 通過。
