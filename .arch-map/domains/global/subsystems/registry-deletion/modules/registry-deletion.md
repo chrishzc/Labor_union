@@ -21,7 +21,7 @@ Append-only trigger 例外要求同案 pending claim 與 row ownership。connect
 - `ui_react/src/components/RegistryDeletionPanel.tsx`
 - `ui_react/src/components/RegistryDeletionPanel.css`
 - `db/schema_parts/1080_registry_case_deletion_signing_guards.sql` — fresh schema 與 preserve-data 升級使用同一版案件刪除 trigger。
-- `db/schema_parts/1060_registry_case_deletion_guards.sql` — 舊版 guard，供保留資料升級辨識前身結構；其中簽回／完簽限制不是現行規則。`1080` 是新建與保留資料升級共同使用的後繼契約：移除簽約狀態條件，仍要求同案、有效且未完成的刪除命令，保留一般歷程的寫入保護。升級版本辨識見 [Migration owner](../../../migration/modules/preserved-database-upgrade.md)。
+- `db/schema_parts/1060_registry_case_deletion_guards.sql` — 舊版 guard，供保留資料升級辨識前身結構；其中簽回／完簽限制不是現行規則。`1080` 是新建與保留資料升級共同使用的後繼契約：移除簽約狀態條件，仍要求同案、有效且未完成的刪除命令，保留一般歷程的寫入保護。升級版本辨識見 [Migration owner](../../migration/modules/preserved-database-upgrade.md)。
 
 ## Dependencies
 - inbound: `clients/profile-change` — ClientRosterPage 與 client_registry router 組合 typed Case deletion。
