@@ -14,7 +14,7 @@
 | 有效 assignment | Scheduling 的非 `cancelled` assignment |
 | 正式服務日 | assignment-owned `staff_schedule` 工作日 |
 | 每日服務時數 | Orders Terms |
-| actual hours | `正式服務日數 × 每日服務時數` |
+| 計薪基礎工時 | 一般重建以 Payroll 採用的正式計薪服務日數 × Orders 約定每日時數；純日期調整採原財務服務日。實際班表時數與假日加成、歷史服務量分別依 §2.2。 |
 | 月嫂費率 | 版本化 Payroll Rate Policy 於 assignment 建立時凍結的條款快照 |
 | 樓層費 | Orders 條款＋實際服務日 ownership 的整數守恆分配 |
 | 調整額 | 不可變 adjustment 及其 assignment allocations |
@@ -41,11 +41,12 @@
 ### 2.2 薪資計算公式與整數守恆 ^payroll-service-pricing
 
 ```text
-actual_hours     = official_work_day_count × service_hours_per_day
+base_payroll_hours = financial_work_day_count × terms_service_hours_per_day
 service_salary   = sum(effective_day_hours × applicable_staff_hourly_rate × holiday_multiplier)
 total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 ```
 
+- `financial_work_day_count` 是本次計薪採用的服務日數，不是調整後班表的可見列數。例：原兩天各 4 小時，純日期合併成一天 8 小時，計薪基礎仍為 8 小時，不是 4 小時；若合併日適用國定假日加成，另按實際有效 8 小時與原受款歸屬算加成。歷史訂單的服務量另見下列兩種來源。
 - 一般訂單的國定假日服務費加成日期與有效時數取 [PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing) 同一來源，月嫂各自使用不可變快照中的適用時薪，跨原財務指派的合併按 Scheduling 保存的來源／結果配對承接各人的完整時數及原受款歸屬，不按目前當日排班人員或資料列順序轉移應付；配對不唯一時不改帳並留下原因。雙倍日服務薪資為有效時數 × 月嫂適用時薪 × 2。歷史案各計算入口均不套用，含依規格27 §8 精準重啟後狀態已回到「訂單成立」的案件；沿既有 `orders_historical_precision_restart` 來源紀錄判斷，不只檢查狀態字首。樓層費、其他津貼、付款日及原月嫂帳務歸屬維持既有規則。兩邊重算或保留原帳依 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)，不因一般重建路徑可追加調整就為已有正式收付的假日異動自動調帳。未收付全額免自備的重算金額、已入帳金額及待對帳差額依22A §2.3分開表達，不以差額負擔未定跳過重算。
 - 中途取消案件的樓層費先以 `ROUND_HALF_UP` 計算全案整數，再以最大餘數法按有效 assignment 服務日數分配（同餘數時依 `assignment_id` 升冪決定）。完整履約後取消一律拒絕，不得縮減薪資。
 - 正式服務日數、`service_hours_per_day`、hourly rate、樓層費與 adjustment 皆須為整數 NTD。非整數異常輸入須進 [Anomalies Domain](06_Anomalies_Domain.md)，不得在每日或 assignment 層私自四捨五入。
