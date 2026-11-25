@@ -9,6 +9,7 @@ import {transport} from '../../../../../../../api/shared/transport';
 import {sessionClient} from '../../../../../../../api/auth/session_client';
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {FinanceCaseAccounting} from '../../../../../../../components/FinanceCaseAccounting';
+import {ClientRegistryAccountingSummary} from '../../../../../../../components/ClientRegistryAccountingSummary';
 import {subsidyPeriodClient} from '../../../../../../../api/government_subsidy/period_reconciliation_client';
 import {FinanceCaseNotice} from '../../../../../../../components/FinanceCaseNotice';
 import {FinanceSubsidyPlanForm} from '../../../../../../../components/FinanceSubsidyPlanForm';
@@ -1318,6 +1319,19 @@ it('歷史帳務 API 契約經 strict client 解碼後交抽屜呈現，拒絕�
 
 
 const historicalContractPath=process.env.HISTORICAL_ACCOUNTING_CONTRACT_PATH;
+it('兩入口保留待核對銀行與過期付款來源，不能視為沒有收付',async()=>{
+ const data:CaseAccounting={...facts(),historical_stages:true,full_subsidy:false,full_subsidy_eligibility:true,
+  scheme:'unknown',client_items:[],customer_amount_ntd:null,
+  accounting_pending_reasons:['historical_client_bank_reconciliation_required','historical_client_payment_evidence_stale'],
+  pending_bank_row_identities:['bank-row:original-1'],stale_payment_evidence_identities:['original:stale-payment']};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ wrapper(<><FinanceCaseAccounting initialCase={caseNo} embedded/><ClientRegistryAccountingSummary caseNo={caseNo} revision={0}/></>);
+ await waitFor(()=>expect(screen.getAllByRole('region',{name:'本案銀行入款待核對'})).toHaveLength(2));
+ for(const section of screen.getAllByRole('region',{name:'本案銀行入款待核對'}))expect(section).toHaveTextContent('bank-row:original-1');
+ for(const section of screen.getAllByRole('region',{name:'歷史付款證據待核對'}))expect(section).toHaveTextContent('original:stale-payment');
+ expect(screen.queryByText('全額補助／免自備，客戶應付 NT$ 0')).not.toBeInTheDocument();
+ expect(screen.queryByText('全額補助／免自備，客戶應付 0 元')).not.toBeInTheDocument();
+});
 it.skipIf(!historicalContractPath)('隔離 MySQL 帳務 API 原回應經 strict client 呈現歷史免自備、上限與舊帳衝突',async()=>{
  if(!historicalContractPath)throw new Error('缺少 HISTORICAL_ACCOUNTING_CONTRACT_PATH');
  const contracts=z.strictObject({main_case:z.unknown(),exact_cap:z.unknown(),conflict:z.unknown()}).parse(
@@ -1336,10 +1350,18 @@ it.skipIf(!historicalContractPath)('隔離 MySQL 帳務 API 原回應經 strict 
    const decoded=await actual.financeAccountingClient.query(currentCase);
    vi.mocked(financeAccountingClient.query).mockResolvedValue(decoded);
    vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:currentCase,order_status:'歷史訂單－服務完成'} as never);
-   const rendered=wrapper(<FinanceCaseAccounting initialCase={currentCase} embedded/>);
+   const rendered=wrapper(<><FinanceCaseAccounting initialCase={currentCase} embedded/><ClientRegistryAccountingSummary caseNo={currentCase} revision={0}/></>);
    const table=within(await screen.findByRole('region',{name:'各期繳款與通知，可左右捲動'}));
    const incoming=decoded.client_items.filter(item=>item.direction==='receivable');
    expect(table.getAllByRole('row')).toHaveLength(incoming.length+1);
+   const registry=within(screen.getByRole('region',{name:'補助及退款方案摘要（唯讀）'}));
+   const customerAmount=await registry.findByText('客戶應付',{exact:true});
+   expect(customerAmount.parentElement).toHaveTextContent(decoded.customer_amount_ntd==null?'待確認':`${decoded.customer_amount_ntd.toLocaleString('zh-TW')} 元`);
+   for(const item of incoming){
+    const original=registry.getByText(item.identity,{exact:true}).closest('tr');
+    if(item.due_date)expect(original).toHaveTextContent(item.due_date);
+    if(item.remaining_ntd!=null)expect(original).toHaveTextContent(`${item.remaining_ntd.toLocaleString('zh-TW')} 元`);
+   }
    if(scenario==='conflict'){
     expect(decoded.scheme_conflict).toBe(true);
     expect(screen.queryByText('全額補助／免自備，客戶應付 NT$ 0')).not.toBeInTheDocument();

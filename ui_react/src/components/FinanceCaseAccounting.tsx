@@ -37,6 +37,7 @@ import { AccountingParametersCard } from './AccountingParametersCard';
 import { AccountingParametersBar } from './AccountingParametersBar';
 import { AccountingParametersDrawer } from './AccountingParametersDrawer';
 import { accountingPricingClient, type CasePricing } from '../api/client_finance/accounting_pricing_client';
+import {accountingReason,unallocatedPaymentLabel} from './case_accounting_presentation';
 import './FinanceCaseAccounting.css';
 import { OrderAttributionFundingReview } from './OrderAttributionFundingReview';
 import './FinanceCompactCase.css';
@@ -65,46 +66,6 @@ const money=(value:number|bigint|null|undefined)=>value==null?'待確認':financ
 type Stage='deposit'|'first'|'second';
 const stageNames:Record<Stage,string>={deposit:'訂金',first:'第一期',second:'第二期'};
 const stages:Stage[]=['deposit','first','second'];
-const historicalAccountingReasons: Record<string,string> = {
- historical_client_cash_requires_review: '原收付款與免自備判定不相容，請核對原帳。',
- historical_subsidy_limit_missing: '缺少本案有效補助上限，免自備資格待確認。',
- historical_client_identity_missing: '缺少正式歷史身分，免自備資格待確認。',
- historical_service_hours_missing: '缺少已採納的整案服務時數，免自備資格待確認。',
- historical_original_client_amount_requires_review: '原客戶款項與免自備判定不相容，請核對原帳。',
- historical_client_payment_evidence_requires_review: '歷史付款證據與免自備判定不相容，請核對原來源。',
- historical_client_finance_source_missing: '尚未確認正式歷史收付款來源，不能認定沒有收付。',
- historical_total_amount_missing: '缺少本案有效總額，免自備金額待確認。',
- subsidy_amount_conflict: '政府補助更正或金額與免自備判定不相容，請核對正式來源。',
- staff_total_amount_conflict: '月嫂正式應付與本案總額不一致，請核對原帳。',
- original_client_amount_requires_review: '原客戶款項與免自備判定不相容，請核對原帳。',
- client_cash_requires_review: '原收付款與免自備判定不相容，請核對原帳。',
- scheduling_effective_generation_invalid: '排班來源版本無效，政府補助金額待確認。',
- pricing_policy_source_missing: '缺少本案有效費率政策，政府補助金額待確認。',
- eligibility_pending: '補助身分待確認，政府補助金額尚未確認。',
- service_volume_pending: '缺少正式服務量，政府補助金額待確認。',
- rate_snapshot_missing: '缺少有效費率快照，政府補助金額待確認。',
- amount_not_integer: '政府補助金額計算不是整數，請核對來源。',
- subsidy_case_source_missing: '未取得本案正式補助計算來源，金額待確認。',
- unique_assignment_required: '歷史月嫂指派歸屬待確認。',
- service_basis_missing: '缺少歷史服務量依據。',
- rate_policy_not_found: '缺少本案有效計薪費率。',
- binding_conflict: '歷史月嫂或款項歸屬有衝突。',
- original_payment_preserved: '保留原應付與付款來源，差額待核對。',
- installment_date_pending: '原應付日期尚未形成。',
- historical_payroll_due_date_missing: '原正式應付缺少到期日，金額與付款紀錄保留。',
- historical_payroll_installment_date_pending: '原正式來源分期缺少到期日。',
- historical_payroll_assignment_source_missing: '缺少歷史月嫂指派來源。',
- historical_payroll_assignment_source_ambiguous: '歷史月嫂指派來源不唯一，請核對歸屬。',
- historical_payroll_service_attribution_missing: '多人服務量尚未按月嫂正式採納，不能分攤整案服務量。',
- historical_payroll_service_basis_missing: '缺少本人的歷史服務量依據。',
- payroll_rate_policy_not_found: '缺少本人的有效計薪費率。',
- historical_payroll_end_date_missing: '缺少已採納的歷史結束日，預計付款日待確認。',
- historical_payroll_obligation_not_established: '已有計薪來源，正式應付尚未建立。',
- historical_payroll_unique_assignment_required: '歷史月嫂指派歸屬待確認。',
-};
-function accountingReason(reason:string):string {
- return historicalAccountingReasons[reason] ?? `帳務來源待核對（${reason}）。`;
-}
 function receiptSource(bank:string|null):string {
  return bank==='manual'?'人工補登':bank==='sinopac'?'永豐':bank==='taishin'?'台新':bank==='legacy'?'歷史來源':'原來源';
 }
@@ -840,6 +801,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  {data.historical_stages&&<>
   {data.full_subsidy&&!data.scheme_conflict&&<p>全額補助／免自備，客戶應付 {money(data.customer_amount_ntd)}</p>}
   {data.accounting_pending_reasons?.map(reason=><p key={reason} role="status">{accountingReason(reason)}</p>)}
+  {!!data.pending_bank_row_identities?.length&&<section aria-label="本案銀行入款待核對"><p>原銀行來源待核對，尚未認列本案實收。</p><ul>{data.pending_bank_row_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
+  {!!data.stale_payment_evidence_identities?.length&&<section aria-label="歷史付款證據待核對"><p>歷史付款證據已過期待核對</p><ul>{data.stale_payment_evidence_identities.map(identity=><li key={identity}>{identity}</li>)}</ul></section>}
   {clientRows.length===0&&<p>{data.full_subsidy&&!data.scheme_conflict?'沒有原期款證據；免自備判定不代表原款已付或帳務結清。':'沒有原期款證據；整案總額僅供查閱，原期款與收付仍待核對。'}</p>}
  </>}
  <div className="finance-table-container" tabIndex={0} role="region" aria-label="各期繳款與通知，可左右捲動"><table className="finance-table finance-case-periods"><thead><tr><th>期款</th><th>原到期日</th><th>應繳</th><th>已收／待收</th><th>入帳資訊</th><th>通知時間</th><th>通知</th></tr></thead><tbody>{clientRows.map(({item,stage})=>{
@@ -859,7 +822,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   <td>{stage!==null&&(!data.historical_stages||notice)?<div className="finance-case-period-actions"><button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'查看'+stageNames[stage]+'通知'} disabled={!!state.loading} title="查看本期通知內容、紀錄與寄送條件" onClick={()=>open(stage)}>查看通知</button></div>:'—'}</td>
  </tr>;
  })}</tbody></table></div>
- {unallocatedClientTransactions.length>0&&<section aria-label="期別待確認的原收付款"><p>以下原收付款尚未分配到期款，保留原來源供核對。</p>{unallocatedClientTransactions.map(row=><p key={row.identity}>{row.occurred_on} · {receiptSource(row.bank)} · {row.kind==='reversal'||row.amount_ntd<0?'沖正':'原收款'} · {money(row.amount_ntd)} · {row.identity}</p>)}</section>}
+ {unallocatedClientTransactions.length>0&&<section aria-label="期別待確認的原收付款"><p>以下原收付款尚未分配到期款，保留原來源供核對。</p>{unallocatedClientTransactions.map(row=><p key={row.identity}>{row.occurred_on} · {receiptSource(row.bank)} · {unallocatedPaymentLabel(row.kind)} · {money(row.amount_ntd)} · {row.identity}</p>)}</section>}
  {state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}
  </div></details>
  <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {data.subsidy_ntd==null?'金額待確認':money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'補助金額先計算，對象可由人工或符合條件的銀行明細確認。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{planConfirmed?'修改補助退款方案':'設定補助退款方案'}</button></div>{data.full_subsidy&&!data.scheme_conflict&&!data.historical_stages&&<p>全額補助，三期免繳</p>}<FinanceCaseBankMemos notes={data.bank_memos??[]}/><p>可在服務結束前先確認補助方案。符合給付條件時，儲存前會顯示給付金額。</p>{planConfirmed&&data.subsidy_plan?.events.at(-1)?.source==='bank'&&<p>依銀行明細確認方案</p>}{selected&&planConfirmed&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
@@ -871,6 +834,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
       {item.pending_reasons.map(reason=><p key={reason}>{accountingReason(reason)}</p>)}
       {item.estimated_self_pay_date&&<p>自備款預計付款日 {item.estimated_self_pay_date}</p>}
       {item.estimated_subsidy_date&&<p>補助款預計付款日 {item.estimated_subsidy_date}</p>}
+      {item.recorded_due_date&&<p>原已保存付款日 {item.recorded_due_date}</p>}
     </div>)}
   </section>}
 

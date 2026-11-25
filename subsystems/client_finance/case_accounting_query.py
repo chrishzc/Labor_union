@@ -29,6 +29,8 @@ class ClientCasePaymentTerms:
     service_end_date: date | None = None
     full_subsidy_eligibility: bool | None = None
     pending_reasons: tuple[str, ...] = ()
+    stale_payment_evidence_identities: tuple[str, ...] = ()
+    pending_bank_row_identities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

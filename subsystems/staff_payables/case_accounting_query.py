@@ -14,6 +14,7 @@ class StaffAccountingAvailability:
     pending_reasons: tuple[str, ...]
     estimated_self_pay_date: str | None = None
     estimated_subsidy_date: str | None = None
+    recorded_due_date: str | None = None
 
 
 @dataclass(frozen=True)

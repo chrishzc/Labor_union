@@ -114,11 +114,16 @@ def query_case_staff_accounting_availability(
                         estimated_subsidy = funding_due_date(end_date, directly_subsidized=True).isoformat()
                 else:
                     reasons.append("historical_payroll_end_date_missing")
+            recorded_due = None
             if any(not row["has_installments"] and row["due_date"] is None for row in formal):
                 reasons.append("historical_payroll_due_date_missing")
+                recorded_due = _availability_date(root["staff_payment_due_date"])
+                if recorded_due is None:
+                    reasons.append("historical_payroll_funding_source_missing")
             result.append(StaffAccountingAvailability(
                 assignment_id, staff_id, party, tuple(str(row["obligation_identity"]) for row in formal),
                 "formal", tuple(reasons), estimated_self_pay, estimated_subsidy,
+                recorded_due_date=recorded_due.isoformat() if recorded_due is not None else None,
             ))
             continue
         if not person_sources or (source is not None and not source["assignment_valid"]):

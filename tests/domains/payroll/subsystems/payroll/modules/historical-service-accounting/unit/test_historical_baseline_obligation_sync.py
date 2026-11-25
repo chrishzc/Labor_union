@@ -112,8 +112,39 @@ def test_staff_availability_keeps_formal_payable_when_service_basis_is_missing()
     assert len(result) == 1
     assert result[0].status == "formal"
     assert result[0].obligation_identities == ("staff-existing:17",)
-    assert result[0].pending_reasons == ("historical_payroll_due_date_missing",)
+    assert result[0].pending_reasons == (
+        "historical_payroll_due_date_missing", "historical_payroll_funding_source_missing",
+    )
     assert result[0].estimated_self_pay_date is None
+
+
+@pytest.mark.parametrize("obligation_due,recorded_due,expected_recorded", [
+    (None, date(2027, 3, 4), "2027-03-04"),
+    (date(2027, 4, 8), date(2027, 3, 4), None),
+    (None, None, None),
+])
+def test_staff_availability_reads_recorded_single_payment_date_without_replacing_formal_due(
+    obligation_due, recorded_due, expected_recorded,
+):
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+
+    original = {"assignment_id": 17, "staff_id": 3, "staff_name": "合成月嫂甲",
+                "obligation_identity": "staff-existing:17", "due_date": obligation_due,
+                "has_installments": False, "missing_installment_date": False,
+                "missing_client_date": False, "missing_subsidy_date": False}
+    connection = ReadOnlyConnection(
+        _availability_root(staff_payment_due_date=recorded_due), (_availability_source(),), (original,),
+    )
+
+    result = query_case_staff_accounting_availability(connection, "CASE-1")
+
+    assert result[0].recorded_due_date == expected_recorded
+    assert original["due_date"] == obligation_due
+    assert result[0].estimated_self_pay_date is None
+    assert result[0].estimated_subsidy_date is None
+    assert ("historical_payroll_funding_source_missing" in result[0].pending_reasons) is (
+        obligation_due is None and recorded_due is None
+    )
 
 
 def test_staff_availability_distinguishes_unestablished_payable_and_missing_rate_per_person():

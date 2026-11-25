@@ -100,6 +100,7 @@ jobs:
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_pricing.test.tsx
           src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/accounting_parameters_components.test.tsx
+          src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx
       - run: npm run lint
       - run: npm run build
 

@@ -82,6 +82,8 @@ def _case_view(case):
     payload.pop("customer_paid_ntd")
     payload["zero_stages"] = list(payload["zero_stages"])
     payload["accounting_pending_reasons"] = list(payload["accounting_pending_reasons"])
+    payload["stale_payment_evidence_identities"] = list(payload["stale_payment_evidence_identities"])
+    payload["pending_bank_row_identities"] = list(payload["pending_bank_row_identities"])
     for field in ("client_items", "staff_items", "transactions", "warnings", "bank_memos", "subsidy_payments", "staff_accounting_availability"):
         payload[field] = list(payload[field])
     for availability in payload["staff_accounting_availability"]:

@@ -632,6 +632,7 @@ def test_historical_full_subsidy_keeps_nonperiod_money_and_unknown_sources(kind)
     assert result.full_subsidy is False
     assert result.accounting_pending_reasons
     assert result.customer_amount_ntd != 0
+    assert result.scheme_conflict is (kind != 'unknown_sources')
     if kind in {'adjustment', 'historical_paid'}:
         assert result.client_items == (item,)
         assert result.customer_amount_ntd == 600
@@ -658,6 +659,7 @@ def test_historical_full_subsidy_without_formal_payable_does_not_invent_staff_de
     assert result.customer_amount_ntd == 0
     assert result.client_items == () and result.zero_stages == ()
     assert result.staff_receivable_ntd is None
+    assert result.customer_burden_ntd == 0
     assert result.payable_ntd is None and result.paid_ntd is None
     assert result.historical_stages is True
 
@@ -712,10 +714,13 @@ def test_historical_terms_use_effective_case_limit_and_adopted_uncapped_volume(
                 self.row = {'aggregate_version': 0} if has_account else None
             elif 'FROM client_ledger_entries' in sql:
                 self.row = {'entry_count': 0}
+            elif 'FROM finance_import_rows fir' in sql:
+                self.rows = ()
             else:
                 assert 'FROM historical_client_payment_projections' in sql
-                self.row = {'evidence_count': 0}
+                self.rows = ()
         def fetchone(self): return self.row
+        def fetchall(self): return self.rows
 
     class Connection:
         def cursor(self): return Cursor()

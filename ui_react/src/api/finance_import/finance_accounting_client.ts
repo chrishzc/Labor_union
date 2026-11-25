@@ -33,11 +33,14 @@ const caseDetail = detail.extend({
   historical_stages: z.boolean().optional(),
   full_subsidy_eligibility: z.boolean().nullable().optional(),
   accounting_pending_reasons: z.array(z.string()).optional(),
+  stale_payment_evidence_identities: z.array(z.string()).optional(),
+  pending_bank_row_identities: z.array(z.string()).optional(),
   subsidy_pending_reason: z.string().nullable().optional(),
   staff_accounting_availability: z.array(z.strictObject({
     assignment_id: z.number().int().nullable(), staff_id: z.number().int().nullable(), party: z.string(),
     obligation_identities: z.array(z.string()), status: z.enum(['formal','not_established','needs_review']),
     pending_reasons: z.array(z.string()), estimated_self_pay_date: z.string().nullable(), estimated_subsidy_date: z.string().nullable(),
+    recorded_due_date: z.string().nullable().optional(),
   })).optional(),
   estimated_subsidy_payment_date: z.string().nullable().optional(),
   subsidy_payments: z.array(z.strictObject({
