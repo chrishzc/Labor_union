@@ -1387,9 +1387,18 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
                     "2400,%s,'open',%s,1)", (identity, historical, stage, due, int(cursor.lastrowid)),
                 )
             cursor.execute("UPDATE client_finance_accounts SET aggregate_version=1 WHERE case_no=%s", (historical,))
-            cursor.execute("INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) VALUES(%s,'Synthetic restart holiday',1)", (holiday,))
             cursor.execute("SELECT COUNT(*) AS total FROM staff_obligations WHERE case_no=%s", (historical,))
             assert cursor.fetchone()["total"] == 0
+        connection.commit()
+
+        normal_plan, normal_segment = _create_matching_plan(connection, database, ordinary, ordinary_staff)
+        _confirm_dates(connection, ordinary)
+        _record_matching_acceptance(database, ordinary, normal_plan, normal_segment)
+        _establish_commitment_and_lock(database, str(tmp_path / 'contracts'), ordinary, normal_plan, normal_segment)
+
+        # Preserve the signed two-day commitment when its first day becomes a holiday.
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) VALUES(%s,'Synthetic restart holiday',1)", (holiday,))
         connection.commit()
 
         restarted = _restart(connection, historical)
@@ -1411,10 +1420,6 @@ def test_holiday_precise_restart_keeps_historical_origin_excluded_mysql(tmp_path
                 correlation_id=CorrelationId("holiday-history-original-payroll"))
             unit.commit()
 
-        normal_plan, normal_segment = _create_matching_plan(connection, database, ordinary, ordinary_staff)
-        _confirm_dates(connection, ordinary)
-        _record_matching_acceptance(database, ordinary, normal_plan, normal_segment)
-        _establish_commitment_and_lock(database, str(tmp_path / 'contracts'), ordinary, normal_plan, normal_segment)
         _confirm_matching(connection, ordinary, normal_plan)
         _apply_assignment(connection, ordinary, ordinary_staff)
 
