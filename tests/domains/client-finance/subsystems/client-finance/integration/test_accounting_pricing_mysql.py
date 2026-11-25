@@ -716,14 +716,15 @@ def test_holiday_toggle_reprices_both_or_preserves_both_real_mysql(client, cash,
                             "obligation_kind,direction,source_obligation_identity,event_type,before_amount_ntd,after_amount_ntd,"
                             "due_date,payroll_fingerprint,expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) "
                             "SELECT %s,assignment_id,case_no,staff_id,'adjustment','payable_to_staff',obligation_identity,"
-                            "'adjustment',0,1,due_date,%s,payroll_version,payroll_version,%s,'pricing-test','synthetic child' "
+                            "'adjustment',0,1,due_date,%s,payroll_version,payroll_version+1,%s,'pricing-test','synthetic child' "
                             "FROM staff_obligations WHERE obligation_identity=%s", (child_identity, "a" * 64, child_identity, identity))
                         event_id = cursor.lastrowid
                         cursor.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,"
                             "obligation_kind,direction,source_obligation_identity,amount_due_ntd,due_date,status,current_event_id,payroll_version) "
                             "SELECT %s,assignment_id,case_no,staff_id,'adjustment','payable_to_staff',obligation_identity,"
-                            "1,due_date,'open',%s,payroll_version FROM staff_obligations WHERE obligation_identity=%s",
+                            "1,due_date,'open',%s,payroll_version+1 FROM staff_obligations WHERE obligation_identity=%s",
                             (child_identity, event_id, identity))
+                        cursor.execute("UPDATE payroll_case_accounts SET aggregate_version=aggregate_version+1 WHERE case_no=%s", (case_no,))
                         identity = child_identity
                         amount = 1
                     cursor.execute("INSERT INTO staff_payout_events(staff_id,event_type,amount_ntd,occurred_on,"
@@ -804,5 +805,57 @@ def test_holiday_toggle_reprices_both_or_preserves_both_real_mysql(client, cash,
         application.apply(off, preview_off.calendar.holiday_version, preview_off.preview_fingerprint,
             case_no + ":disable", "pricing-test", "synthetic holiday")
         assert snapshot() == before
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("cash", [False, True])
+def test_holiday_merge_and_restore_use_effective_eight_hours_and_preserve_paid_total(client, cash):
+    from domains.scheduling.service_date_adjustment import AdjustmentTarget
+    from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+    from infrastructure.mysql.service_date_adjustment_repository import MySqlServiceDateAdjustmentRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentWorkflow, ServiceDateAdjustmentIntent
+    case_no = "holiday-merge-" + str(cash)
+    seed_case(case_no, identity="非市民")
+    bootstrap_case(client, case_no)
+    staff_id = seed_assignment(case_no)
+    connection = mysql_adapter.get_connection()
+    path = f"/api/v1/accounting-pricing/cases/{case_no}"
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE orders SET service_hours_per_day=4,service_end_time='13:00:00' WHERE case_no=%s", (case_no,))
+            cursor.execute("INSERT INTO holidays(holiday_date,holiday_name,is_double_pay_default) VALUES('2026-10-25','Synthetic merge holiday',1) "
+                "ON DUPLICATE KEY UPDATE is_double_pay_default=1")
+        connection.commit()
+        current = client.get(path).json()["data"]
+        terms = {**current["terms"], "client": {"covered": 0, "excess": 350}, "payroll": {"covered": 0, "excess": 320}}
+        post(client, path + "/apply", {"terms": terms, "expected_revision": current["revision"]}, case_no + ":rates")
+        with MySqlUnitOfWork(connection) as unit:
+            MySqlHolidayRepricing(connection).reprice_case(case_no, case_no + ":initial", "pricing-test")
+            unit.commit()
+        if cash:
+            with connection.cursor() as cursor:
+                cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,credit,direction,"
+                    "bank_references,warnings,raw_payload,classification_type) VALUES(%s,'sinopac','2026-10-01',1,'incoming','{}','[]','{}','client_receipt')",
+                    (uuid4().hex + uuid4().hex,))
+                bank_id = cursor.lastrowid
+                cursor.execute("INSERT INTO client_ledger_entries(case_no,finance_import_row_id,entry_type,amount_ntd,occurred_on,"
+                    "reconciliation_reference,idempotency_key,actor,reason) VALUES(%s,%s,'receipt',1,'2026-10-01',%s,%s,'pricing-test','synthetic receipt')",
+                    (case_no, bank_id, case_no, case_no))
+            connection.commit()
+        workflow = ServiceDateAdjustmentWorkflow(MySqlServiceDateAdjustmentRepository(connection), lambda: MySqlUnitOfWork(connection))
+        intent = ServiceDateAdjustmentIntent((date(2026, 10, 1), date(2026, 10, 2)), (AdjustmentTarget(date(2026, 10, 25), staff_id),))
+        preview = workflow.preview(case_no, intent)
+        connection.rollback()
+        receipt = workflow.apply(case_no, intent, versions=preview.facts.versions, preview_fingerprint=preview.fingerprint, key=case_no + ":merge", actor="pricing-test")
+        impact = client.get(path).json()["data"]["impact"]
+        assert (impact["case_total_amount"], impact["client_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == ((28000, 28000, 25600, 2400) if cash else (30800, 30800, 28160, 2640))
+        reverse = ServiceDateAdjustmentIntent((), (), reverse_receipt_id=receipt.receipt_id)
+        preview = workflow.preview(case_no, reverse)
+        connection.rollback()
+        workflow.apply(case_no, reverse, versions=preview.facts.versions, preview_fingerprint=preview.fingerprint, key=case_no + ":restore", actor="pricing-test")
+        impact = client.get(path).json()["data"]["impact"]
+        assert (impact["case_total_amount"], impact["client_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == (28000, 28000, 25600, 2400)
     finally:
         connection.close()

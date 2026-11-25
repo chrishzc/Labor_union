@@ -109,6 +109,9 @@ class MySqlServiceDateAdjustmentRepository:
 
     def save(self, preview, request, *, key, fingerprint, actor):
         facts, change = preview.facts, preview.change
+        from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+        repricing = MySqlHolidayRepricing(self._connection)
+        frozen_total = repricing.prepare_case(facts.case_no) if facts.generation_id is not None else None
         with self._connection.cursor() as cursor:
             if facts.generation_id is None:
                 scheduling_version, confirmed_version = facts.scheduling_version, _write_confirmed(
@@ -137,10 +140,8 @@ class MySqlServiceDateAdjustmentRepository:
                     if str(error) == "order_version_conflict":
                         raise ValueError("service_date_adjustment_stale_version") from error
                     raise
-            if facts.generation_id is not None:
-                from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
-                MySqlHolidayRepricing(self._connection).reprice_case(facts.case_no, key, actor)
             snapshot = {
+                "frozen_case_total_amount": frozen_total,
                 "removed": [service_day_payload(day) for day in change.removed],
                 "inserted": [service_day_payload(day) for day in change.inserted],
                 "scheduling_version": scheduling_version,
@@ -156,7 +157,10 @@ class MySqlServiceDateAdjustmentRepository:
                 if error.args[0] == 1062:
                     raise ValueError("service_date_adjustment_idempotency_conflict") from error
                 raise
-            return ServiceDateAdjustmentReceipt(int(cursor.lastrowid), scheduling_version, confirmed_version)
+            receipt_id = int(cursor.lastrowid)
+            if facts.generation_id is not None:
+                repricing.reprice_case(facts.case_no, key, actor)
+            return ServiceDateAdjustmentReceipt(receipt_id, scheduling_version, confirmed_version)
 
 
 def _formal_days(cursor, generation_id, suffix):

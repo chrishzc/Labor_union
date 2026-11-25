@@ -13,6 +13,7 @@ from infrastructure.mysql.order_terms_read_model import (
     _select_client_obligations, load_calculable_client_finance_facts, select_order,
 )
 from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository, _load_obligations
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
@@ -50,6 +51,12 @@ def load_frozen_holiday_case_total(cursor: DictCursor, case_no: str) -> int | No
         for result in payload.get("case_results", ()):
             if result["case_no"] == case_no and result.get("case_total_amount") is not None:
                 return int(result["case_total_amount"])
+    cursor.execute("SELECT result_snapshot FROM service_date_adjustment_receipts WHERE case_no=%s ORDER BY id DESC", (case_no,))
+    for row in cursor.fetchall():
+        payload = row["result_snapshot"]
+        payload = json.loads(payload) if isinstance(payload, str) else payload
+        if payload.get("frozen_case_total_amount") is not None:
+            return int(payload["frozen_case_total_amount"])
     return None
 
 
@@ -59,9 +66,7 @@ class MySqlHolidayRepricing:
         self._before_totals: dict[str, int] = {}
 
     def prepare(self, command: HolidayCommand) -> None:
-        from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
-        from subsystems.client_finance.pricing_configuration import case_total_amount
-        with self._connection.cursor() as cursor:
+        with self._connection.cursor(DictCursor) as cursor:
             cursor.execute("SELECT DISTINCT assignment.case_no FROM staff_schedule schedule "
                 "JOIN case_staff_assignments assignment ON assignment.id=schedule.assignment_id "
                 "JOIN scheduling_aggregates aggregate ON aggregate.case_no=assignment.case_no "
@@ -73,15 +78,23 @@ class MySqlHolidayRepricing:
                 order = select_order(cursor, case_no, lock=True)
                 if str(order["status"]).startswith("歷史"):
                     continue
-                if load_frozen_holiday_amounts(cursor, case_no, lock=True) is not None:
-                    previous = load_frozen_holiday_case_total(cursor, case_no)
-                    if previous is None:
-                        facts = MySqlPricingConfigurationRepository(self._connection).case(case_no, lock=True)
-                        previous = case_total_amount(replace(facts, frozen_amounts=None))
-                    self._before_totals[case_no] = previous
+                self.prepare_case(case_no)
+
+    def prepare_case(self, case_no: str) -> int | None:
+        from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
+        from subsystems.client_finance.pricing_configuration import case_total_amount
+        with self._connection.cursor(DictCursor) as cursor:
+            if load_frozen_holiday_amounts(cursor, case_no, lock=True) is None:
+                return None
+            previous = load_frozen_holiday_case_total(cursor, case_no)
+            if previous is None:
+                facts = MySqlPricingConfigurationRepository(self._connection).case(case_no, lock=True)
+                previous = case_total_amount(replace(facts, frozen_amounts=None))
+            self._before_totals[case_no] = previous
+            return previous
 
     def __call__(self, command: HolidayCommand, key: str, actor: str) -> tuple[HolidayCaseRepricingResult, ...]:
-        with self._connection.cursor() as cursor:
+        with self._connection.cursor(DictCursor) as cursor:
             cursor.execute(
                 "SELECT DISTINCT assignment.case_no FROM staff_schedule schedule "
                 "JOIN case_staff_assignments assignment ON assignment.id=schedule.assignment_id "
@@ -94,7 +107,7 @@ class MySqlHolidayRepricing:
             return tuple(self.reprice_case(case_no, key, actor) for case_no in cases)
 
     def reprice_case(self, case_no: str, key: str, actor: str) -> HolidayCaseRepricingResult:
-        with self._connection.cursor() as cursor:
+        with self._connection.cursor(DictCursor) as cursor:
             order = select_order(cursor, case_no, lock=True)
             if str(order["status"]).startswith("歷史"):
                 return HolidayCaseRepricingResult(case_no, "historical_excluded")
@@ -118,6 +131,6 @@ class MySqlHolidayRepricing:
             persist_client_finance_terms_impact(cursor, ClientFinanceImpactPersistenceCommand(
                 candidate, identity, context, "國定假日雙倍設定同步", correlation, "holiday", child,
             ), synchronize_government=False)
-            workflow = PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(self._connection), lambda: None)
+            workflow = PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(self._connection), lambda: MySqlUnitOfWork(self._connection))
             workflow.synchronize_in_unit_of_work(case_no, actor=context, key=identity, correlation_id=correlation)
             return HolidayCaseRepricingResult(case_no, "repriced")

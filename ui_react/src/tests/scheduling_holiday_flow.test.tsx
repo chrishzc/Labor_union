@@ -53,7 +53,7 @@ describe('SchedulingPage holiday policy flow', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
 
     fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
-    expect(screen.getByLabelText('當日雙倍計價')).not.toBeChecked();
+    expect(screen.queryByLabelText('當日雙倍計價')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('國定假日日期'), {
       target: { value: HOLIDAY_APPLY_REQUEST.holiday_date },
     });
