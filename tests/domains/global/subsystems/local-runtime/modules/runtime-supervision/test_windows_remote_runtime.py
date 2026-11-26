@@ -11,6 +11,8 @@ from scripts.build_react_admin_artifact import build_artifact
 from infrastructure.runtime.react_admin_artifact import (
     ASSET_ELIGIBILITY_HEADER,
     PRIVATE_IMMUTABLE_CACHE_CONTROL,
+    ReactAdminArtifactError,
+    load_react_admin_runtime_from_environment,
     validate_react_admin_artifact,
 )
 from scripts import windows_remote_runtime as remote
@@ -28,6 +30,27 @@ def artifact(tmp_path, request):
     output = tmp_path / 'artifact'
     build_artifact(output, source=source)
     return validate_react_admin_artifact(output, workspace_root=remote.ROOT)
+
+
+def test_production_api_defers_static_serving_to_a_validated_windows_gateway(artifact):
+    environment = {
+        "APP_ENV": "production",
+        "ACCESS_CONTROL_PROFILE": "production",
+        "ENABLE_ADMIN_AUTH": "true",
+        "WINDOWS_REMOTE_ARTIFACT_DIR": str(artifact.root),
+    }
+    with pytest.raises(ReactAdminArtifactError, match="artifact bindings"):
+        load_react_admin_runtime_from_environment(environment)
+
+    environment["REACT_ADMIN_RUNTIME_PROFILE"] = "windows-remote-gateway"
+    assert load_react_admin_runtime_from_environment(environment) is None
+    with pytest.raises(ReactAdminArtifactError, match="gateway bindings"):
+        load_react_admin_runtime_from_environment({**environment, "ENABLE_ADMIN_AUTH": "false"})
+    with pytest.raises(ReactAdminArtifactError, match="gateway bindings"):
+        load_react_admin_runtime_from_environment({**environment, "REACT_ADMIN_ACTIVE_SELECTOR": "current"})
+    (artifact.root / "index.html").write_text("tampered", encoding="utf-8")
+    with pytest.raises(ReactAdminArtifactError):
+        load_react_admin_runtime_from_environment(environment)
 
 
 def test_prefix_static_and_private_paths_never_reach_api(artifact):

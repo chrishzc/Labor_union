@@ -218,6 +218,23 @@ def load_react_admin_runtime_from_environment(
     selector_value = values.get("REACT_ADMIN_ACTIVE_SELECTOR", "").strip()
     app_environment = values.get("APP_ENV", "development").strip().lower()
     configured = bool(current_value or previous_value or selector_value)
+    if values.get("REACT_ADMIN_RUNTIME_PROFILE") == "windows-remote-gateway":
+        gateway_artifact = values.get("WINDOWS_REMOTE_ARTIFACT_DIR", "").strip()
+        if (
+            app_environment != "production"
+            or values.get("ACCESS_CONTROL_PROFILE") != "production"
+            or values.get("ENABLE_ADMIN_AUTH") != "true"
+            or configured
+            or not gateway_artifact
+        ):
+            raise ReactAdminArtifactError("Windows production gateway bindings are incomplete or invalid")
+        # The Windows gateway serves the validated artifact and owns frontend-only replacement.
+        validate_react_admin_artifact(
+            Path(gateway_artifact),
+            workspace_root=workspace_root,
+            compatibility_registry=compatibility_registry,
+        )
+        return None
     if not configured and app_environment not in _PRODUCTION_ENVIRONMENTS:
         return None
     registry = compatibility_registry or _load_compatibility_registry()

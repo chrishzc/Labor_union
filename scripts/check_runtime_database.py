@@ -45,11 +45,13 @@ class ReadOnlyRuntimeConfig:
         )
 
 
-def configured_database(*, require_remote=False):
+def configured_database(*, require_remote: bool = False, windows_production: bool = False):
     # mysql_adapter loads .env with the same process-over-file precedence as API.
-    if os.getenv("APP_ENV", "development").strip().lower() not in {
-        "development", "local", "test", "testing",
-    }:
+    environment = os.getenv("APP_ENV", "development").strip().lower()
+    if windows_production:
+        if environment != "production" or require_remote:
+            raise RuntimeDatabaseBlocked("Windows production readiness requires APP_ENV=production and local MySQL")
+    elif environment not in {"development", "local", "test", "testing"}:
         raise RuntimeDatabaseBlocked("development launcher requires APP_ENV=development")
     if any(not os.getenv(key, "").strip() for key in (
         "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_DATABASE",
@@ -61,6 +63,8 @@ def configured_database(*, require_remote=False):
         raise RuntimeDatabaseBlocked("DB_HOST must identify a MySQL server")
     if require_remote and host in LOCAL_HOSTS:
         raise RuntimeDatabaseBlocked("NAS launcher requires a remote DB_HOST, not localhost")
+    if windows_production and host not in LOCAL_HOSTS:
+        raise RuntimeDatabaseBlocked("Windows production launcher requires a loopback DB_HOST")
     database = settings["database"]
     if (
         not updater.migration.IDENTIFIER.fullmatch(database)
@@ -73,8 +77,8 @@ def configured_database(*, require_remote=False):
     return ReadOnlyRuntimeConfig(settings), database
 
 
-def check_database(*, dry_run=False, require_remote=False):
-    config, database = configured_database(require_remote=require_remote)
+def check_database(*, dry_run: bool = False, require_remote: bool = False, windows_production: bool = False):
+    config, database = configured_database(require_remote=require_remote, windows_production=windows_production)
     try:
         blocked = restore_startup_blocked(config.host, config.port, database)
     except (MaintenanceBlocked, OSError) as error:
@@ -97,9 +101,10 @@ def check_database(*, dry_run=False, require_remote=False):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--windows-production", action="store_true")
     args = parser.parse_args()
     try:
-        result = check_database(dry_run=args.dry_run)
+        result = check_database(dry_run=args.dry_run, windows_production=args.windows_production)
     except RuntimeDatabaseBlocked as error:
         result = {"status": "blocked", "error": str(error)}
     except Exception:
