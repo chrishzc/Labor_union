@@ -460,10 +460,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       setRichMenuReload(value => value + 1);
       return;
     }
-    const publicationExpected = richMenuDraftSnapshot.publication_locks.some(lock => (
+    const publicationExpected = richMenuDraftSnapshot?.publication_locks.some(lock => (
       lock.menu_definition_id === menuId && lock.configuration_revision === revision
       && (lock.state === 'published' || lock.state === 'processing')
-    ));
+    )) ?? false;
     setPublicationReadState('loading');
     try {
       const tracked = trackedRichMenuPublication;
