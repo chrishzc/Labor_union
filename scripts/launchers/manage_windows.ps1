@@ -207,7 +207,7 @@ function Start-ManagedRuntime {
     $registrationEnabled = & $PythonPath -c "import os; from dotenv import load_dotenv; load_dotenv('.env'); print('1' if (os.getenv('REGISTRATION_REDIS_ADMIN_PASSWORD_FILE') or os.getenv('REGISTRATION_ADMIN_PASSWORD_FILE')) and (os.getenv('REGISTRATION_REDIS_INTAKE_PASSWORD_FILE') or os.getenv('REGISTRATION_INTAKE_PASSWORD_FILE')) else '0')"
     if ($LASTEXITCODE -ne 0) { throw 'Could not read registration Redis configuration; no runtime was started.' }
     if ($registrationEnabled -eq '1') {
-        & docker.exe compose --profile registration up -d --wait db redis registration-redis registration-intake registration-token-verifier
+        & docker.exe compose --profile registration up -d --wait db redis registration-redis registration-intake registration-token-verifier registration-loopback
     } else {
         & docker.exe compose up -d --wait db redis
     }

@@ -22,12 +22,17 @@ def test_non_citizen_service_choices_match_manual_case_form():
     liff = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
     manual = (ROOT / "ui_react/src/components/RegistrationApplications.tsx").read_text(encoding="utf-8")
 
-    for field in ("service_type", "delivery_type", "residence_type", "service_time"):
+    for field in ("delivery_type", "residence_type", "service_time"):
         liff_select = liff.split(f'id="{field}">', 1)[1].split("</select>", 1)[0]
         manual_select = manual.split(f"value={{manualForm.{field}}}", 1)[1].split("</select>", 1)[0]
         assert re.findall(r'<option value="([^"]+)">', liff_select) == re.findall(
             r'<option value="([^"]+)">', manual_select
         )
+    liff_service_type = liff.split('id="service_type">', 1)[1].split("</select>", 1)[0]
+    manual_service_type = manual.split("value={manualForm.service_type}", 1)[1].split("</select>", 1)[0]
+    assert re.findall(r'<option value="([^"]+)">', liff_service_type) == ["週休1日", "週休2日"]
+    assert "連續服務" not in liff_service_type
+    assert re.findall(r'<option value="([^"]+)">', manual_service_type) == ["連續服務", "週休1日", "週休2日"]
     assert tuple(re.findall(
         r'<option value="([^"]+)">', liff.split('id="service_time">', 1)[1].split("</select>", 1)[0]
     )) == LIFF_SERVICE_TIME_OPTIONS
@@ -413,3 +418,108 @@ console.log('missing dom system field safely skipped');
     runtime_res = subprocess.run(["node"], input=runtime_script, capture_output=True, text=True,
                                  encoding="utf-8", timeout=10, check=True)
     assert "missing dom system field safely skipped" in runtime_res.stdout
+
+
+def test_multi_select_survey_labels_display_multi_choice_hint() -> None:
+    source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
+    groups = re.findall(
+        r'<div class="form-group">\s*<label class="form-label[^"]*">([^<]+)</label>(.*?)</div>\s*(?=<div class="form-group">|<div id="customFieldsSection"|<!-- Section)',
+        source,
+        re.S,
+    )
+    multi_labels = [label for label, body in groups if "data-survey-array" in body]
+    assert multi_labels == [
+        "洗澡水準備 (可複選)",
+        "可以接受中藥補品 (可複選)",
+        "料理用油 (可接受種類) (可複選)",
+        "烹煮與加熱工具 (請勾選家中有的設備) (可複選)",
+    ]
+    assert '<label class="form-label">確認條款</label>' in source
+
+    render_fn = "function renderCustomFields(fields)" + source.split(
+        "function renderCustomFields(fields)", 1
+    )[1].split("function collectCustomFields()", 1)[0]
+    script = r'''
+const assert = require('node:assert/strict');
+const container = { children: [], replaceChildren() { this.children = []; }, appendChild(node) { this.children.push(node); } };
+const section = { style: { display: 'none' } };
+const title = { textContent: '' };
+const makeElement = tag => ({
+    tag,
+    className: '',
+    textContent: '',
+    type: '',
+    value: '',
+    id: '',
+    htmlFor: '',
+    required: false,
+    placeholder: '',
+    dataset: {},
+    children: [],
+    append(...items) { this.children.push(...items); },
+    appendChild(item) { this.children.push(item); },
+});
+const document = {
+    getElementById(id) {
+        if (id === 'customFieldsSection') return section;
+        if (id === 'customFieldsContainer') return container;
+        if (id === 'customFieldsTitle') return title;
+        return null;
+    },
+    createElement: makeElement,
+};
+let runtimePage = { content: {} };
+''' + render_fn + r'''
+renderCustomFields([
+    { id: 'multi_new', label: '其他複選需求', type: 'multiple_choice', required: false, order: 1, options: [{ value: 'A', label: 'A' }] },
+    { id: 'multi_existing', label: '已有標註 (可複選)', type: 'multiple_choice', required: false, order: 2, options: [{ value: 'B', label: 'B' }] },
+    { id: 'single_one', label: '單選需求', type: 'single_choice', required: false, order: 3, options: [{ value: 'C', label: 'C' }] },
+]);
+assert.equal(container.children[0].children[0].textContent, '其他複選需求 (可複選)');
+assert.equal(container.children[1].children[0].textContent, '已有標註 (可複選)');
+assert.equal(container.children[2].children[0].textContent, '單選需求');
+console.log('custom field multi-select label contract passed');
+'''
+    result = subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
+    assert "custom field multi-select label contract passed" in result.stdout
+
+
+def test_registration_status_button_removed_and_reload_query_stays_null_safe() -> None:
+    source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
+    assert 'id="registrationStatusButton"' not in source
+    assert "查詢原申請結果" not in source
+
+    query_fn = "async function queryRegistrationStatus()" + source.split(
+        "async function queryRegistrationStatus()", 1
+    )[1].split("function startNewRegistration()", 1)[0]
+    script = r'''
+const assert = require('node:assert/strict');
+const statusMsg = { textContent: '', style: { display: 'none' } };
+const submitButton = { disabled: true };
+let registrationResultUnknown = true;
+const currentIdToken = 'tok';
+const registrationSubmissionId = '00000000-0000-4000-8000-000000000000';
+const document = {
+    getElementById(id) {
+        if (id === 'statusMessage') return statusMsg;
+        if (id === 'registrationStatusButton') return null;
+        return null;
+    },
+    querySelector(sel) {
+        assert.equal(sel, '#registerForm button[type="submit"]');
+        return submitButton;
+    },
+};
+const fetch = async () => ({ ok: true, json: async () => ({ data: { status: 'not_received' } }) });
+function renderRegistrationSuccess() { throw new Error('should not render success for not_received'); }
+''' + query_fn + r'''
+(async () => {
+    await queryRegistrationStatus();
+    assert.equal(registrationResultUnknown, false);
+    assert.equal(submitButton.disabled, false);
+    assert.equal(statusMsg.style.display, 'block');
+    console.log('null-safe reload query passed');
+})().catch(error => { console.error(error); process.exit(1); });
+'''
+    result = subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
+    assert "null-safe reload query passed" in result.stdout

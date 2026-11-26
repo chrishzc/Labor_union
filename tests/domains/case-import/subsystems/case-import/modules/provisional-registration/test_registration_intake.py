@@ -113,7 +113,13 @@ def test_public_container_has_no_mysql_settings_or_network_egress():
     assert intake["secrets"] == ["registration_intake_password"]
     assert not any(key.startswith(("DB_", "MYSQL")) for key in intake["environment"])
     assert all(config["networks"][key].get("internal") is True for key in intake["networks"])
-    for service_name in ("registration-redis", "registration-intake", "registration-token-verifier"):
+    loopback = config["services"]["registration-loopback"]
+    assert loopback["read_only"] is True
+    assert loopback["cap_drop"] == ["ALL"]
+    assert not loopback.get("secrets")
+    assert not any(key.startswith(("DB_", "MYSQL")) for key in loopback.get("environment", ()))
+    assert set(loopback["networks"]) == {"registration-ingress", "registration-loopback-host"}
+    for service_name in ("registration-redis", "registration-intake", "registration-loopback", "registration-token-verifier"):
         for binding in config["services"][service_name].get("ports", ()):
             assert str(binding).startswith("127.0.0.1:")
     image_source = Path("deploy/registration/Dockerfile").read_text(encoding="utf-8")

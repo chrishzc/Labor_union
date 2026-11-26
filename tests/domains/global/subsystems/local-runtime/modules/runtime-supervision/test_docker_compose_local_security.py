@@ -21,6 +21,7 @@ def test_local_stateful_services_bind_only_to_loopback() -> None:
         "redis",
         "registration-redis",
         "registration-intake",
+        "registration-loopback",
         "registration-token-verifier",
     }
     assert "no-new-privileges:true" in services["db"]["security_opt"]

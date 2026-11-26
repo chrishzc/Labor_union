@@ -51,7 +51,7 @@
 - **需求調查時薪**。市民與非市民 LIFF 在單胞胎及雙胞胎選項旁顯示 [Client Finance 計價政策](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 的服務時薪。市民以一般市民費率為參考，區分補助內及用盡後費率。非市民顯示自費費率。
 - **代購食材**。市民與非市民 LIFF 均必填，僅接受「需月嫂代購(實報實銷)」或「自行準備」，保存於 BeClass `survey_details` 的「代購食材」。後台 BeClass 可顯示及修正；歷史未填資料維持未登錄，不猜補答案。
 - **三節假日雙薪意願**。市民與非市民 LIFF 的「費用與同意條款」及後台手動非市民新案均提供選填欄位，記錄遇端午、中秋、除夕、初一或初二服務時的雙薪意願。可選「是」、「否」或未填。答案保存於需求調查，供名冊維護，業務語意依 [CRX-REGISTRATION-01](33_案件與月嫂整合名冊正式規格.md#52-client-profile-與-beclass-欄位及照護修正crx-account-01)。
-- **非市民表單服務時段**。LIFF 與後台手動新案提供相同的服務方式、生產方式及居住型態選項。每日服務時段提供 08:30–12:30（4 小時）、08:30–16:30（8 小時）、09:00–17:00（8 小時）、13:00–17:00（4 小時）。LIFF 表單及 Preview／Apply 僅接受這四個時段。後台手動新案及原案資料帶入可調整每日開始與結束時間，同日起訖時間差須大於或等於所選的 4 或 8 小時；多出的時間可供客戶與月嫂協調休息，不自動增加每日服務時數或扣除固定午休。服務時數與起訖時間分別保存，例如 08:00–17:00 選 8 小時時，每日服務時數仍為 8 小時。前端與手動建案 API 使用相同驗證。LIFF 依預計服務開始日、天數及休假規則推算結束日。退款帳號正規化後須有數字。
+- **非市民表單服務時段**。LIFF 與後台手動新案提供相同的生產方式及居住型態選項；服務方式方面，非市民 LIFF 僅提供「週休 1 日」與「週休 2 日」（不顯示「連續服務」），後台手動新案仍維持支援「連續服務」、「週休 1 日」與「週休 2 日」。每日服務時段提供 08:30–12:30（4 小時）、08:30–16:30（8 小時）、09:00–17:00（8 小時）、13:00–17:00（4 小時）。LIFF 表單及 Preview／Apply 僅接受這四個時段。後台手動新案及原案資料帶入可調整每日開始與結束時間，同日起訖時間差須大於或等於所選的 4 或 8 小時；多出的時間可供客戶與月嫂協調休息，不自動增加每日服務時數或扣除固定午休。服務時數與起訖時間分別保存，例如 08:00–17:00 選 8 小時時，每日服務時數仍為 8 小時。前端與手動建案 API 使用相同驗證。LIFF 依預計服務開始日、天數及休假規則推算結束日。退款帳號正規化後須有數字。
 - **年度流水配號與後續對齊（`NC-NUMBER-01～02`、`NC-FLOW-01`、`NC-PAYMENT-01`）**：案號採 `A＋民國年度＋3碼流水號`，依正式建案日的臺灣時間年度自 `001` 起算。虛擬帳號依 [Client Finance 帳號規則](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 解析。LINE 申請在核准時正式配號。手動新案先唯讀顯示預估案號與帳號，送出時與 LINE 核准共用年度流水號，在同一建案交易內鎖定取號並跳過已使用的案號或帳號，成功後顯示實際配號。可表示的流水號用完時回報衝突。正式建案後的統計、推薦媒合、契約簽署、5 天訂金與分期計價及排班結算沿用既有 owner 流程（見 [營運報表與統計口徑 §5](34_營運報表與統計口徑正式規格.md#noncitizen-statistics-20261029)、[Client Finance §2.3](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 與 [Contract Signing](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)）。
 
 ### 3.1.1 原案資料帶入與獨立操作（`NC-MANUAL-01～04`、`NC-SEPARATE-01`）
@@ -87,7 +87,7 @@
   - 明確拒絕立終態並立即清除問卷原文（僅留申請號、拒絕時間與操作人供授權回讀）；拒絕或到期後可重新提出新申請（原號重送僅回原終態）。
 - **`REG-REDIS-06～08`（兩儲存故障恢復、維護與 AOF 實體整理）**：
   - 核准中斷後先分清 MySQL 是否已提交。若未提交，恢復作業讀取處理中索引，以原操作識別續走冪等 MySQL writer；若已提交但 Redis 未清除，沿用同一申請／操作的 MySQL 回執；有存摺封面時先補做或確認受控歸檔已完成，再完成 Redis 終態與清除，不重新配號或重建 Client、BeClass 或 Orders。
-  - 內部維運排程除設定原生 AOF rewrite 外，每小時偵測自上次整理後如有問卷清除則執行一次 `BGREWRITEAOF`，實體抹除舊 AOF 內容（禁止腳本手動刪 AOF）；獨立容器拓樸統一編排於根目錄 `docker-compose.yml`（`registration` profile，搭配 `REGISTRATION_REDIS_ADMIN_PASSWORD_FILE` 與 `REGISTRATION_REDIS_INTAKE_PASSWORD_FILE`，`registration-intake` 僅綁定 `127.0.0.1`、保持 `internal` 容器網路且不掛 `.env` 或 MySQL 憑證），首次全新空實例以 `scripts.registration_maintenance --initialize-new-instance --once` 初始化並於一般啟動／還原核對既有 SQL 最大編號。
+  - 內部維運排程除設定原生 AOF rewrite 外，每小時偵測自上次整理後如有問卷清除則執行一次 `BGREWRITEAOF`，實體抹除舊 AOF 內容（禁止腳本手動刪 AOF）；獨立容器拓樸統一編排於根目錄 `docker-compose.yml`（`registration` profile，搭配 `REGISTRATION_REDIS_ADMIN_PASSWORD_FILE` 與 `REGISTRATION_REDIS_INTAKE_PASSWORD_FILE`，`registration-intake` 保持 `internal` 容器網路且不掛 `.env` 或 MySQL 憑證，由無憑證唯讀 `registration-loopback` 僅綁定 `127.0.0.1` loopback 轉送進入 `registration-ingress`），首次全新空實例以 `scripts.registration_maintenance --initialize-new-instance --once` 初始化並於一般啟動／還原核對既有 SQL 最大編號。
 
 ## 4. HCM 進件規範、欄位警示與 `BECLASS-001／IMPORT-003`
 
