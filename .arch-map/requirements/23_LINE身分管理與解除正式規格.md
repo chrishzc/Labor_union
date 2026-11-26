@@ -42,6 +42,9 @@ bound
 5. 客戶於 `/line-bind` 核對姓名與電話後，未綁定者完成綁定，已綁定同一帳號者顯示「您已完成綁定，可直接返回 LINE 使用」。若需更換 LINE 帳號，系統拒絕直接改綁並顯示「拒絕重新綁定，請聯絡工會人員確認身分解除舊綁定。在用新帳號綁定」。原綁定保留，不新增審核申請。工會人員確認身分並完成解除舊綁定後，客戶用新 LINE 帳號走原綁定流程。月嫂選單與對話指令統一使用「月嫂認證／月嫂身分綁定」及「我是月嫂」（加入好友歡迎訊息改由 LINE 官方帳號設定，系統不另發送）。
 6. 工會人員用新 LINE 帳號發起工會帳號改綁，通過原有一次性 LINE 流程及工會帳號密碼驗證後，由同一交易停用原 LINE 的工會身分並綁定新 LINE，保存綁定事件及結果。操作不建立人工審核申請。驗證失敗、原綁定已變更或新 LINE 已有互斥身分時，原綁定保留，回傳對應的錯誤。
 
+- **依角色查證**。同一 LINE 帳號可同時有客戶、月嫂身分。查整體結果時沒有單一角色狀態，不能據此判定未綁定；查某一身分時，使用該角色的綁定結果及版本，不以另一角色或名冊的 LINE ID 替代。
+- **正反驗收**。同一合成帳號先有客戶、月嫂兩個有效綁定。經辦只發起月嫂解除，再查兩個角色：月嫂顯示解除中且已不具該角色權限，客戶仍可用。選單回復確認並完成解除後，月嫂才是已解除。整體查不到單一狀態，不可把客戶或月嫂一起判為未綁定；不得以重送建立第二次解除作業。
+
 ### 4.2 目前選定角色與聊天室切換
 
 1. 目前選定角色由 LINE Identity 擁有，每個 LINE User ID 至多有一個 nullable `customer | staff` 狀態；它不是一般 session 或多裝置設定。
@@ -67,7 +70,7 @@ bound
 2. **worker 與 retry**：以解除 request ID claim，向目前設定的 LINE 帳號確認已設定 Messaging API 預設選單，再解除該使用者的個人圖文選單，讓 LINE 顯示帳號現行預設。背景服務回讀個人選單，確認已無個人選單才完成回復。timeout／429／5xx 沿既有重試機制處理。手動重試保留最新 canonical `default_menu` 發布參照，實際回復以 LINE 當前預設為準。
 3. **完成與 crash replay**：provider 確認回復後鎖 request、binding 與 owner projection，清除 owner User ID、轉 `revoked` 並完成 request。未完成的 request 可重試解除個人選單；已完成的 request 只確認待辦完成。
 4. **人工緊急覆寫**：限 `line.identity.binding.override` 於後端在 nonretryable／重試耗盡後填寫原因並留存 audit，不在一般管理 UI 呈現；只撤銷系統授權，後續重新發布可用 `default_menu` 時仍可再排入選單修復。
-5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。個人同步、結案回復與解除優先使用已發布的 canonical 設定版本，由設定版本及發布 ID 依序降冪選取。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md) 四格名稱維護；已由人工修改之 divergent revision 不得自動覆蓋。
+5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。個人同步、結案回復與解除優先使用已發布的 canonical 設定版本，由設定版本及發布 ID 依序降冪選取。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單的按鈕與操作依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md#5-四大角色圖文選單rich-menu-audiences) 維護；已由人工修改之 divergent revision 不得自動覆蓋。
 
 ### 6.1 個人圖文選單同步
 

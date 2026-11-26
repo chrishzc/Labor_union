@@ -15,15 +15,25 @@
 - `infrastructure/mysql/staff_payout_repository.py` — 選定正式應付後，即使預計付款日或補助流向尚未形成（`due_date IS NULL` 且無不可解分期歧義），同案同月嫂之已發生出款仍可經既有 `MySqlStaffPayoutRepository` Preview／Apply 核銷；`_verify_sinopac_payout_targets` 與 `_verify_taishin_memo_recipients` 驗證備註案件與授權月嫂身分，`staff_installment_funding_unconfirmed` 僅於需要補助／自費分期才能決定本次可核金額時阻擋。`AccountsPayable` 清冊／匯出仍維持付款日、路由與收款帳戶防線，不因已建帳或已完成既有出款核銷而開放匯款或自動結案。永豐以完整帳號或受保護之同案備註核對而不將交易參考編號充作月嫂收款帳戶；台新以原始備註姓名唯一確認月嫂。
 - `query_staff_funding_portions` 共用原正式分期與按銀行核銷連結的 typed 自備款／補助款餘額；自動配對與正式 Preview／Apply 均按出款銀行限額（包含部分／超付模式），同月不合併跨來源，未知分配不推定。原案件 Query 投影各來源待付與整筆出款手續費，沒有新金融 writer 或 schema。
 - 原 payout Preview／Apply 的 `confirm_subsidy_split` 明確承接單案單筆永豐自備款。Preview 只讀既有案件補助金額 Query；Apply 先鎖案件、客戶／Payroll account、補助來源及原月嫂事實，在原 Staff Payables outer UoW 內借用方案事件 writer、Payroll 缺席分期 writer及原付款 writer。型別 `StaffSubsidySplit` 隨原 preview fingerprint 驗證金額、方案版本、日期及分配；同鍵重播沿原收據。既有方案不同、來源缺失或矛盾拒絕，不改一般獨立方案儲存語意。`api/routes/staff_payout.py`／`api/dependencies/durable_job_handlers.py` 沿原 durable command 轉送旗標，不新增 job 或外部派送。
-- 規格22 §19人工補登另以Finance Import命令收據綁定的同案exact obligations確認月嫂，投影manual_confirmed_staff_id；不要求交易帳號，不改一般銀行來源的帳號／備註驗證。核銷金額、fee、difference、projection、receipt及outbox仍由本owner原workflow負責。
+- 依規格 #22 §6「案件帳務手動補登與自動銷帳」，人工補登另以Finance Import命令收據綁定的同案exact obligations確認月嫂，投影manual_confirmed_staff_id；不要求交易帳號，不改一般銀行來源的帳號／備註驗證。核銷金額、fee、difference、projection、receipt及outbox仍由本owner原workflow負責。
 - Finance Import 的月嫂出款、客戶入款後備配對與客戶退款在 `infrastructure/mysql/finance_import_owning_domain_composite.py` 先以可核實的案件、對象、用途與精確義務識別收斂競爭候選（`_filter_competing_obligations`），僅於仍可能競爭之候選缺少到期日時回報 `due_date_missing`。永豐薪資及台新月嫂補助候選在宣稱可自動核銷前委派本 owner 同一 Preview，正式 Apply 仍重驗原版本、來源及分配。
 
-## Contracts
+<a id="contracts"></a>
+
+## Contracts ^staff-payout-owner-write
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: staff-payout-owner-write
+  target: .arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md#^staff-payout-reconciliation
+```
 - 台新原始備註的唯一月嫂姓名與正式案件／指派關聯，可於原 Preview 投影方案一分期，選填六碼須與該案一致。交易月份以原補助分期或 owner 預檢日期檢查；跨月只接受有效六碼唯一定位同案同月嫂的既有例外。清單人工資格由唯讀 owner 事實投影，原 Preview／Apply fresh-load 再驗月份、用途、對象、案件及款項，不能依 UI 隱藏按鈕保護。Apply 沿原 outer UoW 鎖來源、確認銀行方案及原 Payroll 分期，再核銷原月嫂義務。一般／歷史訂單同用資格，無方案或分期不直接視為無款；未達資格明示阻擋，方案不得使月嫂總應收增加。既有永豐自備款及正式人工補登來源限制保留。
 - `POST /api/v1/staff-payables/payout/preview`、`payout/apply`（差額沿 `payout-difference/preview`、`payout-difference/apply`）與 `GET /api/v1/jobs/{job_id}` 為原付款核對路徑；精確銀行來源 `finance_import_row_ids` 與所選 `obligation_identities` 隨預檢及命令傳遞，正式成功回執後重查來源與款項。入口顯示契約見 [WF-04](../../../../../requirements/22B_帳務差額處置與工作台UI正式規格.md#bank-subsidy-review-entry)。
 - 未知付款日的既有核對仍依 [支出配對契約](../../../../../requirements/22_銀行流水匯入與帳務異常處理正式規格.md#44-對帳單支出四階段配對與-0100-元手續費核銷)。單筆入口的人工跨月旗標只在已知補助日期時成立，不代替原 owner 的資格，也不把付款日、路由或額外完工條件加回核銷前置。
 - `.arch-map/requirements/05_Staff_Payables_Export_Domain.md` §2–3。
 - `.arch-map/requirements/16_Staff_Payables與Client_Refund正式規格.md`。
+- #16 §2.2：非同步 Apply 的 `202 JobAccepted` 是受理，不是已核銷。付款事件、義務連結和成功收據在原 owner 的同一交易提交；以背景工作成功收據加正式根資料回讀為核銷證據。不等於所有款都結清，清償狀態以各選定義務回讀為準。
+- 若送出後結果不明，先用原 `job_id` 查 `GET /api/v1/jobs/{job_id}`。`queued`／`running` 仍在處理；`failed` 讀取該工作的正式失敗結果；`succeeded` 再讀回同一月嫂、原選定義務的狀態與餘額。少付的核銷可以成功，但讀回有剩餘就仍待付，不顯示結清。
 
 ## Verification
 - integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py` — 既有合成案例核對相同命令重送回傳原收據，不增加寫入。

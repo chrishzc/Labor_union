@@ -24,7 +24,7 @@
 - outbound: `scheduling/current-service-projection` — 正式 assignment 與 daily schedule 是 current service 的主要投影。
 - outbound: `orders/operational-stage-projection` — 排查案件選項依十三核心階段的正式 current ordinal 限定在第 8「訂金」之前。
 - outbound: `orders/historical-precision-restart` — 重啟使舊歷史指派區段失效。歷史未服務案的唯讀預定沿目前有效的重啟世代保留，待正式班表接手。
-- inbound: Scheduling UI — 只透過 typed monthly endpoint 讀取投影，不直接讀 persistence facts。
+- inbound: Scheduling UI — 消費 Scheduling 的兩個 typed 查詢及必要的 Orders 案件明細；不直接讀 persistence facts。
 - inbound: `orders/service-date-confirmation`、`scheduling/leave-substitution` — 共用月曆呈現，各自透過既有查詢取得檔期資料。
 
 ## Contracts
@@ -32,19 +32,35 @@
 
 - 名冊先讀完 bounded Staff summary cursor 全部頁面，再依 Staff-owned `union_no` 自然升冪排列，未設定排最後；日曆、排查與代班選單使用「公會編號 姓名」，搜尋比對公會編號，不以內部 STF 代碼代替。
 - 排班主頁的可選名單使用 `/staff/summaries?lifecycle_state=active`，初頁與後續 cursor 均保留篩選。歷史案件、completed assignment 與單人月份 Query 保持唯讀可查；全域歷史人員標籤仍從未篩選摘要解析，不刪除歷史 root。
-- `GET /api/v1/staff/{staff_id}/monthly-schedule` — `api/routes/staff_monthly_schedule.py` 與 `api/schemas/staff_monthly_schedule.py`。
+- `GET /api/v1/staff/{staff_id}/monthly-schedule` — `api/routes/staff_monthly_schedule.py` 與 `api/schemas/staff_monthly_schedule.py`。 前端由 `ui_react/src/api/scheduling/staff_monthly_schedule_client.ts` 以 strict schema 驗證月份資料；不符合契約的回應走補充支線失敗，不當成空月或正式班次。
 - 多筆逐日班次及可追溯的起訖共供工會甘特與 `line/static/staff_schedule.html`；跨日續班沿用原服務日。LINE 用同案、指派及服務日定位既有請假表單。
 - `historical_assignment` — completed legacy assignment 的唯讀 provenance projection；不宣稱 daily schedule ownership。
 - `historical_reservation` — 工會月曆以共用檔期資料呈現歷史未服務案的唯讀預定區段，涵蓋重啟後待排班期間。
 - `SchedulingPage` 對日曆、案件選項及資格投影分別最多同時查詢 3 位人員；日曆每列完成即顯示，兩個 projection 同時接收成功／失敗，避免無上限 fan-out 及未處理的 rejected Promise，不自動重送失敗列。
 
-### 年度時間軸的唯讀邊界
-- 載入由可視月份驅動，快取鍵為人員、年、月。每次只呼叫既有逐月 endpoint，沿用最多三列並行；未查、查詢中、空結果、失敗及部分失敗分開保存，失敗由使用者重試。回到仍有效月份不重查，跨年與中斷請求不得寫回其他月份。
+### 年度時間軸的唯讀邊界 ^staff-calendar-visible-month
+
+**交接定位**：Scheduling 供正式班次與補充歷史讀取，前端負責可視月份、部分失敗呈現及重試。此流程不新增 DB 寫入；資料來源與既有查詢見本節，前端驗收位置見下方 Verification。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: staff-calendar-visible-month
+  target: .arch-map/requirements/31_MultiCaregiver_Admin_UI正式規格.md#^admin-ui-staff-calendar
+```
+- 載入由可視月份驅動，快取鍵為人員、年、月；切月不寫入。每個人員月份讀取 [正式班次與占用](current-service-projection.md)（`GET /api/v1/scheduling/staff/{staff_id}/current-calendar`，`range_start`／`range_end` 含首末日）及補充檔期與歷史（`GET /api/v1/staff/{staff_id}/monthly-schedule`，`year`／`month`），沿用最多三列並行。合法空月仍依正式契約回傳完整日期範圍，不以缺頁／失敗代替空月。
+- 補充資料只有歷史指派或歷史保留含非空案號時，才按案號去重，查 `GET /api/v1/orders/{case_no}` 取得唯讀整案日期。歷史指派依各端實際日期優先，缺值才用同端預定日期；歷史保留用預定日期。起訖缺失或逆序時，只不顯示整案期間，月內資料仍可保留；讀取或解碼失敗才是可重試的補充支線錯誤。
+- 兩支線均有結果（成功或失敗）後提交當月列，區分未查、載入、完整空結果、失敗與部分失敗。預設「全部」可保留成功支線的資料；歷史不能替代正式狀態來通過其他篩選。重試同人員同月份的失敗支線，補充月資料與其適用的 Orders 明細可能一併重讀；已成功且仍有效的正式支線不要求重讀。回到仍有效月份不重查，跨年與中斷請求不得寫回其他月份。
 - 合併逐筆比較來源類型、指派／鎖／不可服務識別、服務日及時段。同來源同班去重，不同案件及唯讀歷史可同日並列。跨午夜的續班不增加正式服務事實。歷史整案起訖與重啟抑制仍由原查詢與 Orders 日期投影負責，不形成出勤或計薪來源。
 - 成功異動依既有通知失效受影響人員的已快取月份；只有人員識別而沒有日期的通知，以該人員所有已快取月份為保守失效範圍，不清其他人。返回畫面的重新查詢讀回有效來源；取消及成立後未服務的 Orders 狀態在歷史指派查詢排除；其餘合格的歷史指派維持唯讀投影，不刪來源。
 - 正式日班及正式緩衝讀取須核對有效 generation 與 aggregate current pointer；取消／替換來源退出目前投影。completed 歷史指派沿既有獨立分支及重啟規則，後端逐月契約維持不變。
 
 - 點擊附有正式案號的班次改用待辦看板既有案件連結（`case`、`work=service`，不限制為後續排班）。由待辦看板查唯一案件並維持原操作權限；月曆不另開排班與訂單摘要抽屜。無案件識別的媒合排查沿用原流程。
+
+#### 可視月份與部分失敗驗收
+- **正例**：同一月嫂八月與九月各有不同正式班，八月另有歷史指派。只水平滑動，不使用月份選單，即看到對應月份的班及歷史；回到仍有效的八月不重查。兩路皆成功且確定無班，才是完整空結果。
+- **反例**：在「全部」下，八月正式成功、歷史案整案日期請求失敗。保留正式和已讀到的月內歷史，標明整案日期不可用且可重試；重試不必重讀有效的正式結果。若明細成功讀回但日期缺值，日期不可用仍成立，不能把缺值標為網路錯誤。反向讓正式查詢失敗但補充成功，仍可見歷史且不可視為完整空結果。
+
+- **取消與跳轉**：用同一月嫂的已取消舊指派、成立後未服務舊指派和仍合格的已完成歷史指派作對照。月曆不顯示前兩筆，仍可讀到第三筆。點擊帶正式案號的班次，進入同一案件的待辦看板排班頁，不開摘要抽屜。
 
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/staff-monthly-calendar/`

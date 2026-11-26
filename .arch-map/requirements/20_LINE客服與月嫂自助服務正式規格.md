@@ -179,6 +179,12 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 
 `import_fields` 依 `data_browser.read` 唯讀查詢 Case Import 目前的 HCM／BeClass 欄位問題。每案一筆，詳情聚合該案問題及其正式修正入口，只列案號、問題說明與欄位定位。客戶名冊與訂單進件欄位的正式修正入口在桌面後台，因此手機目錄排除這個來源。修正後由原 Query 重新判定，各問題都解除時移除該案事項。此來源沒有通用已讀或完成狀態，也沒有 LINE 寄送作業。
 
+<a id="line-todo-import-fields"></a>
+
+**驗收：待辦來源與 HCM／BeClass 欄位修正**
+
+本表 `LINE-TODO-04` 指 `import_fields`：由名冊／進件完成正式欄位修正，不是下方的[客戶綁定提醒誤報消除](#line-todo-binding-reminder-dismiss)。引用此案例時附上情境名稱，避免混用同號案例。
+
 | ID | S：情境與前提 | T：人員任務 | A：操作 | R：可判定結果 |
 |---|---|---|---|---|
 | LINE-TODO-01 | 有權限查看各來源且各有目前事項 | 接續原正式作業 | 逐來源開啟事項與處理入口，另以手機讀取共用來源 | 正確攜帶案號、申請、task 或 issue identity；手機目錄只有共用來源；缺件及無權限不誤執行寫入 |
@@ -192,6 +198,12 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 - 頂部通知事項顯示目前權限可讀的待辦筆數。完整讀取所有來源分頁並去重同筆事項，原通知異常已涵蓋的寄送工作不重複計數。查詢中及任一來源失敗須顯示未確認狀態，不當成零；進出通知頁、重新聚焦及處理後刷新。
 - 寄送紀錄完整內容及嘗試明細依 [六個月保存契約](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#44-寄送紀錄六個月滾動保存) 滾動整理，已清理者不列清單或總數，舊連結明示到期；待處理及結果不明工作保留，防重送與停送憑證不隨正文移除。
 - 帳務列表保留單一「查看案件」，各期提供「查看通知」。無法寄送或已繳齊仍可查閱原因與歷史；真正寄送沿 owner 的 `can_send` 判定。
+
+<a id="line-todo-binding-reminder-dismiss"></a>
+
+**驗收：提醒消除、總數與通知歷史**
+
+本表 `LINE-TODO-04` 指 `customer_binding`：只消除同案的提醒，不執行[正式欄位修正](#line-todo-import-fields)。兩個既有 ID 均保留。
 
 | ID | S | T | A | R |
 |---|---|---|---|---|
@@ -212,7 +224,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 - **入口分流與非市民 LIFF 設定契約**：
   - `/line-gateway` 的正式畫面與後台預覽依 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 呈現兩步分流。市民已登記與非市民已建案共用 `/line-bind`，各自依 §2 處理核對不到或資料不完整的結果。既有直接連結仍到原目的地。一般需求問卷使用 `/line-registration`。非市民專用合併表單固定由 `/line-non-citizen-registration`（後端於 `<body>` 注入 `data-registration-kind="non_citizen"`）開啟，管理端表單工作室則透過同源 `/api/v1/line/identity/studio-preview/gateway` 與 `/api/v1/line/identity/studio-preview/non-citizen-registration` 渲染唯讀預覽，且頁面內執行期設定查詢依當前預覽前綴解析 `/api/config/liff/runtime`。
   - 既有站台透過 `PUT /api/config/liff/pages/gateway` 直接更新導流頁版型、四個選項與對應網址。只調整需要變更的 LIFF 頁面，保留相容自訂文案、其他設定及歷史版本。後端非市民申請設定 API 維持提供 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（首次初始化）與 `PUT /api/config/liff/non-citizen` 供版本化查詢與寫入；前台 `#line-interface` 之「非市民服務申請」僅顯示唯讀互動預覽，不內嵌頁面欄位編輯表單。各項設定共用 `If-Match` 衝突控制。新站台的初始設定包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
-  - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。一般問卷（`/line-registration`）與非市民表單（`/line-non-citizen-registration`）共用之 `register.html` 固定提供必填閉鎖單選「**胎數（單胞胎／雙胞胎）**」（對應 `特殊計費:胎數` 並提示將影響服務時薪標準，不沿用「第一胎／第二胎」自由文字輸入，亦不更動既有 DB `LiffSettingsConfig` 系統欄位清單）；市民與非市民皆於銀行帳號欄位固定顯示「**請填入產婦本人銀行帳號**」備註，並新增必填「**存摺封面**」圖片上傳欄位（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼，並一併歸檔至 NAS `02_客戶存摺封面` 資料夾。非市民 LIFF 不顯示舊「寶寶資訊」多行文字輸入框與 `LINE ID`（`id="line_id"`）輸入欄（改由客戶主動加入官方帳號並保留系統 `clients.line_id` 欄位），送出時由所選胎數（`單胞胎`／`雙胞胎`）同步帶入 `baby_info`，且執行期套用設定安全略過缺席之 DOM 節點。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
+  - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。一般問卷（`/line-registration`）與非市民表單（`/line-non-citizen-registration`）共用之 `register.html` 固定提供必填閉鎖單選「**胎數（單胞胎／雙胞胎）**」（對應 `特殊計費:胎數` 並提示將影響服務時薪標準，不沿用「第一胎／第二胎」自由文字輸入，亦不更動既有 DB `LiffSettingsConfig` 系統欄位清單）；市民與非市民皆於銀行帳號欄位固定顯示「**請填入產婦本人銀行帳號**」備註，並新增必填「**存摺封面**」圖片上傳欄位（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼，並一併歸檔至 Windows 主機受控根目錄下的存摺封面專區（實體路徑見[受控檔案正式規格](30_Controlled_File_Storage_NAS正式規格.md) §8.2）。非市民 LIFF 不顯示舊「寶寶資訊」多行文字輸入框與 `LINE ID`（`id="line_id"`）輸入欄（改由客戶主動加入官方帳號並保留系統 `clients.line_id` 欄位），送出時由所選胎數（`單胞胎`／`雙胞胎`）同步帶入 `baby_info`，且執行期套用設定安全略過缺席之 DOM 節點。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
 
 ### 5.3 客戶資料與訂單異動流程
 

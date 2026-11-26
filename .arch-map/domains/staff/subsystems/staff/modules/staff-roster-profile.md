@@ -5,7 +5,7 @@
 - subsystem: `staff`
 
 ## Responsibility
-提供選定單一月嫂的 bounded、authenticated 個人、聯絡與銀行帳戶投影及 owner-routed mutation；管理 UI 可讀完整身分證與緊急聯絡電話，但銀行帳號固定只讀末四碼，且不輸出 IP、LINE User ID 或 raw source。Staff Profile 與 Staff Bank Account 各自維持 version、Preview／Apply、稽核與 readback。
+提供選定單一月嫂的 bounded、authenticated 個人、聯絡與銀行帳戶投影及 owner-routed mutation；管理 UI 可讀完整身分證與緊急聯絡電話；月嫂銀行帳號在有完整值時顯示 `account_no`，沒有才回退 `account_last4`。不輸出 IP、LINE User ID 或 raw source。Staff Profile 與 Staff Bank Account 各自維持 version、Preview／Apply、稽核與 readback。
 
 Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。月嫂在原「我的資料」申請一併送件，管理員依目前版本裁切、退回或手動發布。客戶只看推薦授權範圍內的姓名與發布圖片，依照片、證照、其他、客戶反饋順序顯示有圖片的橫列。客戶反饋各項可有多張圖片，無須填寫到期日，也不發送到期提醒。
 
@@ -38,6 +38,8 @@ Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。�
   - `ui_react/src/api/staff/staff_web_profile_client.ts` — 模板、照片審核、資料夾 metadata、代傳發布與授權圖片的型別化傳輸。
   - `ui_react/src/components/StaffWebFileManagement.tsx`、`ui_react/src/components/StaffWebFileManagement.css` — 個人抽屜的「履歷網頁與照片」分組、資料夾、代傳與刪除確認。
   - `db/schema_parts/1085_staff_web_file_management.sql` — 目前內容關聯的移除時間與操作者。升級僅新增欄位，保留發布版本與受控檔案。
+  - `db/schema_parts/1086_staff_web_feedback.sql` — 只在 `staff_web_template_items.category` 加入 `feedback`，保留既有類別與業務資料；不新增資料表，也不改圖片或到期欄位。
+  - `db/schema_assembly/labor_union_fresh_schema_v1.json` — 新建資料庫納入 1086。既有資料庫保留資料升級走 `db/migration_releases/labor_union_2026_11_24_staff_web_feedback_v1.json`；升級後先核對 ENUM 精確值及既有業務資料是否保留。這項檢查不代表客戶頁面已驗收。
   - `ui_react/src/components/StaffWebProfileManagement.tsx`、`ui_react/src/components/StaffWebPhotoReview.tsx`、`ui_react/src/components/StaffWebProfilePreview.tsx` — 名冊「履歷網頁」、待審裁切及已發布預覽。
   - `infrastructure/mysql/staff_profile_mutation_repository.py`
   - `domains/staff/bank_account.py`
@@ -74,9 +76,9 @@ Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。�
 - 名冊主頁預設「現役月嫂」，以「已退役月嫂」分頁分開呈現；`/roster` optional `lifecycle_state=active|retired` 在 cursor／limit 前依 Staff-owned lifecycle 篩選，省略維持原查詢，不增加回應欄位或逐人查詢。退役／復職的正式 readback 同步移除原分頁清單列；搜尋與排序沿用目前分頁。
 - `/summaries` 同樣支援 optional `lifecycle_state=active|retired`，供排班及代班的新選項使用 active；省略仍保留全部人員，`StaffIdentityProvider` 不套用篩選，以保留歷史案件的退役人員名稱與公會編號。
 - 既有 PDF 履歷沿受控檔案保存、版本管理與管理者下載。客戶確認使用個人網頁連結。姓名取自 Staff Profile，照片取自 Staff 個人網頁的目前發布版本。到期提醒由 LINE durable delivery 投遞。
-- 規格 33 §3.2：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
+- [規格 33 §4.2](../../../../../requirements/33_案件與月嫂整合名冊正式規格.md#42-月嫂名冊與公會編號)：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
 - `.arch-map/requirements/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
-- `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md`
+- [規格 33 §6「月嫂銀行帳戶顯示契約」](../../../../../requirements/33_案件與月嫂整合名冊正式規格.md#6-月嫂銀行帳戶顯示契約)：授權 Profile 與名冊 Reader 讀取兩個欄位，名冊優先顯示完整帳號。此讀取權責不擴及事件、回執、日誌、錯誤、匯出或歷史出款快照。
 - `.arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md`
 - Profile、Bank Account 與資格修改皆為一次點擊儲存；`reason` 為選填備註，省略預設空字串。內部仍使用既有 Preview／Apply，保留 actor／before／after／receipt／idempotency，無人工預覽或核對勾選門檻（Global §2.4）。
 
@@ -98,7 +100,37 @@ flowchart LR
   F --> I[版本化發布內容及正式回讀]
 ```
 
+## 客戶反饋照片：交接定位
+
+這三個入口分屬畫面、服務與資料。以規格 #35 為行為依據；下列實作位置供查核，不代表已跑驗收。
+
+### 前端：發布前後的畫面 ^staff-feedback-ui
+- **負責／正式約定**：客戶端與名冊前端；規格的「客戶個人網頁」定義只顯示已發布圖片、空類別隱藏與同列橫滑。送審或發布結果未確認，不顯示新照片。
+- **接線／去哪驗**：客戶頁 `line/static/staff_web_profile.html`、`line/static/staff_web_profile.js`；以 #35 §4 的客戶頁與發布案例為驗收來源。
+
+### API：本人送審、管理員發布與客戶讀取 ^staff-feedback-api
+- **負責／正式約定**：Staff；本人沿 `POST /api/v1/line/staff-self-service/profile-change/submit` 送審，管理員以 `POST /api/v1/admin/staff-profile-change-requests/{application_id}/decision` 審核。客戶經授權讀取 `POST /api/v1/line/staff-web-profiles/{staff_id}/query`。本人送審的審核入口與辦公室代傳的 `/{staff_id}/publications` 不混用。
+- **暫存來源不可用**：本人查詢異動表單時，專用 Redis 設定缺漏或暫存讀寫不可用回 503 `staff_profile_change_unavailable`（可重試），不能顯示空表單、申請已送出或當作已發布。現有 `test_staff_profile_change_intake.py::test_query_form_translates_missing_redis_configuration_to_typed_503` 以替身驗查詢的錯誤契約，不等同真實 Redis 或 LINE 驗收。
+- **去哪驗**：現行路由 `api/routes/staff_profile_change.py` 與 `api/routes/staff_web_profile.py`；規格 #35 §3.2–3.3 及 §4，測試定位見下方 Verification。受理不等於已發布，不能以回應成功代替正式讀回。
+
+### DB：類別與保留資料升級 ^staff-feedback-db
+- **負責／正式約定**：Staff 持久層與 DB；共用模板的 `staff_web_template_items.category` 由既有 ENUM 納入 `feedback`，不新增資料表或重建照片／到期欄位。這是資料契約，不是新的業務規則。
+- **去哪驗**：沿 Implementation 所列 1086 與新建／保留資料兩份清單；分開核對類別值和既有資料保留，不以資料驗證代替客戶頁驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: staff-feedback-ui
+  target: .arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md#^staff-web-03
+- kind: implements_requirement
+  source: staff-feedback-api
+  target: .arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md#^staff-web-review-publish
+- kind: implements_requirement
+  source: staff-feedback-db
+  target: .arch-map/requirements/35_月嫂個人網頁與照片審核發布正式規格.md#^staff-web-01
+```
+
 ## Verification
+- 1086 資格證據：`validation/receipts/PROV-STAFF-WEB-FEEDBACK-local-additive-qualification-20261125.json`（`QUAL-1086-20261125`）。紀錄涵蓋新建與保留資料候選；不代表現用資料庫已升級或客戶頁通過。
 - layout_status: `custom_current`
 - test_root: `tests/domains/staff/subsystems/staff/modules/staff-roster-profile/`
 - test_root: `ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roster-profile/`

@@ -12,6 +12,9 @@
 既有 Terms input 的 `floor_fee_correction=true` 僅允許更正已完成服務的樓層費，沿原 Terms 事件與收據。需同步 Payroll 的更正沿用既有 rate-correction candidate，連續更正以 Orders version 區分。
 編排 Orders Terms 的 Query／zero-write Preview／fresh-lock Apply。Preview 衍生 `requires_formal_apply`：不形成 Scheduling、confirmed dates、Finance、Payroll 或 lifecycle 正式影響的普通保存只更新 Orders aggregate，不建立 command claim、事件或永久 receipt；有正式影響時才以單一 outer Unit of Work 套用跨 owner 影響並產生可追溯 receipt。Terms caller 另比對 current effective assignments 與 candidate 的 identity／人員／日期／區間形狀；形狀未變時不呼叫 Scheduling replacement writer，沿用 current generation 與真實 assignment identity，Terms receipt 的 Scheduling receipt linkage 為 nullable。尚未建立 assignment 時，起始日平移不虛構排班 segment，並以相同天數平移預計結束日；已有 current confirmed service dates 時保留日期間隔、建立新的 immutable current version 取代舊版。
 
+- 尚無正式影響的普通保存仍須鎖定案件並重驗適用版本、Preview 指紋與 Apply 模式；成功只更新 Orders。若重新預覽已產生正式影響，不可沿用普通保存，應要求重新預覽與提交。
+- 已有正式影響時，即使指派形狀不變，仍由正式 Apply 在同一交易保存各 owner 的變更與 Terms 收據；此時沿用原指派，沒有 Scheduling replacement 收據。相同已完成命令回傳原正式收據，不再寫入。
+
 尚未建立 assignment 且沒有既有下游義務時，與付款計算無關的修改只讀 Orders／Scheduling 與下游完整性的最小存在 facts；Finance／Payroll version 與 impact 明確為 nullable。預計開始日、服務天數、每日時數或樓層費異動且已有 Finance root 時，額外讀取 Finance 付款計算 facts，由 owner 重算階段並在日期有變化時同步條款與 immutable event，依完整資料同步全部期款，不新增未指派的 Payroll 依賴。已有 assignment 時仍使用完整下游 facts 與版本控制。
 
 客戶名冊使用獨立的 typed `OrderTermsRegistryFacts` 唯讀 projection，只讀 Orders 條件與 Scheduling／Finance／Payroll 版本；不以 Preview 的逐日排班或義務完整性限制查閱。缺少必要 Orders 欄位仍回 not-ready，服務資料鎖只限制編輯；Preview／Apply 的完整性與版本檢查保持原規則。

@@ -1,7 +1,7 @@
 # Module: case-preference-manual
 
 ## Responsibility
-Staff owner Query／Preview／Apply for the six canonical service-capability relations: regions, time slots, cooking skills, holiday availability, weekly rest, and baby types. Transportation remains the existing read-only source_not_ready fact.
+Staff owner Query／Preview／Apply for the six canonical service-capability relations: regions, time slots, cooking skills, holiday availability, weekly rest, and baby types. 此 manual 入口不寫交通方式；既有交通選項由 [Staff Qualification](staff-qualification-master.md#contracts) 編輯。`source_not_ready` 只適用交通補充說明，不影響已保存選項的唯讀摘要。
 
 ## Implementation
 - primary:
@@ -16,6 +16,13 @@ Staff owner Query／Preview／Apply for the six canonical service-capability rel
   - `ui_react/src/api/staff_case_preferences/staff_case_preferences_client.ts`
   - `ui_react/src/api/staff_case_preferences/staff_case_preferences_schemas.ts`
   - `ui_react/src/pages/StaffPage.tsx`
+
+<a id="read-write-boundary"></a>
+
+## Read／write boundary
+
+- [需求書 #24A §5](../../../../../requirements/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md#staff-preference-read-boundary)：名冊唯讀摘要使用 `/api/v1/staff/{staff_id}/case-preference-summary`，不把六個摘要母題送往 manual Apply；交通來源未就緒不是未填，也不借用料理備註。
+- `/api/v1/staff/case-preference-manual` 由 Staff owner 管理既有關聯的操作與重驗。唯讀摘要契約不能代替 stale Apply 的前端驗證；下方 `staff_preferences_flow.test.tsx` 也不驗證摘要敏感欄位全部被排除。
 
 ## Invariants
 - Query is read-only and returns a six-relation snapshot fingerprint.

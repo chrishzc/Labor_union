@@ -72,6 +72,8 @@
 
 管理端既有儲存、套用、匯入、帳務處理、案件／排班／人員狀態異動、LINE 設定與發布及營運清理，一律由人員填妥必要業務輸入後一次點擊送出。管理端不設作為防操作失誤用途的獨立預覽步驟、已核對勾選或純確認對話框，不因未按預覽或未勾選而阻擋送出（不擴張公開 LINE／LIFF 使用者端行為）。
 
+本節移除的是額外的防誤觸確認，不是 owner 的驗證。若正式領域契約已明定須由人員核對特定預覽結果後才能入帳或提交，依該契約及 [§2.3 PreviewFingerprint 適用範圍](#23-concurrencyfingerprint-簡化原則)；例如[結束服務後確認永豐入款](04_Client_Finance_Domain.md#^sinopac-late-receipt-refund)。不得用此例外替其他操作新增確認。
+
 - 人工自由文字原因／備註均為選填；未提供或留空保存空字串，不代填虛構理由。人事異動的既有原因分類可不選，填寫時仍須屬合法分類。系統產生的機器錯誤碼、拒絕分類、來源可用性與必要業務 evidence 保持各 owner 語意。
 - 同一次點擊可以先呼叫既有零寫入檢查／試算，再將同一 intent 與回傳的 typed candidate 交給正式 Apply；不把中間結果變成下一道人員確認。人員只點擊一次送出，不等於略過後端檢查：必要業務證據仍由原 owner 驗證。既有傳輸 fingerprint 僅沿用既有命令一致性檢查，不新增第二層 token、retry 或 fallback。
 - 保留欄位型別／合法值、業務 blocker、actor／authorization、owner version／必要 snapshot、fresh-read／lock、冪等命令識別、receipt 與正式 readback。資料競爭仍回 typed conflict；結果未明仍查回或重送同一原命令，不重新產生另一筆 mutation。
