@@ -92,7 +92,7 @@
 
 ## Verification
 - 直接歸檔接線對照：`test_contract_external_signing_api.py::test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_session` 核對 multipart 到既有歸檔入口，不要求先產生未簽版本或 session。
-- 歸檔應用層正反例：`test_final_document_workflow.py::test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files` 同時覆蓋只有客戶檔與另有月嫂分段、缺任何應傳檔拒絕、成功回讀、同鍵重送及不同內容衝突。`test_archive_storage_failure_rolls_back_without_recording_completion` 使用假交易與單份客戶 PDF，在第一次 `apply_borrowed` 就失敗，核對不保存回執、不標完約。此案例未驗證第一份已寫入交易、第二份才失敗時，正式檔案紀錄、Orders 完約狀態與歸檔回執是否一起回滾；檔案的暫存早於交易，不在這項回滾證據的範圍內。這些隔離案例也不驗通知或待辦看板推進。
+- 歸檔應用層正反例：`test_final_document_workflow.py::test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files` 同時覆蓋只有客戶檔與另有月嫂分段、缺任何應傳檔拒絕、成功回讀、同鍵重送及不同內容衝突。`test_archive_storage_failure_rolls_back_without_recording_completion` 使用假交易與單份客戶 PDF，在第一次 `apply_borrowed` 就失敗，核對不保存回執、不標完約。若要驗證正式檔案、Orders 完約及歸檔回執一起回滾，需在三類紀錄均已寫入同一交易、尚未提交時令交易失敗，再用新連線確認三者皆未留下，並以同一組輸入的成功案例對照。若在第二份檔案寫入時就失敗，只能驗證第一份正式檔案紀錄回滾，以及尚未執行的完約與歸檔回執沒有寫入。檔案暫存早於正式交易，不要求跟著回滾。這些隔離案例也不驗通知或待辦看板推進。
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/`
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx` — L546–550 的既有介面測試斷言：後端未提供本機測試能力時，不顯示測試跳過操作。此案例不驗證後端授權或正式環境拒絕。
