@@ -41,7 +41,8 @@ describe('LINE Rich Menu query 接線', () => {
     expect(resolveRichMenuUri('?target=staff_verification')).toBe('/line-identity?target=staff_verification');
     expect(resolveRichMenuUri('?target=order_tracking')).toBe('/line-mobile-admin?target=order_tracking');
     expect(resolveRichMenuUri('?target=dashboard')).toBe('/line-mobile-admin?target=dashboard');
-    expect(resolveRichMenuUri('?target=faq')).toBe('/line-service-help?tab=faq');
+    // Older published menu links now reach the retired-page guidance.
+    expect(resolveRichMenuUri('?target=faq')).toBe('/line-identity?target=faq');
     expect(resolveRichMenuUri('?target=ai_assistant')).toBe('/line-identity?target=ai_assistant');
     expect(resolveRichMenuUri('?target=unknown')).toBe('/line-identity?target=unknown');
   });
