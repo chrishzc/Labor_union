@@ -6,6 +6,15 @@
 - LINE 擁有分類卡片的版面與正式選單投影；[Knowledge Retrieval](../../../../knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog.md) 擁有題目、答案、別名與正式版本。共用分類以穩定 ID 銜接；在版面中只存卡片設定及題目引用，不複製題目、答案或網頁清單。分類是可由後台增加的資料，不為每個分類建表。
 - 本頁是目標設計，不表示已接線或驗收。現況入口：`ui_react/src/pages/line_management/AiCustomerServiceStudioPage.tsx`、`CommonQaCatalogPanel.tsx`、`subsystems/line/service_help_application.py`，網頁 FAQ 經 `api/routes/line_service_help.py`。
 
+## 四角色接手入口
+
+| 角色 | 直接讀取 | 本角色輸出與不必再猜的事 |
+|---|---|---|
+| PM | [#29 §4.1](../../../../../requirements/29_LINE服務說明、客服互動與選單角色正式規格.md#41-共用問答與聊天室版面) | 定義草稿、正式、停用和頁面結果，提供 STAR。分類要能增加是需求；存放方式和 API 命名不是 PM 決策。 |
+| 前端 | 下列三欄設計、[API 契約](faq-chat-contract.md) | 沿用 AI 客服工作室、既有 React 控制元件及 `applicationFetch`；照契約顯示資料及失敗原因，不從題目文字、index 狀態或 HTTP 成功自行推定發布。 |
+| 後端 | [API／舊入口／失敗回讀契約](faq-chat-contract.md)，以及 [Knowledge 資料界線](../../../../knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog.md) | 提供共用 FAQ read port、LINE 投影、版面命令；同一 renderer 產生可供預覽的呈現資料與正式 payload，不由前端生成 LINE 規則。 |
+| DB | [正式題庫讀寫與回填](../../../../knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog.md)、[版面儲存及升級](faq-chat-contract.md#db-交接與切換) | 沿用現有 owner 資料表，交付 type、唯一性、交易及讀回；不負責判定 UX 或業務可見性。 |
+
 ## 前端設計
 
 | 區域 | 內容與操作 |
@@ -13,6 +22,10 @@
 | 左：分類卡片 | 顯示分類名稱、題數或草稿狀態；「＋ 新增分類」展開名稱表單。建立後切到新卡片並聚焦標題。 |
 | 中：編輯 | 卡片標題、說明、最多四個選題槽、短文字、移動／移除與底部快捷入口；「儲存版面草稿」「發布聊天室版面」分開。 |
 | 右：手機預覽 | 可點的分類選單、卡片、答案；草稿／已發布切換。無正式版的分類在已發布選單不可見，從編輯器切換查看時明示尚未發布。 |
+
+**畫面狀態及接線。** 載入中顯示骨架並禁用寫入；載入失敗保留重試，不顯示成零分類；只有成功回傳零筆才顯示空態與「新增分類」。新增後聚焦標題；題庫選題只列可發布引用，已在同一卡片的題目不可重複加入。已失效引用在草稿顯示「題目已停用」與移除動作，已發布預覽不列該按鈕。預覽一律透過契約的 Preview 操作取得畫面資料；切「已發布」時不送編輯表單，沒有正式版時顯示未發布提示。保留「草稿／已發布」分頁；有未儲存編輯時，切離先確認，不自動覆寫。儲存成功回讀草稿，發布成功回讀相同正式 revision；若提交逾時，用同一操作鍵查回執，再決定是否重送，不產生第二次發布。
+
+**入口與窄版。** 在 AI 客服工作室沿現有分頁導航加「LINE 聊天室版面」；桌面左／中／右，窄版按分類、編輯、手機預覽順序堆疊，主要操作保留可見標籤。題庫端把既有分類自由文字換成可搜尋單選（既有分類值先顯示可辨識名稱）；不增加獨立網頁後台。手機預覽要能用鍵盤操作，草稿狀態不可只靠顏色。
 
 空名／同名就地提示；儲存與發布失敗不顯示成功，保留表單可重試。發布前提示影響哪一個通路。正式預覽與聊天室共用版面投影規則；預覽不呼叫 LINE 寄送。沿用固定卡片，不做自由畫布。
 
