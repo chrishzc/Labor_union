@@ -69,7 +69,7 @@ _RESUME_AI_ALIASES = {
 _REPLY_ONLY_SUFFIXES = frozenset({
     "menu", "order-update-menu", "registration", "clarification", "unavailable",
     "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "profile-update-form", "other",
-    "ai_assistant_menu", "knowledge", "category_faq", "faq-guidance",
+    "knowledge", "category_faq", "faq-guidance",
 })
 
 
@@ -130,8 +130,7 @@ class LineServiceHelpApplication:
             if outcome.route_key == "service_help_menu":
                 return self._handle_faq_action(inbox, unit_of_work, line_user_id, "menu", "0")
             if outcome.route_key == "ai_assistant_menu":
-                self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _ai_assistant_payload(), "ai_assistant_menu", reason_code=outcome.reason_code)
-                return True
+                return self._handle_faq_action(inbox, unit_of_work, line_user_id, "menu", "0")
             if outcome.route_key in {"order_update_menu", "order_update_request"}:
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _order_update_menu_payload(), "order-update-menu", reason_code=outcome.reason_code)
                 return True
@@ -195,7 +194,7 @@ class LineServiceHelpApplication:
             inbox,
             unit_of_work,
             line_user_id,
-            _text_payload("此功能已停用。如需協助，請直接在此聊天室留言。"),
+            _text_payload("此功能已停用。請在本聊天室輸入「常見問題」，或直接留言由工會人員協助。"),
             "retired-ai-action",
             reason_code="chat_ai_retired",
         )
@@ -425,20 +424,12 @@ def _registration_reply(registration_url):
     return f"請開啟以下服務登記頁面：\n\n{registration_url}"
 
 
-def _ai_assistant_liff_url():
-    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
-    if not liff_id or liff_id == "your_liff_id_here":
-        liff_id = "ai-assistant"
-    return f"https://liff.line.me/{liff_id}?target=ai_assistant"
-
-
 def _fixed_service_quick_actions():
     return [
         {"type": "action", "action": {"type": "message", "label": label, "text": text}}
         for label, text in (
             ("查詢進度", "查詢服務進度"),
             ("修改資料", "修改登記資料"),
-            ("詢問 AI 客服", "AI客服"),
         )
     ]
 
@@ -459,15 +450,14 @@ def _service_menu_payload(quick_reply=None):
         ("💰 費用收費與政府補助", "常見問題：收費與補助", "secondary"),
         ("🔍 如何查詢目前服務進度？", "查詢服務進度", "secondary"),
         ("✏️ 登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
-        ("🤖 找不到答案？試試 AI 智慧問答", "ai_assistant", "primary"),
     )
     return _navigation_card_payload(
         alt_text="新竹市月子工會：常見問題與服務說明",
         eyebrow="新竹市月子工會",
         title="常見問題與服務說明",
-        description="整理家長最常詢問的服務重點與其他問題，點選下方分類查看常見問題。若找不到答案，歡迎試試 AI 智慧問答！",
+        description="整理家長最常詢問的服務重點與其他問題，點選下方分類查看常見問題。",
         actions=actions,
-        hint="點選問題分類可展開常見題目；點選「問 AI 客服」可直接跳出智慧問答視窗。",
+        hint="點選問題分類可展開常見題目；找不到答案時，請直接在聊天室留言。",
         quick_reply=quick_reply or _common_category_quick_replies(),
     )
 
@@ -518,14 +508,13 @@ def _predecessor_category_payload(reader: PredecessorLineFaq, category_id: str):
         (faq_short_label(question, 18), question, "secondary")
         for question in reader.card_questions(category_id)
     ]
-    actions.append(("🤖 找不到答案？試試 AI 智慧問答", "ai_assistant", "primary"))
     return _navigation_card_payload(
         alt_text=f"新竹市月子工會：{title}",
         eyebrow="新竹市月子工會 · 常見問題",
         title=title,
         description=description,
         actions=actions,
-        hint="點選問題即可在對話中查看解答。點選「問 AI 客服」可開啟 LIFF。",
+        hint="點選問題即可在對話中查看解答。",
         quick_reply={"items": [
             *_faq_back_quick_reply(predecessor=True)["items"],
             *(item for item in _common_category_quick_replies()["items"]
@@ -554,10 +543,6 @@ def _category_card_payload(view: FaqCardView):
         payload["contents"]["body"]["contents"] = [_flex_action_button(action) for action in actions]
     else:
         payload["contents"].pop("body")
-    if view.footer_label:
-        payload["contents"]["footer"]["contents"].append(
-            _navigation_button(view.footer_label, "ai_assistant", "primary")
-        )
     return payload
 
 
@@ -565,28 +550,12 @@ def _flex_action_button(action):
     return {"type": "button", "style": "secondary", "height": "sm", "action": action}
 
 
-def _ai_assistant_payload():
-    return _navigation_card_payload(
-        alt_text="服務說明請至 AI 客服查看",
-        eyebrow="新竹市月子工會",
-        title="AI 客服智慧問答",
-        description="服務流程、收費與補助等問題，點選下方按鈕直接跳出 AI 客服視窗開始提問！",
-        actions=(("🤖 開啟 AI 智慧問答", "ai_assistant", "primary"),),
-        hint="點擊按鈕直接開啟 LIFF 智慧問答；如需人員協助，請直接在此聊天室留言。",
-        quick_reply={
-            "items": [
-                {"type": "action", "action": {"type": "message", "label": "📚 返回常見問題", "text": "常見問題"}},
-            ]
-        },
-    )
-
-
 def _qa_answer_payload(item: PublishedFaq, *, predecessor=False):
     sources = f"資料來源：{item.source_ref}\n" if item.source_ref else ""
     text = (
         f"{item.answer}\n\n"
         f"{sources}此資訊僅供說明，請以工會確認為準。\n\n"
-        "💡 若有特殊或客製化需求，歡迎開啟【AI 智慧問答】提問，或直接在此留言由專員為您服務。"
+        "如需進一步協助，請直接在此留言。"
     )
     return {
         "type": "text",
@@ -594,9 +563,6 @@ def _qa_answer_payload(item: PublishedFaq, *, predecessor=False):
         "quickReply": {
             "items": [
                 *_faq_back_quick_reply(predecessor=predecessor)["items"],
-                {"type": "action", "action": {"type": "message", "label": "🤖 詢問 AI 客服", "text": "AI客服"}},
-                {"type": "action", "action": {"type": "message", "label": "👍 有幫助", "text": "有幫助"}},
-                {"type": "action", "action": {"type": "message", "label": "👎 未解決", "text": "未解決"}},
             ]
         },
     }
@@ -654,25 +620,6 @@ def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, 
 
 
 def _navigation_button(label, action_text, style):
-    if action_text in ("ai_assistant", "其他問題"):
-        ai_url = _ai_assistant_liff_url()
-        if ai_url:
-            return {
-                "type": "button",
-                "style": style,
-                "height": "sm",
-                "action": {
-                    "type": "uri",
-                    "label": label,
-                    "uri": ai_url,
-                },
-            }
-        return {
-            "type": "button",
-            "style": style,
-            "height": "sm",
-            "action": {"type": "message", "label": label, "text": "詢問其他問題"},
-        }
     button = {
         "type": "button",
         "style": style,

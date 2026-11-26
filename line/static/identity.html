@@ -447,8 +447,8 @@ function requestedStandalonePage() {
     return `/line-deposit-payment?case_no=${encodeURIComponent(caseNo)}`;
   }
   return {
-    faq: "/line-service-help?tab=faq",
-    ai_assistant: "/line-service-help?tab=ai"
+    faq: "/line-service-help",
+    ai_assistant: "/line-service-help"
   }[target] || "";
 }
 

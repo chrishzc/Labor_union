@@ -24,7 +24,7 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         request = route.request
         method, url_path = request.method, urlsplit(request.url).path
         path = url_path.split("/api/v1", 1)[-1]
-        if not url_path.startswith("/trial/") and path.startswith(("/line/faq-layout", "/line/service-help/faq")):
+        if not url_path.startswith("/trial/") and path.startswith(("/line/faq-layout", "/line/faq-layout/published-questions")):
             unprefixed_faq_requests.append(url_path)
             return route.fulfill(status=500, json={"error": "required deployment prefix missing"})
 
@@ -36,7 +36,7 @@ def test_faq_01_playwright_add_preview_publish_reopen():
 
         if path == "/admin/setup" and method == "GET":
             return route.fulfill(json={"required": False})
-        if path == "/line/service-help/faq":
+        if path == "/line/faq-layout/published-questions":
             return ok({"items": [answer], "categories": [answer["category"]], "next_cursor": None})
         if path.startswith(("/knowledge/items", "/knowledge/indexes")):
             return route.fulfill(json=[])
@@ -101,8 +101,10 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         page.on('pageerror', lambda error: print(f'Browser error: {error}'))
         page.add_init_script("sessionStorage.setItem('union_admin_session_token', 'synthetic-ci-session')")
         page.route(re.compile(r"^http://[^/]+/(?:trial/)?api/v1/"), dispatch)
-        page.goto(os.environ["FAQ_E2E_URL"] + "/#line-ai-events")
-        expect(page.get_by_role("heading", name="AI 客服工作室")).to_be_visible()
+        page.goto(os.environ["FAQ_E2E_URL"] + "/#line-faq")
+        expect(page.get_by_role("heading", name="LINE 常見問答")).to_be_visible()
+        for removed in ("回答測試", "回饋分析", "模型設定"):
+            expect(page.get_by_role("button", name=removed, exact=True)).to_have_count(0)
         page.get_by_role("button", name="LINE 聊天室版面").click()
         page.get_by_role("button", name="＋ 新增分類").click()
         page.get_by_role("textbox", name="分類名稱").fill("服務異動")

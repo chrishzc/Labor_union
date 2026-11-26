@@ -217,16 +217,16 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
 
   const transition = (item: ManagedQa, action: 'publish' | 'retire') => {
     const identity = operationIdentity(`qa-${action}`);
-    const success = action === 'publish' ? '已讀回正式答案。AI 搜尋索引正在更新。' : '已停用，正在更新問答搜尋資料以移除舊答案。';
+    const success = action === 'publish' ? '已讀回正式答案。' : '已停用，聊天室不再提供該答案。';
     return runMutation(() => applicationFetch(`/api/v1/knowledge/items/${item.id}/${action}`, {
       method: 'POST',
       headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
       credentials: 'include',
-      body: JSON.stringify({ expected_version: item.current_version, reason: `AI 客服工作室：${action} ${item.qa.id}` }),
+      body: JSON.stringify({ expected_version: item.current_version, reason: `LINE 常見問答：${action} ${item.qa.id}` }),
     }), success, async (response) => {
       const result = await response.json() as { version: number };
       const data = await faqRequest<{ items: PublishedFaq[] }>(
-        `/api/v1/line/service-help/faq?qa_id=${encodeURIComponent(item.qa.id)}`,
+        `/api/v1/line/faq-layout/published-questions?qa_id=${encodeURIComponent(item.qa.id)}`,
       );
       const visible = data.items.find((row) => row.qa_id === item.qa.id);
       if (action === 'publish' ? visible?.version !== result.version : Boolean(visible)) {

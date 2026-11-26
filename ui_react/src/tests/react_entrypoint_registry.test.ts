@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HASH_ALIASES } from '../App';
 import { NAV_ITEMS } from '../components/MasterLayout';
 import { LineManagementPage } from '../pages/LineManagementPage';
-import { AiCustomerServiceStudioPage } from '../pages/line_management/AiCustomerServiceStudioPage';
+import { LineFaqStudioPage } from '../pages/line_management/LineFaqStudioPage';
 import {
   AlertGroupSecurity,
   type RuntimeTargetClient,
@@ -17,7 +17,7 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 const EXPECTED_HASHES = [
   'order-workbench-v2', 'scheduling', 'staff', 'clients', 'data-import', 'reports',
-  'line-management', 'line-notifications', 'line-interface', 'line-ai-events',
+  'line-management', 'line-notifications', 'line-interface', 'line-faq',
   'finance', 'payment-reminder-settings', 'accounting-parameters', 'account-management', 'contract-templates', 'database-backup',
 ] as const;
 
@@ -72,10 +72,8 @@ describe('React entrypoint registry', () => {
     expect(NAV_ITEMS.some(item => String(item.id) === 'line-security')).toBe(false);
     expect(HASH_ALIASES).not.toHaveProperty('line-security');
     expect(HASH_ALIASES).toMatchObject({
-      'line-ai': 'line-ai-events',
-      'line-ai-events': 'line-ai-events',
-      'line-llm': 'line-ai-events',
-      'line-llm-settings': 'line-ai-events',
+      'line-ai': 'line-faq',
+      'line-ai-events': 'line-faq',
       'line-studio': 'line-interface',
       'line-liff-studio': 'line-interface',
     });
@@ -89,12 +87,12 @@ describe('React entrypoint registry', () => {
         : url.includes('/api/v1/line/identity/runtime-config') ? { liff_id: 'test-liff-id' } : { items: [], next_cursor: null };
       return new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
-    const studio = render(React.createElement(AiCustomerServiceStudioPage));
-    expect(screen.getByRole('button', { name: '回饋分析' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: '引導動作' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '回答測試' }));
-    expect(screen.getByRole('button', { name: '測試回答' })).toBeDisabled();
-    expect(screen.getByLabelText('測試問題')).toHaveValue('');
+    const studio = render(React.createElement(LineFaqStudioPage));
+    expect(screen.getByRole('button', { name: '常見問答題庫' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'LINE 聊天室版面' })).toBeEnabled();
+    for (const name of ['回答測試', '回饋分析', '模型設定', '引導動作']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
     studio.unmount();
 
     window.history.replaceState(null, '', '#line-interface?tab=guidance');

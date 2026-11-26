@@ -95,7 +95,7 @@ export async function getPublishedFaq(): Promise<PublishedFaq[]> {
   do {
     const query = new URLSearchParams({ limit: '100' });
     if (cursor) query.set('cursor', cursor);
-    const page = await faqRequest<{ items: PublishedFaq[]; next_cursor: string | null }>(`/api/v1/line/service-help/faq?${query}`);
+    const page = await faqRequest<{ items: PublishedFaq[]; next_cursor: string | null }>(`/api/v1/line/faq-layout/published-questions?${query}`);
     rows.push(...page.items);
     cursor = page.next_cursor;
   } while (cursor);

@@ -1,6 +1,6 @@
 """
 File: test_line_service_help.py
-Description: 驗證客服問答專屬 LIFF API（FAQ 列表與 AI 智慧問答檢索）以及靜態頁面路由。
+Description: 驗證聊天室 FAQ Reply、管理題庫讀取、舊公開問答入口退役。
 """
 
 from __future__ import annotations
@@ -15,10 +15,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.dependencies.admin_auth import require_admin
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.access.integration_capabilities import IntegrationCapability
 from api.dependencies.line_faq_layout import get_service_help_faq_readers
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
-from api.dependencies.line_identity import get_liff_token_verifier
-from api.dependencies.llm_configuration import LlmSemanticTestResult, get_llm_configuration_application
 from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
 from domains.line.faq_chat_layout import FaqCategory, FaqLayout, FaqQuestionLink, project_category
 from domains.line.identities import LineSourceType, LineUserId
@@ -28,11 +29,6 @@ from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.faq_chat_layout import FaqCategoryNotPublished, FaqLayoutUnavailable
 from subsystems.line.service_help_application import LineServiceHelpApplication, ServiceHelpFaqReaders
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
-
-
-@pytest.fixture
-def semantic_application():
-    return Mock(spec=["test_semantics"])
 
 
 class _FaqRepository:
@@ -123,13 +119,15 @@ def faq_layout():
 
 
 @pytest.fixture
-def client(semantic_application, faq_repository, faq_layout):
+def client(faq_repository, faq_layout):
     catalog = PublishedFaqCatalog(faq_repository.unit)
     faq_layout.catalog = catalog
     original = dict(app.dependency_overrides)
     app.dependency_overrides[get_service_help_faq_readers] = lambda: lambda: ServiceHelpFaqReaders(catalog, faq_layout)
-    app.dependency_overrides[get_llm_configuration_application] = lambda: semantic_application
-    app.dependency_overrides[get_liff_token_verifier] = lambda: Mock(spec=["verify"])
+    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(
+        None, "fixture", "fixture", "operator",
+        capabilities=frozenset({IntegrationCapability.KNOWLEDGE_READ.value}),
+    )
     try:
         with TestClient(app) as client:
             yield client
@@ -138,66 +136,36 @@ def client(semantic_application, faq_repository, faq_layout):
         app.dependency_overrides.update(original)
 
 
-def test_service_help_page_returns_html(client):
-    response = client.get("/line-service-help")
-    assert response.status_code == 200
-    assert "text/html" in response.headers.get("content-type", "")
-    content = response.text
-    assert "新竹市月子工會" in content
-    assert "常見問答" in content
-    assert "AI 智慧問答" in content
-    assert "AI 智慧問答助理" in content
-    assert "tab-nav" not in content
-    assert "依據規範" not in content
+@pytest.mark.parametrize(("method", "path"), [
+    ("GET", "/line-service-help?tab=ai"),
+    ("GET", "/line-service-help?tab=faq"),
+    ("GET", "/api/v1/line/service-help/faq"),
+    ("POST", "/api/v1/line/service-help/ask"),
+])
+def test_faq_retired_public_entrances_only_show_chat_guidance(client, method, path):
+    response = client.request(method, path)
+    assert response.status_code == 410
+    assert "常見問題" in response.text
+    assert "target=ai_assistant" not in response.text
+    assert "<script" not in response.text
 
 
-def test_service_help_faq_endpoint(client):
-    response = client.get("/api/v1/line/service-help/faq")
-    assert response.status_code == 200
-    body = response.json()
-    assert "data" in body
-    data = body["data"]
-    assert "items" in data
-    assert "categories" in data
-    assert len(data["items"]) >= 5
-
-    qa_ids = {item["qa_id"] for item in data["items"]}
-    assert "QA-001" in qa_ids
-    assert "QA-005" in qa_ids
+@pytest.mark.parametrize("suffix", ["", "/preview"])
+def test_faq_legacy_liff_feedback_cannot_start_a_write(client, suffix):
+    response = client.post("/api/v1/line/feedback" + suffix, json={
+        "source_response_id": "knowledge-answer-request:3",
+        "outcome": "resolved", "response_revision": 1, "catalog_revision": 1,
+        "idempotency_key": "faq-retired", "correlation_id": "faq-retired",
+    })
+    assert response.status_code == 410
+    assert response.json()["detail"]["error"]["code"] == "line_service_help_retired"
 
 
-def test_service_help_ask_matched_question(client, semantic_application):
-    question = "如果和月嫂合作不適合，可以更換月嫂嗎？"
-    item = next(item for item in load_line_ai_qa_catalog() if item.id == "QA-001")
-    semantic_application.test_semantics.return_value = LlmSemanticTestResult(
-        "answered", "fixture", "fixture", 1, item.id, f"line-common-qa:{item.id}", 1,
-        item.answer, item.answer, None,
-    )
-    response = client.post(
-        "/api/v1/line/service-help/ask",
-        json={"question": "如果和月嫂合作不適合，可以更換月嫂嗎？"},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["data"]["outcome"] == "answered"
-    assert body["data"]["answer_text"]
-    assert body["data"]["qa_id"] == "QA-001"
-    assert body["data"]["source_identity"] == "line-common-qa:QA-001"
-    semantic_application.test_semantics.assert_called_once_with(question)
-
-
-def test_service_help_ask_unsupported_question(client, semantic_application):
-    semantic_application.test_semantics.return_value = LlmSemanticTestResult(
-        "unsupported", "fixture", "fixture", 1, None, None, None, None, None, None,
-    )
-    response = client.post(
-        "/api/v1/line/service-help/ask",
-        json={"question": "請問如何火星登陸與太空梭維修？"},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["data"]["outcome"] == "unsupported"
-    assert "LINE 官方帳號聊天室" in body["data"]["suggestion"]
+def test_faq_admin_readback_rejects_unprivileged_user(client, monkeypatch):
+    monkeypatch.setitem(app.dependency_overrides, require_admin, lambda: AdminPrincipal(
+        None, "fixture", "fixture", "operator", capabilities=frozenset(),
+    ))
+    assert client.get("/api/v1/line/faq-layout/published-questions").status_code == 403
 
 
 def _private_inbox(*, text="", postback="", group=False):
@@ -250,7 +218,7 @@ def _body_actions(payload):
     return [button["action"] for button in payload["contents"]["body"]["contents"]]
 
 
-def test_faq_02_official_version_is_shared_by_web_and_line(client, faq_repository, faq_layout):
+def test_faq_02_official_version_is_shared_by_admin_and_line(client, faq_repository, faq_layout):
     qa_id = "qa-versioned"
     legacy = "這是上一張 LINE 卡片送出的問題？"
     handlers = _reply_handlers(faq_repository, faq_layout)
@@ -259,7 +227,7 @@ def test_faq_02_official_version_is_shared_by_web_and_line(client, faq_repositor
     faq_repository.rows[qa_id] = _faq_row(qa_id, "草稿答案 B", version=2, question="新問題？")
 
     def assert_shared_answer(expected, version):
-        response = client.get("/api/v1/line/service-help/faq", params={"qa_id": qa_id})
+        response = client.get("/api/v1/line/faq-layout/published-questions", params={"qa_id": qa_id})
         assert response.status_code == 200
         [item] = response.json()["data"]["items"]
         assert item["answer"] == expected
@@ -273,7 +241,7 @@ def test_faq_02_official_version_is_shared_by_web_and_line(client, faq_repositor
     assert_shared_answer("草稿答案 B", 2)
     faq_repository.rows[qa_id] = _faq_row(qa_id, "未發布 C", version=3)
     del faq_repository.official[qa_id]
-    response = client.get("/api/v1/line/service-help/faq", params={"qa_id": qa_id})
+    response = client.get("/api/v1/line/faq-layout/published-questions", params={"qa_id": qa_id})
     assert response.json()["data"]["items"] == []
     for kwargs in ({"text": legacy}, {"postback": f"faq:v1:question:{qa_id}"}):
         reply = _reply_payload(handlers, **kwargs)["text"]
@@ -284,7 +252,7 @@ def test_faq_02_official_version_is_shared_by_web_and_line(client, faq_repositor
 def test_faq_03_walks_all_official_pages_and_surfaces_unavailability(
     client, faq_repository, faq_layout, monkeypatch,
 ):
-    path = "/api/v1/line/service-help/faq"
+    path = "/api/v1/line/faq-layout/published-questions"
     ids = [f"faq-{index:03}" for index in range(101)]
     faq_repository.official = {qa_id: _faq_row(qa_id, qa_id) for qa_id in reversed(ids)}
     faq_repository.official["faq-not-a-qa"] = {"source_identity": "non-faq-source"}
@@ -365,7 +333,7 @@ def test_faq_05_postback_uses_verified_private_reply_and_paginates_menu(faq_repo
     assert {action.get("text") for action in first_actions if action["type"] == "message"} == {
         "查詢服務進度", "修改登記資料",
     }
-    assert any("target=ai_assistant" in action.get("uri", "") for action in first_actions)
+    assert all(action["type"] != "uri" for action in first_actions)
     assert len(first["quickReply"]["items"]) <= 13
     assert _reply_payload(handlers, postback="faq:v1:menu:999") == first
     second = _reply_payload(handlers, postback="faq:v1:menu:1")
@@ -377,7 +345,11 @@ def test_faq_05_postback_uses_verified_private_reply_and_paginates_menu(faq_repo
     assert _body_actions(card) == [{"data": "faq:v1:question:qa-one", "label": label, "type": "postback"}]
     for item in card["quickReply"]["items"]:
         assert len(item["action"]["label"]) <= 20
-    assert "target=ai_assistant" in card["contents"]["footer"]["contents"][-1]["action"]["uri"]
+    assert "開啟 AI 客服" not in json.dumps(card, ensure_ascii=False)
+    for payload in (first, second, card, _reply_payload(handlers, postback="faq:v1:question:qa-one")):
+        body = json.dumps(payload, ensure_ascii=False)
+        assert "target=ai_assistant" not in body and "詢問 AI 客服" not in body
+    assert _reply_payload(handlers, text="AI客服") == first
     assert _reply_payload(handlers, postback="faq:v1:question:qa-one", group=True) is None
     assert _reply_payload(handlers, text="常見問題", group=True) is None
 
@@ -406,6 +378,6 @@ def test_faq_05_unavailable_or_unpublished_menu_keeps_existing_service_actions(
     assert "暫時無法使用" in unavailable["text"]
     for payload in (no_publication, unavailable):
         actions = [item["action"] for item in payload["quickReply"]["items"]]
-        assert {"查詢服務進度", "修改登記資料", "AI客服"} <= {
+        assert {"查詢服務進度", "修改登記資料"} <= {
             action.get("text") for action in actions
         }

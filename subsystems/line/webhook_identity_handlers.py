@@ -600,8 +600,7 @@ def _handle_service_help_text(inbox, unit_of_work, line_user_id, text, scheduled
         return False
     reply_text = _SERVICE_HELP_CATEGORIES[normalized]
     if reply_text is None:
-        from subsystems.line.service_help_application import _ai_assistant_payload
-        payload = _ai_assistant_payload()
+        payload = _text_message_payload("請輸入「常見問題」查看分類，或直接留言由工會人員協助。")
     else:
         payload = _text_message_payload(reply_text)
     if normalized == "月嫂身分認證":
@@ -625,15 +624,12 @@ def _service_help_menu_delivery(
     correlation_id,
     scheduled_at,
 ):
-    from subsystems.line.service_help_application import _ai_assistant_liff_url
     payload = {
         "type": "text",
         "text": "請選擇您想了解或處理的項目：",
         "quickReply": {
             "items": [
-                {"type": "action", "action": {"type": "uri", "label": label, "uri": _ai_assistant_liff_url()}}
-                if reply is None else _quick_reply_item(label)
-                for label, reply in _SERVICE_HELP_CATEGORIES.items()
+                _quick_reply_item(label) for label in _SERVICE_HELP_CATEGORIES
             ]
         },
     }

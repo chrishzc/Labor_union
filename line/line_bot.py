@@ -240,7 +240,7 @@ async def health_check(request: Request):
     if not target:
         state_query = params.get("liff.state", "").partition("?")[2]
         target = parse_qs(state_query).get("target", [""])[0]
-    if target == "ai_assistant":
+    if target in {"ai_assistant", "faq"}:
         from api.routes.line_service_help import service_help_page
         return service_help_page()
 

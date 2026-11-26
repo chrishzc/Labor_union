@@ -25,7 +25,7 @@
 - `line-management` — LINE 營運（身分與授權、案件群組）
 - `line-notifications` — 通知與寄送（[通知與發送及範本分類](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)、寄送與異常）
 - `line-interface` — LINE 介面設定（圖文選單、表單、LINE 流程圖、引導動作）。引導動作分頁可用 `#line-interface?tab=guidance` 直接開啟。
-- `line-ai-events` — AI 客服工作室（常見問答、回答測試、回饋分析、模型設定）
+- `line-faq` — LINE 常見問答（題庫、聊天室版面）
 - `finance`
 - `accounting-parameters`
 - `payment-reminder-settings` — 帳務通知排程與通知條件
@@ -35,7 +35,7 @@
 
 ### 2.2 相容 Deep Link 解析規則
 
-- `#line-llm`／`#line-llm-settings` → `line-ai-events` 模型設定分頁。
+- `#line-ai`／`#line-ai-events` → `line-faq`；`#line-llm`／`#line-llm-settings` 退役，沿未知 hash 規則。
 - `#line-studio`／`#line-liff-studio` → `line-interface` 表單分頁。
 - `#line-management?tab=push_queue|delivery|richmenu|message_flow|liff` → 依責任導向 `line-notifications` 或 `line-interface`。
 - `#finance?tab=payment-destination` → 導向 `finance` 每月帳務。
@@ -63,6 +63,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **非市民歷史補登**：移除表單與 `POST /api/v1/admin/registration-applications/manual-non-citizen/check`，手動建案只接受後端正式配號的新案。既有案件及虛擬帳號對照保留。
 - **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。
 - **管理員通知對象設定**：移除 `line-security` 頁與 mutation；管理員系統狀態顯示於 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，歷史 target 查詢保留。
+- **公開 LINE FAQ／AI 問答退役**：既有 `/line-service-help` 及舊 LIFF target 只回 410 聊天室指引；舊公開 `/api/v1/line/service-help/{faq,ask}` 回 typed 410。模型設定路由不再掛載；舊 LIFF 問答來源的新回饋預覽／送出回 410，不影響其他回饋或既有紀錄。後台正式題庫讀回移至受權限保護的 `GET /api/v1/line/faq-layout/published-questions`；不影響其他 LIFF 表單、LINE 引導動作或已保存歷史。
 - **LINE 加入好友歡迎訊息設定**：`GET /api/v1/line/onboarding`、`POST /api/v1/line/onboarding/preview` 與 `PUT /api/v1/line/onboarding` 回傳 typed `410 Gone`；加入好友歡迎訊息改由 LINE 官方帳號後台設定，通知工作台與公版目錄不再列管歡迎詞。
 - **LINE 客服工單退役**。舊客服工單摘要、列表、明細、客服提醒、客服回覆與行動客服 API 回 `410 Gone`。切換結案保留原授權。
 - **客戶資料與訂單異動申請退役**。自路由移除舊客戶表單頁面（`/line-profile-guard`、`/line-profile-update`、`/line-order-update`）及送審、查詢、審核 API（`/api/v1/line/client-profile/*`、`/api/v1/client-profile/requests*`、`/api/v1/line/mobile-admin/client-profile/requests*`、`/api/v1/line/order-change/{query,preview,requests}`、`/api/v1/orders/change-requests*`）。舊 `POST /api/v1/line/order-change/apply` 維持 `410 Gone`，提示客戶在 LINE 聊天室留言。

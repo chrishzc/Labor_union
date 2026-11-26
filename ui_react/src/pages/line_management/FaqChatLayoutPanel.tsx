@@ -231,7 +231,6 @@ export function FaqChatLayoutPanel() {
         {card && <fieldset disabled={disabled}>
           <label>卡片標題<input ref={title} maxLength={36} value={card.title} onChange={event => updateCard({ title: event.target.value })} /></label>
           <label>說明<textarea maxLength={150} value={card.description} onChange={event => updateCard({ description: event.target.value })} /></label>
-          <label>AI 客服快捷入口文字<input maxLength={28} value={card.footer_label} onChange={event => updateCard({ footer_label: event.target.value })} /></label>
           <ol>{card.questions.map((link, index) => <li key={link.qa_id}>
             <p>{published.find(item => item.qa_id === link.qa_id)?.question ?? `題目已停用（${link.qa_id}）`}</p>
             <label>題目 {index + 1} 短標籤<input maxLength={24} value={link.label} onChange={event => updateCard({
@@ -272,7 +271,6 @@ export function FaqChatLayoutPanel() {
             <h3>{preview.view.title}</h3><p>{preview.view.description}</p>
             {preview.issues.map(issue => <p key={issue.field}>題目無法顯示（{issue.qa_id ?? issue.field}）</p>)}
             {preview.view.buttons.map(button => <button type="button" key={button.qa_id} onClick={() => setAnswer(button.qa_id)}>{button.label}</button>)}
-            {preview.view.footer_label && <small>{preview.view.footer_label}</small>}
           </> : <>
             <h3>分類選單</h3>
             {mode === 'published' && !state.published_layout && !previewError && <p>尚未發布</p>}

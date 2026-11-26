@@ -523,7 +523,10 @@ def _faq_runtime_answers(case, monkeypatch, database=None, *, shared=False):
 
     from fastapi.testclient import TestClient
 
+    from api.dependencies.admin_auth import require_admin
     from api.dependencies.line_worker_operation import _event_handlers, webhook_reply_dispatcher
+    from subsystems.access.authentication_session import AdminPrincipal
+    from subsystems.access.integration_capabilities import IntegrationCapability
     from api.main import app
     from domains.line.identities import LineSourceType, LineUserId, LineWebhookEventId
     from infrastructure.mysql import mysql_adapter
@@ -566,7 +569,11 @@ def _faq_runtime_answers(case, monkeypatch, database=None, *, shared=False):
         assert request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
         return json.loads(request.payload_json)
 
-    response = TestClient(app).get("/api/v1/line/service-help/faq", params={"qa_id": _FQ_SERVICE})
+    monkeypatch.setitem(app.dependency_overrides, require_admin, lambda: AdminPrincipal(
+        None, "fixture", "fixture", "operator",
+        capabilities=frozenset({IntegrationCapability.KNOWLEDGE_READ.value}),
+    ))
+    response = TestClient(app).get("/api/v1/line/faq-layout/published-questions", params={"qa_id": _FQ_SERVICE})
     assert response.status_code == 200, response.text
     [item] = response.json()["data"]["items"]
     assert item["version"] == 2

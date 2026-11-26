@@ -37,7 +37,7 @@ on:
       - 'tests/test_access_knowledge_disposable_mysql_e2e.py'
       - 'tests/test_line_ai_qa_catalog.py'
       - 'tests/test_line_service_help.py'
-      - 'ui_react/src/pages/line_management/AiCustomerServiceStudioPage.tsx'
+      - 'ui_react/src/pages/line_management/LineFaqStudioPage.tsx'
       - 'ui_react/src/pages/line_management/CommonQaCatalogPanel.tsx'
       - 'ui_react/src/pages/line_management/FaqChatLayoutPanel.*'
       - 'ui_react/src/pages/line_management/faqLayoutApi.ts'

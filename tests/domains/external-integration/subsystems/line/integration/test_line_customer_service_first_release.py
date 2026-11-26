@@ -114,7 +114,7 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     assert request.message_kind.value == "flex"
     assert request.idempotency_key.value == "service-help:menu:event-1"
     assert "customer-service:handoff:confirm" not in request.payload_json
-    assert "target=ai_assistant" in request.payload_json
+    assert "target=ai_assistant" not in request.payload_json
     assert "月嫂身分認證" not in request.payload_json
 
 
