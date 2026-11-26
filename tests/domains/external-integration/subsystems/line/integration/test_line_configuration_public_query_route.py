@@ -408,7 +408,7 @@ class _FaqStore:
         self.current = LineConfigurationSnapshot(FAQ_CHAT_LAYOUT_KIND, LineConfigurationRevision(0), "{}")
         self.operations = {}
         self.audit = []
-        self.answers = {"QA-001": SimpleNamespace(question="服務如何申請？", answer="請先填寫需求登記。")}
+        self.answers = {"QA-001": SimpleNamespace(question="服務如何申請？", answer="請先填寫需求登記。", source_ref="測試來源")}
         self.catalog_available = True
         self.available = True
 
@@ -547,6 +547,16 @@ def test_faq_01_layout_draft_published_preview_and_invalid_writes_with_fake_port
     assert stale.status_code == 409
     assert stale.json()["detail"]["error"]["current_version"] == 2
     assert query()["published_layout"] is None
+
+    item = store.answers["QA-001"]
+    original_answer = item.answer
+    item.answer = "答" * 5000
+    too_long = client.post(publish_url, json={"expected_revision": 2}, headers=_faq_headers("oversize"))
+    assert too_long.status_code == 422
+    assert too_long.json()["detail"]["error"]["field_errors"][0]["code"] == "faq_line_reply_too_long"
+    assert "oversize" not in store.operations
+    assert query()["published_layout"] is None
+    item.answer = original_answer
 
     published = client.post(publish_url, json={"expected_revision": 2}, headers=_faq_headers("publish"))
     assert published.status_code == 200

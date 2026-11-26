@@ -163,14 +163,15 @@ def test_faq_04_mysql_publication_and_receipt_rollback(monkeypatch):
     def key(operation):
         return IdempotencyKey(f"{qa_id}:{operation}")
 
-    def save(answer, expected_version):
+    def save(answer, expected_version, suffix=None):
+        suffix = suffix or answer
         content = GovernedQaContent(
             qa_id=qa_id, category="服務流程", category_id="service_flow", tag="合成",
-            question=f"測試題 {qa_id}？", aliases=("合成別名",), answer=answer, source_ref=f"source-{answer}-{qa_id}",
+            question=f"測試題 {qa_id}？", aliases=("合成別名",), answer=answer, source_ref=f"source-{suffix}-{qa_id}",
         )
         return app.ingest(IngestKnowledgeSourceCommand(
             content.source_identity, "internal_policy", content.question, encode_governed_qa(content),
-            content.source_ref, actor, key(f"draft-{answer}"), CorrelationId(f"{qa_id}:draft"),
+            content.source_ref, actor, key(f"draft-{suffix}"), CorrelationId(f"{qa_id}:draft"),
             ExpectedVersion(expected_version) if expected_version is not None else None,
         ))[0]
 
@@ -216,6 +217,16 @@ def test_faq_04_mysql_publication_and_receipt_rollback(monkeypatch):
     monkeypatch.setattr(KnowledgeRetrievalMySqlUnitOfWork, "commit", original_commit)
     assert app.publish_and_request_index(second)[0] == first_version + 2
     assert catalog.get(qa_id).answer == "B"
+
+    assert save("答" * 5000, first_version + 2, "oversize") == item_id
+    too_long = publish(first_version + 3, "publish-oversize")
+    with pytest.raises(ValueError, match="knowledge_qa_line_reply_too_long"):
+        app.publish_and_request_index(too_long)
+    assert catalog.get(qa_id).answer == "B"
+    with get_connection() as fresh:
+        with fresh.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS n FROM knowledge_apply_receipts WHERE idempotency_key=%s", (too_long.idempotency_key.value,))
+            assert cursor.fetchone()["n"] == 0
 
 
 def test_faq_04_mysql_compatible_upgrade_rerun():

@@ -51,6 +51,7 @@ export class FaqRequestError extends Error {
       faq_category_not_published: '尚未發布',
       faq_layout_revision_conflict: '版面已被其他人修改。請核對新版後再編輯。',
       faq_layout_idempotency_conflict: '這個操作鍵已用於其他內容。',
+      faq_line_reply_too_long: '答案加上來源與固定提示後超過 LINE 上限，請先縮短題庫答案。',
       faq_layout_invalid: '請檢查輸入欄位。卡片發布前須有至少一個有效題目。',
     };
     super((code && messages[code]) || (
@@ -79,7 +80,10 @@ export async function faqRequest<T>(path: string, options: RequestInit = {}): Pr
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       const detail = payload?.detail?.error ?? payload?.detail ?? payload?.error;
-      throw new FaqRequestError(response.status, typeof detail === 'string' ? detail : detail?.code, detail?.field_errors?.[0]?.field ?? detail?.field);
+      const firstFieldError = detail?.field_errors?.[0];
+      const code = typeof detail === 'string' ? detail
+        : firstFieldError?.code === 'faq_line_reply_too_long' ? firstFieldError.code : detail?.code;
+      throw new FaqRequestError(response.status, code, firstFieldError?.field ?? detail?.field);
     }
     return payload.data as T;
   } finally {

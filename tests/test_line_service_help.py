@@ -20,7 +20,7 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.access.integration_capabilities import IntegrationCapability
 from api.dependencies.line_faq_layout import get_service_help_faq_readers
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
-from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
+from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa, format_line_faq_reply
 from domains.line.faq_chat_layout import FaqCategory, FaqLayout, FaqQuestionLink, project_category
 from domains.line.identities import LineSourceType, LineUserId
 from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
@@ -309,6 +309,24 @@ def test_faq_05_only_one_current_exact_legacy_match_is_answered(faq_repository, 
     assert "返回常見問題" in _reply_payload(handlers, postback="faq:v1:question:unknown")["text"]
     faq_repository.unavailable = True
     assert "暫時無法使用" in _reply_payload(handlers, text="舊版問題文字")["text"]
+
+
+def test_faq_05_reply_budget_includes_source_note_and_utf16_units(faq_repository, faq_layout):
+    handlers = _reply_handlers(faq_repository, faq_layout)
+    suffix_units = len(format_line_faq_reply("", "正式題庫來源").encode("utf-16-le")) // 2
+    answer = "答" * (5000 - suffix_units - 2) + "😀"
+    faq_repository.official = {
+        "fits": _faq_row("fits", answer),
+        "oversize": _faq_row("oversize", answer + "答"),
+    }
+    reply = _reply_payload(handlers, postback="faq:v1:question:fits")
+    assert reply["text"] == format_line_faq_reply(answer, "正式題庫來源")
+    assert len(reply["text"].encode("utf-16-le")) // 2 == 5000
+    fallback = _reply_payload(handlers, postback="faq:v1:question:oversize")
+    assert "無法完整顯示" in fallback["text"]
+    assert "請直接在此留言" in fallback["text"]
+    assert fallback["quickReply"]["items"]
+    assert answer not in fallback["text"]
 
 
 def test_faq_05_postback_uses_verified_private_reply_and_paginates_menu(faq_repository, faq_layout):

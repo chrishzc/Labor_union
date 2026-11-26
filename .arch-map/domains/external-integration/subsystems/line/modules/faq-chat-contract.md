@@ -13,7 +13,7 @@
 | POST `/categories` | `{name, expected_revision}` → `{operation_id, draft_revision, category_id}` | 建立帶穩定 ID 的共享分類及空白草稿卡片；先存不對外出現。 |
 | PUT `/draft` | `{expected_revision, layout}` → `{operation_id, draft_revision}` | 保存現有分類的版面編輯，不隱含建立、刪除或重命名分類。 |
 | POST `/publish` | `{expected_revision}` → `{operation_id, draft_revision, published_revision}` | 發布整份已儲存草稿；不接收未保存的 layout，不改 Q&A、不呼叫 LINE 發布 Rich Menu。 |
-| GET `/operations/{operation_id}` | 原 `Idempotency-Key` → 相同操作回執 | 查不到是沒有可讀回的回執，不等同於確認未寫入；先刷新 Query，必要時同鍵重送。 |
+| GET `/operations/{operation_id}` | 原 `Idempotency-Key` → 相同操作回執 | 查不到是沒有可讀回的回執，不等同於確認未寫入；管理畫面只再查同鍵與 Query，不自動重送。 |
 
 表中路徑接在前綴後，GET 根路徑不附尾斜線。所有寫入必帶 `Idempotency-Key`、`X-Correlation-ID`。expected_revision 為最近一次成功讀回之整份 draft revision；初始化未建立用 0，正常版本為正整數。每次成功寫入均前移 draft_revision；只有 publish 同一次設定交易更新 published_revision。前端若仍有未存編輯，先儲存再發布；兩次寫入使用不同操作鍵。回執識別等於本次操作鍵。相同鍵及相同命令重送回原回執，不新增版本；同鍵不同內容回 409。Query 讀回的現況可以比回執更新，兩者不可互相覆寫。
 
@@ -36,6 +36,10 @@
 - 對照匯入以既有 JSONL／舊卡片為來源清單，比對正式項目，不在 runtime 讀取。保留別名、順序、既有特殊政策說明；無唯一匹配列差異，不把舊答案偷偷發布或用文字硬接其他題。
 
 - 舊 `/line-service-help` 及 LIFF 問答 target 只回 410 聊天室指引；舊公開 FAQ 與 ask API 回 typed 410，沒有資料、推論或寫入。後台不提供回答測試、回饋分析、模型設定。其他 LIFF／引導動作不受影響。
+
+**結果未明的操作。** 同一瀏覽器分頁只保留原操作種類與識別，不保存草稿內容。請求結束即可切頁；返回或重新載入後，可用原鍵 GET 查回執並讀正式版。無回執時保持結果未明，不自動重送，也不換鍵再送。
+
+**LINE 文字上限。** 發布題目或引用於新版面前，以答案、來源及固定提示合成後的單則 Reply 文字核對 5,000 UTF-16 code units。超限保持舊正式版；既有超長題目仍可維護，客戶點擊時回聊天室留言指引，不靜默、不截斷正式答案。
 
 ## DB 交接與切換
 

@@ -80,6 +80,7 @@ async function apiError(response: Response): Promise<string> {
   const code = typeof payload.detail === 'string' ? payload.detail : payload.detail?.code;
   const messages: Record<string, string> = {
     knowledge_qa_answer_required: '標準回答尚未完成，不能發布。',
+    knowledge_qa_line_reply_too_long: '答案加上來源與固定提示後超過 LINE 上限，請縮短答案再發布。',
     knowledge_item_version_conflict: '內容已被其他人更新，請重新整理後再操作。',
     knowledge_review_required: '目前狀態不能執行這個動作，請重新整理確認。',
     knowledge_state_conflict: '目前狀態不能執行這個動作，請重新整理確認。',

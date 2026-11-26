@@ -7,7 +7,23 @@ import {
 import './FaqChatLayoutPanel.css';
 
 type Mode = 'draft' | 'published';
-type Command = { path: '/categories' | '/draft' | '/publish'; key: string; body: string };
+type Operation = { path: '/categories' | '/draft' | '/publish'; key: string };
+type Command = Operation & { body: string };
+const storageKey = () => `line-faq-pending:${window.location.pathname}`;
+
+function readPendingOperation(): Operation | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(storageKey());
+    if (!raw) return undefined;
+    const value = JSON.parse(raw) as Partial<Operation> | null;
+    if (value && typeof value.key === 'string' && /^[a-f0-9]{32}$/.test(value.key) &&
+      (value.path === '/categories' || value.path === '/draft' || value.path === '/publish')) {
+      return { key: value.key, path: value.path };
+    }
+  } catch { /* Storage may be unavailable; writes will report that explicitly. */ }
+  return undefined;
+}
+
 const emptyLayout: FaqLayout = { categories: [] };
 const errorText = (error: unknown) => error instanceof FaqRequestError
   ? [error.message, error.field].filter(Boolean).join(' ')
@@ -24,7 +40,7 @@ export function FaqChatLayoutPanel() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [pending, setPending] = useState<Command>();
+  const [pending, setPending] = useState<Operation | undefined>(readPendingOperation);
   const [remote, setRemote] = useState<FaqLayoutState>();
   const [mode, setMode] = useState<Mode>('draft');
   const [preview, setPreview] = useState<FaqPreview>();
@@ -40,7 +56,7 @@ export function FaqChatLayoutPanel() {
   const disabled = busy || Boolean(pending) || Boolean(remote);
   const guard = useUnsavedDraft('LINE 聊天室版面', { '分類卡片': layout.categories }, {
     baseline: { '分類卡片': state?.draft_layout.categories ?? [] },
-    busy: busy || Boolean(pending),
+    busy,
   });
 
   function resetPreview() {
@@ -116,12 +132,17 @@ export function FaqChatLayoutPanel() {
     updateCard({ questions });
   }
 
-  async function complete(command: Command, receipt: FaqReceipt, current?: FaqLayoutState) {
+  function clearPendingOperation() {
+    window.sessionStorage.removeItem(storageKey());
+    setPending(undefined);
+  }
+
+  async function complete(command: Operation, receipt: FaqReceipt, current?: FaqLayoutState) {
     const next = current ?? await getFaqLayout();
     if (receipt.operation_id !== command.key || next.draft_revision < receipt.draft_revision) {
       throw new Error('invalid readback');
     }
-    setPending(undefined);
+    clearPendingOperation();
     if (command.path === '/categories') {
       focusTitle.current = true;
       setAdding(false);
@@ -140,7 +161,7 @@ export function FaqChatLayoutPanel() {
     }
   }
 
-  async function readOperation(command: Command) {
+  async function readOperation(command: Operation) {
     const headers = { 'Idempotency-Key': command.key };
     const [receipt, current] = await Promise.allSettled([
       faqRequest<FaqReceipt>(`${faqLayoutPath}/operations/${encodeURIComponent(command.key)}`, { headers }),
@@ -153,33 +174,46 @@ export function FaqChatLayoutPanel() {
     return false;
   }
 
-  async function submit(command: Command, retry = false) {
+  async function checkOperation(operation: Operation) {
+    setBusy(true);
+    setError('');
+    try {
+      if (await readOperation(operation)) return;
+    } catch { /* Keep the original reference if readback is incomplete. */ }
+    finally { setBusy(false); }
+    setError('尚無法確認原操作結果。你可離開此頁，稍後再查；系統不會重送。');
+  }
+
+  async function submit(command: Command) {
+    const operation: Operation = { path: command.path, key: command.key };
+    try {
+      window.sessionStorage.setItem(storageKey(), JSON.stringify(operation));
+    } catch {
+      setError('此瀏覽器無法保留操作鍵，尚未送出。請先啟用工作階段儲存。');
+      return;
+    }
+    setPending(operation);
     setBusy(true);
     setError('');
     setNotice('');
     let acknowledged = false;
     try {
-      if (retry && await readOperation(command)) return;
       const receipt = await faqRequest<FaqReceipt>(faqLayoutPath + command.path, {
         method: command.path === '/draft' ? 'PUT' : 'POST',
         headers: { 'Idempotency-Key': command.key, 'X-Correlation-ID': command.key },
         body: command.body,
       });
       acknowledged = true;
-      await complete(command, receipt);
+      await complete(operation, receipt);
     } catch (failure) {
-      if (!acknowledged && failure instanceof FaqRequestError && failure.status < 500) {
-        setPending(undefined);
+      if (!acknowledged && failure instanceof FaqRequestError && [400, 401, 403, 409, 422].includes(failure.status)) {
+        clearPendingOperation();
         setError(errorText(failure));
         if (failure.status === 409) {
           try { setRemote(await getFaqLayout()); } catch { setError(errorText(failure) + ' 新版讀取失敗，請重新確認。'); }
         }
       } else {
-        setPending(command);
-        try {
-          if (await readOperation(command)) return;
-        } catch { /* The original command remains available for readback. */ }
-        setError('操作結果尚未確認。請使用原操作查詢或重送。');
+        await checkOperation(operation);
       }
     } finally { setBusy(false); }
   }
@@ -210,7 +244,7 @@ export function FaqChatLayoutPanel() {
   return <div className="faq-layout-workspace" ref={guard}>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    {pending && <button type="button" disabled={busy} onClick={() => void submit(pending, true)}>查詢或重送原操作</button>}
+    {pending && <button type="button" disabled={busy} onClick={() => void checkOperation(pending)}>查詢原操作結果</button>}
     {remote && <button type="button" disabled={busy} onClick={() => requestLeave(() => adopt(remote, selected))}>載入目前草稿（版本 {remote.draft_revision}）</button>}
     <div className="faq-layout-columns">
       <section className="ai-editor-card" aria-labelledby="faq-layout-categories">

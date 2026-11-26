@@ -215,6 +215,7 @@ def _invalid(request: Request, issues: tuple[FaqIssue, ...]):
     messages = {
         "duplicate_category_name": "已有相同名稱的分類。",
         "faq_question_not_published": "題目目前未發布。",
+        "faq_line_reply_too_long": "答案加上來源與固定提示後超過 LINE 上限，請先縮短題庫答案。",
         "published_question_required": "每張卡片至少要有一題已發布的問答。",
         "title_required": "發布前請填寫卡片標題。",
         "empty_layout": "發布前請新增分類與題目。",

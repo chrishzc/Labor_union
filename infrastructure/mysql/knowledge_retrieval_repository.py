@@ -17,7 +17,9 @@ from domains.knowledge_retrieval.knowledge import (
     source_digest,
     transition_item_status,
 )
-from domains.knowledge_retrieval.qa_catalog import QA_SOURCE_PREFIX, decode_governed_qa
+from domains.knowledge_retrieval.qa_catalog import (
+    QA_SOURCE_PREFIX, decode_governed_qa, format_line_faq_reply, line_faq_reply_fits,
+)
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineUserId
@@ -679,6 +681,8 @@ class MySqlKnowledgeRetrievalRepository:
                 transition_item_status(current_state, target)
                 if governed_qa is not None and target is KnowledgeItemStatus.PUBLISHED:
                     governed_qa.require_publishable()
+                    if not line_faq_reply_fits(format_line_faq_reply(governed_qa.answer, governed_qa.source_ref)):
+                        raise ValueError("knowledge_qa_line_reply_too_long")
 
                 actor_id = _admin_actor_id(command.actor.actor_id)
                 next_version = command.expected_version.value + 1

@@ -18,6 +18,7 @@ def test_faq_01_playwright_add_preview_publish_reopen():
     answer = {"qa_id": "CI-FAQ", "version": 2, "category": "服務異動", "question": "如何調整服務？", "answer": "請聯絡工會確認可調整時間。"}
     receipts = {}
     operation_reads = []
+    operation_writes = []
     unprefixed_faq_requests = []
 
     def dispatch(route):
@@ -45,6 +46,8 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         if path.startswith("/line/faq-layout/operations/"):
             key = path.rsplit("/", 1)[-1]
             operation_reads.append(key)
+            if len(operation_reads) <= 2:
+                return problem("faq_layout_operation_not_found", 404)
             receipt = receipts.get(key)
             return ok(receipt) if receipt else problem("faq_operation_not_found", 404)
         if not path.startswith("/line/faq-layout/"):
@@ -69,6 +72,7 @@ def test_faq_01_playwright_add_preview_publish_reopen():
             return ok({"view": view, "issues": []})
 
         key = request.headers["idempotency-key"]
+        operation_writes.append(key)
         assert request.headers["x-correlation-id"] == key
         assert body["expected_revision"] == records["draft_revision"]
         assert key not in receipts
@@ -123,15 +127,24 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         page.get_by_role("button", name="儲存版面草稿").click()
         expect(page.get_by_text("已儲存版面草稿。")).to_be_visible()
         page.get_by_role("button", name="發布聊天室版面").click()
-        expect(page.get_by_text("已發布聊天室版面。")).to_be_visible()
+        expect(page.get_by_text(re.compile("尚無法確認原操作結果"))).to_be_visible()
+        page.get_by_role("button", name="常見問答題庫").click()
+        expect(page.get_by_role("button", name="常見問答題庫")).to_have_attribute("aria-current", "page")
+        page.get_by_role("button", name="LINE 聊天室版面").click()
+        page.get_by_role("button", name="查詢原操作結果").click()
+        expect(page.get_by_text(re.compile("尚無法確認原操作結果"))).to_be_visible()
 
         page.reload()
         page.get_by_role("button", name="LINE 聊天室版面").click()
+        page.get_by_role("button", name="查詢原操作結果").click()
+        expect(page.get_by_text("已發布聊天室版面。")).to_be_visible()
         preview.get_by_role("button", name="已發布").click()
         preview.get_by_role("button", name="服務異動").click()
         preview.get_by_role("button", name=answer["question"]).click()
         expect(preview.get_by_text(answer["answer"])).to_be_visible()
         assert len(receipts) == 3
-        assert operation_reads == [next(key for key, receipt in receipts.items() if "published_revision" in receipt)]
+        assert len(operation_writes) == len(set(operation_writes)) == 3
+        publish_key = next(key for key, receipt in receipts.items() if "published_revision" in receipt)
+        assert operation_reads == [publish_key] * 3
         assert unprefixed_faq_requests == []
         browser.close()

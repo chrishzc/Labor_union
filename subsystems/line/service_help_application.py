@@ -18,6 +18,7 @@ from typing import Callable
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
+from domains.knowledge_retrieval.qa_catalog import format_line_faq_reply, line_faq_reply_fits
 from domains.line.faq_chat_layout import FAQ_ID_PATTERN, FaqCardView, FaqCategory, faq_short_label
 from domains.line.legacy_faq import LEGACY_FAQ_CATEGORIES, LEGACY_FAQ_POLICY_LABELS
 from domains.line.identity_flow import LineIdentityFlowPurpose
@@ -551,12 +552,9 @@ def _flex_action_button(action):
 
 
 def _qa_answer_payload(item: PublishedFaq, *, predecessor=False):
-    sources = f"資料來源：{item.source_ref}\n" if item.source_ref else ""
-    text = (
-        f"{item.answer}\n\n"
-        f"{sources}此資訊僅供說明，請以工會確認為準。\n\n"
-        "如需進一步協助，請直接在此留言。"
-    )
+    text = format_line_faq_reply(item.answer, item.source_ref)
+    if not line_faq_reply_fits(text):
+        text = "這則常見問答目前無法完整顯示。如需解答，請直接在此留言。"
     return {
         "type": "text",
         "text": text,
