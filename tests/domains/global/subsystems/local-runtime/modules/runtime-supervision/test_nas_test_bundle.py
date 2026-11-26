@@ -77,6 +77,7 @@ def test_single_host_compose_binds_mysql_and_redis_locally():
         "redis",
         "registration-redis",
         "registration-intake",
+        "registration-loopback",
         "registration-token-verifier",
     }
     db_service = services["db"]

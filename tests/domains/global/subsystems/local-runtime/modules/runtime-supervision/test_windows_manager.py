@@ -228,7 +228,7 @@ function Invoke-TestPython {
 function docker.exe {
     $expectedDockerArgs='compose|up|-d|--wait|db|redis'
     if($env:REGISTRATION_MODE -eq '1'){
-        $expectedDockerArgs='compose|--profile|registration|up|-d|--wait|db|redis|registration-redis|registration-intake|registration-token-verifier'
+        $expectedDockerArgs='compose|--profile|registration|up|-d|--wait|db|redis|registration-redis|registration-intake|registration-token-verifier|registration-loopback'
     }
     if(($args -join '|') -ne $expectedDockerArgs){throw 'Unexpected container operation'}
     $script:calls.Add('containers');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'containers')

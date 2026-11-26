@@ -359,7 +359,6 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
                 <label class="form-label required" for="service_type">服務方式</label>
                 <select class="form-select" id="service_type">
                     <option value="">請選擇服務方式</option>
-                    <option value="連續服務">連續服務（不排固定週休）</option>
                     <option value="週休1日">週休 1 日（週日休息）</option>
                     <option value="週休2日">週休 2 日（週六、週日休息）</option>
                 </select>
@@ -389,7 +388,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         </div>
 
         <div class="form-group">
-            <label class="form-label">洗澡水準備</label>
+            <label class="form-label">洗澡水準備 (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="一般熱水" id="bw1"><label for="bw1">一般熱水</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="薑水" id="bw2"><label for="bw2">薑水</label></div>
@@ -431,7 +430,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             </div>
         </div>
         <div class="form-group">
-            <label class="form-label">可以接受中藥補品</label>
+            <label class="form-label">可以接受中藥補品 (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="茶飲" id="hm1"><label for="hm1">茶飲</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="藥飲" id="hm2"><label for="hm2">藥飲</label></div>
@@ -449,7 +448,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             </div>
         </div>
         <div class="form-group">
-            <label class="form-label">料理用油 (可接受種類)</label>
+            <label class="form-label">料理用油 (可接受種類) (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="苦茶油(前兩週)" id="oil1"><label for="oil1">苦茶油(前兩週)</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="麻油(後兩週)" id="oil2"><label for="oil2">麻油(後兩週)</label></div>
@@ -465,7 +464,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         <!-- Section 4: 居家設備與環境 -->
         <div class="section-title">🍳 4. 居家設備與環境</div>
         <div class="form-group">
-            <label class="form-label">烹煮與加熱工具 (請勾選家中有的設備)</label>
+            <label class="form-label">烹煮與加熱工具 (請勾選家中有的設備) (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="炒菜鍋"><label>炒菜鍋</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="大同電鍋"><label>大同電鍋</label></div>
@@ -557,7 +556,6 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         </div>
     </form>
 
-    <button type="button" class="btn-submit" id="registrationStatusButton" onclick="queryRegistrationStatus()">查詢原申請結果</button>
     <!-- 成功畫面 -->
     <div id="successCard" class="success-card">
         <div class="success-icon">✓</div>
@@ -923,7 +921,9 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             group.className = 'form-group';
             const label = document.createElement('label');
             label.className = `form-label${field.required ? ' required' : ''}`;
-            label.textContent = field.label;
+            label.textContent = field.type === 'multiple_choice' && !String(field.label || '').includes('可複選')
+                ? `${field.label} (可複選)`
+                : field.label;
             group.appendChild(label);
             let control;
             if (field.type === 'textarea') {
@@ -1562,7 +1562,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     async function queryRegistrationStatus() {
         const statusMsg = document.getElementById('statusMessage');
         const button = document.getElementById('registrationStatusButton');
-        button.disabled = true;
+        if (button) button.disabled = true;
         try {
             const response = await fetch('/api/v1/line/identity/registration/status', {
                 method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1579,7 +1579,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         } catch (error) {
             statusMsg.textContent = error.message || '原申請結果暫時無法確認。';
             statusMsg.style.display = 'block';
-        } finally { button.disabled = false; }
+        } finally { if (button) button.disabled = false; }
     }
 
     function startNewRegistration() {
