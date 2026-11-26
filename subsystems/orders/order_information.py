@@ -279,7 +279,7 @@ def _candidate_line_sections(
     }
     info_two_diet = {
         "f_206_e6", "f_207_e7", "f_208_e8", "f_209_e9", "f_210_ea",
-        "f_211_eb", "f_212_ec",
+        "f_211_eb", "f_212_ec", "f_221_f5",
     }
     info_one_payments = {
         "f_112_cc", "f_113_cd", "f_116_cg", "f_117_ch", "f_118_ci",

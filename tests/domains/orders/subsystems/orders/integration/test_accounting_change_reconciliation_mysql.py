@@ -360,6 +360,8 @@ def test_early_end_creates_refund_only_for_formally_received_surplus(connection,
     cash = cash_snapshot(connection)
     before = workspace.query(_CASE_NO)
     assert not any(item.obligation_type == 'refund' for item in before.client_items)
+    assert sum(item.expected_ntd for item in before.staff_items
+               if item.direction == 'payable' and item.summary_included) == 25000
     repository = MySqlOrderTermsRepository(connection)
     facts = repository.load_for_query(_CASE_NO)
     proposed = replace(facts.registry.order.terms, service_days=5)
@@ -371,7 +373,9 @@ def test_early_end_creates_refund_only_for_formally_received_surplus(connection,
     preview = workflow.preview(_CASE_NO, proposed, **replacement)
     assert [item.direction_amount_ntd for item in preview.client_finance_impact.actions
             if item.direction.value == 'refund_due'] == ([3000] if partial_first_paid else [])
-    assert workspace.query(_CASE_NO).client_items == before.client_items
+    readback = workspace.query(_CASE_NO)
+    assert readback.client_items == before.client_items
+    assert readback.staff_items == before.staff_items
     request = OrderTermsApplyRequest(_CASE_NO, proposed, ExpectedVersion(preview.order_version),
         ExpectedVersion(preview.scheduling_version), ExpectedVersion(preview.client_finance_version),
         ExpectedVersion(preview.payroll_version), preview.fingerprint, IdempotencyKey('shorten-10-to-5'),
@@ -394,6 +398,8 @@ def test_early_end_creates_refund_only_for_formally_received_surplus(connection,
     after = workspace.query(_CASE_NO)
     refunds = [item for item in after.client_items if item.obligation_type == 'refund']
     assert [(item.remaining_ntd, item.actual_ntd) for item in refunds] == ([(3000, 0)] if partial_first_paid else [])
+    assert sum(item.expected_ntd for item in after.staff_items
+               if item.direction == 'payable' and item.summary_included) == 13000
     assert repository.load_for_query(_CASE_NO).registry.order.terms.service_days == 5
     with connection.cursor() as cursor:
         cursor.execute('SELECT actual_end_date,status FROM orders WHERE case_no=%s', (_CASE_NO,))

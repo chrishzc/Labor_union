@@ -10,7 +10,7 @@ import { FinanceStatementArchive } from './FinanceStatementArchive';
 import { financeMoney } from './FinanceReceiptsWorkspace';
 import { bankReconciliationUnavailableReason, financeBankReviewPresentation, financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
 import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage, FinanceExcludedBankTransactionPage } from '../api/finance_import/finance_import_query_schemas';
-import { financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
+import { FINANCE_WORKBOOK_EXTENSIONS, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
 import { accountingReason } from './case_accounting_presentation';
@@ -577,7 +577,7 @@ export function FinanceBankReconciliationWorkspace({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept={FINANCE_WORKBOOK_EXTENSIONS.join(',')}
               aria-label="選擇銀行交易明細工作簿"
               className="finance-input"
               style={{ padding: '6px 10px', fontSize: '0.82rem' }}

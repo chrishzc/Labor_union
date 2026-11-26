@@ -60,6 +60,19 @@ async function expectNotDispatched(reason: RegExp) {
 }
 
 describe('finance import operation identity after an observed result',()=>{
+  it('offers both Excel extensions and sends a selected .xls workbook to ingestion', async () => {
+    vi.mocked(FinanceWorkbookSnapshot.fromFile).mockRestore();
+    const file = new File(['fixture'], 'statement.xls', {type: 'application/vnd.ms-excel'});
+    render(<FinancePage/>);
+    const picker = screen.getByLabelText('選擇銀行交易明細工作簿');
+    expect(picker.getAttribute('accept')?.split(',')).toEqual(expect.arrayContaining(['.xlsx', '.xls']));
+    fireEvent.change(picker, {target: {files: [file]}});
+    fireEvent.click(screen.getByRole('button', {name: '匯入銀行交易明細'}));
+    await waitFor(() => expect(financeImportMutationClient.ingest).toHaveBeenCalledWith(
+      expect.objectContaining({filename: file.name, contentType: file.type}), expect.anything(),
+    ));
+  });
+
   it.each(['advance', 'sharedName', 'split'] as const)('submits a resolved automatic subsidy match on upload (%s)', async (kind) => {
     const split = kind === 'split';
     const checked: FinanceImportBatchPreview = { ...preview, rows: [{

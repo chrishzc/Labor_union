@@ -17,6 +17,8 @@ from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates,
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.orders.floor_fee import prorate_historical_floor_fee
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.payroll.calculation import PayrollPolicyKind, standard_hourly_rate
+from domains.payroll.historical_calculation import historical_service_salary
 from domains.payroll.tiered_rates import TieredPayrollRate
 from infrastructure.mysql.case_category_query import BOUND_POLICY_IDENTITY_SQL
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -29,6 +31,8 @@ from subsystems.client_finance.pricing_configuration import (
     HistoricalBirthCorrectionPreview, HistoricalAccountingCarry, HistoricalRateAuthority,
     legacy_historical_service_salary,
 )
+
+_LEGACY_BIRTH_POLICY_BLOCKER = 'historical_pricing_birth_bound_policy_required'
 
 
 # Source-owned read projection replaces the two runtime uses of the old SQL view.
@@ -328,7 +332,7 @@ def citizen_reclassification_terms(cursor, order_row, *, lock=False):
     return CasePricingTerms(citizen, IdentityRule.CITIZEN, default_subsidy_hour_cap(citizen), rates, rates, 5)
 
 
-def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None):
+def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None, readback=False):
     """Borrow confirmed historical volume, without manufacturing calendar days."""
     from infrastructure.mysql.order_terms_read_model import select_order
     from infrastructure.mysql.historical_service_accounting_repository import (
@@ -349,6 +353,13 @@ def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None
                  if items and all(item['actual_service_hours'] is not None for item in items)
                  else Decimal(days) * Decimal(source.service_hours_per_day))
         indexed = {f"assignment:{item['assignment_id']}": item for item in items}
+        cursor.execute('SELECT a.id,COALESCE(r.hourly_rate_ntd,c.hourly_rate_ntd) original_hourly_rate '
+            'FROM case_staff_assignments a '
+            'LEFT JOIN assignment_payroll_rate_snapshots r ON r.assignment_id=a.id '
+            'LEFT JOIN case_payroll_rate_policy_snapshots c ON c.case_no=a.case_no '
+            'WHERE a.case_no=%s' + suffix, (case_no,))
+        original_rates = {f"assignment:{row['id']}": int(row['original_hourly_rate'])
+            for row in cursor.fetchall() if row['original_hourly_rate'] is not None}
         people = tuple(HistoricalPricingPerson(
             assignment.assignment_identity, assignment.staff_id, assignment.staff_name,
             Decimal(str(indexed[assignment.assignment_identity]['actual_service_hours']))
@@ -357,7 +368,7 @@ def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None
             if assignment.assignment_identity in indexed else hours if len(source.assignments) == 1 else None,
             int(indexed[assignment.assignment_identity]['actual_service_days']) if assignment.assignment_identity in indexed
             else days if len(source.assignments) == 1 else None, assignment.effective_adjustment.amount,
-            assignment.rate_snapshot)
+            assignment.rate_snapshot, original_rates.get(assignment.assignment_identity))
             for assignment in source.assignments)
         if any(person.hours is None for person in people):
             hours = None
@@ -385,6 +396,7 @@ def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None
                 payload = _object(event['pricing_json'])
                 rate_authority = _event_rate_authority(payload)
                 accounting = payload.get('historical_accounting', {})
+        pricing_accounting = accounting
         cursor.execute('SELECT e.resulting_day_revision,e.result_snapshot FROM historical_service_day_events e '
             "WHERE e.case_no=%s AND JSON_TYPE(JSON_EXTRACT(e.result_snapshot,'$.financial_correction'))='OBJECT' "
             'ORDER BY e.resulting_day_revision DESC LIMIT 1' + suffix, (case_no,))
@@ -394,17 +406,23 @@ def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None
             pricing_versions = accounting.get('source_versions', ())
             if service_plan and (not pricing_versions or int(service_event['resulting_day_revision']) > int(pricing_versions[4])):
                 accounting = service_plan
+        standard_rate = (standard_hourly_rate(PayrollPolicyKind.TWINS)
+            if rate_authority == 'legacy' and _is_twins(cursor, case_no, lock) else None)
         carry = tuple(HistoricalAccountingCarry(
             item['component'], item['identity'], item['basis_amount'], tuple(item['pending']),
             item['financial_sources_digest'], item.get('subsidy_claim_basis'))
             for item in accounting.get('carry', ()))
-    return CasePricingFacts(case_no, int(order.get('pricing_revision', 0)),
-        (source.lifecycle_version, source.client_finance_version, source.payroll_version,
-         int(scheduling['aggregate_version']) if scheduling else -1, source.historical_day_revision, source.adoption_receipt_id),
-        terms, rate_authority,
-        (), floor, sum(person.adjustment for person in people), historical_service_hours=hours,
-        historical_people=people, historical=str(order['status']) == '歷史訂單－服務完成',
-        accounting_pending=tuple(accounting.get('pending', ())), accounting_carry=carry)
+        facts = CasePricingFacts(case_no, int(order.get('pricing_revision', 0)),
+            (source.lifecycle_version, source.client_finance_version, source.payroll_version,
+             int(scheduling['aggregate_version']) if scheduling else -1, source.historical_day_revision, source.adoption_receipt_id),
+            terms, rate_authority,
+            (), floor, sum(person.adjustment for person in people), historical_service_hours=hours,
+            historical_people=people, historical=str(order['status']) == '歷史訂單－服務完成',
+            accounting_pending=tuple(accounting.get('pending', ())), accounting_carry=carry,
+            historical_payroll_rate=standard_rate)
+        if readback and standard_rate is not None:
+            facts = _historical_twins_payroll_readback(cursor, facts, pricing_accounting, standard_rate)
+        return facts
 
 
 def historical_deposit_floor_fee_plan(cursor, order, proposed_fee, *, lock):
@@ -482,6 +500,56 @@ def _amount_update(source: HistoricalAmountFacts, delta: int) -> HistoricalAmoun
     return HistoricalAmountUpdate(source.identity, computed, effective, source.computed, source.effective, source.mode)
 
 
+def _historical_staff_rows(cursor, case_no: str, suffix: str) -> tuple[HistoricalStaffAmountRow, ...]:
+    cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.staff_id,o.current_event_id,o.status,o.amount_due_ntd,o.due_date,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+        'FROM staff_obligations o JOIN staff_obligation_events e ON e.id=o.current_event_id '
+        'LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+        "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_kind='service_pay' AND o.direction='payable_to_staff' AND o.source_obligation_identity IS NULL" + suffix, (case_no,))
+    return tuple(cursor.fetchall())
+
+
+def _original_payables(person: HistoricalPricingPerson, staff_rows: tuple[HistoricalStaffAmountRow, ...]
+        ) -> tuple[HistoricalStaffAmountRow, ...]:
+    return tuple(row for row in staff_rows if row['assignment_id'] is not None and
+        int(row['assignment_id']) == int(person.assignment_identity.removeprefix('assignment:'))
+        and int(row['staff_id']) == person.staff_id)
+
+
+def _historical_twins_payroll_readback(cursor, facts: CasePricingFacts, accounting: Mapping[str, object],
+        rate: MoneyNTD) -> CasePricingFacts:
+    staff_rows = _historical_staff_rows(cursor, facts.case_no, '')
+    amounts = _person_amounts(facts.terms, facts, use_legacy_person_rates=True)
+    saved = accounting.get('persons')
+    recorded = {person['assignment_identity']: person for person in saved
+        if isinstance(person, dict) and person.get('effective_hourly_rate') == rate.amount} if isinstance(saved, list) else {}
+    pending = [code for code in facts.accounting_pending if code != _LEGACY_BIRTH_POLICY_BLOCKER]
+    people = []
+    for person in facts.historical_people:
+        identity = person.assignment_identity
+        originals = _original_payables(person, staff_rows)
+        source = _historical_amount_facts(originals[0]) if len(originals) == 1 else None
+        calculated = amounts.get(identity)
+        previous = recorded.get(identity)
+        matches = source is not None and calculated == source.computed
+        confirmed = previous if source and matches and previous and previous['after_amount'] == source.effective else None
+        if source is None:
+            code = 'historical_pricing_original_payable_ambiguous:' if originals else 'historical_pricing_original_payable_required:'
+            pending.append(code + identity)
+        elif calculated is None:
+            pending.append('historical_pricing_person_service_hours_required:' + identity)
+        elif not matches:
+            pending.append('historical_pricing_standard_twins_difference_pending:' + identity)
+        people.append(HistoricalPersonPricing(identity, person.staff_id, person.staff_name, person.hours,
+            confirmed['before_amount'] if confirmed else None, source.effective if source else None,
+            confirmed['delta'] if confirmed else 0 if matches else None,
+            snapshot_hourly_rate=person.original_hourly_rate,
+            effective_hourly_rate=rate.amount, calculated_amount=calculated))
+    formal = (sum(person.after_amount for person in people if person.after_amount is not None)
+        if people and all(person.after_amount is not None for person in people) else None)
+    return replace(facts, historical_payroll=tuple(people), formal_staff_amount=formal,
+        accounting_pending=tuple(dict.fromkeys(pending)))
+
+
 def historical_repricing_plan(connection, facts: CasePricingFacts, terms: CasePricingTerms, *, lock: bool = True,
                               after_facts: CasePricingFacts | None = None,
                               include_payroll: bool = True,
@@ -492,11 +560,7 @@ def historical_repricing_plan(connection, facts: CasePricingFacts, terms: CasePr
         client_rows = _historical_client_amount_rows(cursor, facts.case_no, ('deposit', 'first', 'second'), suffix)
         if not facts.historical and (not client_rows or len({r['obligation_type'] for r in client_rows}) != len(client_rows)):
             raise PricingConflict('historical_pricing_original_installments_required')
-        cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.staff_id,o.current_event_id,o.status,o.amount_due_ntd,o.due_date,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
-            'FROM staff_obligations o JOIN staff_obligation_events e ON e.id=o.current_event_id '
-            'LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
-            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_kind='service_pay' AND o.direction='payable_to_staff' AND o.source_obligation_identity IS NULL" + suffix, (facts.case_no,))
-        staff_rows = cursor.fetchall()
+        staff_rows = _historical_staff_rows(cursor, facts.case_no, suffix)
         if not facts.historical and len(staff_rows) != 1:
             raise PricingConflict('historical_pricing_original_payable_required')
         cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
@@ -577,7 +641,9 @@ def _person_amounts(terms: CasePricingTerms, facts: CasePricingFacts, *,
         own_rate = use_legacy_person_rates and facts.source == 'legacy'
         if not own_rate and consumed is None and terms.payroll.covered != terms.payroll.excess:
             continue
-        if own_rate:
+        if own_rate and facts.historical_payroll_rate is not None:
+            salary = historical_service_salary(person.hours, facts.historical_payroll_rate).amount
+        elif own_rate:
             salary = legacy_historical_service_salary(person, person.hours)
         else:
             covered, excess = price_hours(((person.hours, False),), payroll_tiers(terms), consumed or Decimal(0))
@@ -676,16 +742,15 @@ def _partial_historical_repricing_plan(facts: CasePricingFacts, terms: CasePrici
         defer('subsidy', facts.case_no, subsidy_basis,
             ('historical_pricing_original_subsidy_return_required',), claim_basis)
     after_people = _person_amounts(terms, after_facts, use_legacy_person_rates=use_legacy_person_rates)
+    standard_rate = after_facts.historical_payroll_rate if use_legacy_person_rates else None
     persons: list[HistoricalPersonPricing] = []
     for person in after_facts.historical_people:
-        originals = tuple(row for row in staff_rows if row['assignment_id'] is not None and
-            int(row['assignment_id']) == int(person.assignment_identity.removeprefix('assignment:'))
-            and int(row['staff_id']) == person.staff_id)
+        originals = _original_payables(person, staff_rows)
         source = _historical_amount_facts(originals[0]) if len(originals) == 1 else None
         calculated = after_people.get(person.assignment_identity)
         update = None
         person_prior = previous.get(('payroll', person.assignment_identity))
-        if person_prior and birth_blockers.intersection(person_prior.pending):
+        if person_prior and standard_rate is None and birth_blockers.intersection(person_prior.pending):
             defer('payroll', person.assignment_identity, None, person_prior.pending)
         elif calculated is None:
             if include_payroll:
@@ -707,7 +772,10 @@ def _partial_historical_repricing_plan(facts: CasePricingFacts, terms: CasePrici
         persons.append(HistoricalPersonPricing(person.assignment_identity, person.staff_id,
             person.staff_name, person.hours, source.effective if source else None,
             update.effective if update else None,
-            update.effective - source.effective if update is not None and source is not None else None))
+            update.effective - source.effective if update is not None and source is not None else None,
+            snapshot_hourly_rate=person.original_hourly_rate if standard_rate else None,
+            effective_hourly_rate=standard_rate.amount if standard_rate else None,
+            calculated_amount=calculated if standard_rate else None))
     if include_payroll and not after_facts.historical_people:
         pending.append('historical_pricing_assignments_required')
     for person in after_facts.historical_people:
@@ -766,6 +834,8 @@ def preview_historical_birth_correction(connection, *, case_no: str, before_birt
         order = select_order(cursor, case_no, lock=for_update)
         policy_id = order.get('pricing_policy_id')
         terms = facts.terms
+        if before_birth_count == after_birth_count and facts.historical_payroll_rate is None:
+            raise PricingConflict('historical_pricing_birth_repair_not_required')
         if facts.source == 'policy' and policy_id is not None and before_birth_count in {'單胞胎', '雙胞胎'}:
             cursor.execute('SELECT policy_json FROM accounting_pricing_policies WHERE id=%s' +
                 (' FOR UPDATE' if for_update else ''), (policy_id,))
@@ -774,12 +844,20 @@ def preview_historical_birth_correction(connection, *, case_no: str, before_birt
             terms = replace(facts.terms, client=after_terms.client, payroll=after_terms.payroll)
         authority: HistoricalRateAuthority = ('policy' if facts.source == 'policy' else
             'manual' if facts.source == 'manual' else 'legacy')
-        plan = replace(historical_repricing_plan(connection, facts, terms, lock=for_update),
-            rate_authority=authority)
-        if before_birth_count not in {'單胞胎', '雙胞胎'} or authority == 'legacy':
-            code = ('historical_pricing_birth_original_value_required'
-                    if before_birth_count not in {'單胞胎', '雙胞胎'}
-                    else 'historical_pricing_birth_bound_policy_required')
+        standard_rate = (standard_hourly_rate(PayrollPolicyKind.TWINS)
+            if authority == 'legacy' and after_birth_count == '雙胞胎' else None)
+        if standard_rate is not None:
+            carry = tuple(replace(item, pending=tuple(code for code in item.pending if code != _LEGACY_BIRTH_POLICY_BLOCKER))
+                for item in facts.accounting_carry)
+            facts = replace(facts, accounting_carry=tuple(item for item in carry if item.pending))
+        after = replace(facts, historical_payroll_rate=standard_rate)
+        plan = replace(historical_repricing_plan(connection, facts, terms, lock=for_update,
+            after_facts=after, use_legacy_person_rates=authority == 'legacy'), rate_authority=authority)
+        if before_birth_count == after_birth_count and not plan.payroll_changed and all(
+                person.delta is not None for person in plan.persons):
+            raise PricingConflict('historical_pricing_birth_repair_not_required')
+        if standard_rate is None and before_birth_count not in {'單胞胎', '雙胞胎'}:
+            code = 'historical_pricing_birth_original_value_required'
             bases = {(item.component, item.identity): item for item in (*facts.accounting_carry, *plan.carry)}
             before = pricing_impact(facts.terms, facts)
             basis_entries: tuple[tuple[Literal['client', 'subsidy', 'payroll'], str, int | None], ...] = (
@@ -939,7 +1017,8 @@ class MySqlPricingConfigurationRepository:
         from infrastructure.mysql.order_terms_read_model import load_calculable_client_finance_facts, select_order
         with self.connection.cursor() as cursor:
             order = select_order(cursor, case_no, lock=lock)
-            historical = load_historical_pricing_facts(self.connection, case_no, lock=lock, order=order)
+            historical = load_historical_pricing_facts(self.connection, case_no, lock=lock, order=order,
+                readback=True)
             if historical is not None:
                 return historical
             from infrastructure.mysql.order_terms_read_model import load_locked_facts, load_preview_facts, preflight_staff_ids

@@ -40,7 +40,7 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 
 `HistoricalAccountingCarry` 沿既有 pricing event 與歷史天數事件的財務計畫保存未處理的計算基準與來源。後續胎數、服務資料或個案計價更正接續同一基準，補證後才能清除對應待核對，不能只算最近一次變更或以無變更操作消除舊差額。服務量或原計算基準未知時，預覽金額與差額為 `null`，不以零元冒充已確認。
 
-未綁個案政策或人工計價的歷史案件，服務資料更正沿各指派的正式費率快照計算，未改的指派不套用他人的時數或費率。明確儲存個案計價才採用承辦人確認的整案費率。胎數更正依正式費率來源判斷，人工費率不因數值恰好等於政策費率就被替換；缺正式新費率時保存更正與待核對，不把畫面建議值升格為正式價格。
+未綁個案政策或人工計價的歷史案件，單純更正服務資料沿各指派的原費率依據計算。對正式胎數更正，BeClass 提供有效胎數；Payroll 的適用費率依 [薪資規格 §2.1](../../../../../requirements/03_Payroll_Domain.md#21-核心計價與費率政策) 判定。未綁新政策不代表無費率來源，沒有人工計價的歷史雙胞胎用標準 `450`，計價查詢回讀更正後的有效費率，不改原快照。已綁政策與明確人工計價依原契約辨認，不用舊數字猜來源。只有缺服務量、原帳或其他實際缺項才暫留對應差額，不能只因沒有政策 ID 擋住標準費率。落帳沿既有 Payroll 差額 writer，重送不重複；已更正胎數但金額未同步時沿同一更正流程補差額，不要求再次切換胎數。
 
 ## Contracts
 - Reporting borrows read-only `case_total_amount` from complete current `CasePricingFacts`; Domain `calculate_case_total_amount` retains covered service before funding and one fixed floor fee. It does not reuse salary or receipt totals — `15` §15.4 / `04` §0 Reporting 唯讀投影.

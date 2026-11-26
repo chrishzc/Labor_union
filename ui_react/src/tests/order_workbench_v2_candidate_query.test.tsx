@@ -220,31 +220,68 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     expect(mocks.addCandidates).not.toHaveBeenCalled();
   });
 
-  it('新增候選月嫂先列出區域與週間服務都符合的人選，同組依會員編號排序', async () => {
+  it('按日期燈號分組，同組依兩項偏好、週間、地區、編號排序', async () => {
     mocks.queryPool.mockResolvedValue({ ...candidatePool(), candidates: [] });
+    const mismatch = { status: 'not_matched', required_value: '新竹市', staff_values: ['竹北市'] };
+    const pending = { status: 'pending', required_value: '週休一日', staff_values: [] };
     mocks.searchInquiryCandidates.mockResolvedValue(availability({ candidate_options: [
-      { ...eligible, staff_id: 1, staff_name: '週間不符月嫂', staff_union_no: 'A1', matching_conditions: {
-        ...eligible.matching_conditions,
-        preferred_service_days: { status: 'not_matched', required_value: '週休一日', staff_values: ['週休二日'] },
+      { ...eligible, staff_id: 1, staff_name: '只有地區', staff_union_no: 'A1', matching_conditions: {
+        ...eligible.matching_conditions, preferred_service_days: pending,
       } },
-      { ...eligible, staff_id: 2, staff_name: '區域待確認月嫂', staff_union_no: 'A2', matching_conditions: {
-        ...eligible.matching_conditions,
-        region: { status: 'pending', required_value: '新竹市', staff_values: [] },
+      { ...eligible, staff_id: 2, staff_name: '只有週間', staff_union_no: 'A2', matching_conditions: {
+        ...eligible.matching_conditions, region: mismatch,
       } },
       { ...eligible, staff_id: 10, staff_name: '兩項符合甲', staff_union_no: 'A10' },
       { ...eligible, staff_id: 3, staff_name: '兩項符合乙', staff_union_no: 'A3' },
+      { ...eligible, staff_id: 11, staff_name: '兩項未符合', staff_union_no: 'A0', matching_conditions: {
+        region: mismatch, preferred_service_days: pending,
+      } },
+      { ...eligible, staff_id: 4, staff_name: '等待訂金警示', staff_union_no: 'A4' },
+      { ...eligible, staff_id: 5, staff_name: '有正式排班', staff_union_no: 'A5',
+        available_ranges: [
+          { start_date: '2026-09-01', end_date: '2026-09-02' },
+          { start_date: '2026-09-04', end_date: '2026-09-05' },
+        ],
+        coverage_day_count: 4, supported_day_count: 4,
+        supported_service_dates: eligible.required_service_dates.filter(day => day !== '2026-09-03'),
+        supported_ranges: [
+          { start_date: '2026-09-01', end_date: '2026-09-02', service_day_count: 2 },
+          { start_date: '2026-09-04', end_date: '2026-09-05', service_day_count: 2 },
+        ],
+        full_case_coverage: false, full_selected_segment_coverage: false, uncovered_segment_dates: ['2026-09-03'],
+      },
+      { ...partial, staff_id: 6, staff_name: '未覆蓋服務日', staff_union_no: 'A6' },
+    ], conflicts: [
+      { segment_index: 0, staff_id: 4, work_date: '2026-09-01', reason_code: 'active_lock' },
+      { segment_index: 0, staff_id: 5, work_date: '2026-09-02', reason_code: 'buffer' },
+      { segment_index: 0, staff_id: 5, work_date: '2026-09-03', reason_code: 'schedule', case_no: '115000205' },
+      { segment_index: 1, staff_id: 3, work_date: '2026-09-04', reason_code: 'assignment' },
     ] }));
 
     render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} presentation="workbench" />);
     const list = await screen.findByLabelText('可詢問月嫂');
+    const groups = within(list).getAllByRole('region');
+    expect(groups.map(group => group.getAttribute('aria-label'))).toEqual(['無日期衝突', '有日期警示', '有日期衝突']);
+    expect(within(groups[0]).getByRole('heading')).toHaveTextContent('無日期衝突（5）');
     const buttons = within(list).getAllByRole('button', { name: /^加入候選池/ });
     expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual([
-      '加入候選池（兩項符合乙）',
-      '加入候選池（兩項符合甲）',
-      '加入候選池（週間不符月嫂）',
-      '加入候選池（區域待確認月嫂）',
+      '加入候選池（兩項符合乙）', '加入候選池（兩項符合甲）', '加入候選池（只有週間）', '加入候選池（只有地區）',
+      '加入候選池（兩項未符合）', '加入候選池（等待訂金警示）', '加入候選池（有正式排班）', '加入候選池（未覆蓋服務日）',
     ]);
+    expect(within(groups[2]).getByText('空閒 4/5 天')).toBeVisible();
+    expect(within(groups[2]).getByText('已有正式排班：案件 115000205、2026-09-03')).toBeVisible();
+    expect(within(list).getAllByText(/^已有正式排班：/)).toHaveLength(1);
+    expect(list).not.toHaveTextContent(/影響日期|查看(?:衝突|檔期)日期與原因|待公會協調|尚缺可用人選|僅提醒|2026-09-0[1245]/);
     for (const button of buttons) expect(button).toBeEnabled();
+  });
+
+  it('日期未備妥不會顯示綠燈候選', async () => {
+    mocks.queryPool.mockResolvedValue({ ...candidatePool(), candidates: [] });
+    mocks.searchInquiryCandidates.mockRejectedValue(new ApiHttpError(409, 'candidate_inquiry_dates_missing', 'missing'));
+    render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} presentation="workbench" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('預計服務日期尚未完整');
+    expect(screen.queryByRole('region', { name: '無日期衝突' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^加入候選池/ })).not.toBeInTheDocument();
   });
 
   it('automatically refreshes availability warnings after pause and restore changes', async () => {

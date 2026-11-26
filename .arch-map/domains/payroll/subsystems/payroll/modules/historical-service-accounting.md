@@ -32,6 +32,12 @@
 - `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md`
 - `.arch-map/requirements/03_Payroll_Domain.md` §2.2、§3.2
 
+### 畫面與正式同步分開驗收 ^historical-payroll-calculation-and-readback
+
+- 延續本模組唯讀查核與正式同步分工。工作區讀回各人計薪來源、正式應付及付款安排，由 Payroll 計算及回傳能證實的金額，前端不使用案件總額或補助款代算。查核狀態須能區分「可建帳但尚未下命令」與「已建帳但日期／分期未知」。
+- 歷史採納及服務中轉完工由 Orders 保留 Payroll 同步結果；舊案依既有同案同步命令接續。歸屬已更正者沿更正版本的證據接續，不由基準同步復活舊服務量。驗收分別讀 case accounting、Payroll 應付及來源收據。
+- [共同狀態與驗收](../../../../../requirements/03_Payroll_Domain.md#payroll-lifecycle-readback)；[抽屜讀回](../../../../../requirements/22B_帳務差額處置與工作台UI正式規格.md#case-drawer-payroll-and-subsidy-readback)。
+
 ## Verification
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/`
 

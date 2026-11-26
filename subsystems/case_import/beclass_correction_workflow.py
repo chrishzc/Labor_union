@@ -251,8 +251,12 @@ class BeClassCorrectionWorkflow:
             raise BeClassCorrectionConflict("beclass_correction_stale_version")
         historical_pricing = None
         before = {field: snapshot.effective.get(field) for field in normalized}
-        if _birth_count_changed(snapshot, normalized):
-            mode = snapshot.birth_count_correction_mode
+        mode = snapshot.birth_count_correction_mode
+        review_existing_twins = (
+            mode is BeClassBirthCountCorrectionMode.HISTORICAL_SERVICE_COMPLETED
+            and normalized == {"multi_birth_count": "雙胞胎"}
+        )
+        if _birth_count_changed(snapshot, normalized) or review_existing_twins:
             if mode is BeClassBirthCountCorrectionMode.LOCKED:
                 raise BeClassCorrectionBlocked("beclass_multi_birth_count_locked_after_service_start")
             if mode is BeClassBirthCountCorrectionMode.HISTORICAL_SERVICE_COMPLETED:

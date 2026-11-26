@@ -12,6 +12,11 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from domains.case_import.registration_details import (
+    INGREDIENT_PURCHASE_SURVEY_FIELD,
+    normalize_ingredient_purchase,
+)
+
 
 VALID_MULTI_BIRTH_COUNTS = frozenset({"單胞胎", "雙胞胎"})
 
@@ -116,13 +121,20 @@ def project_order_information(raw_payload: object, corrections: object = None) -
             issues[canonical_key] = "invalid"
             continue
         values[canonical_key] = clean[0]
-    return _with_corrections(OrderInformationProjection(values=values, issues=issues), corrections)
+    return _with_corrections(
+        OrderInformationProjection(values=values, issues=issues),
+        corrections,
+        ingredient_purchase=data.get(INGREDIENT_PURCHASE_SURVEY_FIELD),
+    )
 
 
-def _with_corrections(projection: OrderInformationProjection, corrections: object) -> OrderInformationProjection:
-    effective = _decode_mapping(corrections)
-    if not effective:
-        return projection
+def _with_corrections(
+    projection: OrderInformationProjection,
+    corrections: object,
+    *,
+    ingredient_purchase: object = None,
+) -> OrderInformationProjection:
+    effective = _decode_mapping(corrections) or {}
     values, issues = dict(projection.values), dict(projection.issues)
     for field in ORDER_INFORMATION_KEYS:
         if field not in effective:
@@ -135,6 +147,13 @@ def _with_corrections(projection: OrderInformationProjection, corrections: objec
         if value is None or isinstance(value, (str, bool, int, float)):
             values[field] = value
             issues.pop(field, None)
+    try:
+        values["ingredient_purchase"] = normalize_ingredient_purchase(
+            effective.get("ingredient_purchase", ingredient_purchase)
+        )
+    except ValueError:
+        values["ingredient_purchase"] = None
+        issues["ingredient_purchase"] = "invalid"
     return OrderInformationProjection(values=values, issues=issues)
 
 

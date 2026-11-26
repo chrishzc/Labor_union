@@ -344,11 +344,14 @@ def _payment_due_date(root, pricing=None, service_day_count=0):
     if pricing is not None:
         from domains.payroll.tiered_rates import funding_due_date
 
+        if payable is not None and payable > 0:
+            return funding_due_date(completed_on, directly_subsidized=False)
         hours = Decimal(str(root["service_hours_per_day"])) * service_day_count
-        directly_subsidized = payable in (None, 0) and is_full_subsidy_case(
+        if payable in (None, 0) and is_full_subsidy_case(
             root["identity_status"], hours, pricing.subsidy_hours,
-        ) is True
-        return funding_due_date(completed_on, directly_subsidized=directly_subsidized)
+        ) is True:
+            return funding_due_date(completed_on, directly_subsidized=True)
+        return None
     if payable is None:
         return None
     coverage = derive_subsidy_coverage(
@@ -356,6 +359,8 @@ def _payment_due_date(root, pricing=None, service_day_count=0):
         Decimal(str(root["service_days"])) * Decimal(str(root["service_hours_per_day"])),
         Decimal(str(root["floor_fee"])),
     )
+    if payable == 0 and not coverage.is_full_subsidy_order:
+        return None
     return calculate_staff_payment_due_date(completed_on, payable, coverage.is_full_subsidy_order)
 
 

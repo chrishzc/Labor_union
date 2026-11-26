@@ -704,6 +704,29 @@ def test_legacy_mixed_person_rates_preserve_unselected_pay_and_explicit_case_can
         assert current_pricing_impact(replace(after, source=source)).staff_total_amount == 17150
 
 
+def test_standard_historical_twins_price_confirmed_people_without_inventing_original_payables():
+    from domains.payroll.calculation import PayrollPolicyKind, standard_hourly_rate
+    from infrastructure.mysql.pricing_configuration_repository import _partial_historical_repricing_plan
+    from subsystems.client_finance.pricing_configuration import HistoricalPricingPerson
+
+    people = (HistoricalPricingPerson('assignment:1', 1, 'Confirmed', Decimal(320), 40),
+              HistoricalPricingPerson('assignment:2', 2, 'Confirmed without original', Decimal(16), 2),
+              HistoricalPricingPerson('assignment:3', 3, 'Unknown service', None, None))
+    facts = CasePricingFacts('standard-twins', 0, (1, 1, 1, 0, 1, 1), terms(), 'legacy', (), 0,
+        historical=True, historical_people=people)
+    after = replace(facts, historical_payroll_rate=standard_hourly_rate(PayrollPolicyKind.TWINS))
+    row = {'obligation_identity': 'original', 'assignment_id': 1, 'staff_id': 1,
+        'computed_ntd': 96000, 'effective_ntd': 96000, 'nominal': 96000, 'amount_mode': 'automatic'}
+    plan = _partial_historical_repricing_plan(facts, facts.terms, after, (), (row,), (), False, 'evidence',
+        True, use_legacy_person_rates=True)
+    assert [(person.effective_hourly_rate, person.calculated_amount, person.after_amount, person.delta)
+            for person in plan.persons] == [(450, 144000, 144000, 48000), (450, 7200, None, None),
+                                             (450, None, None, None)]
+    assert [update.identity for update in plan.staff_updates] == ['original']
+    assert 'historical_pricing_original_payable_required:assignment:2' in plan.pending
+    assert 'historical_pricing_person_service_hours_required:assignment:3' in plan.pending
+
+
 def test_legacy_person_rate_correction_preserves_floor_allocation_and_manual_effective_amount():
     from domains.payroll.calculation import AssignmentRateSnapshot, PayrollPolicyKind
     from shared_kernel.money import MoneyNTD

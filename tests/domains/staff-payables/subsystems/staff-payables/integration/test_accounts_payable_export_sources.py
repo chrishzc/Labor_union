@@ -185,6 +185,9 @@ def test_missing_obligation_is_not_recalculated_by_export_query():
      "待核對原付款證據。"),
     ({"action": "created", "due_date": "2026-03-15", "amount_ntd": 12000},
      "已查到同步所需資料，可同步月嫂應付。本次查核尚未入帳。"),
+    ({"action": "created", "due_date": None, "amount_ntd": 48000,
+      "detail": "月嫂付款來源與補助流向尚未確認。"},
+     "已查到同步所需資料，可同步月嫂應付。本次查核尚未入帳。月嫂付款來源與補助流向尚未確認。"),
 ])
 def test_historical_case_audit_uses_current_payroll_preview_without_reporting_payment_as_created(
     monkeypatch, outcome, reason
