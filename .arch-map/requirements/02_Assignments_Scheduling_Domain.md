@@ -62,6 +62,9 @@
 - 管理員選擇年度後直接查詢並顯示該年全部國定假日，匯入完成亦回讀全年。保留排班日曆原區間查詢。逐日保存雙倍開關；新匯入日期預設關閉，重匯既有日期保留人工開關，不以匯入預設值覆寫。匯入沿既有逐日 Query／Preview／Apply、版本及重送契約。
 - 雙倍適用日期只取調整後的實際有效服務日及當日有效時數，取消班、休息日、緩衝日不供計價。歷史案排除與金額規則見 [Client Finance PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing)；設定異動的雙邊帳務保護見 [22A](22A_案件帳務三方案與補助流向正式規格.md#holiday-recalculation-protection)。本設定不改排班衝突規則。
 - 設定儲存成功與逐案帳務重算結果分開呈現。開關回執及既有案件／對帳入口須能追查已重算、確實不需更動、因正式收付保留，以及未重算的具體原因；不得忽略逐案結果而將整批標為完成。此結果不新增全額免自備操作警告。
+<a id="full-subsidy-double-pay-scheduling"></a>
+
+- **全額免自備的人工排班**：經辦安排班表時避開已啟用雙倍薪的國定假日。這是工會的排班作業規則，不新增系統擋單或警示。若案件早已排定，之後才啟用該日雙倍，不自動移班；依 [全額免自備帳務例外](22A_案件帳務三方案與補助流向正式規格.md#full-subsidy-no-advance) 處理重算與差額。
 - **Holiday facts**：`SchedulingHolidayQuery` 作為版本化唯讀 port，納入 Preview fingerprint 並在 Apply 重鎖重讀（無法讀取回 `holiday_calendar_unavailable`）。
 
 <a id="service-start-and-substitution"></a>
