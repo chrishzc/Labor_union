@@ -813,3 +813,26 @@ def test_reclaim_fails_closed_when_persisted_create_ids_conflict():
     assert [step for step, _ in provider.calls] == []
     assert repository.receipts == []
     assert repository.recorded == []
+
+def test_richmenuswitch_survives_publication_model_and_provider_payload() -> None:
+    import json
+    from subsystems.line.rich_menu_definition import rich_menu_provider_definition
+    from subsystems.line.rich_menu_models import RichMenuDefinition
+
+    menu = RichMenuDefinition.model_validate({
+        "id": "staff_menu",
+        "name": "Staff menu",
+        "audience_role": "staff",
+        "chat_bar_text": "Menu",
+        "buttons": [{
+            "id": "next",
+            "label": "Next",
+            "bounds": {"x": 0, "y": 0, "width": 2500, "height": 843},
+            "action": {"type": "richmenuswitch", "rich_menu_alias_id": "staff-next", "data": "next"},
+        }],
+    })
+    assert json.loads(rich_menu_provider_definition(menu.model_dump()))["areas"][0]["action"] == {
+        "type": "richmenuswitch",
+        "richMenuAliasId": "staff-next",
+        "data": "next",
+    }

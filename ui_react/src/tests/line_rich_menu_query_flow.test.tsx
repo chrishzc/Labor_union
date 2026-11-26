@@ -112,6 +112,29 @@ describe('LINE Rich Menu query 接線', () => {
     expect(screen.getAllByText('此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。').length).toBeGreaterThan(0);
   });
 
+  it('重開後重新整理讀回同一版發布，只查詢不重新送出', async () => {
+    const { identity, configuration, richMenuDraft } = dependencies();
+    const current = { ...LINE_RICH_MENU_PUBLICATION_FIXTURE, id: 73,
+      menu_definition_id: 'customer_menu', configuration_revision: 8, status: 'published' as const };
+    vi.mocked(configuration.listRichMenuPublications).mockResolvedValue({
+      ...LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE, items: [current],
+    });
+    vi.mocked(configuration.getRichMenuPublication).mockResolvedValue({
+      ...current, step_receipts: [{ step: 'upload', acknowledged_at: '2026-11-01T00:00:00Z' }],
+    });
+    const publication: LineRichMenuPublicationClient = { preview: vi.fn(), publish: vi.fn(), retry: vi.fn() };
+    render(<LineManagementPage scope="interface" lineIdentity={identity} lineConfiguration={configuration}
+      richMenuDraft={richMenuDraft} richMenuPublication={publication} />);
+    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
+    await screen.findByRole('heading', { name: '此版本已發布' });
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    expect(await screen.findByText(/發布編號：73.*upload/)).toBeVisible();
+    expect(configuration.listRichMenuPublications).toHaveBeenCalledWith({ menuId: 'customer_menu', page: 1, pageSize: 1 });
+    expect(configuration.getRichMenuPublication).toHaveBeenCalledWith(73);
+    expect(publication.publish).not.toHaveBeenCalled();
+    expect(publication.retry).not.toHaveBeenCalled();
+  });
+
   it.each(['published', 'publish_retryable_failed'] as const)('排入後追蹤至 %s；可重試失敗留在發布狀態視窗處理', async (terminalStatus) => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     sessionClient.setSession('root-session', {

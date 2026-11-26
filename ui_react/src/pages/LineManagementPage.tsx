@@ -316,7 +316,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     status: LineRichMenuPublicationModel['status'];
     attempts: number;
     timedOut: boolean;
+    lastStep?: string;
   } | null>(null);
+
+  const [publicationReadState, setPublicationReadState] = useState<'idle' | 'loading' | 'unknown'>('idle');
 
   // 圖文選單 本機互動沙盒與比對狀態
   const [activeSimLiff, setActiveSimLiff] = useState<{
@@ -401,6 +404,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     const tracked = trackedRichMenuPublication;
     if (
       activeTab !== 'richmenu'
+      || publicationReadState === 'loading'
       || !tracked
       || tracked.timedOut
       || !['queued', 'publishing'].includes(tracked.status)
@@ -421,6 +425,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             ? {
                 ...existing,
                 status: current.status,
+                lastStep: publication.step_receipts?.at(-1)?.step,
                 attempts: existing.attempts + 1,
               }
             : existing);
@@ -444,7 +449,41 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     lineConfiguration,
     richMenuPublicationPollIntervalMs,
     trackedRichMenuPublication,
+    publicationReadState,
   ]);
+
+  async function refreshRichMenuPublication(): Promise<void> {
+    if (publicationReadState === 'loading') return;
+    const revision = richMenuDraftSnapshot?.revision;
+    const menuId = selectedMenuId;
+    if (revision === undefined || !menuId) {
+      setRichMenuReload(value => value + 1);
+      return;
+    }
+    setPublicationReadState('loading');
+    try {
+      const tracked = trackedRichMenuPublication;
+      const id = tracked?.menuDefinitionId === menuId && tracked.configurationRevision === revision
+        ? tracked.id
+        : (await lineConfiguration.listRichMenuPublications({ menuId, page: 1, pageSize: 1 })).items
+          .find(item => item.menu_definition_id === menuId && item.configuration_revision === revision)?.id;
+      if (id !== undefined) {
+        const publication = await lineConfiguration.getRichMenuPublication(id);
+        const current = adaptLineRichMenuPublication(publication);
+        if (current.id !== id || current.menuDefinitionId !== menuId || current.configurationRevision !== revision) {
+          throw new Error('Rich Menu publication identity mismatch');
+        }
+        setTrackedRichMenuPublication({
+          ...current, attempts: 0, timedOut: false,
+          lastStep: publication.step_receipts?.at(-1)?.step,
+        });
+      }
+      setPublicationReadState('idle');
+      setRichMenuReload(value => value + 1);
+    } catch {
+      setPublicationReadState('unknown');
+    }
+  }
 
 
 
@@ -612,8 +651,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 data-control-id="line.richmenu.refresh"
                 aria-label="重新整理"
                 title={richMenuDirty ? '請先儲存或取消修改，再重新整理' : '重新整理草稿'}
-                disabled={richMenuDirty || richMenuBusy}
-                onClick={() => setRichMenuReload((value) => value + 1)}
+                disabled={richMenuDirty || richMenuBusy || publicationReadState === 'loading'}
+                onClick={() => void refreshRichMenuPublication()}
               >
                 <RefreshCw aria-hidden="true" /><span className="richmenu-refresh-label">重新整理</span>
               </button>
@@ -965,6 +1004,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     }}
                   />
                 )}
+                {publicationReadState === 'unknown' && <p role="status">目前無法查詢發布結果；未重新送出發布。</p>}
                 {(activePublicationTracking || activePublicationLock?.state !== 'editable') && (
                   <section className="richmenu-publish-card" aria-label="圖文選單 發布狀態">
                     {activePublicationTracking ? (
@@ -976,6 +1016,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               ? '發布處理中'
                               : '發布未完成'}
                         </h4>
+                        <p>發布編號：{activePublicationTracking.id}{activePublicationTracking.lastStep && ` · 最後已確認步驟：${activePublicationTracking.lastStep}`}</p>
                         {activePublicationTracking.status === 'published' ? (
                           <p>LINE 平台已完成發布。如需再次發布，請先儲存變更，建立下一版草稿。</p>
                         ) : ['queued', 'publishing'].includes(activePublicationTracking.status) ? (
