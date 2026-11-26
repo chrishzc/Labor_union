@@ -64,6 +64,13 @@ def _provider_action(action):
         if isinstance(display_text, str) and display_text.strip():
             provider_postback["displayText"] = display_text.strip()
         return provider_postback
+    if action_type == "richmenuswitch":
+        alias = _text(action.get("rich_menu_alias_id"), "Rich Menu switch alias")
+        return {
+            "type": "richmenuswitch",
+            "richMenuAliasId": alias,
+            "data": _text(action.get("data") or alias, "Rich Menu switch data"),
+        }
     if action_type != "uri":
         raise ValueError("Rich Menu action type is unsupported")
     if action.get("uri_source") == "liff":

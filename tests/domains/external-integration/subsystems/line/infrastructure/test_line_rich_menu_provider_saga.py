@@ -813,3 +813,97 @@ def test_reclaim_fails_closed_when_persisted_create_ids_conflict():
     assert [step for step, _ in provider.calls] == []
     assert repository.receipts == []
     assert repository.recorded == []
+
+def test_richmenuswitch_survives_publication_model_and_provider_payload() -> None:
+    import json
+    from subsystems.line.rich_menu_definition import rich_menu_provider_definition
+    from subsystems.line.rich_menu_models import RichMenuDefinition
+
+    menu = RichMenuDefinition.model_validate({
+        "id": "staff_menu",
+        "name": "Staff menu",
+        "audience_role": "staff",
+        "chat_bar_text": "Menu",
+        "buttons": [{
+            "id": "next",
+            "label": "Next",
+            "bounds": {"x": 0, "y": 0, "width": 2500, "height": 843},
+            "action": {"type": "richmenuswitch", "rich_menu_alias_id": "staff-next", "data": "next"},
+        }],
+    })
+    assert json.loads(rich_menu_provider_definition(menu.model_dump()))["areas"][0]["action"] == {
+        "type": "richmenuswitch",
+        "richMenuAliasId": "staff-next",
+        "data": "next",
+    }
+
+@pytest.mark.parametrize("data", [None, "", "   "])
+def test_richmenuswitch_rejects_missing_postback_data(data: str | None) -> None:
+    from pydantic import ValidationError
+    from subsystems.line.rich_menu_models import MenuAction
+
+    with pytest.raises(ValidationError, match="richmenuswitch action requires data"):
+        MenuAction.model_validate({"type": "richmenuswitch", "rich_menu_alias_id": "staff-next", "data": data})
+
+
+@pytest.mark.parametrize(("before", "expected_calls", "expected_outcome"), [
+    ("richmenu-old", ["get", "post", "get"], LineRichMenuProviderOutcomeType.SUCCESS),
+    ("richmenu-next", ["get"], LineRichMenuProviderOutcomeType.SUCCESS),
+    ("richmenu-unexpected", ["get"], LineRichMenuProviderOutcomeType.REJECTED),
+])
+def test_alias_replacement_uses_only_the_expected_previous_version(
+    before: str, expected_calls: list[str], expected_outcome: LineRichMenuProviderOutcomeType,
+) -> None:
+    responses = [_Response(200, {"richMenuId": before})]
+    if before == "richmenu-old":
+        responses.extend([_Response(200), _Response(200, {"richMenuId": "richmenu-next"})])
+    session = _Session(responses)
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"png", "image/png"), session=session)
+    request = LineRichMenuProviderRequest(
+        LineRichMenuPublicationId(7), _definition(), "image/ref",
+        expected_previous_provider_menu_id="richmenu-old",
+    )
+
+    outcome = adapter.upsert_alias(request, "richmenu-next")
+
+    assert outcome.outcome_type is expected_outcome
+    assert [call[0] for call in session.calls] == expected_calls
+    assert all(call[1].endswith("/richmenu/alias/default-alias") for call in session.calls)
+
+def test_alias_replace_readback_confirms_an_acknowledgement_lost_in_transit() -> None:
+    session = _Session([
+        _Response(200, {"richMenuId": "richmenu-old"}),
+        requests.Timeout("response lost after update"),
+        _Response(200, {"richMenuId": "richmenu-next"}),
+        _Response(200, {"richMenuId": "richmenu-next"}),
+    ])
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"png", "image/png"), session=session)
+    request = LineRichMenuProviderRequest(
+        LineRichMenuPublicationId(7), _definition(), "image/ref",
+        expected_previous_provider_menu_id="richmenu-old",
+    )
+
+    assert adapter.upsert_alias(request, "richmenu-next").provider_menu_id == "richmenu-next"
+    assert adapter.upsert_alias(request, "richmenu-next").provider_menu_id == "richmenu-next"
+    assert [call[0] for call in session.calls] == ["get", "post", "get", "get"]
+    assert all(call[1].endswith("/richmenu/alias/default-alias") for call in session.calls)
+
+
+def test_alias_replace_does_not_confirm_success_without_matching_readback() -> None:
+    session = _Session([
+        _Response(200, {"richMenuId": "richmenu-old"}),
+        _Response(200),
+        _Response(200, {"richMenuId": "richmenu-old"}),
+    ])
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"png", "image/png"), session=session)
+    request = LineRichMenuProviderRequest(
+        LineRichMenuPublicationId(7), _definition(), "image/ref",
+        expected_previous_provider_menu_id="richmenu-old",
+    )
+
+    outcome = adapter.upsert_alias(request, "richmenu-next")
+
+    assert outcome.outcome_type is LineRichMenuProviderOutcomeType.UNAVAILABLE
+    assert outcome.error_code == "line_rich_menu_alias_update_unconfirmed"
+    assert outcome.provider_menu_id is None
+    assert [call[0] for call in session.calls] == ["get", "post", "get"]

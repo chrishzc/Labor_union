@@ -133,6 +133,7 @@ class LineRichMenuWorker:
             reference,
             receipts,
             attempts,
+            previous_provider_menu_id,
         )
         self._record(
             item,
@@ -203,11 +204,12 @@ class LineRichMenuWorker:
             )
         return receipts, attempts, previous_provider_menu_id
 
-    def _advance(self, item, reference, receipts, attempts):
+    def _advance(self, item, reference, receipts, attempts, previous_provider_menu_id: str | None):
         request = LineRichMenuProviderRequest(
             item.publication.publication_id,
             item.definition_json,
             reference,
+            expected_previous_provider_menu_id=previous_provider_menu_id,
         )
         provider_menu_id = self._receipt_provider_id(
             item,

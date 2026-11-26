@@ -36,6 +36,7 @@ export interface LineConfigurationQueryRequestOptions {
 export interface LineRichMenuPublicationListOptions extends LineConfigurationQueryRequestOptions {
   page?: number;
   pageSize?: number;
+  menuId?: string;
 }
 
 export interface LineConfigurationQueryClient {
@@ -145,6 +146,7 @@ export async function listLineRichMenuPublications(
       params: {
         page,
         page_size: pageSize,
+        ...(options?.menuId ? { menu_id: options.menuId } : {}),
       },
     });
     return decodeEnvelope(LineRichMenuPublicationPageSchema, raw);
