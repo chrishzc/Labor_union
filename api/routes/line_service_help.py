@@ -87,7 +87,6 @@ def _require_faq_published_reader(
     response_model=BaseResponse[FaqListResponse],
     dependencies=[Depends(_require_faq_published_reader)],
 )
-@public_router.get("/faq", response_model=BaseResponse[FaqListResponse])
 def get_published_faqs(
     select_readers: Annotated[Callable[[], ServiceHelpFaqReaders], Depends(get_service_help_faq_readers)],
     cursor: str | None = None,
