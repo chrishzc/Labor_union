@@ -460,6 +460,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       setRichMenuReload(value => value + 1);
       return;
     }
+    const publicationExpected = richMenuDraftSnapshot.publication_locks.some(lock => (
+      lock.menu_definition_id === menuId && lock.configuration_revision === revision
+      && (lock.state === 'published' || lock.state === 'processing')
+    ));
     setPublicationReadState('loading');
     try {
       const tracked = trackedRichMenuPublication;
@@ -478,7 +482,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           lastStep: publication.step_receipts?.at(-1)?.step,
         });
       }
-      setPublicationReadState('idle');
+      setPublicationReadState(id === undefined && publicationExpected ? 'unknown' : 'idle');
       setRichMenuReload(value => value + 1);
     } catch {
       setPublicationReadState('unknown');

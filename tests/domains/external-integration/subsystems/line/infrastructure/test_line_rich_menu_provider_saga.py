@@ -837,6 +837,15 @@ def test_richmenuswitch_survives_publication_model_and_provider_payload() -> Non
         "data": "next",
     }
 
+@pytest.mark.parametrize("data", [None, "", "   "])
+def test_richmenuswitch_rejects_missing_postback_data(data: str | None) -> None:
+    from pydantic import ValidationError
+    from subsystems.line.rich_menu_models import MenuAction
+
+    with pytest.raises(ValidationError, match="richmenuswitch action requires data"):
+        MenuAction.model_validate({"type": "richmenuswitch", "rich_menu_alias_id": "staff-next", "data": data})
+
+
 @pytest.mark.parametrize(("before", "expected_calls", "expected_outcome"), [
     ("richmenu-old", ["get", "post", "get"], LineRichMenuProviderOutcomeType.SUCCESS),
     ("richmenu-next", ["get"], LineRichMenuProviderOutcomeType.SUCCESS),

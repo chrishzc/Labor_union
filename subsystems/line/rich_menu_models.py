@@ -39,6 +39,8 @@ class MenuAction(BaseModel):
             raise ValueError("postback action requires data")
         if self.type == "richmenuswitch" and not self.rich_menu_alias_id:
             raise ValueError("richmenuswitch action requires an alias")
+        if self.type == "richmenuswitch" and not (self.data or "").strip():
+            raise ValueError("richmenuswitch action requires data")
         if self.type != "richmenuswitch" and self.rich_menu_alias_id is not None:
             raise ValueError("only richmenuswitch actions can specify an alias")
         return self

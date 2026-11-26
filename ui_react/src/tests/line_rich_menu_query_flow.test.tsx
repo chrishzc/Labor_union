@@ -81,6 +81,31 @@ describe('LINE Rich Menu query 接線', () => {
     expect(richMenuDraft.apply).not.toHaveBeenCalled();
   });
 
+  it.each(['wrong revision', 'query failed'] as const)('重新整理找不到已發布原版本時不重送：%s', async reason => {
+    const { identity, configuration, richMenuDraft } = dependencies();
+    const history = vi.mocked(configuration.listRichMenuPublications);
+    if (reason === 'wrong revision') {
+      history.mockResolvedValue({
+        ...LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE,
+        items: [{ ...LINE_RICH_MENU_PUBLICATION_FIXTURE, id: 74, configuration_revision: 9 }],
+      });
+    } else {
+      history.mockRejectedValue(new Error('query failed'));
+    }
+    const publication: LineRichMenuPublicationClient = { preview: vi.fn(), publish: vi.fn(), retry: vi.fn() };
+    render(<LineManagementPage scope="interface" lineIdentity={identity} lineConfiguration={configuration}
+      richMenuDraft={richMenuDraft} richMenuPublication={publication} />);
+    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
+    await screen.findByRole('heading', { name: '此版本已發布' });
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+
+    expect(await screen.findByText('目前無法查詢發布結果；未重新送出發布。')).toBeVisible();
+    expect(history).toHaveBeenCalledWith({ menuId: 'customer_menu', page: 1, pageSize: 1 });
+    expect(configuration.getRichMenuPublication).not.toHaveBeenCalled();
+    expect(publication.publish).not.toHaveBeenCalled();
+    expect(publication.retry).not.toHaveBeenCalled();
+  });
+
   it('processing exact lock 不掛載草稿或 provider mutation controls', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
