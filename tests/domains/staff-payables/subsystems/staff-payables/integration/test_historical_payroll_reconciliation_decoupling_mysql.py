@@ -16,6 +16,7 @@ import subprocess
 from threading import Thread
 from time import monotonic, sleep
 from urllib.error import URLError
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 from uuid import uuid4
 
@@ -595,7 +596,10 @@ def _browser_payroll_app(tmp_path):
             with log_path.open("w", encoding="utf-8") as log, subprocess.Popen(
                 ["node", "node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", str(vite_port), "--strictPort"],
                 cwd=Path.cwd() / "ui_react",
-                env={**os.environ, "VITE_DEV_API_TARGET": api_url, "VITE_PUBLIC_PATH_PREFIX": "/admin"},
+                env={
+                    **{key: value for key, value in os.environ.items() if key != "VITE_PUBLIC_PATH_PREFIX"},
+                    "VITE_DEV_API_TARGET": api_url,
+                },
                 stdout=log, stderr=subprocess.STDOUT,
             ) as vite:
                 try:
@@ -680,8 +684,19 @@ def test_historical_payroll_via_real_browser(mysql_connection, monkeypatch, tmp_
     with _browser_payroll_app(tmp_path) as base, sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        api_responses = []
+        page_errors = []
+
+        def record_api_response(response):
+            path = urlsplit(response.url).path
+            if response.url.startswith(f"{base}/") and "/api/" in path:
+                api_responses.append((response.request.method, path, response.status))
+
+        page.on("response", record_api_response)
+        page.on("pageerror", lambda error: page_errors.append(error.name))
         try:
-            page.goto(f"{base}/admin/", wait_until="domcontentloaded")
+            # Start with a same-origin API document so React does not mount before the session is stored.
+            page.goto(f"{base}/api/v1/admin/auth/development-session", wait_until="domcontentloaded")
             session_status = page.evaluate("""async () => {
                 const response = await fetch('/api/v1/admin/auth/development-session', {method: 'POST'});
                 if (response.ok) {
@@ -769,6 +784,16 @@ def test_historical_payroll_via_real_browser(mysql_connection, monkeypatch, tmp_
             assert {item["staff_id"]: item["status"] for item in readback["staff_accounting_availability"]} == {
                 partial_staff[0]["staff_id"]: "formal", partial_staff[1]["staff_id"]: "needs_review",
             }
+        except Exception:
+            document = urlsplit(page.url)
+            print(f"Browser document path: {document.path}#{document.fragment.split('?')[0]}")
+            print(f"Browser API responses (method, path, status): {api_responses[-30:]}")
+            print(f"Browser JavaScript error types: {page_errors[-10:]}")
+            try:
+                print(f"Browser visible text:\n{page.locator('body').inner_text(timeout=2000)[:3500]}")
+            except Exception:
+                print("Browser document text unavailable.")
+            raise
         finally:
             browser.close()
 
