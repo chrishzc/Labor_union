@@ -72,7 +72,7 @@ it.each([
  ['estimate', null, '尚無正式補助分期明細'],
  ['formal', 12000, '待付 NT$ 12,000'],
  ['formal', 0, '已結清'],
-] as const)('方案一（%s，分期待付 %s）只呈現月嫂補助',async(source,remaining,label)=>{
+] as const)('方案一（%s，分期待付 %s）呈現月嫂補助並保留既有退款',async(source,remaining,label)=>{
  const base=facts();
  const data:CaseAccounting={...base,scheme:'split',
   subsidy_plan:{...plan,version:1,events:[{version:1,scheme:'split',actor:'synthetic',created_at:'2026-10-01T00:00:00Z'}]},
@@ -81,7 +81,7 @@ it.each([
   ]}],
   client_items:remaining===0 ? [...base.client_items,{
    ...base.client_items[0], identity:'old-subsidy-return', direction:'payable', obligation_type:'subsidy_return',
-   label:'原帳補助', expected_ntd:12000, actual_ntd:1000, remaining_ntd:11000,
+   label:'原帳補助', expected_ntd:12000, actual_ntd:1000, remaining_ntd:11000, settled:false,
   }] : base.client_items,
   subsidy_payments:[
   {recipient:'staff',party:'合成月嫂',amount_ntd:12000,due_date:'2026-11-15',source},
@@ -96,9 +96,10 @@ it.each([
  expect(section).not.toHaveTextContent(/補助款退還客戶|政府補助款|政府款待入/);
  expect(screen.getByLabelText('月嫂薪資匯總')).toHaveTextContent('NT$ 30,000');
  if(remaining===0){
-  const history=screen.getByRole('row',{name:/原補助退款紀錄.*原帳補助/});
-  expect(history).toHaveTextContent('已退 NT$ 1,000');
-  expect(history).not.toHaveTextContent('待退');
+  const originalRefund=screen.getByRole('row',{name:/原補助退款紀錄.*原帳補助/});
+  expect(originalRefund).toHaveTextContent('已退 NT$ 1,000');
+  expect(originalRefund).toHaveTextContent('待退 NT$ 11,000');
+  expect(section?.querySelector('.finance-refund-summary-bar')).toHaveTextContent('客戶退款待結：NT$ 11,000');
  }
 });
 it.each(['2027-02-15',null])('方案未定的補助預估唯讀（日期 %s），候選資料不變成正式款項',async(date)=>{
@@ -192,17 +193,22 @@ it.each([
  expect(screen.queryByText(new RegExp(identity))).not.toBeInTheDocument();
 });
 
-it('政府直接退給客戶經逐案確認，正式回執後重讀案件，保留一般退款與原補助退款紀錄',async()=>{
+it.each([
+ ['尚有待退',false,11000,'待退 NT$ 11,000','NT$ 11,800'],
+ ['已結清',true,0,'已結清','NT$ 800'],
+ ['餘額未知',false,null,'餘額待核對','已知待退 NT$ 800，部分餘額待核對'],
+ ['零餘額但未結清',false,0,'待退 NT$ 0','NT$ 800'],
+] as const)('政府直退確認後依正式退款餘額顯示（%s）',async(_scenario,settled,remaining,refundState,summary)=>{
  const data=facts();
  const confirmed={case_no:caseNo,version:1,events:[{version:1,action:'confirm_direct' as const,
   actor:'synthetic',created_at:'2026-11-09T00:00:00Z',reason:'合成證據已查核'}]};
  const refund={identity:'refund',direction:'payable' as const,label:'一般退款',party:'合成客戶',
-  expected_ntd:800,actual_ntd:0,remaining_ntd:800,has_payment:false,version:'1',due_date:null,obligation_type:'refund'};
+  expected_ntd:800,actual_ntd:0,remaining_ntd:800,settled:false,has_payment:false,version:'1',due_date:null,obligation_type:'refund'};
  vi.mocked(financeAccountingClient.query).mockResolvedValueOnce({...data,scheme:'unknown',can_confirm_direct:true,
   arrangement:{case_no:caseNo,version:0,events:[]}})
   .mockResolvedValue({...data,scheme:'direct',arrangement:confirmed,
    client_items:[refund,{...refund,identity:'older-subsidy',label:'原帳補助',expected_ntd:12000,actual_ntd:1000,
-    remaining_ntd:11000,has_payment:true,obligation_type:'subsidy_return'}]});
+    remaining_ntd:remaining,settled,has_payment:true,obligation_type:'subsidy_return'}]});
  vi.mocked(financeAccountingClient.confirmArrangement).mockResolvedValue({case_no:caseNo,applied_version:1,arrangement:confirmed});
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
  fireEvent.click(await screen.findByRole('button',{name:'設定補助退款方案'}));
@@ -217,13 +223,17 @@ it('政府直接退給客戶經逐案確認，正式回執後重讀案件，保�
  expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
  expect(screen.getByRole('row',{name:/客戶退款.*一般退款/})).toHaveTextContent('待退 NT$ 800');
  expect(screen.getByText('政府直退／工會不經手')).toBeVisible();
- const history=screen.getByRole('row',{name:/原補助退款紀錄.*原帳補助/});
- expect(history).toHaveTextContent('唯讀查閱');
- expect(history).toHaveTextContent('原退款 NT$ 12,000');
- expect(history).toHaveTextContent('已退 NT$ 1,000');
- expect(history).not.toHaveTextContent('待退');
- expect(within(history).queryByRole('button')).not.toBeInTheDocument();
- expect(within(history).queryByRole('link')).not.toBeInTheDocument();
+ const originalRefund=screen.getByRole('row',{name:/原補助退款紀錄.*原帳補助/});
+ expect(originalRefund).toHaveTextContent('原退款 NT$ 12,000');
+ expect(originalRefund).toHaveTextContent('已退 NT$ 1,000');
+ expect(within(originalRefund).getByText(refundState)).toBeVisible();
+ expect(originalRefund.closest('details')?.querySelector('.finance-refund-summary-bar'))
+  .toHaveTextContent(`客戶退款待結：${summary}`);
+ if(settled || remaining === null)expect(originalRefund).not.toHaveTextContent(/待退 NT\$/);
+ if(!settled)expect(originalRefund).not.toHaveTextContent('已結清');
+ if(!settled && remaining === 0)expect(originalRefund).toHaveTextContent('結清狀態待核對');
+ expect(within(originalRefund).queryByRole('button')).not.toBeInTheDocument();
+ expect(within(originalRefund).queryByRole('link')).not.toBeInTheDocument();
 });
 it.each(['client_subsidy_return','client_refund'] as const)('正式直退的單筆核對按原用途處理 %s', async classification=>{
  const isSubsidy = classification === 'client_subsidy_return';

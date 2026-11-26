@@ -668,27 +668,32 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const estimatedStaffAmount = state.pricing?.case_no === initialCase ? state.pricing.impact.staff_total_amount : null;
  const staffEstimate = data?.historical_stages ? null : isEstablishedUnserved ? staffPayableTotal : estimatedStaffAmount;
 
- const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
- const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];
- const subsidyRefundsAreHistorical = directArrangement || selected === 'split';
- const currentRefundItems = subsidyRefundsAreHistorical
-  ? refundClientItems.filter(item => item.obligation_type !== 'subsidy_return') : refundClientItems;
- const refundRemainingTotal=currentRefundItems.reduce((sum,item)=>{
-  const remaining = item.remaining_ntd == null ? BigInt(item.expected_ntd) - BigInt(item.actual_ntd) : BigInt(item.remaining_ntd);
-  return sum + (remaining > 0n ? remaining : 0n);
- },0n);
+ const refundItems = data?.client_items.filter(row => row.direction === 'payable').map(row => {
+  const remaining = row.remaining_ntd == null ? null : BigInt(row.remaining_ntd);
+  return {row, remaining, isSettled: row.settled ?? (remaining === 0n)};
+ }) ?? [];
+ const openRefundItems = refundItems.filter(item => !item.isSettled);
+ const hasUnknownRefundBalance = openRefundItems.some(item => item.remaining === null);
+ const refundRemainingTotal = openRefundItems.reduce((sum, {remaining}) =>
+  remaining !== null && remaining > 0n ? sum + remaining : sum, 0n);
 
  const staffSubsidyPortions = selected === 'split' ? staffItems.flatMap(item =>
   (item.funding_portions ?? []).filter(portion => portion.funding_kind === 'subsidy')
    .map(portion => ({item, portion})),
  ) : [];
- const hasFormalSubsidyRefund = refundClientItems.some(item => item.obligation_type === 'subsidy_return');
+ const hasFormalSubsidyRefund = refundItems.some(({row}) => row.obligation_type === 'subsidy_return');
  const subsidyEstimate = data?.subsidy_payments?.find(payment => payment.source === 'estimate' && payment.amount_ntd > 0
   && ((selected === 'split' && staffSubsidyPortions.length === 0 && payment.recipient === 'staff')
    || (selected === 'advance' && !hasFormalSubsidyRefund && payment.recipient === 'client')));
  const hasPositiveSubsidy = data?.subsidy_ntd != null && data.subsidy_ntd > 0;
  const orderStatus=state.order?.order_status;
  const subsidyRefundPending = selected === 'advance' && !hasFormalSubsidyRefund;
+ const refundSummary = hasUnknownRefundBalance
+  ? (refundRemainingTotal > 0n ? `已知待退 ${money(refundRemainingTotal)}，部分餘額待核對` : '餘額待核對')
+  : refundRemainingTotal > 0n ? money(refundRemainingTotal)
+  : openRefundItems.length ? '結清狀態待核對'
+  : subsidyRefundPending ? '尚無正式退款'
+  : refundItems.length ? '已結清' : '目前無退款';
  const showUnassignedSubsidyEstimate = !selected && hasPositiveSubsidy;
 
  const virtualAccount=state.registry?.finance?.values?.virtual_account??null;
@@ -1092,7 +1097,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     預估補助給付 {money(subsidyEstimate.amount_ntd)} · {subsidyEstimate.party || '收款對象待確認'}
     {' · '}{subsidyEstimate.due_date ?? '日期待確認'}
   </p>}
-  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : subsidyRefundPending ? '尚無正式退款' : currentRefundItems.length ? '已結清' : '目前無退款'}</strong></span></div>
+  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundSummary}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">
       <thead>
@@ -1113,30 +1118,27 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
             ? `預估 ${data.estimated_subsidy_payment_date}` : '日期待確認'}</td>
           <td colSpan={5}>{money(data.subsidy_ntd)}</td>
         </tr>}
-        {refundClientItems.map(row => {
+        {refundItems.map(({row, remaining, isSettled}) => {
             const isSubsidyReturn = row.obligation_type === 'subsidy_return';
-            const itemTransactions = refundTransactions.filter(transaction => transaction.item_identity === row.identity);
-            const isRefundSettled = row.settled ?? (row.remaining_ntd != null
-              ? BigInt(row.remaining_ntd) === 0n
-              : !isSubsidyReturn && row.actual_ntd >= row.expected_ntd && row.has_payment);
-            const readOnlySubsidyHistory = subsidyRefundsAreHistorical && isSubsidyReturn;
+            const itemTransactions = data.transactions.filter(transaction => transaction.item_identity === row.identity);
+            const isOriginalSubsidyRefund = isSubsidyReturn && (directArrangement || selected === 'split');
             return (
               <tr key={row.identity}>
                 <td>
-                  <strong>{readOnlySubsidyHistory ? '原補助退款紀錄' : isSubsidyReturn ? '補助款退還客戶' : '客戶退款'}</strong>
+                  <strong>{isOriginalSubsidyRefund ? '原補助退款紀錄' : isSubsidyReturn ? '補助款退還客戶' : '客戶退款'}</strong>
                   <small>{row.party || refundName} · {row.label}</small>
                 </td>
                 <td>
                   <span>{row.due_date ?? '日期待確認'}</span>
-                  {!readOnlySubsidyHistory && <small>{isRefundSettled ? '已結算' : '案件結束結算'}</small>}
+                  {!isOriginalSubsidyRefund && <small>{isSettled ? '已結算' : '案件結束結算'}</small>}
                 </td>
-                <td>{readOnlySubsidyHistory ? <span>原退款 {money(row.expected_ntd)}</span> : money(row.expected_ntd)}</td>
+                <td>{isOriginalSubsidyRefund ? <span>原退款 {money(row.expected_ntd)}</span> : money(row.expected_ntd)}</td>
                 <td>
                   <span>已退 {money(row.actual_ntd)}</span>
-                  {readOnlySubsidyHistory ? null : isRefundSettled ? (
+                  {isSettled ? (
                     <small className="finance-paid">已結清</small>
                   ) : (
-                    <small>待退 {money(row.remaining_ntd)}</small>
+                    <small>{remaining === null ? '餘額待核對' : `待退 ${money(remaining)}`}</small>
                   )}
                 </td>
                 <td>
@@ -1161,10 +1163,14 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                   )}
                 </td>
                 <td>
-                  {readOnlySubsidyHistory ? (
-                    <span>唯讀查閱</span>
-                  ) : isRefundSettled ? (
+                  {isSettled ? (
                     <span className="finance-paid">已完成退款</span>
+                  ) : remaining === 0n ? (
+                    <span>結清狀態待核對</span>
+                  ) : isOriginalSubsidyRefund ? (
+                    <span>唯讀查閱</span>
+                  ) : remaining === null ? (
+                    <span>待核對</span>
                   ) : refundAccountStatus === 'complete' ? (
                     <span>待出款（帳戶齊全）</span>
                   ) : (
@@ -1179,7 +1185,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
               </tr>
             );
         })}
-        {refundClientItems.length === 0 && (refundBankCode || refundAccountNo) && (
+        {refundItems.length === 0 && (refundBankCode || refundAccountNo) && (
           <tr>
             <td>退款帳戶備查</td>
             <td colSpan={3}>尚未建立退款款項</td>
