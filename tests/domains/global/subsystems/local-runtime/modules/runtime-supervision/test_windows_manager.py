@@ -216,9 +216,15 @@ function New-ManagedArtifact {
 }
 function Invoke-TestPython {
     if($args[0] -eq '-c'){
-        if($args[1] -notmatch 'REGISTRATION_REDIS_ADMIN_PASSWORD_FILE'){throw 'Unexpected setting read'}
-        $global:LASTEXITCODE=0
-        return $env:REGISTRATION_MODE
+        if($args[1] -match 'REGISTRATION_REDIS_ADMIN_PASSWORD_FILE'){
+            $global:LASTEXITCODE=0
+            return $env:REGISTRATION_MODE
+        }
+        if($args[1] -match 'registration_redis_client'){
+            $script:calls.Add('registration');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'registration')
+            return
+        }
+        throw 'Unexpected setting read'
     }
     $readiness = '-m|scripts.check_runtime_database'
     if ($env:APP_ENV -eq 'production') { $readiness += '|--windows-production' }
@@ -244,10 +250,43 @@ function Start-Process {
 $rejected=$false
 try{Invoke-ManagerAction start}catch{$rejected=$true}
 if($rejected -ne [bool]$env:FAIL_AT){throw 'Startup failure was hidden or startup failed'}
-$expected=@('build','containers','database','supervisor')
+$expected=@('build','containers')
+if($env:REGISTRATION_MODE -eq '1'){$expected+='registration'}
+$expected+=@('database','supervisor')
 if($env:FAIL_AT){$expected=$expected[0..([array]::IndexOf($expected,$env:FAIL_AT))]}
 if(($script:calls -join ',') -ne ($expected -join ',')){throw ('Unexpected startup effects: '+($script:calls -join ','))}
 ''', tmp_path, FAIL_AT=failure, REGISTRATION_MODE=registration_mode, APP_ENV=mode)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows startup ordering')
+def test_start_aborts_when_registration_readiness_fails(tmp_path):
+    result = run_manager_functions(r'''
+$LocalOnly=$true
+$PythonPath='Invoke-TestPython'
+$supervisorPath='unused-supervisor'
+$script:calls=[System.Collections.Generic.List[string]]::new()
+function Get-ManagedState {return $null}
+function Assert-ProgramEnvironment {}
+function Set-RuntimeEnvironment {}
+function Get-Service {param($Name,$ErrorAction);return $null}
+function Get-RemoteDisplayUrl {return 'https://example.invalid/'}
+function New-ManagedArtifact { $script:calls.Add('build'); return (Join-Path $ProjectRoot 'artifact') }
+function Invoke-TestPython {
+    if($args[0] -eq '-c'){
+        if($args[1] -match 'REGISTRATION_REDIS_ADMIN_PASSWORD_FILE'){ $global:LASTEXITCODE=0; return '1' }
+        if($args[1] -match 'registration_redis_client'){ $script:calls.Add('registration'); $global:LASTEXITCODE=1; return }
+        throw 'Unexpected setting read'
+    }
+    $script:calls.Add('database'); $global:LASTEXITCODE=0
+}
+function docker.exe { $script:calls.Add('containers'); $global:LASTEXITCODE=0 }
+function Start-Process { throw 'Should not launch supervisor when registration readiness fails' }
+$rejected=$false
+try{Invoke-ManagerAction start}catch{$rejected=$true}
+if(-not $rejected){throw 'Registration readiness failure was hidden'}
+if(($script:calls -join ',') -ne 'build,containers,registration'){throw ('Unexpected startup effects: '+($script:calls -join ','))}
+''', tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
 
 

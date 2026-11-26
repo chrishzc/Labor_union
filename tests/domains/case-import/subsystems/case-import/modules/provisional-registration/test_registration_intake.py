@@ -41,6 +41,7 @@ with TestClient(app) as client:
   'delivery_type': '自然產', 'service_type': '連續服務', 'baby_info': '單胞胎', 'notes': '無',
   'passbook_image_id': 'pbk_synthetic_preview', 'survey_details': {
    '特殊計費:胎數': '單胞胎', '服務時間內是否有其他寶寶': '無', '是否需要下廚：': '不需要下廚',
+   '代購食材': '自行準備',
    '補助款退款:銀行代號+分行代號': '0000000', '銀行帳號': '0000000000',
   },
  })
@@ -83,14 +84,14 @@ def test_preview_uses_verified_subject_and_never_opens_staging_or_sql():
                 "line_id_token": "synthetic-token", "name": "合成申請", "phone": "0900000000",
                 "address": "合成地址", "service_days": 10, "expected_date": "2026-11-20",
                 "passbook_image_id": "pbk_synthetic_preview",
-                "survey_details": {"特殊計費:胎數": "單胞胎"}})
+                "survey_details": {"特殊計費:胎數": "單胞胎", "代購食材": "自行準備"}})
             assert response.status_code == 200
             assert response.json()["data"]["expected_binding_version"] == 0
             bad = client.post("/api/v1/line/identity/registration/preview", json={
                 "line_id_token": "synthetic-token", "name": "合成申請", "phone": "0900000000",
                 "address": "合成地址", "service_days": 10, "expected_date": "2026-11-20",
                 "passbook_image_id": "pbk_synthetic_preview",
-                "survey_details": {"特殊計費:胎數": "第一胎"}})
+                "survey_details": {"特殊計費:胎數": "第一胎", "代購食材": "自行準備"}})
             assert bad.status_code == 422
     finally:
         app.dependency_overrides.clear()
@@ -145,6 +146,15 @@ def test_registration_deployment_multipart_proxy_and_minimal_redis_acl():
     assert "registration:decision:*" not in intake_line
     assert "+del" not in intake_line
     assert "+persist" not in intake_line
+    assert "+zrevrange" not in intake_line
+    assert "+zremrangebyrank" not in intake_line
+    assert "+expire" not in intake_line
+
+    admin_line = next(line for line in acl_script.splitlines() if line.startswith("user registration-admin "))
+    assert "+zrevrange" in admin_line
+    assert "+zremrangebyrank" in admin_line
+    assert "+expire" in admin_line
+    assert "%RW~registration:*" in admin_line
 
 
 def test_passbook_upload_size_limits_magic_bytes_and_cross_user_isolation():
@@ -367,3 +377,58 @@ def test_redis_passbook_atomic_stage_ttl_sync_and_fail_closed_recovery():
     assert flaky_staging.completed
     assert flaky_staging.deleted
     assert formal.create_calls == 1
+
+
+def test_redis_acl_covers_every_command_used_by_staging_and_maintenance() -> None:
+    import ast
+    from pathlib import Path
+    import re
+
+    root = Path(__file__).resolve().parents[7]
+    entrypoint = (root / "deploy" / "registration" / "redis-entrypoint.sh").read_text(encoding="utf-8")
+    users: dict[str, set[str]] = {}
+    for line in entrypoint.splitlines():
+        if line.startswith("user "):
+            parts = line.split()
+            users[parts[1]] = {token[1:].lower() for token in parts if token.startswith("+")}
+
+    assert {"registration-admin", "registration-intake"}.issubset(users)
+    admin_acl = users["registration-admin"]
+    intake_acl = users["registration-intake"]
+
+    redis_name_map = {"delete": "del"}
+    used_commands: set[str] = set()
+    for rel_path in (
+        "infrastructure/redis/registration_staging_repository.py",
+        "infrastructure/redis/registration_maintenance.py",
+        "infrastructure/redis/staff_profile_change_staging.py",
+    ):
+        source = (root / rel_path).read_text(encoding="utf-8")
+        for match in re.findall(r"""redis\.call\(\s*['"]([a-zA-Z]+)['"]""", source):
+            used_commands.add(match.lower())
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "_call" and node.args and isinstance(node.args[0], ast.Constant):
+                    if isinstance(node.args[0].value, str):
+                        cmd = node.args[0].value.lower()
+                        used_commands.add(redis_name_map.get(cmd, cmd))
+                elif (
+                    isinstance(node.func.value, ast.Attribute)
+                    and node.func.value.attr == "_client"
+                    and isinstance(node.func.value.value, ast.Name)
+                    and node.func.value.value.id == "self"
+                ):
+                    cmd = node.func.attr.lower()
+                    if cmd not in {"register_script", "pipeline"}:
+                        used_commands.add(redis_name_map.get(cmd, cmd))
+
+    # pexpireat is only used by intake paths (_STAGE_PASSBOOK / _SUBMIT); admin reads/persists/deletes.
+    missing_admin = (used_commands - {"pexpireat"}) - admin_acl
+    assert missing_admin == set(), f"registration-admin ACL 缺少必要 Redis 指令: {sorted(missing_admin)}"
+
+    required_intake = {"ping", "get", "set", "incr", "zadd", "pexpireat", "exists", "eval"}
+    assert required_intake - intake_acl == set()
+    forbidden = {"flushall", "flushdb", "config", "acl", "keys", "scan", "shutdown", "module", "replicaof", "slaveof"}
+    assert admin_acl.isdisjoint(forbidden)
+    assert intake_acl.isdisjoint(forbidden | {"del", "persist", "zrem", "zrange", "zrevrange", "zrangebyscore", "zremrangebyrank", "expire", "dbsize", "info", "bgrewriteaof"})

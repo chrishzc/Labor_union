@@ -212,6 +212,31 @@ function Start-ManagedRuntime {
         & docker.exe compose up -d --wait db redis
     }
     if ($LASTEXITCODE -ne 0) { throw 'Database/Redis container startup failed; no runtime was started.' }
+    if ($registrationEnabled -eq '1') {
+        $probeScript = @'
+import os, time, urllib.request
+from dotenv import load_dotenv
+from infrastructure.redis.registration_connection import registration_redis_client
+load_dotenv('.env')
+port = os.getenv('REGISTRATION_INTAKE_PORT') or '8080'
+deadline = time.monotonic() + 5.0
+last_err = None
+while time.monotonic() <= deadline:
+    try:
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=2) as res:
+            if res.status != 200:
+                raise RuntimeError(f'health status {res.status}')
+        if not registration_redis_client(role='admin').ping():
+            raise RuntimeError('registration redis ping failed')
+        raise SystemExit(0)
+    except Exception as exc:
+        last_err = exc
+        time.sleep(0.5)
+raise SystemExit(f'registration readiness failed: {last_err}')
+'@
+        & $PythonPath -c $probeScript
+        if ($LASTEXITCODE -ne 0) { throw 'Registration loopback or dedicated Redis failed readiness check; no runtime was started.' }
+    }
     # Database maintenance is a separate explicit action.
     $readinessArguments = @('-m', 'scripts.check_runtime_database')
     if ($env:APP_ENV -eq 'production') { $readinessArguments += '--windows-production' }

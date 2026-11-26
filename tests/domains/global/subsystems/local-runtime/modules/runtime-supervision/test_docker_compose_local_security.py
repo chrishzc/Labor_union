@@ -29,3 +29,14 @@ def test_local_stateful_services_bind_only_to_loopback() -> None:
     for service in services.values():
         for binding in service.get("ports", ()):
             assert binding.startswith("127.0.0.1:")
+
+    networks = compose["networks"]
+    for name, service in services.items():
+        attached = set(service.get("networks", ()))
+        if service.get("ports"):
+            assert any(not networks[net].get("internal", False) for net in attached), (
+                f"{name} publishes ports without any non-internal network"
+            )
+    intake = services["registration-intake"]
+    assert not intake.get("ports")
+    assert all(networks[net].get("internal", False) for net in intake.get("networks", ()))

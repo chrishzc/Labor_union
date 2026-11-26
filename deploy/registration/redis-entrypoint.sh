@@ -13,7 +13,7 @@ test -s /run/secrets/registration_admin_password
 cat > /run/registration/users.acl <<EOF
 user default off resetpass +@all ~* &*
 user registration-intake on #${intake_hash} -@all +ping +get +set +incr +zadd +pexpireat +eval +exists %RW~registration:ready %RW~registration:counter %RW~registration:submission:* %RW~registration:active:* %RW~registration:content:* %RW~registration:meta:* %RW~registration:passbook:meta:* %RW~registration:passbook:data:* %RW~registration:pending %RW~registration:deadlines %R~registration:result:*
-user registration-admin on #${admin_hash} -@all +ping +get +set +incr +zadd +zrem +zrange +zrangebyscore +persist +del +exists +eval +dbsize +info +bgrewriteaof %RW~registration:*
+user registration-admin on #${admin_hash} -@all +ping +get +set +incr +zadd +zrem +zrange +zrevrange +zrangebyscore +zremrangebyrank +expire +persist +del +exists +eval +dbsize +info +bgrewriteaof %RW~registration:*
 EOF
 chown -R redis:redis /run/registration
 exec /usr/local/bin/docker-entrypoint.sh redis-server /usr/local/etc/redis/redis.conf

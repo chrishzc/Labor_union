@@ -19,6 +19,7 @@ from domains.staff.web_profile import WebProfileConflict
 from infrastructure.file.storage_layout import StorageLayoutError
 from infrastructure.runtime.file_transfer_settings import FileSettingsError
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from infrastructure.redis.registration_connection import RegistrationRedisConfigurationError
 from infrastructure.redis.staff_profile_change_staging import StaffProfileStagingConflict, StaffProfileStagingUnavailable
 from shared_kernel.identities import ActorContext
 from subsystems.controlled_files.contracts import ControlledFileStorageError
@@ -253,7 +254,7 @@ def _translate_errors():
             raise typed_http_error(422, "validation", code, message, "staff-web-profile") from None
         raise typed_http_error(422, "validation", "staff_profile_change_invalid",
                                "請核對異動欄位與格式。", "staff-profile-change") from None
-    except StaffProfileStagingUnavailable:
+    except (StaffProfileStagingUnavailable, RegistrationRedisConfigurationError):
         raise typed_http_error(503, "unavailable", "staff_profile_change_unavailable",
                                "暫時無法讀取或保存申請，請稍後重試。", "staff-profile-change", retryable=True) from None
     except ControlledFileWorkflowError as error:

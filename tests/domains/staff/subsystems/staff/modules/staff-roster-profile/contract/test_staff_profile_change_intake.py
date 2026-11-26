@@ -100,3 +100,29 @@ def test_liff_submission_and_review_with_disposable_redis(monkeypatch):
         assert "content" not in staging.get(second["id"])
         assert len(writes) == 1
     redis.close()
+
+
+def test_query_form_translates_missing_redis_configuration_to_typed_503(monkeypatch):
+    from api.exception_handlers import install_typed_error_handlers
+    from infrastructure.redis.registration_connection import RegistrationRedisConfigurationError
+
+    @contextmanager
+    def application():
+        yield (
+            SimpleNamespace(form=lambda staff_id: {"basis": {"version": 1}}),
+            SimpleNamespace(load=lambda staff_id, lock=False: SimpleNamespace(state=StaffLifecycleState.ACTIVE)),
+        )
+
+    def missing_staging():
+        raise RegistrationRedisConfigurationError("missing registration redis password")
+
+    monkeypatch.setattr(route, "staff_profile_change_application", application)
+    monkeypatch.setattr(route, "staff_profile_change_staging", missing_staging)
+    monkeypatch.setattr(route, "_bound_staff_id", lambda body: 7)
+    app = FastAPI()
+    install_typed_error_handlers(app)
+    app.include_router(route.router)
+    with TestClient(app) as client:
+        response = client.post("/api/v1/line/staff-self-service/profile-change/query", json={})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"]["code"] == "staff_profile_change_unavailable"
