@@ -14,6 +14,7 @@ from subsystems.orders.order_information import (
     OrderInformationQueryService,
     OrderInformationTemplate,
 )
+from subsystems.line.table_image_contracts import candidate_information_document, information_document
 
 
 def test_candidate_information_works_without_assignment_or_beclass_and_binds_content():
@@ -309,6 +310,47 @@ class _Connection:
 
     def cursor(self):
         return self.cursor_instance
+
+
+@pytest.mark.parametrize(("survey", "corrections", "expected"), [
+    ({"代購食材": "需月嫂代購(實報實銷)"}, {}, "需月嫂代購(實報實銷)"),
+    ({"代購食材": "自行準備"}, {}, "自行準備"),
+    ({"代購食材": "需月嫂代購(實報實銷)"}, {"ingredient_purchase": "自行準備"}, "自行準備"),
+    ({"代購食材": "需月嫂代購(實報實銷)"}, {"ingredient_purchase": None}, "待確認"),
+    ({}, {}, "待確認"),
+    ({"代購食材": "未知選項"}, {}, "待確認"),
+])
+def test_ingredient_purchase_is_shared_by_both_matching_previews_and_table_documents(
+    survey: dict[str, str], corrections: dict[str, str | None], expected: str,
+) -> None:
+    class SurveyCursor(_Cursor):
+        def execute(self, statement: str, params: tuple[object, ...]) -> None:
+            super().execute(statement, params)
+            if "FROM orders" in statement:
+                self.rows[0].update(
+                    _case_import_payload=json.dumps(survey, ensure_ascii=False),
+                    _case_import_corrections=json.dumps(corrections, ensure_ascii=False),
+                )
+
+    connection = _Connection()
+    connection.cursor_instance = SurveyCursor()
+    repository = MySqlOrderInformationRepository(connection)
+    common_preview = repository.preview_case_information("CASE-1", 2)
+    candidate = repository.preview_candidate_information("CASE-1", 17, 2)
+    customer = repository.preview_matching_plan_information("CASE-1", 51, 2)
+
+    label = "代購食材"
+    group = "飲食與照護需求"
+    assert dict(next(section.rows for section in common_preview.line_sections if section.title == group))[label] == expected
+    assert f"{label}：{expected}" in candidate.text
+    assert f"{label}：{expected}" in customer[0]["text"]
+    candidate_table = candidate_information_document(
+        "CASE-1", 2, tuple((section.title, section.rows) for section in candidate.line_sections),
+    )
+    customer_table = information_document("訂單資訊－2", "CASE-1", customer, info_type=2)
+    for table in (candidate_table, customer_table):
+        rows = next(section.rows for section in table.sections if section.title == group)
+        assert dict(rows)[label] == expected
 
 
 def test_mysql_adapter_projects_case_import_source_before_returning_owner_snapshot():
