@@ -2,6 +2,8 @@
 
 import copy
 import os
+import re
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -15,16 +17,16 @@ def test_faq_01_playwright_add_preview_publish_reopen():
     records = {"draft_revision": 0, "published_revision": None, "draft_layout": {"categories": []}, "published_layout": None}
     answer = {"qa_id": "CI-FAQ", "version": 2, "category": "服務異動", "question": "如何調整服務？", "answer": "請聯絡工會確認可調整時間。"}
     receipts = {}
+    operation_reads = []
+    unprefixed_faq_requests = []
 
     def dispatch(route):
         request = route.request
-        method, url = request.method, request.url.split("?")[0]
-        if "/trial/api/" in url:
-            path = url.split("/trial/api/v1", 1)[-1]
-        elif "/api/" in url:
-            raise AssertionError("FAQ must use the deployment path prefix")
-        else:
-            return route.continue_()
+        method, url_path = request.method, urlsplit(request.url).path
+        path = url_path.split("/api/v1", 1)[-1]
+        if not url_path.startswith("/trial/") and path.startswith(("/line/faq-layout", "/line/service-help/faq")):
+            unprefixed_faq_requests.append(url_path)
+            return route.fulfill(status=500, json={"error": "required deployment prefix missing"})
 
         def ok(data, status=200):
             route.fulfill(status=status, json={"data": data})
@@ -39,7 +41,9 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         if path == "/line/faq-layout" and method == "GET":
             return ok(records)
         if path.startswith("/line/faq-layout/operations/"):
-            receipt = receipts.get(path.rsplit("/", 1)[-1])
+            key = path.rsplit("/", 1)[-1]
+            operation_reads.append(key)
+            receipt = receipts.get(key)
             return ok(receipt) if receipt else problem("faq_operation_not_found", 404)
         if not path.startswith("/line/faq-layout/"):
             return ok({})
@@ -85,13 +89,15 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         else:
             raise AssertionError(action)
         receipts[key] = receipt
+        if action == "publish":
+            return route.abort()
         return ok(receipt)
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page()
         page.add_init_script("sessionStorage.setItem('union_admin_session_token', 'synthetic-ci-session')")
-        page.route("**/*api/**", dispatch)
+        page.route(re.compile(r"^http://[^/]+/(?:trial/)?api/v1/"), dispatch)
         page.goto(os.environ["FAQ_E2E_URL"] + "/#line-ai-events")
         page.get_by_role("button", name="LINE 聊天室版面").click()
         page.get_by_role("button", name="＋ 新增分類").click()
@@ -120,4 +126,6 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         preview.get_by_role("button", name=answer["question"]).click()
         expect(preview.get_by_text(answer["answer"])).to_be_visible()
         assert len(receipts) == 3
+        assert operation_reads == [next(key for key, receipt in receipts.items() if "published_revision" in receipt)]
+        assert unprefixed_faq_requests == []
         browser.close()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -12,7 +13,8 @@ import re
 from domains.knowledge_retrieval.qa_catalog import QA_SOURCE_PREFIX, decode_governed_qa
 from domains.line.faq_chat_layout import FaqCategory, FaqLayout, FaqQuestionLink
 from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork
-from shared_kernel.identities import ActorContext, CorrelationId
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from subsystems.knowledge_retrieval.contracts import IngestKnowledgeSourceCommand
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.configuration_contracts import LineConfigurationCommandOutcome
 from subsystems.line.faq_chat_layout import (
@@ -46,9 +48,11 @@ POLICY_LABELS = LAYOUT_META["payment_subsidy"][3][:2]
 @dataclass(frozen=True)
 class Pointer:
     item_id: int
+    qa_id: str
     version: int | None
     aliases: tuple[str, ...]
     category_id: str | None
+    changes: tuple[str, ...]
 
 
 def _json(value):
@@ -87,6 +91,28 @@ def _publication(root, revisions, events):
     return publication
 
 
+def _historical_source_proven(root, publication, versions, events, content):
+    if all(publication[field] is not None for field in ("title", "source_uri", "source_trust_tier")):
+        return True
+    ingest = next((
+        row for row in reversed(versions)
+        if row["item_version"] <= publication["item_version"] and row["event_type"] == "ingested"
+    ), None)
+    if ingest is None or ingest["source_digest"] != publication["source_digest"]:
+        return False
+    event = events.get(ingest["item_version"])
+    if event is None or not event["command_fingerprint"]:
+        return False
+    command = IngestKnowledgeSourceCommand(
+        root["source_identity"], "internal_policy", content.question, ingest["content"],
+        content.source_ref, ActorContext(str(event["actor_admin_user_id"])),
+        IdempotencyKey(event["idempotency_key"]), CorrelationId(event["correlation_id"]),
+    )
+    # Before expected_version was added, the durable receipt hashed this representation.
+    canonical = repr(command).removesuffix(", expected_version=None)") + ")"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest() == event["command_fingerprint"]
+
+
 def _read_rows(cursor, lock):
     cursor.execute(
         "SELECT id, source_identity, version, published_version, state, title, source_uri, "
@@ -105,8 +131,10 @@ def _read_rows(cursor, lock):
     for row in cursor.fetchall():
         revisions[row["item_id"]].append(row)
     cursor.execute(
-        "SELECT e.knowledge_item_id,e.after_version,e.event_type,e.snapshot_json "
+        "SELECT e.knowledge_item_id,e.after_version,e.event_type,e.snapshot_json,e.actor_admin_user_id,"
+        "e.idempotency_key,e.correlation_id,r.command_fingerprint "
         "FROM knowledge_item_events e JOIN knowledge_items i ON i.id=e.knowledge_item_id "
+        "LEFT JOIN knowledge_apply_receipts r ON r.idempotency_key=e.idempotency_key "
         "WHERE i.source_identity LIKE %s ORDER BY e.id",
         (QA_SOURCE_PREFIX + "%",),
     )
@@ -182,6 +210,10 @@ def build_plan(rows, legacy, reviewed, known_categories):
                     title, uri, trust, publication["source_digest"]
                 ) != (root["title"], root["source_uri"], root["source_trust_tier"], root["content_digest"]):
                     raise ValueError("published_source_metadata_conflict")
+                if version != root["version"] and not _historical_source_proven(
+                    root, publication, versions, events[item_id], content,
+                ):
+                    raise ValueError("published_source_metadata_unproven")
                 category_id = content.category_id or categories.get(content.category)
                 if category_id not in known_categories:
                     issues.append({"code": "published_category_unmapped", "qa_id": qa_id, "category": content.category})
@@ -196,7 +228,14 @@ def build_plan(rows, legacy, reviewed, known_categories):
                 official[qa_id] = content
             else:
                 version = None
-            resolved.append(Pointer(item_id, version, tuple(sorted(texts)), category_id))
+            changes = []
+            if version is not None and root["published_version"] is None:
+                changes.append("published_version")
+            if texts and saved_aliases is None:
+                changes.append("faq_legacy_aliases")
+            if category_id is not None and root["faq_legacy_category_id"] is None:
+                changes.append("faq_legacy_category")
+            resolved.append(Pointer(item_id, qa_id, version, tuple(sorted(texts)), category_id, tuple(changes)))
         except ValueError as error:
             issues.append({"code": str(error), "qa_id": qa_id})
 
@@ -239,7 +278,8 @@ def backfill(connection, legacy, reviewed, *, actor, correlation_id, apply=False
             report = {
                 "mode": "apply" if apply else "audit",
                 "issues": issues,
-                "publication_candidates": sum(row.version is not None for row in resolved),
+                "differences": [{"qa_id": row.qa_id, "publication_version": row.version, "fields": row.changes}
+                                for row in resolved if row.changes],
                 "legacy_cards": [{"category_id": card.category_id, "qa_ids": [link.qa_id for link in card.questions]} for card in layout.categories],
                 "layout_revision": snapshot.revision.value,
                 "updated_items": 0,
@@ -247,6 +287,8 @@ def backfill(connection, legacy, reviewed, *, actor, correlation_id, apply=False
             if not apply or issues:
                 return report
             for row in resolved:
+                if not row.changes:
+                    continue
                 cursor.execute(
                     "UPDATE knowledge_items SET published_version=COALESCE(published_version,%s), "
                     "faq_legacy_aliases=COALESCE(faq_legacy_aliases,%s), "
@@ -279,7 +321,10 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--reviewed-mapping", type=Path)
+    parser.add_argument(
+        "--reviewed-mapping", type=Path,
+        help="UTF-8 JSON with categories (old category to stable ID) and legacy_questions (exact text to QA ID)",
+    )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-database")
     parser.add_argument("--actor")

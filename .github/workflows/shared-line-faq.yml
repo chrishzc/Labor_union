@@ -40,6 +40,7 @@ jobs:
         run: >-
           python -m pytest -vv
           tests/test_line_service_help.py
+          tests/test_line_ai_qa_catalog.py
           tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_error_contracts.py
           tests/domains/external-integration/subsystems/line/infrastructure/test_line_inline_knowledge_replay.py
           tests/domains/external-integration/subsystems/line/integration/test_line_configuration_public_query_route.py
