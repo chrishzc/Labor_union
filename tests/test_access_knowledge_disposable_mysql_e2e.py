@@ -462,7 +462,7 @@ def _faq_preserved_upgrade(tmp_path, request, monkeypatch, capsys):
     }, ensure_ascii=False), encoding="utf-8")
     environment_file = tmp_path / "runtime.env"
     environment_file.write_text(
-        f"DB_HOST={host}\nDB_PORT={port}\nDB_USER=root\nDB_DATABASE={source}\n",
+        f"DB_HOST={host}\nDB_PORT={port}\nDB_USER=root\nDB_PASSWORD=\nDB_DATABASE={source}\n",
         encoding="utf-8",
     )
     plan_path = tmp_path / "candidate-plan.json"
