@@ -151,6 +151,8 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
   - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室提供現行官方 LIFF 表單與行動工作面預覽（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與三個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
   - [LINE 介面設定的引導動作分頁](19_Global_Entry_Point_Governance.md#21-現行導航與頁面清冊)提供觸發指令編輯與唯讀預覽。AI 客服工作室的回答測試先以相同路由預覽檢查問句。命中引導動作時顯示導向結果及前往設定的連結，未命中時才執行模型回答測試。
 
+  - AI 客服工作室提供「常見問答題庫」與「LINE 聊天室版面」兩個分頁。新增分類、編輯卡片和手機預覽留在同一工作室；FAQ 網頁不另開編輯入口。兩種發布的作用範圍依 [共用問答與聊天室版面](29_LINE服務說明、客服互動與選單角色正式規格.md#41-共用問答與聊天室版面)。
+
 ### 5.1.1 通知事項分類與處理入口
 
 - `#notifications` 依目前帳號 capability 讀取各 owner 的 bounded Query，不保存另一份通用已讀或完成狀態。正式作業提交後重新查詢；回到通知頁與手動刷新時以目前資格替換已載入資料，既有資料不符合資格即移除，不僅限制之後的新資料。來源讀取失敗須明示，不能以零筆代替。搜尋明示只限已載入事項，各來源保留分頁及完整總數語意。

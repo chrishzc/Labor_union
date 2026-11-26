@@ -34,6 +34,13 @@
 - operator runbook: `document/line/LINE_AI客服題庫Production匯入操作手冊.md`
 - consumer: LINE AI customer-service studio and knowledge answer worker.
 
+## 共用 FAQ 讀取契約（待實作）
+
+- [需求書 #29 §4.1](../../../../../requirements/29_LINE服務說明、客服互動與選單角色正式規格.md#41-共用問答與聊天室版面)；LINE 呈現與分類卡片生命週期見 [聊天室版面模組](../../../../external-integration/subsystems/line/modules/faq-chat-layout.md)。
+- Knowledge Retrieval 擁有正式問答內容及發布版本。沿用 `knowledge_items` 與目前已發布的 `knowledge_item_versions`，以穩定題目 ID 與正式版本讀取問題、答案、分類識別及別名；草稿另存，不取代正式可讀版本。索引是衍生資料，不是 FAQ 的權威，索引延遲不應讓兩邊出現不同版本的正式答案。
+- 提供依穩定 ID、正式別名或分頁列舉的共用唯讀契約；明確區分不存在／已停用與來源暫時不可用。網頁使用既有 FAQ HTTP 入口，完整清單走明確分頁，穩定排序且不得默默只回前 100 題。聊天室只消費同一契約，不自行讀資料表或解析 JSONL。
+- 現況：網頁路由已接治理題庫；聊天室分類和精確回覆仍有 JSONL 路徑。實作應移除該 runtime 讀取，保留播種用途；遷移既有 ID／分類引用需可重跑且不得覆蓋已發布的人工修訂。
+
 ## Verification
 
 - layout_status: `custom_current`
