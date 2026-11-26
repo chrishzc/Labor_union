@@ -40,7 +40,9 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReportData) 
       annualIdentity: `(${row.application_roc_year ?? '—'})${PARTITION_KIND_LABELS[partition.citizen_kind]}`,
       annualEntry: row.serial_number,
       notes: row.notes,
-      reconciliationStatus: row.reconciliation_status || '結案',
+      reconciliationStatus: row.reconciliation_status === '成立後未服務'
+        ? '結案'
+        : row.reconciliation_status || '結案',
       claimPeriodLabel: row.claim_period_label,
     })),
   }));
