@@ -19,7 +19,7 @@ from api.registration_contracts import registration_intent
 from api.schemas.base import BaseResponse
 from api.schemas.line_identity import ProvisionalRegistrationPreviewRequest, ProvisionalRegistrationRequest
 from domains.case_import.provisional_registration import (
-    ProvisionalRegistrationDomainError, build_provisional_registration_candidate,
+    ProvisionalRegistrationCandidate, ProvisionalRegistrationDomainError, build_provisional_registration_candidate,
 )
 from infrastructure.line.liff_token_verifier import (
     InvalidLiffTokenError, LiffVerificationUnavailableError, LineLoginTokenVerifier,
@@ -87,7 +87,9 @@ def _verified_subject(payload, verifier):
         raise typed_http_error(503, "unavailable", "liff_verification_unavailable", "LINE 驗證暫時無法使用。", uuid4().hex, retryable=True) from None
 
 
-def _candidate(payload, verifier):
+def _candidate(
+    payload: ProvisionalRegistrationPreviewRequest, verifier: LineLoginTokenVerifier,
+) -> ProvisionalRegistrationCandidate:
     subject = _verified_subject(payload, verifier)
     try:
         return build_provisional_registration_candidate(registration_intent(payload, subject))
@@ -145,15 +147,23 @@ async def upload_passbook(
     })
 
 
-def _require_passbook_staged(staging, passbook_image_id: str, line_user_id: str) -> None:
-    if _translate(lambda: staging.get_passbook_image(passbook_image_id, line_user_id=line_user_id)) is None:
+def _require_passbook_staged(
+    staging: RedisRegistrationStagingRepository,
+    passbook_image_id: str | None,
+    candidate: ProvisionalRegistrationCandidate,
+) -> None:
+    if passbook_image_id is None and candidate.registration_kind == "non_citizen":
+        return
+    if passbook_image_id is None or _translate(
+        lambda: staging.get_passbook_image(passbook_image_id, line_user_id=candidate.line_user_id)
+    ) is None:
         raise typed_http_error(422, "validation", "passbook_image_missing", "請先上傳存摺封面照片。", uuid4().hex)
 
 
 @app.post("/api/v1/line/identity/registration/preview")
 def preview(payload: ProvisionalRegistrationPreviewRequest, staging=Depends(get_staging), verifier=Depends(get_verifier)):
     candidate = _candidate(payload, verifier)
-    _require_passbook_staged(staging, payload.passbook_image_id, candidate.line_user_id)
+    _require_passbook_staged(staging, payload.passbook_image_id, candidate)
     return BaseResponse(data={"status": "ready", "expected_binding_version": 0,
         "payload_fingerprint": candidate.payload_fingerprint.value,
         "preview_fingerprint": candidate.payload_fingerprint.value})
@@ -163,7 +173,7 @@ def preview(payload: ProvisionalRegistrationPreviewRequest, staging=Depends(get_
 def submit(payload: ProvisionalRegistrationRequest, submission_id: str = Header(alias="Idempotency-Key"),
            staging=Depends(get_staging), verifier=Depends(get_verifier)):
     candidate = _candidate(payload, verifier)
-    _require_passbook_staged(staging, payload.passbook_image_id, candidate.line_user_id)
+    _require_passbook_staged(staging, payload.passbook_image_id, candidate)
     if payload.expected_binding_version != 0 or payload.preview_fingerprint != candidate.payload_fingerprint.value:
         raise typed_http_error(409, "conflict", "registration_preview_stale", "申請內容已變更，請重新確認。", uuid4().hex)
     return BaseResponse(data=_translate(lambda: _result(staging.submit(candidate, submission_id))))

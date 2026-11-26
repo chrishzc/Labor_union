@@ -3,10 +3,16 @@ File: test_line_registration_presentation.py
 Description: 驗證 LINE LIFF 客戶登記頁呈現、胎數必填與預覽送出契約。
 """
 
+from contextlib import closing
+from datetime import datetime
 import json
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from domains.case_import.non_citizen_registration import LIFF_SERVICE_TIME_OPTIONS
 
@@ -16,6 +22,158 @@ ROOT = next(
     for parent in Path(__file__).resolve().parents
     if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
 )
+
+
+@pytest.mark.parametrize(
+    ("path", "kind", "studio"),
+    [
+        pytest.param("/line-registration", "subsidy", False, id="subsidy"),
+        pytest.param("/line-non-citizen-registration", "non_citizen", False, id="non-citizen"),
+        pytest.param(
+            "/api/v1/line/identity/studio-preview/non-citizen-registration?studio_preview=1",
+            "non_citizen", True, id="studio-preview",
+        ),
+    ],
+)
+def test_registration_passbook_controls_and_submission_in_browser(path: str, kind: str, studio: bool) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from playwright.sync_api import Route, expect, sync_playwright
+
+    from api.routes.line_identity import page_router, public_router
+
+    pages = FastAPI()
+    pages.include_router(page_router)
+    pages.include_router(public_router)
+    origin = "https://registration.example.test"
+    registration_api = "/api/v1/line/identity/registration"
+    requests: list[tuple[str, str | None]] = []
+    runtime = {
+        "revision": "synthetic-revision",
+        "theme": {
+            "primary_color": "#357abd", "primary_hover_color": "#357abd", "background": "#fff",
+            "text_color": "#000", "muted_text_color": "#333", "font_family": "sans-serif",
+        },
+        "page": {
+            "title": "需求調查", "subtitle": "", "submit_button": "送出測試申請",
+            "success_title": "提交結果", "loading_text": "處理中", "content": {},
+            "fields": [{"id": "gender", "system_field": True, "required": True, "label": "性別",
+                        "options": [{"value": "女", "label": "女"}]}],
+        },
+    }
+
+    def route_request(route: Route) -> None:
+        url = urlsplit(route.request.url)
+        if route.request.is_navigation_request() and url.netloc == "registration.example.test":
+            response = page_client.get(path)
+            route.fulfill(status=response.status_code, body=response.content, content_type="text/html; charset=utf-8")
+        elif url.path == "/api/config/liff/runtime":
+            route.fulfill(json=runtime)
+        elif url.path == "/api/v1/line/identity/runtime-config":
+            route.fulfill(json={"data": {"liff_id": "synthetic-liff"}})
+        elif url.path.startswith(registration_api + "/"):
+            endpoint = url.path.removeprefix(registration_api + "/")
+            requests.append((endpoint, route.request.post_data if endpoint != "passbook" else None))
+            if endpoint == "passbook":
+                route.fulfill(json={"data": {"passbook_image_id": "pbk_synthetic_cover"}})
+            elif endpoint == "preview":
+                route.fulfill(json={"data": {"status": "ready", "expected_binding_version": 0,
+                                             "payload_fingerprint": "a" * 64,
+                                             "preview_fingerprint": "a" * 64}})
+            elif endpoint == "apply":
+                route.fulfill(json={"data": {"registration_id": 234, "identity_status": "pending_approval",
+                                             "client_id": None, "beclass_record_id": None}})
+            else:
+                route.fulfill(status=404)
+        else:
+            route.abort()
+
+    with TestClient(pages) as page_client, sync_playwright() as playwright, closing(playwright.chromium.launch()) as browser:
+        page = browser.new_page()
+        page.route("**/*", route_request)
+        page.add_init_script("""
+            window.liff = { init: async () => {}, isLoggedIn: () => true, getIDToken: () => 'synthetic-token' };
+        """)
+        page.goto(origin + path)
+        submit = page.locator("#registrationPreviewButton")
+        passbook = page.locator("#passbook_cover")
+        expect(page.locator("#refund_bank_code")).to_be_visible()
+        expect(page.locator("#refund_bank_account")).to_be_visible()
+        expect(page.get_by_text("請填入產婦本人銀行帳號。", exact=True)).to_be_visible()
+        if kind == "non_citizen":
+            expect(page.locator('input[type="file"]')).to_have_count(0)
+            expect(page.locator("#passbookPreviewBox")).to_have_count(0)
+            expect(page.get_by_text("存摺封面")).to_have_count(0)
+        if studio:
+            expect(submit).to_have_text("預覽模式")
+            expect(submit).to_be_disabled()
+            expect(page.locator("#studioPreviewNotice")).to_be_visible()
+            page.locator("#registerForm").dispatch_event("submit")
+            assert requests == []
+            return
+
+        expect(submit).to_have_text("送出測試申請")
+        page.wait_for_function("currentIdToken === 'synthetic-token'")
+        today = datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat()
+        for field, value in {
+            "name": "合成申請", "phone": "0900000000", "expected_date": today, "service_days": "10",
+            "address": "合成地址", "email": "test@example.com", "refund_bank_code": "0000000",
+            "refund_bank_account": "0000000000",
+        }.items():
+            page.locator(f"#{field}").fill(value)
+        page.locator('[data-survey="服務時間內是否有其他寶寶"]').fill("無")
+        page.locator("#ingredient_purchase").select_option("自行準備")
+        for field in ("multi_birth_single", "needs_cooking_no", "agree2", "agree3"):
+            page.locator(f"#{field}").check()
+        page.locator('label[for="agree1"]').click()
+        page.locator("#refundPolicyAccept").click()
+
+        if kind == "non_citizen":
+            for field, value in {"city": "新竹市", "birth_date": "1990-01-01",
+                                 "service_start_date": today, "notes": "無"}.items():
+                page.locator(f"#{field}").fill(value)
+            for field, value in {"gender": "女", "service_time": "08:30-12:30 (4小時)",
+                                 "residence_type": "電梯大樓", "delivery_type": "自然產",
+                                 "service_type": "週休1日"}.items():
+                page.locator(f"#{field}").select_option(value)
+            for field, valid in (("refund_bank_code", "0000000"), ("refund_bank_account", "0000000000")):
+                control = page.locator(f"#{field}")
+                for value in ("", "X"):
+                    control.fill(value)
+                    submit.click()
+                    expect(control).to_have_class(re.compile(r"\binvalid\b"))
+                    assert requests == []
+                control.fill(valid)
+        else:
+            expect(passbook).to_be_visible()
+            assert passbook.evaluate("input => input.required") is True
+            submit.click()
+            expect(page.get_by_text("請上傳存摺封面照片。", exact=True)).to_be_visible()
+            assert requests == []
+            passbook.set_input_files({
+                "name": "synthetic.png", "mimeType": "image/png",
+                "buffer": bytes.fromhex(
+                    "89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b55"
+                    "0000000a49444154789c636000000002000148afa4710000000049454e44ae426082"
+                ),
+            })
+            expect(page.locator("#passbookPreviewImg")).to_be_visible()
+
+        submit.click()
+        expect(page.locator(".success-desc")).to_contain_text("申請編號：234")
+        endpoints = [endpoint for endpoint, _ in requests]
+        assert endpoints == (["passbook", "preview", "apply"] if kind == "subsidy" else ["preview", "apply"])
+        for _, raw_payload in requests[-2:]:
+            assert raw_payload is not None
+            payload = json.loads(raw_payload)
+            if kind == "non_citizen":
+                assert payload["registration_kind"] == "non_citizen"
+                assert "passbook_image_id" not in payload
+            else:
+                assert payload.get("registration_kind", "subsidy") == "subsidy"
+                assert payload["passbook_image_id"] == "pbk_synthetic_cover"
+            assert payload["survey_details"]["補助款退款:銀行代號+分行代號"] == "0000000"
+            assert payload["survey_details"]["銀行帳號"] == "0000000000"
 
 
 def test_non_citizen_service_choices_match_manual_case_form():
