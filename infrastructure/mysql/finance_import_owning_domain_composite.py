@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
+from typing import overload
 
 from domains.client_finance.reconciliation import (
     PaymentStage,
@@ -211,7 +212,7 @@ class MySqlFinanceImportOwningDomainComposite:
         except ClientRefundReversalError as error:
             raise ValueError(error.error.code) from error
 
-    def resolve(self, candidate):
+    def resolve(self, candidate: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow:
         if not isinstance(candidate, CanonicalFinanceImportRow):
             raise TypeError("unsupported Finance Import resolution candidate")
         if candidate.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
@@ -234,7 +235,7 @@ class MySqlFinanceImportOwningDomainComposite:
             return _resolve_staff_payout(self._connection, candidate)
         return candidate
 
-    def resolve_pending_government(self, candidate):
+    def resolve_pending_government(self, candidate: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow:
         if candidate.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
             return candidate
         from subsystems.government_subsidy.period_reconciliation import period_rematch_targets
@@ -252,7 +253,13 @@ class MySqlFinanceImportOwningDomainComposite:
             MySqlGovernmentSubsidyPeriodRepository(self._connection), BorrowedTransactionUnitOfWork,
         )
 
-    def post(self, candidate):
+    @overload
+    def post(self, candidate: CanonicalFinanceImportRow) -> FinanceImportDispatchResult: ...
+
+    @overload
+    def post(self, candidate: FinanceImportCorrectionCandidate) -> int: ...
+
+    def post(self, candidate: CanonicalFinanceImportRow | FinanceImportCorrectionCandidate) -> FinanceImportDispatchResult | int:
         try:
             return self._post(candidate, self._require_context())
         except (
@@ -285,9 +292,6 @@ class MySqlFinanceImportOwningDomainComposite:
         if isinstance(candidate, CanonicalFinanceImportRow) and candidate.subsidy_preflight is not None:
             from infrastructure.mysql.subsidy_confirmation_repository import apply_subsidy_confirmation
             apply_subsidy_confirmation(self._connection, candidate, context)
-            if candidate.subsidy_preflight.confirmation_only:
-                return FinanceImportDispatchResult(candidate.row_identity, FinanceDispatchOutcome.PENDING,
-                    reason_code='subsidy_scheme_confirmed_service_not_completed')
         if candidate.classification_type is _CLIENT_RECEIPT:
             return self._post_client_receipt(candidate, context)
         if candidate.classification_type is _CLIENT_REFUND:
@@ -306,14 +310,22 @@ class MySqlFinanceImportOwningDomainComposite:
         if isinstance(candidate, FinanceImportCorrectionCandidate) and candidate.service_end_receipt is not None:
             from infrastructure.mysql.client_service_end_receipt_preview import preview_client_service_end_receipt
             from infrastructure.mysql.client_service_end_receipt_writer import apply_client_service_end_receipt
+            from infrastructure.mysql.subsidy_confirmation_repository import confirm_reconciled_subsidy_scheme
             quote = candidate.service_end_receipt
             expected = preview_client_service_end_receipt(
                 self._connection, row_id=_row_id(candidate.row_identity), case_no=quote.case_no, lock=True,
             )
             if expected.fingerprint != quote.fingerprint:
                 raise ValueError("late_service_end_receipt_preview_stale")
-            apply_client_service_end_receipt(self._connection, expected=expected,
-                key=context.idempotency_key, actor=context.actor, reason=context.reason)
+            receipt = apply_client_service_end_receipt(
+                self._connection, expected=expected,
+                key=context.idempotency_key, actor=context.actor, reason=context.reason,
+            )
+            if expected.cancellation_event_id is None:
+                confirm_reconciled_subsidy_scheme(
+                    self._connection, expected.case_no, context.actor.actor_id, context.idempotency_key.value,
+                    receipt_identity=f"client:{receipt.ledger_entry_id}",
+                )
             return 1
         selection = _client_selection(self._connection, candidate)
         repository = MySqlClientReceiptReconciliationRepository(self._connection)

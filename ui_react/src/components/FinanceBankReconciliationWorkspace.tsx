@@ -12,6 +12,9 @@ import { bankReconciliationUnavailableReason, financeBankReviewPresentation, fin
 import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage, FinanceExcludedBankTransactionPage } from '../api/finance_import/finance_import_query_schemas';
 import { financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
+import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
+import { accountingReason } from './case_accounting_presentation';
+import { subsidyPlanLabels } from './FinanceSubsidyPlanForm';
 import { formatTaipeiDateTime } from '../shared/taipeiTime';
 
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
@@ -139,7 +142,7 @@ export function BankTransactionReviewActions({ row, offerPairing, disabled, onBu
   </>;
 }
 
-export function StaffSubsidyBankReview({ row, preview, job, outcome, submitted, busy, onPreview, onApply, onObserve }: {
+export function SubsidyBankReview({ row, preview, job, outcome, submitted, busy, onPreview, onApply, onObserve }: {
   row: FinanceBankTransaction;
   preview: LoadState<FinanceImportBatchPreview>;
   job: LoadState<FinanceImportJobAccepted>;
@@ -150,21 +153,40 @@ export function StaffSubsidyBankReview({ row, preview, job, outcome, submitted, 
   onApply: (preview: FinanceImportBatchPreview) => void;
   onObserve: (jobId: string, expected: { batchIdentity: string; previewFingerprint: string }) => void;
 }) {
-  if (preview.kind === 'idle' || preview.kind === 'loading') return <p role="status">正在查詢本筆月嫂補助預檢…</p>;
+  const rowPreview = preview.kind === 'ready'
+    ? preview.data.rows.find(candidate => candidate.row_identity === row.row_identity) : undefined;
+  const postedCase = outcome.kind === 'ready' && outcome.data.status === 'succeeded' && outcome.data.receipt?.reconciled_count
+    ? rowPreview?.subsidy_preflight?.case_no ?? rowPreview?.selected_staff_subsidy_case : undefined;
+  const [postedAccounting, setPostedAccounting] = useState<LoadState<CaseAccounting>>({ kind: 'idle' });
+  useEffect(() => {
+    setPostedAccounting({ kind: 'idle' });
+    if (!postedCase) return;
+    const controller = new AbortController();
+    setPostedAccounting({ kind: 'loading' });
+    void financeAccountingClient.query(postedCase, controller.signal).then(data => {
+      if (!controller.signal.aborted) setPostedAccounting({ kind: 'ready', data });
+    }).catch(() => {
+      if (!controller.signal.aborted) setPostedAccounting({ kind: 'error', message: '本案最新補助方案讀取失敗，請開啟案件帳務重查。' });
+    });
+    return () => controller.abort();
+  }, [postedCase]);
+
+  if (preview.kind === 'idle' || preview.kind === 'loading') return <p role="status">正在查詢本筆補助出款預檢…</p>;
   if (preview.kind !== 'ready') return <div role="alert">
-    <p>{preview.kind === 'error' ? preview.message : '查無本筆月嫂補助預檢。'}</p>
+    <p>{preview.kind === 'error' ? preview.message : '查無本筆補助出款預檢。'}</p>
     <button type="button" className="finance-btn-secondary" disabled={busy} onClick={() => onPreview()}>重新查詢本筆預檢</button>
   </div>;
 
   const checked = preview.data;
-  const item = checked.rows.find(candidate => candidate.row_identity === row.row_identity);
+  const item = rowPreview;
   if (!item) return <p role="alert">本次預檢未回傳原交易，請重新查詢原流水。</p>;
   const plan = item.subsidy_preflight;
-  const canApply = checked.apply_allowed && checked.counts.ready_dispatch > 0 && item.disposition === 'create';
+  const canApply = !plan?.confirmation_only && checked.apply_allowed && checked.counts.ready_dispatch > 0 && item.disposition === 'create';
+  const completed = outcome.kind === 'ready' && outcome.data.status === 'succeeded';
   const pending = job.kind === 'loading' || outcome.kind === 'loading' || (submitted && outcome.kind !== 'ready');
   return <section className="bank-fact-card" aria-label="補助處理預檢">
     <h4>本次補助處理預檢</h4>
-    {(item.staff_subsidy_cases?.length ?? 0) > 1 && <fieldset disabled={busy || pending}>
+    {(item.staff_subsidy_cases?.length ?? 0) > 1 && <fieldset disabled={busy || pending || completed}>
       <legend>選擇同月補助案件</legend>
       {item.staff_subsidy_cases?.map(candidate => <button key={candidate.case_no} type="button"
         aria-pressed={item.selected_staff_subsidy_case === candidate.case_no}
@@ -173,9 +195,9 @@ export function StaffSubsidyBankReview({ row, preview, job, outcome, submitted, 
       </button>)}
     </fieldset>}
     {plan && <>
-      <p><strong>{plan.case_no} · 補助轉交月嫂</strong></p>
+      <p><strong>{plan.case_no} · {plan.scheme === 'split' ? '補助轉交月嫂' : '補助款退還客戶'} · 明細候選</strong></p>
       <p>本案補助 {financeMoney(plan.subsidy_ntd)} · 銀行原實付 {financeMoney(plan.bank_cash_ntd)}</p>
-      {plan.confirmation_only ? <p>服務尚未結束，本次只確認補助方案。</p> : <p>
+      {plan.confirmation_only ? <p>服務尚未結束，補助款仍待核對。</p> : <p>
         本次款項 {financeMoney(plan.payable_amount_ntd)} · 預計付款日 {plan.payable_due_date ?? '待確認'} · 手續費 {financeMoney(plan.transfer_fee_ntd)} · 預計核銷 {financeMoney(plan.settlement_ntd)} · 剩餘 {financeMoney(plan.remaining_ntd)}
       </p>}
       {plan.blocker && !plan.confirmation_only && <p role="alert">{/[\u3400-\u9fff]/.test(plan.blocker) ? plan.blocker
@@ -185,7 +207,7 @@ export function StaffSubsidyBankReview({ row, preview, job, outcome, submitted, 
     {!checked.apply_allowed && !!checked.blocking_codes.length && <p role="alert">{financeImportBlockerMessage(checked.blocking_codes)}</p>}
     {canApply && job.kind === 'idle' && outcome.kind === 'idle' && !submitted && <button type="button"
       className="finance-btn-primary" disabled={busy} onClick={() => onApply(checked)}>
-      {plan?.confirmation_only ? '確認本案補助方案' : '確認核銷本筆交易'}
+      確認核銷本筆交易
     </button>}
     {job.kind === 'error' && submitted && <button type="button" className="finance-btn-secondary" disabled={busy}
       onClick={() => onApply(checked)}>以原操作確認核銷結果</button>}
@@ -197,8 +219,16 @@ export function StaffSubsidyBankReview({ row, preview, job, outcome, submitted, 
     {outcome.kind === 'error' && <p role="alert">{outcome.message}</p>}
     {outcome.kind === 'ready' && (outcome.data.status === 'succeeded' ? <p role="status">{outcome.data.receipt?.reconciled_count
       ? '本筆交易已核銷。' : '本次處理已完成，請查看案件帳務。'}</p> : <p role="alert">未完成核銷，請重新查詢原流水。</p>)}
+    {postedAccounting.kind === 'ready' && <p role="status">{postedSchemeSummary(postedAccounting.data)}</p>}
+    {postedAccounting.kind === 'error' && <p role="alert">{postedAccounting.message}</p>}
     {(job.kind === 'loading' || outcome.kind === 'loading') && <p role="status">正在確認本筆核銷結果…</p>}
   </section>;
+}
+
+function postedSchemeSummary(data: CaseAccounting): string {
+  const {scheme, scheme_pending_reason: reason} = data;
+  if (scheme === 'split' || scheme === 'advance' || scheme === 'direct') return `本案補助方案 ${subsidyPlanLabels[scheme]}`;
+  return reason ? accountingReason(reason) : '本案補助方案待確認。';
 }
 
 const historyStatus = {

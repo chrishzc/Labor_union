@@ -20,6 +20,7 @@ from infrastructure.mysql.client_payments_query_repository import (
     query_case_net_cash,
 )
 from infrastructure.mysql.order_terms_read_model import (
+    find_formal_service_shortening_receipt_id,
     load_calculable_client_finance_facts,
     select_order,
 )
@@ -157,26 +158,15 @@ def _terminal_charge_facts(
     if (status != OrderLifecycleStatus.COMPLETED
             or order.get("actual_start_date") is None or order.get("actual_end_date") is None):
         raise ValueError("late_service_end_receipt_completion_not_verified")
-    cursor.execute(
-        "SELECT receipt.id FROM order_terms_apply_receipts receipt "
-        "JOIN order_terms_change_events event ON event.id=receipt.order_terms_event_id "
-        "AND event.case_no=receipt.case_no "
-        "JOIN scheduling_aggregates aggregate ON aggregate.case_no=receipt.case_no "
-        "JOIN scheduling_generations generation ON generation.id=aggregate.effective_generation_id "
-        "AND generation.case_no=receipt.case_no AND generation.generation_number=receipt.scheduling_generation "
-        "WHERE receipt.case_no=%s AND receipt.lifecycle_status IN ('服務中','訂單完成') "
-        "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(event.before_terms,'$.service_days')) AS UNSIGNED)>"
-        "CAST(JSON_UNQUOTE(JSON_EXTRACT(event.after_terms,'$.service_days')) AS UNSIGNED) "
-        "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(event.after_terms,'$.service_days')) AS UNSIGNED)=%s "
-        "ORDER BY receipt.id DESC LIMIT 1",
-        (case_no, order["service_days"]),
-    )
-    shortening = cursor.fetchone()
-    if shortening is None:
+    service_days = order.get("service_days")
+    if service_days is None:
+        raise ValueError("late_service_end_receipt_shortening_not_verified")
+    shortening_id = find_formal_service_shortening_receipt_id(cursor, case_no, int(service_days))
+    if shortening_id is None:
         raise ValueError("late_service_end_receipt_shortening_not_verified")
     facts, _ = load_calculable_client_finance_facts(cursor, order, lock=lock, allow_planned=False)
-    if (facts is None or len(facts.charge_days) != int(order["service_days"])
+    if (facts is None or len(facts.charge_days) != int(service_days)
             or any(not order["actual_start_date"] <= day.service_date <= order["actual_end_date"]
                    for day in facts.charge_days)):
         raise ValueError("late_service_end_receipt_actual_service_not_verified")
-    return sum(stage.amount.amount for stage in _build_stage_plans(facts)), 0, f"terms:{int(shortening['id'])}", None
+    return sum(stage.amount.amount for stage in _build_stage_plans(facts)), 0, f"terms:{shortening_id}", None

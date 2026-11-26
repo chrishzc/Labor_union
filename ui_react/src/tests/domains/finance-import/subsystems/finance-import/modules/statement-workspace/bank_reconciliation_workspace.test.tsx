@@ -353,6 +353,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       }
       throw new Error(`unexpected GET ${path}`);
     });
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockRejectedValue(new Error('synthetic case'));
     const warnings = vi.spyOn(console, 'error');
     try {
       render(<FinancePage />);
@@ -366,9 +367,11 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       expect(drawer.getByLabelText('永豐入款結算預覽')).toHaveTextContent('5,000');
       expect(drawer.getAllByRole('region', { name: '銀行款項更正' })).toHaveLength(1);
       expect(post.mock.calls.map(([path]) => path)).toEqual(['/api/v1/finance-import/corrections/preview']);
+      expect(readCase).not.toHaveBeenCalled();
       expect(warnings.mock.calls.some(call => call.some(value => String(value).includes('same key')))).toBe(false);
       fireEvent.click(confirm);
-      await waitFor(() => expect(screen.queryByRole('dialog', { name: '核對交易' })).not.toBeInTheDocument());
+      await screen.findByRole('dialog', { name: `案件帳務 · ${caseNo}` });
+      await waitFor(() => expect(readCase).toHaveBeenCalledWith(caseNo, expect.any(AbortSignal)));
       expect(post.mock.calls.map(([path]) => path)).toEqual([
         '/api/v1/finance-import/corrections/preview',
         '/api/v1/finance-import/corrections/apply',
@@ -377,7 +380,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
         service_end_case_no: caseNo, classification_type: 'client_receipt', preview_fingerprint: fingerprint });
       expect(get.mock.calls.filter(([path]) => path.endsWith('/correction-outcome'))).toHaveLength(1);
     } finally {
-      [get, post, token, warnings].forEach(mock => mock.mockRestore());
+      [get, post, token, readCase, warnings].forEach(mock => mock.mockRestore());
       window.location.hash = '';
     }
   });
@@ -503,6 +506,71 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       expect(await screen.findByRole('row', { name: /交易明細#3.*已核銷/ })).toBeVisible();
     } finally {
       [preview, token, post, outcome].forEach(mock => mock.mockRestore());
+      window.location.hash = '';
+    }
+  });
+
+  it('預檢客戶補助退款只顯示候選，取得原操作成功回執後才讀回案件補助方案', async () => {
+    window.location.hash = '#finance?tab=bank';
+    const caseNo = '115000001';
+    const batchIdentity = 'finance-import-batch:9';
+    const fingerprint = 'a'.repeat(64);
+    const row: FinanceBankTransaction = {
+      ...taishin, direction: 'outgoing', amount_ntd: 12000, classification_type: 'client_subsidy_return',
+      cases: [caseNo], client_subsidy_batch_identity: batchIdentity, reconciliation_target: null,
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row], pending_count: 1, next_before_row_id: null,
+    });
+    const preview = vi.spyOn(financeImportMutationClient, 'preview').mockResolvedValue({
+      batch_identity: batchIdentity, batch_version: 0, preview_fingerprint: fingerprint,
+      source_content_digest: 'b'.repeat(64), classifier_version: 'v1', fingerprint_version: 'v1',
+      counts: { source_rows: 1, canonical_created: 1, duplicate_occurrences: 0, ready_dispatch: 1,
+        existing: 0, manual_review: 0, business_pending: 0, blocked: 0 },
+      rows: [{
+        row_identity: row.row_identity, canonical_fact_version: 0, amount_ntd: 12000,
+        classification_type: 'client_subsidy_return', disposition: 'create', target_identities: ['client:refund'],
+        evidence: [], available_actions: ['reconcile'], integrity_violations: [], fingerprint_collision: false,
+        formal_reference_conflict: false,
+        subsidy_preflight: {
+          case_no: caseNo, scheme: 'advance', subsidy_ntd: 12000, total_ntd: 48000, confirmation_only: false,
+          payable_amount_ntd: 12000, payable_due_date: '2026-11-15', bank_cash_ntd: 12000, transfer_fee_ntd: 0,
+          settlement_ntd: 12000, remaining_ntd: 0, blocker: null,
+        },
+      }], dispatch_summaries: [], blocking_codes: [], apply_allowed: true,
+    });
+    const apply = vi.spyOn(financeImportMutationClient, 'apply').mockResolvedValue({
+      job_id: 'refund-job', status_url: '/refund-job', replayed: false,
+    });
+    const readCase = vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({
+      case_no: caseNo, client_name: '合成客戶', receivable_ntd: 48000, received_ntd: 48000, payable_ntd: 12000,
+      paid_ntd: 12000, subsidy_ntd: 12000, scheme: 'advance', pending_warning_count: 0,
+      client_items: [], staff_items: [], transactions: [], warnings: [],
+    });
+    let finish: () => void = () => { throw new Error('等待查詢核銷結果'); };
+    const outcome = vi.spyOn(financeImportMutationClient, 'queryBatchOutcome').mockImplementation(() => new Promise(resolve => {
+      finish = () => resolve({ job_id: 'refund-job', status: 'succeeded', attempt_count: 1, max_attempts: 1,
+        result_reference: 'refund-receipt', receipt: { batch_identity: batchIdentity, preview_fingerprint: fingerprint,
+          resulting_batch_version: 1, reconciled_count: 1, existing_count: 0, pending_count: 0 } });
+    }));
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: `核對交易 ${row.reference}` }));
+      const review = within(await screen.findByRole('dialog', { name: '核對交易' }));
+      expect(await review.findByText(/補助款退還客戶 · 明細候選/)).toBeVisible();
+      expect(preview).toHaveBeenCalledWith(batchIdentity, expect.any(AbortSignal), undefined, false, row.row_identity);
+      expect(apply).not.toHaveBeenCalled();
+      expect(readCase).not.toHaveBeenCalled();
+      fireEvent.click(review.getByRole('button', { name: '確認核銷本筆交易' }));
+      await waitFor(() => expect(outcome).toHaveBeenCalledWith('refund-job', expect.any(AbortSignal)));
+      expect(readCase).not.toHaveBeenCalled();
+      expect(review.queryByText('本筆交易已核銷。')).not.toBeInTheDocument();
+      await act(async () => finish());
+      expect(await review.findByText('本筆交易已核銷。')).toBeVisible();
+      expect(await review.findByText('本案補助方案 客戶先墊後退')).toBeVisible();
+      expect(readCase).toHaveBeenCalledWith(caseNo, expect.any(AbortSignal));
+    } finally {
+      [preview, apply, readCase, outcome].forEach(mock => mock.mockRestore());
       window.location.hash = '';
     }
   });

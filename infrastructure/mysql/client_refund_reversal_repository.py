@@ -114,17 +114,6 @@ class MySqlClientRefundReversalRepository:
     def append_ledger_entries(self, candidate) -> None:
         request = self._require_request()
         with _mysql_cursor(self._connection) as cursor:
-            if request.selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
-                from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
-                cursor.execute('SELECT id,format_id FROM finance_import_rows WHERE id IN ('
-                    + _placeholders(request.selection.bank_fact_identities) + ') ORDER BY id', request.selection.bank_fact_identities)
-                rows = tuple(cursor.fetchall())
-                if rows and all(row['format_id'] == 'taishin' for row in rows):
-                    state = MySqlAccountingWorkspaceState(self._connection)
-                    plan = state.subsidy_plan(request.selection.case_no)
-                    if plan.selected_scheme is None:
-                        state.append_subsidy_plan(request.selection.case_no, plan.version+1, 'advance',
-                            request.actor.actor_id, request.idempotency_key.value, bank_row_id=int(rows[0]['id']))
             for ordinal, entry in enumerate(candidate.entries, start=1):
                 entry_id = _insert_ledger_entry(cursor, request, candidate, entry, ordinal)
                 self._entry_ids[entry.identity] = entry_id
@@ -237,6 +226,12 @@ class MySqlClientRefundReversalRepository:
                 ),
             )
 
+        if (request.selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}
+                and len(request.selection.bank_fact_identities) == 1):
+            from infrastructure.mysql.subsidy_confirmation_repository import confirm_reconciled_subsidy_scheme
+            confirm_reconciled_subsidy_scheme(self._connection, receipt.case_no,
+                request.actor.actor_id, key.value, bank_row_id=int(request.selection.bank_fact_identities[0]))
+
     def query(self, case_no: str):
         with _mysql_cursor(self._connection) as cursor:
             if not _case_exists(cursor, case_no):
@@ -315,6 +310,11 @@ class MySqlClientRefundReversalRepository:
         manual_verified = bool(bank_rows) and all(row.get("manual_confirmed_case_no") == selection.case_no for row in bank_rows)
         is_taishin_subsidy = (selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}
                               and bool(bank_rows) and all(row.get("format_id") == "taishin" for row in bank_rows))
+        if is_taishin_subsidy:
+            from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+            state = MySqlAccountingWorkspaceState(self._connection)
+            if state.arrangement(selection.case_no, for_update=lock).direct_confirmed:
+                raise ValueError('subsidy_direct_arrangement_active')
         if is_sinopac_refund or is_taishin_subsidy:
             for row in bank_rows:
                 if row.get("transaction_date") is None:
@@ -936,10 +936,10 @@ def _reopen_receivable_obligations(cursor, candidate, totals, version):
     for identity in candidate.affected_obligations:
         amount = totals.get(identity, 0)
         cursor.execute(
-            "UPDATE client_obligations SET amount_due_ntd=%s,status='open',"
+            "UPDATE client_obligations SET amount_due_ntd=amount_due_ntd+%s,status='open',"
             "projection_version=%s WHERE obligation_identity=%s AND case_no=%s "
-            "AND direction='receivable_from_client' AND status='settled' "
-            "AND amount_due_ntd=0",
+            "AND direction='receivable_from_client' "
+            "AND ((status='settled' AND amount_due_ntd=0) OR (status='open' AND amount_due_ntd>0))",
             (amount, version, identity, candidate.case_no),
         )
         if int(cursor.rowcount) != 1:

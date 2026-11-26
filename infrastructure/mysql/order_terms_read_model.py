@@ -214,6 +214,37 @@ def _contract_charge_days(cursor, case_no, schedule_rows, lock):
 
 def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow_planned: bool = True):
     """Price confirmed/planned days without creating official Scheduling facts."""
+    days = load_client_pricing_charge_days(cursor, order_row, lock=lock, allow_planned=allow_planned)
+    if not days and not allow_planned:
+        return None, None
+    source = _load_client_finance(cursor, order_row, lock)
+    if order_row.get("actual_start_date") is not None:
+        from dataclasses import replace
+        source = replace(source, effective_start_date=order_row["actual_start_date"],
+            payment_terms=replace(source.payment_terms, first_payment_due_date=order_row["actual_start_date"]))
+    return _materialize_contract_client_finance_facts(order_row, days, source), source
+
+
+def find_formal_service_shortening_receipt_id(cursor, case_no: str, service_days: int) -> int | None:
+    cursor.execute(
+        "SELECT receipt.id FROM order_terms_apply_receipts receipt "
+        "JOIN order_terms_change_events event ON event.id=receipt.order_terms_event_id "
+        "AND event.case_no=receipt.case_no "
+        "JOIN scheduling_aggregates aggregate ON aggregate.case_no=receipt.case_no "
+        "JOIN scheduling_generations generation ON generation.id=aggregate.effective_generation_id "
+        "AND generation.case_no=receipt.case_no AND generation.generation_number=receipt.scheduling_generation "
+        "WHERE receipt.case_no=%s AND receipt.lifecycle_status IN ('服務中','訂單完成') "
+        "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(event.before_terms,'$.service_days')) AS UNSIGNED)>"
+        "CAST(JSON_UNQUOTE(JSON_EXTRACT(event.after_terms,'$.service_days')) AS UNSIGNED) "
+        "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(event.after_terms,'$.service_days')) AS UNSIGNED)=%s "
+        "ORDER BY receipt.id DESC LIMIT 1",
+        (case_no, service_days),
+    )
+    receipt = cursor.fetchone()
+    return int(receipt['id']) if receipt else None
+
+
+def load_client_pricing_charge_days(cursor, order_row, *, lock: bool, allow_planned: bool = True) -> tuple[ClientChargeDay, ...]:
     case_no = str(order_row["case_no"])
     aggregate = select_scheduling_aggregate(cursor, case_no, lock=lock)
     generation = _select_generation(cursor, aggregate, lock)
@@ -222,7 +253,7 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
             tuple(ClientChargeDay(row["work_date"], False)
                   for row in schedules if bool(row["is_work_day"])))
     if not days and not allow_planned:
-        return None, None
+        return ()
     if not days:
         _, dates = _select_confirmed_service_dates(cursor, case_no, lock)
         if not dates:
@@ -242,12 +273,7 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
             Decimal(str(order_row["service_hours_per_day"])), lock=lock,
         )
         days = tuple(ClientChargeDay(row["work_date"], False, row["holiday_hours"], row["holiday_hour_segments"]) for row in financial_days)
-    source = _load_client_finance(cursor, order_row, lock)
-    if order_row.get("actual_start_date") is not None:
-        from dataclasses import replace
-        source = replace(source, effective_start_date=order_row["actual_start_date"],
-            payment_terms=replace(source.payment_terms, first_payment_due_date=order_row["actual_start_date"]))
-    return _materialize_contract_client_finance_facts(order_row, days, source), source
+    return days
 
 
 def _committed_charge_days(cursor, case_no, lock):
@@ -807,6 +833,11 @@ def _client_obligation(row):
         net_settled_amount=MoneyNTD(_integer_ntd(row["net_settled_amount_ntd"])),
         due_date=row["due_date"],
         formal_history_exists=bool(row["formal_history_exists"]),
+        net_receipt_amount=MoneyNTD(_integer_ntd(row["net_receipt_amount_ntd"])),
+        automatic_amount=(MoneyNTD(_integer_ntd(row["automatic_amount_ntd"]))
+                          if row["automatic_amount_ntd"] is not None else None),
+        manual_amount=(MoneyNTD(_integer_ntd(row["manual_amount_ntd"]))
+                       if row["manual_amount_ntd"] is not None else None),
     )
 
 
@@ -1325,14 +1356,25 @@ _CLIENT_ACCOUNTED_AMOUNT_SQL = (
     "WHERE a.obligation_identity=o.obligation_identity),0) + "
     "COALESCE((SELECT SUM(n.amount_ntd) FROM client_finance_noncash_events n WHERE n.target_identity=o.obligation_identity),0)"
 )
+_CLIENT_NET_RECEIPT_AMOUNT_SQL = (
+    "COALESCE((SELECT SUM(CASE WHEN l.entry_type='receipt' THEN a.amount_ntd "
+    "WHEN l.entry_type='reversal' AND original.entry_type='receipt' THEN -a.amount_ntd END) "
+    "FROM client_ledger_obligation_allocations a JOIN client_ledger_entries l ON l.id=a.ledger_entry_id "
+    "LEFT JOIN client_ledger_entries original ON original.id=l.reversal_of_entry_id AND original.case_no=l.case_no "
+    "WHERE a.obligation_identity=o.obligation_identity AND l.case_no=o.case_no),0)"
+)
 _CLIENT_OBLIGATIONS_SQL = (
     "SELECT o.obligation_identity,o.obligation_type,o.direction,o.due_date,"
-    "CASE WHEN EXISTS(SELECT 1 FROM client_finance_amount_controls c WHERE c.obligation_identity=o.obligation_identity) "
+    "CASE WHEN c.amount_mode='automatic' THEN c.effective_ntd END AS automatic_amount_ntd,"
+    "CASE WHEN c.amount_mode='manual' THEN c.effective_ntd END AS manual_amount_ntd,"
+    + _CLIENT_NET_RECEIPT_AMOUNT_SQL + " AS net_receipt_amount_ntd,"
+    "CASE WHEN c.obligation_identity IS NOT NULL "
     "THEN GREATEST(e.after_amount_ntd," + _CLIENT_ACCOUNTED_AMOUNT_SQL + ") ELSE e.after_amount_ntd END AS contracted_amount_ntd,"
     + _CLIENT_ACCOUNTED_AMOUNT_SQL + " AS net_settled_amount_ntd,"
     "(EXISTS(SELECT 1 FROM client_ledger_obligation_allocations a WHERE a.obligation_identity=o.obligation_identity) "
     "OR EXISTS(SELECT 1 FROM client_finance_noncash_events n WHERE n.target_identity=o.obligation_identity)) AS formal_history_exists "
     "FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id "
+    "LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity "
     "WHERE o.case_no=%s AND o.obligation_type IN ('deposit','first','second') "
     "ORDER BY o.obligation_type,o.obligation_identity"
 )

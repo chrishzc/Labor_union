@@ -22,7 +22,9 @@ export function ClientRegistryAccountingSummary({caseNo, revision}: {caseNo: str
   const originalClientItems=state.data?.client_items.filter(item=>item.direction==='receivable')??[];
   const unallocatedTransactions=state.data?.transactions.filter(item=>item.item_identity==='unallocated')??[];
   const scheme = state.data?.scheme;
-  const manual = state.data?.subsidy_plan?.events.at(-1)?.scheme;
+  const planEvent = state.data?.subsidy_plan?.events.at(-1);
+  const manual = state.data?.arrangement?.events.at(-1)?.action === 'confirm_direct'
+    ? 'direct' : planEvent?.source === 'bank' || planEvent?.source === 'receipt' ? undefined : planEvent?.scheme;
   const subsidyPayments=state.data?.subsidy_payments?.filter(payment=>
     !state.data?.historical_stages||payment.recipient!=='client'||payment.source==='formal')??[];
   const known = scheme === 'split' || scheme === 'advance' || scheme === 'direct' ? scheme : undefined;
@@ -64,6 +66,7 @@ export function ClientRegistryAccountingSummary({caseNo, revision}: {caseNo: str
         <div><dt>歷史方案補助對象</dt><dd>{known ? subsidyPlanTargets[known] : '待確認'}</dd></div>
         <div><dt>人工設定補助對象</dt><dd>{manual ? subsidyPlanTargets[manual] : '待確認'}</dd></div>
       </dl>
+      {state.data.scheme_pending_reason&&<p role="status">{accountingReason(state.data.scheme_pending_reason)}</p>}
       {state.data.subsidy_pending_reason&&<p role="status">{accountingReason(state.data.subsidy_pending_reason)}</p>}
       <h4>月嫂應付</h4>
       {!!state.data.staff_accounting_availability?.length&&<section aria-label="歷史月嫂應付依據">

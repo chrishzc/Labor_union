@@ -20,7 +20,8 @@ def query_case_subsidy_amount(connection, case_no, *, lock=False):
     """S uses the government owner's calculation, independent of scheme/payables."""
     from subsystems.government_subsidy.reconciliation_register_query import SubsidyReceivableEstimate
     sources = _select_established_cases(connection, None, None, case_no=case_no, lock=lock)
-    estimate = (project_receivable_estimate(sources[0]) if len(sources) == 1
+    estimate = (project_receivable_estimate(sources[0],
+                require_frozen_rate=str(sources[0]['order_status']).startswith('歷史')) if len(sources) == 1
                 else SubsidyReceivableEstimate(None, 'subsidy_case_source_missing'))
     with connection.cursor() as cursor:
         cursor.execute('SELECT amount_mode,effective_ntd FROM government_subsidy_amount_controls WHERE case_no=%s'

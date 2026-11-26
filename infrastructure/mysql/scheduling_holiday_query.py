@@ -73,7 +73,21 @@ class MySqlSchedulingHolidayQuery:
         reason: str,
         result: dict[str, object],
     ) -> None:
+        from infrastructure.mysql.order_terms_read_model import select_order
+        from infrastructure.mysql.pricing_configuration_repository import find_service_shortening_pricing_basis
+
         with self._connection.cursor() as cursor:
+            shortening_receipts: dict[str, int] = {}
+            case_results = result.get("case_results")
+            if isinstance(case_results, list):
+                for case_result in case_results:
+                    case_no = case_result.get("case_no") if isinstance(case_result, dict) else None
+                    if isinstance(case_no, str) and case_result.get("case_total_amount") is not None:
+                        order = select_order(cursor, case_no, lock=True)
+                        shortening = find_service_shortening_pricing_basis(cursor, order, lock=True)
+                        if shortening is not None:
+                            shortening_receipts[case_no] = shortening.receipt_id
+            snapshot = {**result, "service_shortening_receipts": shortening_receipts} if shortening_receipts else result
             cursor.execute(
                 "INSERT INTO admin_command_receipts "
                 "(command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) "
@@ -85,7 +99,7 @@ class MySqlSchedulingHolidayQuery:
                     preview_fingerprint,
                     actor,
                     reason,
-                    json.dumps(result, ensure_ascii=False),
+                    json.dumps(snapshot, ensure_ascii=False),
                 ),
             )
 

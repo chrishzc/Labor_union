@@ -26,6 +26,7 @@ from domains.client_finance.reconciliation import (
 from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.identities import IdempotencyKey
 from shared_kernel.money import MoneyNTD
 from subsystems.client_finance.reconciliation_workflow import (
     ClientReconciliationApplyRequest,
@@ -344,7 +345,10 @@ class MySqlClientReceiptReconciliationRepository:
             payload,
         )
 
-    def save_receipt(self, key, stored_receipt) -> None:
+    def save_receipt(self, key: IdempotencyKey, stored_receipt: StoredClientReconciliationReceipt) -> None:
+        from infrastructure.mysql.subsidy_confirmation_repository import confirm_reconciled_subsidy_scheme
+
+        request = self._require_request()
         receipt = stored_receipt.receipt
         with _mysql_cursor(self._connection) as cursor:
             cursor.execute(
@@ -352,12 +356,19 @@ class MySqlClientReceiptReconciliationRepository:
                 (
                     key.value,
                     stored_receipt.command_fingerprint.value,
-                    self._require_request().preview_fingerprint.value,
+                    request.preview_fingerprint.value,
                     receipt.case_no,
                     receipt.account_version,
                     _canonical_json(_receipt_payload(receipt)),
                 ),
             )
+        confirm_reconciled_subsidy_scheme(
+            self._connection,
+            receipt.case_no,
+            request.actor.actor_id,
+            key.value,
+            receipt_identity=f"client:{min(self._ledger_entry_ids.values())}",
+        )
 
     def query(self, case_no: str) -> dict[str, object]:
         with _mysql_cursor(self._connection) as cursor:
@@ -442,6 +453,9 @@ def _raise_if_retryable(error: OperationalError) -> None:
 
 def _load_account_version(cursor, case_no, *, lock):
     if lock:
+        # Share the Orders → Client Finance lock order with subsidy payout Apply.
+        cursor.execute("SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
+        cursor.fetchone()
         cursor.execute(
             "INSERT IGNORE INTO client_finance_accounts "
             "(case_no,aggregate_version) VALUES (%s,0)",

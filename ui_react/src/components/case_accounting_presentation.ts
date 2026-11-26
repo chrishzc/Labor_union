@@ -1,4 +1,17 @@
-const historicalAccountingReasons: Record<string,string> = {
+import type {CaseAccounting} from '../api/finance_import/finance_accounting_client';
+
+const accountingReasons: Record<string,string> = {
+ subsidy_case_total_unknown: '缺少本案正式總額，補助方案待確認。',
+ subsidy_amount_unknown: '缺少本案正式補助金額，補助方案待確認。',
+ subsidy_amount_invalid: '本案補助金額與案件總額不符，請核對正式來源。',
+ subsidy_receipt_missing: '尚無本案有效的客戶核銷實收。',
+ subsidy_receipt_over_total: '客戶核銷實收已超過案件總額，請核對原收款。',
+ subsidy_receipt_difference_mismatch: '案件總額與客戶實收的差額不等於本案補助。',
+ subsidy_payout_missing: '已收全額，尚無同案已核銷的補助出款。',
+ subsidy_payout_conflict: '同案有互相衝突的補助出款證據，請核對款項與對象。',
+ subsidy_evidence_ambiguous: '收付款的案件或對象不唯一，請核對原交易。',
+ subsidy_confirmation_receipt_required: '已有可供辨識的款項，正式確認仍待核銷回執。',
+ subsidy_confirmation_evidence_changed: '原確認證據已變動，歷史方案保留，請核對目前有效的收付款。',
  historical_client_bank_reconciliation_required: '已有本案銀行收付款待核對，不能視為沒有收付或自行分配期款。',
  historical_client_cash_requires_review: '原收付款與免自備判定不相容，請核對原帳。',
  historical_subsidy_limit_missing: '缺少本案有效補助上限，免自備資格待確認。',
@@ -41,7 +54,7 @@ const historicalAccountingReasons: Record<string,string> = {
  historical_payroll_unique_assignment_required: '歷史月嫂指派歸屬待確認。',
 };
 export function accountingReason(reason:string):string {
- return historicalAccountingReasons[reason] ?? `帳務來源待核對（${reason}）。`;
+ return accountingReasons[reason] ?? `帳務來源待核對（${reason}）。`;
 }
 
 export function unallocatedPaymentLabel(kind:string):string {
@@ -50,4 +63,9 @@ export function unallocatedPaymentLabel(kind:string):string {
  if(kind==='refund_reversal')return '退款沖正';
  if(kind==='reversal')return '沖正';
  return '原收付款';
+}
+
+export function isDirectSubsidyArrangement(data: CaseAccounting): boolean {
+ return data.arrangement?.events.at(-1)?.action === 'confirm_direct'
+   || data.subsidy_plan?.events.at(-1)?.scheme === 'direct';
 }

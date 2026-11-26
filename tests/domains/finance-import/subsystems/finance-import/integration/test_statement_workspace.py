@@ -516,18 +516,34 @@ def test_six_cash_flows_require_bank_direction_and_unique_owner_proof(bank, dire
     assert _cash_flow({**row, 'direction':'outgoing' if direction=='incoming' else 'incoming'}) == (bank, None)
 
 
-@pytest.mark.parametrize('total,customer,subsidy,complete,government,expected', [
-    (30000,18000,12000,False,12000,'waiting'),
-    (30000,18000,12000,True,0,'split'),
-    (30000,30000,12000,True,12000,'advance'),
-    (30000,30000,12000,True,0,'unknown'),
-    (30000,30000,0,True,0,'unknown'),
-    (30000,None,12000,None,12000,'unknown'),
-    (30000,20000,12000,True,12000,'unknown'),
-])
-def test_scheme_gate_uses_independent_terms_and_never_infers_direct_from_absent_cash(total,customer,subsidy,complete,government,expected):
-    from domains.finance_import.statement_archive import case_accounting_scheme
-    assert case_accounting_scheme(total,customer,subsidy,complete,government) == expected
+@pytest.mark.parametrize(
+    "total,subsidy,received,pt,rt,g,ambiguous,expected,source,reason",
+    [
+        (48000, 12000, 36000, False, False, False, False, "split", "receipt", None),
+        (48000, 12000, 48000, True, False, False, False, "split", "bank", None),
+        (48000, 12000, 48000, False, True, False, False, "advance", "bank", None),
+        (48000, 12000, 48000, False, False, True, False, "unknown", None, "subsidy_payout_missing"),
+        (48000, 12000, 0, True, False, False, False, "unknown", None, "subsidy_receipt_missing"),
+        (48000, 12000, 0, False, True, False, False, "unknown", None, "subsidy_receipt_missing"),
+        (48000, 12000, 49000, True, False, False, False, "unknown", None, "subsidy_receipt_over_total"),
+        (48000, 12000, 48000, True, True, False, False, "unknown", None, "subsidy_payout_conflict"),
+        (48000, 12000, 36000, False, True, False, False, "unknown", None, "subsidy_payout_conflict"),
+        (48000, 12000, 36000, False, False, False, True, "unknown", None, "subsidy_evidence_ambiguous"),
+        (48000, 12000, 41000, False, False, False, False, "unknown", None, "subsidy_receipt_difference_mismatch"),
+        (None, 12000, 36000, False, False, False, False, "unknown", None, "subsidy_case_total_unknown"),
+        (48000, None, 36000, False, False, False, False, "unknown", None, "subsidy_amount_unknown"),
+    ],
+)
+def test_scheme_gate_uses_reconciled_receipts_and_subsidy_payouts(
+    total, subsidy, received, pt, rt, g, ambiguous, expected, source, reason,
+):
+    from domains.finance_import.statement_archive import ReconciledSubsidyEvidence, case_accounting_scheme
+    receipts = (("client:1", received),) if received else ()
+    evidence = ReconciledSubsidyEvidence(receipts, ("bank:2",) if pt else (),
+                                        ("bank:3",) if rt else (), g, ambiguous)
+    decision = case_accounting_scheme(total, subsidy, evidence)
+    assert (decision.scheme, decision.source, decision.pending_reason) == (expected, source, reason)
+    assert ("client:1" in decision.evidence_identities) == (source is not None)
 
 
 @pytest.mark.parametrize('identity,hours,limit', [('補助市民',11,12),('補助市民',12,12),('原住民',79,80),('原住民',80,80)])
@@ -775,7 +791,7 @@ def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_
     State.arrangement=lambda self,case_no: CaseArrangement(case_no)
     query=AccountingWorkspace(State(),lambda *_,**__: (stages,()),lambda *_,**__: (staff,()),lambda _:banks,lambda _:12000)
     case=query.query('CASE')
-    assert (case.customer_amount_ntd,case.customer_fully_received,case.scheme)==(18000,True,'split')
+    assert (case.customer_amount_ntd,case.customer_fully_received,case.scheme)==(18000,True,'unknown')
     assert (case.staff_receivable_ntd,case.subsidy_ntd,case.customer_burden_ntd,case.cash_net_ntd)==(30000,12000,18000,0)
     assert case.cash_by_flow=={'C':18000,'G':12000,'PS':30000,'PT':0,'RS':0,'RT':0}
     assert stages[1].due_date=='2026-09-20' and staff[0].due_date=='2026-09-30'
@@ -784,7 +800,7 @@ def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_
     query.client=lambda *_,**__: (partial,())
     query.payment_terms=lambda _: ClientCasePaymentTerms(service_end_date=date(2026, 10, 20))
     waiting=query.query('CASE')
-    assert waiting.scheme=='waiting'
+    assert waiting.scheme=='unknown'
     assert waiting.estimated_subsidy_payment_date=='2026-12-15'
     assert not waiting.subsidy_payments
     query.client=lambda *_,**__: (stages[1:],())
@@ -864,7 +880,41 @@ def _direct_arrangement_workspace():
     staff=(StaffAccountingItem('staff','payable','月嫂款','Synthetic',30000,0,False,'v1','2026-10-31'),)
     banks=(AccountingBankFact('c','2026-10-02','in',30000,('DIRECT',),'sinopac','C'),)
     state=State()
-    return AccountingWorkspace(state,lambda *_,**__: (stages,()),lambda *_,**__: (staff,()),lambda _:banks,lambda _:12000),state
+    from domains.finance_import.statement_archive import ReconciledSubsidyEvidence
+
+    query = AccountingWorkspace(
+        state, lambda *_, **__: (stages, ()), lambda *_, **__: (staff, ()),
+        lambda _: banks, lambda _: 12000, case_total=lambda *_, **__: 30000,
+    )
+    def evidence(case_no, *, for_update=False):
+        rows = query.bank(case_no)
+        return ReconciledSubsidyEvidence(
+            receipts=tuple((row.identity, row.amount_ntd) for row in rows if row.cash_flow == 'C'),
+            staff_payouts=tuple(row.identity for row in rows if row.cash_flow == 'PT'),
+            customer_refunds=tuple(row.identity for row in rows if row.cash_flow == 'RT'),
+            government_received=any(row.cash_flow == 'G' for row in rows),
+            ambiguous=any(row.cases != (case_no,) for row in rows),
+        )
+    query.subsidy_evidence = evidence
+    return query, state
+
+
+def test_existing_refunds_remain_readable_after_direct_arrangement():
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
+    query, _ = _direct_arrangement_workspace()
+    existing = query.client
+    refunds = (
+        ClientAccountingItem("refund", "payable", "一般退款", "Synthetic", 500, 0, False, "v1", None,
+                             obligation_type="refund"),
+        ClientAccountingItem("historic-subsidy", "payable", "歷史補助", "Synthetic", 800, 800, True, "v1", None,
+                             obligation_type="subsidy_return", settled=True),
+    )
+    query.client = lambda *args, **kwargs: ((*existing(*args, **kwargs)[0], *refunds), ())
+    query.confirm_arrangement("DIRECT", "confirm_direct", "確認政府直接退客戶", 0, "direct", "admin")
+    case = query.query("DIRECT")
+    assert case.scheme == "direct"
+    assert case.client_items[-2:] == refunds
+    assert [item.source for item in case.subsidy_payments] == ["formal"]
 
 
 def test_direct_arrangement_confirmation_replay_stale_and_full_correction_history():
@@ -905,11 +955,12 @@ def test_incomplete_or_unknown_bank_sources_cannot_be_confirmed_as_direct():
     from dataclasses import replace
     from subsystems.finance_import.accounting_workspace import ArrangementNotReady
     query,state=_direct_arrangement_workspace()
-    client=query.client
-    query.client=lambda *args,**kwargs:(tuple(replace(item,actual_ntd=0) if item.payment_stage=='first' else item for item in client(*args,**kwargs)[0]),())
-    assert query.query('DIRECT').scheme=='waiting'
-    with pytest.raises(ArrangementNotReady):query.confirm_arrangement('DIRECT','confirm_direct','尚未齊款',0,'incomplete','admin')
-    query.client=client
+    bank = query.bank
+    query.bank = lambda _: ()
+    assert query.query('DIRECT').scheme == 'unknown'
+    with pytest.raises(ArrangementNotReady):
+        query.confirm_arrangement('DIRECT', 'confirm_direct', '尚未齊款', 0, 'incomplete', 'admin')
+    query.bank = bank
     bank=query.bank
     query.bank=lambda case:tuple(replace(row,cases=('DIRECT','OTHER')) for row in bank(case))
     assert query.query('DIRECT').cash_by_flow is None
@@ -1020,7 +1071,7 @@ def _plan_workspace():
     return state,AccountingWorkspace(state,no_finance,no_finance)
 
 
-@pytest.mark.parametrize('scheme',['split','advance','direct'])
+@pytest.mark.parametrize('scheme',['split','advance'])
 def test_human_plan_can_be_saved_before_collection_without_financial_calls(scheme):
     state,workspace=_plan_workspace()
     result=workspace.save_subsidy_plan('PLAN-CASE',scheme,0,'operation-1','admin:1')
@@ -1032,7 +1083,7 @@ def test_manual_plan_replays_original_operation_after_later_change_and_rejects_c
     from subsystems.finance_import.accounting_workspace import AccountingConflict
     state,workspace=_plan_workspace()
     workspace.save_subsidy_plan('PLAN-CASE','split',0,'operation-1','admin:1')
-    workspace.save_subsidy_plan('PLAN-CASE','direct',1,'operation-2','admin:2')
+    workspace.save_subsidy_plan('PLAN-CASE','advance',1,'operation-2','admin:2')
     replay=workspace.save_subsidy_plan('PLAN-CASE','split',0,'operation-1','admin:1')
     assert replay.applied_version==1 and replay.plan.version==2 and len(state.events)==2
     with pytest.raises(AccountingConflict,match='command_changed'):
@@ -1040,6 +1091,14 @@ def test_manual_plan_replays_original_operation_after_later_change_and_rejects_c
     with pytest.raises(AccountingConflict,match='version_changed'):
         workspace.save_subsidy_plan('PLAN-CASE','advance',0,'operation-new','admin:1')
     assert len(state.events)==2 and state.rollbacks==2
+
+
+def test_direct_plan_requires_the_arrangement_command():
+    from subsystems.finance_import.accounting_workspace import ArrangementNotReady
+    state, workspace = _plan_workspace()
+    with pytest.raises(ArrangementNotReady, match='direct_arrangement_confirmation_required'):
+        workspace.save_subsidy_plan('PLAN-CASE', 'direct', 0, 'operation', 'admin:1')
+    assert not state.events and state.rollbacks == 1
 
 
 @pytest.mark.parametrize('received,selected,completed',[(False,'split',False),(None,'direct',False),(True,None,False),(True,'advance',True),(True,'direct',True)])

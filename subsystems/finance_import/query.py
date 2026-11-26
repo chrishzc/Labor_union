@@ -1532,6 +1532,12 @@ def _bank_transaction(row, cases, reconciliation_target=None, reconciliation_una
         "bank_memo": re.sub(r"\d[\d\s\-－]{6,}\d", "****", row.get("memo") or "")[:500] or None,
         "reconciliation_records": [],
         "staff_subsidy_manual_review_allowed": False,
+        "client_subsidy_batch_identity": (
+            row.get("batch_identity") if row["transaction_status"] == "pending"
+            and row["disposition"] != "blocked" and bank == "taishin" and row["direction"] == "outgoing"
+            and row["classification_type"] == "client_subsidy_return" and len(cases) == 1
+            and not (reconciliation_target and reconciliation_target["obligation_identities"]) else None
+        ),
         "staff_subsidy_batch_identity": (
             row.get("batch_identity") if row["transaction_status"] == "pending"
             and row["disposition"] != "blocked"

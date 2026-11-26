@@ -1,7 +1,7 @@
 """Real owner writes: corrected terms -> current bank candidates -> original-source receipt."""
 from argparse import Namespace
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import hashlib
 import json
 import os
@@ -44,7 +44,7 @@ pytestmark = pytest.mark.skipif(os.getenv('ACCOUNTING_SYNC_MYSQL') != '1', reaso
 
 
 @pytest.fixture
-def connection():
+def connection(request):
     config = mysql_adapter._database_config_from_environment()
     assert config['host'] in {'127.0.0.1', 'localhost'}
     assert os.getenv('APP_ENV', 'development') == 'development'
@@ -65,8 +65,9 @@ def connection():
         assert schema_state['state'] == 'exact', 'The real feature schema must match the strict 1081 descriptor.'
         from infrastructure.mysql.nas_mutations import ensure_nas_procedures
         ensure_nas_procedures(connection)
-        _seed(connection)
-        _seed_effective_assignment(connection)
+        service_days = getattr(request, 'param', 5)
+        _seed(connection, service_days=service_days)
+        _seed_effective_assignment(connection, service_days=service_days)
         yield connection
     finally:
         connection.rollback()
@@ -116,11 +117,11 @@ def receipt_application(connection):
     return ClientReceiptReconciliationApplication(repository, ClientReconciliationWorkflow(repository, lambda: MySqlUnitOfWork(connection)))
 
 
-def receive(connection, row, targets, key):
+def receive(connection, row, targets, key, *, partial=False):
     app = receipt_application(connection)
-    selection = ReconciliationSelection(_CASE_NO, None, (str(row),), tuple(targets))
+    selection = ReconciliationSelection(_CASE_NO, None, (str(row),), tuple(targets), allow_partial_receipt=partial)
     preview = app.preview(selection)
-    assert preview.candidate.status.value == 'exact'
+    assert preview.candidate.status.value == ('partial' if partial else 'exact')
     request = ClientReconciliationApplyRequest(selection, ExpectedVersion(preview.account_version),
         preview.fingerprint, IdempotencyKey(key), ActorContext('synthetic-accounting'),
         '核銷原銀行流水', CorrelationId(key))
@@ -329,6 +330,74 @@ def test_early_service_end_replaces_bank_candidates_and_receives_original_source
     assert all(row in after_cash[table] for table, rows in original_cash.items() for row in rows)
     assert after_cash['staff_payout_events'] == original_cash['staff_payout_events']
     assert after_cash['staff_payout_obligation_links'] == original_cash['staff_payout_obligation_links']
+
+
+@pytest.mark.parametrize('connection', (10,), indirect=True)
+@pytest.mark.parametrize(('deposit_paid', 'partial_first_paid'), ((False, 0), (True, 0), (True, 3000)))
+def test_early_end_creates_refund_only_for_formally_received_surplus(connection, deposit_paid, partial_first_paid):
+    change_fee(connection, 1000, 'terms-before-shortening')
+    original = {item['payment_stage']: item for item in receipt_application(connection).query(_CASE_NO)['obligations']}
+    assert int(original['deposit']['amount_due_ntd']) == 17000
+    assert int(original['first']['amount_due_ntd']) == 16000
+    if deposit_paid:
+        target = original['deposit']['obligation_identity']
+        receive(connection, bank_source(connection, 17000, (target,)), (target,), 'original-deposit')
+    if partial_first_paid:
+        target = original['first']['obligation_identity']
+        receive(connection, bank_source(connection, partial_first_paid, (target,)), (target,),
+                'original-partial-first', partial=True)
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE orders SET status='服務中',actual_start_date='2026-10-01',"
+                       "service_start_time='09:00:00',service_end_time='17:00:00',service_end_day_offset=0 "
+                       "WHERE case_no=%s", (_CASE_NO,))
+        cursor.execute('SELECT a.id FROM case_staff_assignments a JOIN scheduling_aggregates s '
+                       'ON s.case_no=a.case_no AND s.effective_generation_id=a.generation_id '
+                       'WHERE a.case_no=%s', (_CASE_NO,))
+        assignment_id = cursor.fetchone()['id']
+    connection.commit()
+
+    workspace = build_accounting_workspace(connection)
+    cash = cash_snapshot(connection)
+    before = workspace.query(_CASE_NO)
+    assert not any(item.obligation_type == 'refund' for item in before.client_items)
+    repository = MySqlOrderTermsRepository(connection)
+    facts = repository.load_for_query(_CASE_NO)
+    proposed = replace(facts.registry.order.terms, service_days=5)
+    days = tuple(date(2026, 10, 1) + timedelta(days=index) for index in range(5))
+    replacement = dict(replacement_service_dates=days, replacement_allocations=((assignment_id, 5),),
+                       replacement_assignment_dates=((assignment_id, days),), allow_started_service_change=True)
+    clock = FixedBusinessClock(datetime(2026, 10, 6, 12, tzinfo=TAIPEI_TIME_ZONE))
+    workflow = OrderTermsWorkflow(repository, lambda: MySqlUnitOfWork(connection), clock)
+    preview = workflow.preview(_CASE_NO, proposed, **replacement)
+    assert [item.direction_amount_ntd for item in preview.client_finance_impact.actions
+            if item.direction.value == 'refund_due'] == ([3000] if partial_first_paid else [])
+    assert workspace.query(_CASE_NO).client_items == before.client_items
+    request = OrderTermsApplyRequest(_CASE_NO, proposed, ExpectedVersion(preview.order_version),
+        ExpectedVersion(preview.scheduling_version), ExpectedVersion(preview.client_finance_version),
+        ExpectedVersion(preview.payroll_version), preview.fingerprint, IdempotencyKey('shorten-10-to-5'),
+        ActorContext('synthetic-accounting'), '確認實際服務五天', CorrelationId('shorten-10-to-5'), **replacement)
+
+    if partial_first_paid:
+        class FailingRepository(MySqlOrderTermsRepository):
+            def persist_payroll_impact(self, command):
+                super().persist_payroll_impact(command)
+                raise RuntimeError('synthetic rollback after planned refund')
+
+        failing = OrderTermsWorkflow(FailingRepository(connection), lambda: MySqlUnitOfWork(connection), clock)
+        with pytest.raises(RuntimeError, match='synthetic rollback after planned refund'):
+            failing.apply(request)
+        assert workspace.query(_CASE_NO).client_items == before.client_items
+        assert repository.load_for_query(_CASE_NO) == facts
+    receipt = workflow.apply(request)
+    assert workflow.apply(request) == receipt
+    assert cash_snapshot(connection) == cash
+    after = workspace.query(_CASE_NO)
+    refunds = [item for item in after.client_items if item.obligation_type == 'refund']
+    assert [(item.remaining_ntd, item.actual_ntd) for item in refunds] == ([(3000, 0)] if partial_first_paid else [])
+    assert repository.load_for_query(_CASE_NO).registry.order.terms.service_days == 5
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT actual_end_date,status FROM orders WHERE case_no=%s', (_CASE_NO,))
+        assert cursor.fetchone() == {'actual_end_date': days[-1], 'status': '服務中'}
 
 
 def _finish_yesterdays_service_via_durable_worker(connection, monkeypatch):

@@ -166,6 +166,8 @@ def test_case_pricing_query_and_preview_use_full_subsidy_funding(
             assert not lock
             return facts
 
+        case_for_query = case
+
     application = PricingConfigurationApplication(Repository(), lambda: pytest.fail("preview opened transaction"))
     _, impact = application.query_case("case-1")
     assert (impact.client_amount, impact.subsidy_amount, impact.subsidy_return_amount) == (0, 29000, 0)
@@ -211,6 +213,9 @@ def test_new_case_settings_reject_unequal_covered_rates_but_legacy_is_readable(r
         accounting_pending = ()
         def case(self, case_no, *, lock=False):
             return CasePricingFacts(case_no, 0, (1, 2, 3), invalid, 'manual', (), 0)
+
+        case_for_query = case
+
     application = PricingConfigurationApplication(Repository(), lambda: pytest.fail('preview wrote'))
     assert application.query_case('legacy-unequal')[0].terms == invalid
     with pytest.raises(ValueError, match='pricing_covered_rates_must_match'):

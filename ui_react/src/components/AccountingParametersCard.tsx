@@ -14,6 +14,7 @@ interface AccountingParametersCardProps {
   serviceHours?: number | null;
   customerAmountNtd?: number | bigint | null;
   staffAmountNtd?: number | bigint | null;
+  caseTotalNtd?: number | bigint | null;
   disabled?: boolean;
   onOpenEdit: () => void;
 }
@@ -25,6 +26,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
   serviceHours,
   customerAmountNtd,
   staffAmountNtd,
+  caseTotalNtd,
   disabled = false,
   onOpenEdit,
 }) => {
@@ -62,6 +64,8 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
   const displayCustomerAmount = customerAmountNtd != null
     ? customerAmountNtd.toLocaleString()
     : pricing?.impact?.client_amount?.toLocaleString();
+
+  const displayCaseTotal = caseTotalNtd === undefined ? pricing?.impact.case_total_amount : caseTotalNtd;
 
   const displayStaffAmount = staffAmountNtd != null
     ? staffAmountNtd.toLocaleString()
@@ -135,7 +139,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
           {totalHours == null || coveredHours == null || excessHours == null ? '服務時數計價依據待確認' : <>💡 計價依據：服務總時數 {totalHours}h（補助範圍 {coveredHours}h + 超額 {excessHours}h）</>}
         </span>
         <span style={{ fontWeight: 600, color: 'var(--md-sys-color-primary)' }}>
-          案件總額 {pricing?.impact.case_total_amount == null ? '待確認' : `NT$ ${pricing.impact.case_total_amount.toLocaleString()}`} ｜ 工會收入 {pricing?.impact.union_income_amount == null ? '待確認' : `NT$ ${pricing.impact.union_income_amount.toLocaleString()}`} ｜ 客戶應繳 {displayCustomerAmount == null ? '待確認' : `NT$ ${displayCustomerAmount}`} ｜ 月嫂基準應付 {displayStaffAmount == null ? '待確認' : `NT$ ${displayStaffAmount}`}
+          案件總額 {displayCaseTotal == null ? '待確認' : `NT$ ${displayCaseTotal.toLocaleString('zh-TW')}`} ｜ 工會收入 {pricing?.impact.union_income_amount == null ? '待確認' : `NT$ ${pricing.impact.union_income_amount.toLocaleString()}`} ｜ 客戶應繳 {displayCustomerAmount == null ? '待確認' : `NT$ ${displayCustomerAmount}`} ｜ 月嫂基準應付 {displayStaffAmount == null ? '待確認' : `NT$ ${displayStaffAmount}`}
         </span>
       </div>
     </div>
