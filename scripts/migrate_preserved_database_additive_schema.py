@@ -10011,7 +10011,11 @@ def _run_manifest_backfills(
     if not backfills:
         return ()
     artifact_dir = operation_receipt_path.expanduser().resolve().parent
-    backup_path = artifact_dir / f"{candidate}.pre_backfill.sql"
+    archive_id = (
+        f"{candidate}.{time_module.time_ns()}"
+        if any(item.backfill_id == SHARED_LINE_FAQ_BACKFILL_ID for item in backfills) else candidate
+    )
+    backup_path = artifact_dir / f"{archive_id}.pre_backfill.sql"
     backup = _candidate_preddl_dump(
         config,
         candidate,
