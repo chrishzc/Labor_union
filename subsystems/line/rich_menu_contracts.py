@@ -195,6 +195,7 @@ class LineRichMenuProviderRequest:
     publication_id: LineRichMenuPublicationId
     definition_json: str
     image_object_reference: str
+    expected_previous_provider_menu_id: str | None = None
 
     def __post_init__(self) -> None:
         validate_canonical_line_payload_json(self.definition_json)

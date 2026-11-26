@@ -836,3 +836,27 @@ def test_richmenuswitch_survives_publication_model_and_provider_payload() -> Non
         "richMenuAliasId": "staff-next",
         "data": "next",
     }
+
+@pytest.mark.parametrize(("before", "expected_calls", "expected_outcome"), [
+    ("richmenu-old", ["get", "post", "get"], LineRichMenuProviderOutcomeType.SUCCESS),
+    ("richmenu-next", ["get"], LineRichMenuProviderOutcomeType.SUCCESS),
+    ("richmenu-unexpected", ["get"], LineRichMenuProviderOutcomeType.REJECTED),
+])
+def test_alias_replacement_uses_only_the_expected_previous_version(
+    before: str, expected_calls: list[str], expected_outcome: LineRichMenuProviderOutcomeType,
+) -> None:
+    responses = [_Response(200, {"richMenuId": before})]
+    if before == "richmenu-old":
+        responses.extend([_Response(200), _Response(200, {"richMenuId": "richmenu-next"})])
+    session = _Session(responses)
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"png", "image/png"), session=session)
+    request = LineRichMenuProviderRequest(
+        LineRichMenuPublicationId(7), _definition(), "image/ref",
+        expected_previous_provider_menu_id="richmenu-old",
+    )
+
+    outcome = adapter.upsert_alias(request, "richmenu-next")
+
+    assert outcome.outcome_type is expected_outcome
+    assert [call[0] for call in session.calls] == expected_calls
+    assert all(call[1].endswith("/richmenu/alias/default-alias") for call in session.calls)

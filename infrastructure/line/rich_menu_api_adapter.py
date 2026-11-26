@@ -102,9 +102,12 @@ class LineRichMenuApiAdapter:
         request: LineRichMenuProviderRequest,
         provider_menu_id: str,
     ) -> LineRichMenuProviderOutcome:
-        result = self._set_alias(
-            _rich_menu_alias_id(request.definition_json),
-            provider_menu_id,
+        alias_id = _rich_menu_alias_id(request.definition_json)
+        previous_id = request.expected_previous_provider_menu_id
+        result = (
+            self._switch_existing_alias(alias_id, provider_menu_id, previous_id)
+            if alias_id and previous_id
+            else self._set_alias(alias_id, provider_menu_id)
         )
         return result or LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.SUCCESS,
@@ -219,6 +222,46 @@ class LineRichMenuApiAdapter:
             provider_menu_id,
         )
 
+    def _switch_existing_alias(
+        self, alias_id: str, provider_menu_id: str, previous_provider_menu_id: str,
+    ) -> LineRichMenuProviderOutcome | None:
+        url = f"{_API_ROOT}/richmenu/alias/{alias_id}"
+        before = self._request("get", url)
+        if before.status_code == 404:
+            return self._set_alias(alias_id, provider_menu_id)
+        if not _successful(before):
+            return _rich_menu_failure(before)
+        target = _alias_target(before)
+        if target is None:
+            return _adapter_failure("line_rich_menu_alias_response_invalid")
+        if target == provider_menu_id:
+            return None
+        if target != previous_provider_menu_id:
+            return _alias_conflict()
+
+        update = self._request(
+            "post", url, data=json.dumps({"richMenuId": provider_menu_id}),
+            content_type="application/json",
+        )
+        if not _successful(update):
+            outcome = _rich_menu_failure(update)
+            if outcome.outcome_type not in {
+                LineRichMenuProviderOutcomeType.TIMEOUT,
+                LineRichMenuProviderOutcomeType.UNAVAILABLE,
+            }:
+                return outcome
+        after = self._request("get", url)
+        if not _successful(after):
+            if after.status_code == 404:
+                return _adapter_failure("line_rich_menu_alias_update_unconfirmed")
+            return _rich_menu_failure(after)
+        target = _alias_target(after)
+        if target == provider_menu_id:
+            return None
+        if target is not None and target != previous_provider_menu_id:
+            return _alias_conflict()
+        return _adapter_failure("line_rich_menu_alias_update_unconfirmed")
+
     def _set_alias(
         self,
         alias_id: str | None,
@@ -249,17 +292,12 @@ class LineRichMenuApiAdapter:
             return _rich_menu_failure(response)
         if not _successful(lookup):
             return _rich_menu_failure(lookup)
-        try:
-            current_provider_menu_id = lookup.json()["richMenuId"]
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        current_provider_menu_id = _alias_target(lookup)
+        if current_provider_menu_id is None:
             return _adapter_failure("line_rich_menu_alias_response_invalid")
         if current_provider_menu_id == provider_menu_id:
             return None
-        return LineRichMenuProviderOutcome(
-            LineRichMenuProviderOutcomeType.REJECTED,
-            error_code="line_rich_menu_alias_target_conflict",
-            error_message="LINE Rich Menu alias points to a different provider menu",
-        )
+        return _alias_conflict()
 
     def _create(self, definition_json: str):
         response = self._request(
@@ -344,6 +382,22 @@ def _rich_menu_alias_id(definition_json: str) -> str | None:
     if isinstance(alias_id, str) and alias_id.strip():
         return alias_id.strip()
     return None
+
+
+def _alias_target(response: requests.Response) -> str | None:
+    try:
+        target = response.json()["richMenuId"]
+    except (KeyError, TypeError, ValueError):
+        return None
+    return target if isinstance(target, str) and target else None
+
+
+def _alias_conflict() -> LineRichMenuProviderOutcome:
+    return LineRichMenuProviderOutcome(
+        LineRichMenuProviderOutcomeType.REJECTED,
+        error_code="line_rich_menu_alias_target_conflict",
+        error_message="LINE Rich Menu alias points to a different provider menu",
+    )
 
 
 def _rich_menu_failure(response: object) -> LineRichMenuProviderOutcome:
