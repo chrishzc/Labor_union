@@ -330,7 +330,7 @@ describe('AccountingParametersDrawer component', () => {
     vi.mocked(accountingPricingClient.queryCase).mockResolvedValueOnce(initial)
       .mockResolvedValue({ ...initial, revision: 2, historical_payroll: [confirmed] });
     vi.mocked(clientRegistryClient.preview).mockResolvedValueOnce({
-      owner: 'client_beclass', aggregate_identity: mockPricing.case_no, current_version: 7,
+      owner: 'client_beclass', aggregate_identity: mockPricing.case_no, current_version: 8,
       before: twinChange, after: twinChange, preview_fingerprint: birthFingerprint,
       historical_impact: {
         client_updates: [], staff_updates: [], persons: [confirmed], client_delta: 0,
@@ -340,7 +340,7 @@ describe('AccountingParametersDrawer component', () => {
     render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen onClose={vi.fn()} onCommitted={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: '預覽雙胞胎薪資差額' }));
-    expect(clientRegistryClient.preview).toHaveBeenCalledWith(mockPricing.case_no, 'beclass', twinChange, 7);
+    expect(clientRegistryClient.preview).toHaveBeenCalledWith(mockPricing.case_no, 'beclass', twinChange, 8);
     fireEvent.click(await screen.findByRole('button', { name: '確認胎數並儲存' }));
     await waitFor(() => expect(screen.getByRole('table', { name: '歷史雙胞胎月嫂應付' })).toHaveTextContent('48,000'));
     expect(clientRegistryClient.apply).toHaveBeenCalledOnce();

@@ -14,6 +14,7 @@ from domains.government_subsidy.pricing import subsidy_claim_amount
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.money import MoneyNTD
 
 
 HistoricalRateAuthority = Literal['legacy', 'policy', 'manual']

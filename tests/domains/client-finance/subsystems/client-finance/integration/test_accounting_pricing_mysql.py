@@ -2324,9 +2324,10 @@ def test_historical_accounting_legacy_mixed_rates_birth_repricing_and_explicit_c
         connection.close()
 
 
-@pytest.mark.parametrize(('already_twins', 'has_original'), [(False, True), (True, True), (False, False)],
-                         ids=['320-hours', 'same-twins-repair', 'missing-original'])
-def test_historical_accounting_standard_twins_payroll_readback(client, already_twins, has_original):
+@pytest.mark.parametrize(('already_twins', 'has_original', 'paid'), [
+    (False, True, False), (True, True, False), (False, False, False), (False, True, True)],
+    ids=['320-hours', 'same-twins-repair', 'missing-original', 'paid-original'])
+def test_historical_accounting_standard_twins_payroll_readback(client, already_twins, has_original, paid):
     from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
     from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
     from infrastructure.mysql.payroll_amount_correction_repository import MySqlPayrollAmountRepository
@@ -2368,12 +2369,43 @@ def test_historical_accounting_standard_twins_payroll_readback(client, already_t
                     "(beclass_record_id,aggregate_version,effective_values_json,updated_by) "
                     "SELECT id,1,%s,'synthetic' FROM beclass_records WHERE bound_case_no=%s",
                     (json.dumps({'multi_birth_count': twins}), case_no))
+                identity_key = f'assignment:{assignment}'
+                blocker = 'historical_pricing_birth_bound_policy_required'
+                legacy_event = {
+                    'historical_accounting': {
+                        'rate_authority': 'legacy', 'pending': [blocker],
+                        'carry': [{'component': 'payroll', 'identity': identity_key, 'basis_amount': None,
+                                   'pending': [blocker], 'financial_sources_digest': 'old-pricing'}],
+                    },
+                }
+                cursor.execute("INSERT INTO case_pricing_events(case_no,resulting_revision,pricing_json,actor,reason,"
+                    "created_at_utc) VALUES(%s,1,%s,'synthetic','old birth correction',UTC_TIMESTAMP(6))",
+                    (case_no, json.dumps(legacy_event)))
+                cursor.execute('UPDATE orders SET pricing_override_event_id=%s,pricing_revision=1 WHERE case_no=%s',
+                    (cursor.lastrowid, case_no))
             if has_original:
                 cursor.execute(_EVENT_INSERT_SQL, (source, assignment, case_no, staff, 'service_pay', 'payable_to_staff',
                     None, 'established', 0, 96000, due_on, 'd' * 64, 0, 1, source, 'synthetic', 'original payable'))
                 cursor.execute(_PROJECTION_INSERT_SQL, (source, assignment, case_no, staff, 'service_pay', 'payable_to_staff',
                     None, 96000, due_on, cursor.lastrowid, 1))
                 cursor.execute('UPDATE payroll_case_accounts SET aggregate_version=1 WHERE case_no=%s', (case_no,))
+            if paid:
+                from infrastructure.mysql.staff_payout_repository import _projection_rows, _upsert_projection
+
+                cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,debit,"
+                    "direction,currency,classification_type,bank_references,warnings,raw_payload) "
+                    "VALUES(%s,'taishin','2026-12-15',96000,'outgoing','TWD','staff_payout','{}','[]','{}')",
+                    (uuid4().hex * 2,))
+                bank_id = cursor.lastrowid
+                cursor.execute("INSERT INTO staff_payout_events(staff_id,finance_import_row_id,event_type,amount_ntd,"
+                    "occurred_on,bank_account_identity_hash,reconciliation_reference,idempotency_key,actor,reason) "
+                    "VALUES(%s,%s,'payout',96000,%s,%s,%s,%s,'synthetic','original payout')",
+                    (staff, bank_id, due_on, 'a' * 64, case_no + ':paid', case_no + ':paid'))
+                cursor.execute('INSERT INTO staff_payout_obligation_links(payout_event_id,obligation_identity,'
+                    'allocated_amount_ntd,allocation_ordinal) VALUES(%s,%s,96000,1)', (cursor.lastrowid, source))
+                _upsert_projection(cursor, _projection_rows(cursor, (source,))[0], 1)
+                cursor.execute('UPDATE staff_payable_accounts SET aggregate_version=1 WHERE staff_id=%s', (staff,))
+                cursor.execute('UPDATE staff_obligations SET payout_history_exists=1 WHERE obligation_identity=%s', (source,))
         connection.commit()
         repository = MySqlBeClassCorrectionRepository(connection)
         workflow = BeClassCorrectionWorkflow(repository, lambda: MySqlUnitOfWork(connection),
@@ -2424,6 +2456,15 @@ def test_historical_accounting_standard_twins_payroll_readback(client, already_t
         current = payroll.query(case_no)
         assert [(event.action, event.before_ntd, event.after_ntd) for event in current.events] == (
             [('source_update', 96000, 144000)] if has_original else [])
+        if paid:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT obligation_amount_ntd,net_paid_ntd,balance_ntd FROM staff_payable_projections '
+                    'WHERE obligation_identity=%s', (source,))
+                assert cursor.fetchone() == {'obligation_amount_ntd': 96000, 'net_paid_ntd': 96000, 'balance_ntd': 0}
+                cursor.execute('SELECT source_obligation_identity,amount_due_ntd,due_date FROM staff_obligations '
+                    'WHERE source_obligation_identity=%s', (source,))
+                assert tuple(cursor.fetchall()) == ({
+                    'source_obligation_identity': source, 'amount_due_ntd': 48000, 'due_date': due_on},)
     finally:
         connection.close()
 
