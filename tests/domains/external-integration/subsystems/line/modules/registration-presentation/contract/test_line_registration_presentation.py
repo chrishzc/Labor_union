@@ -148,7 +148,9 @@ def test_registration_passbook_controls_and_submission_in_browser(path: str, kin
             expect(passbook).to_be_visible()
             assert passbook.evaluate("input => input.required") is True
             submit.click()
-            expect(page.get_by_text("請上傳存摺封面照片。", exact=True)).to_be_visible()
+            status_message = page.locator("#statusMessage")
+            expect(status_message).to_have_text("請上傳存摺封面照片。")
+            expect(status_message).to_be_visible()
             assert requests == []
             passbook.set_input_files({
                 "name": "synthetic.png", "mimeType": "image/png",

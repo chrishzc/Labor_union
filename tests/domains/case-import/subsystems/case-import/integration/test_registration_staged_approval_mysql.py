@@ -150,7 +150,7 @@ def test_no_passbook_non_citizen_approval_completes_and_replays_original_case(
         assert detail.client.client_id == first.client_id
         assert detail.beclass.record_id == first.beclass_record_id
         cursor.execute("SELECT case_no FROM orders WHERE client_id=%s", (first.client_id,))
-        assert cursor.fetchall() == ({"case_no": case_no},)
+        assert [row["case_no"] for row in cursor.fetchall()] == [case_no]
         cursor.execute(
             "SELECT COUNT(*) n FROM admin_command_receipts WHERE command_family='registration_approval/v1' AND idempotency_key=%s",
             (operation_id,),
