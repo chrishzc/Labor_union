@@ -860,3 +860,41 @@ def test_alias_replacement_uses_only_the_expected_previous_version(
     assert outcome.outcome_type is expected_outcome
     assert [call[0] for call in session.calls] == expected_calls
     assert all(call[1].endswith("/richmenu/alias/default-alias") for call in session.calls)
+
+def test_alias_replace_readback_confirms_an_acknowledgement_lost_in_transit() -> None:
+    session = _Session([
+        _Response(200, {"richMenuId": "richmenu-old"}),
+        requests.Timeout("response lost after update"),
+        _Response(200, {"richMenuId": "richmenu-next"}),
+        _Response(200, {"richMenuId": "richmenu-next"}),
+    ])
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"png", "image/png"), session=session)
+    request = LineRichMenuProviderRequest(
+        LineRichMenuPublicationId(7), _definition(), "image/ref",
+        expected_previous_provider_menu_id="richmenu-old",
+    )
+
+    assert adapter.upsert_alias(request, "richmenu-next").provider_menu_id == "richmenu-next"
+    assert adapter.upsert_alias(request, "richmenu-next").provider_menu_id == "richmenu-next"
+    assert [call[0] for call in session.calls] == ["get", "post", "get", "get"]
+    assert all(call[1].endswith("/richmenu/alias/default-alias") for call in session.calls)
+
+
+def test_alias_replace_does_not_confirm_success_without_matching_readback() -> None:
+    session = _Session([
+        _Response(200, {"richMenuId": "richmenu-old"}),
+        _Response(200),
+        _Response(200, {"richMenuId": "richmenu-old"}),
+    ])
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"png", "image/png"), session=session)
+    request = LineRichMenuProviderRequest(
+        LineRichMenuPublicationId(7), _definition(), "image/ref",
+        expected_previous_provider_menu_id="richmenu-old",
+    )
+
+    outcome = adapter.upsert_alias(request, "richmenu-next")
+
+    assert outcome.outcome_type is LineRichMenuProviderOutcomeType.UNAVAILABLE
+    assert outcome.error_code == "line_rich_menu_alias_update_unconfirmed"
+    assert outcome.provider_menu_id is None
+    assert [call[0] for call in session.calls] == ["get", "post", "get"]
