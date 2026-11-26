@@ -372,9 +372,11 @@ def apply_additive_update(
                 pass
             return current
         if preview.get("status") != "ready":
+            blocked_code = str(preview.get("code") or "additive_blocked")
             raise LocalDatabaseUpdateError(
                 f"{preview.get('blocked_reason', 'additive route blocked')} "
-                f"[{preview.get('code', 'additive_blocked')}]"
+                f"[{blocked_code}]",
+                code=blocked_code,
             )
         pending = preview.get("pending_releases")
         if not isinstance(pending, list) or not pending:
