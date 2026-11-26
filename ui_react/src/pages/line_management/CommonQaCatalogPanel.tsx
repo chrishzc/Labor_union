@@ -341,7 +341,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
           <strong>問答搜尋資料：</strong>{readStatus === 'loading' ? '讀取中' : readStatus === 'error' ? '無法確認更新狀態' : latestIndex ? indexLabels[latestIndex.index_status] : '尚未建立'}
           {readStatus === 'ready' && <span className="studio-count">共 {items.length} 筆 · {publishedCount} 筆已發布</span>}
         </div>
-        <details className="studio-help"><summary><CircleHelp aria-hidden="true" />發布與生效說明</summary><p>發布後，新答案會在搜尋資料更新時生效。停用會保留歷程，並從搜尋資料移除舊答案。</p>{latestIndex && <small>索引版本：{latestIndex.index_version}</small>}</details>
+        <details className="studio-help"><summary><CircleHelp aria-hidden="true" />發布與生效說明</summary><p>題目正式發布後，LINE 聊天室會立即使用新的正式答案。停用會保留歷程，並從搜尋資料移除舊答案。</p>{latestIndex && <small>索引版本：{latestIndex.index_version}</small>}</details>
       </div>
       {notice && <div className={noticeKind === 'error' ? 'line-error' : noticeKind === 'success' ? 'line-success' : 'studio-description'} role="status">{notice}</div>}
 
