@@ -5,7 +5,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Bell,
-  Bot,
+  BookOpenText,
   CalendarDays,
   CircleDollarSign,
   ClipboardList,
@@ -42,7 +42,7 @@ export type PageType =
   | 'data-import'
   | 'reports'
   | 'line-management'
-  | 'line-ai-events'
+  | 'line-faq'
   | 'line-notifications'
   | 'line-interface'
   | 'finance'
@@ -62,7 +62,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'reports': 'operations',
 
   'line-management': 'line',
-  'line-ai-events': 'line',
+  'line-faq': 'line',
   'line-notifications': 'line',
   'line-interface': 'line',
 
@@ -95,7 +95,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'line-management', icon: ClipboardList, label: 'LINE 營運', section: 'line' },
   { id: 'line-notifications', icon: Send, label: '通知與寄送', section: 'line' },
   { id: 'line-interface', icon: PanelTop, label: 'LINE 介面設定', section: 'line' },
-  { id: 'line-ai-events', icon: Bot, label: 'AI 客服工作室', section: 'line' },
+  { id: 'line-faq', icon: BookOpenText, label: 'LINE 常見問答', section: 'line' },
 
   // Finance Section
   { id: 'finance', icon: CircleDollarSign, label: '帳務中心', section: 'finance' },

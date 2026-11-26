@@ -11,6 +11,7 @@ from typing import Mapping
 
 from fastapi import Request
 
+from api.dependencies.knowledge_retrieval import published_index_source_versions
 from api.dependencies.runtime_heartbeat import (
     get_runtime_heartbeat_application,
     record_runtime_heartbeat,
@@ -123,6 +124,7 @@ def run_knowledge_cycle(worker_id: str, runtime_identity: WorkerRuntimeIdentity)
     gateway = ChromaKnowledgeGateway(
         os.getenv("KNOWLEDGE_CHROMA_PATH", "db/chroma_knowledge"),
         llm=GeminiCandidateSelector(),
+        published_source_versions=published_index_source_versions,
     )
     worker = KnowledgeWorker(open_knowledge_retrieval_unit_of_work, gateway, worker_id)
     processed = int(worker.run_once())

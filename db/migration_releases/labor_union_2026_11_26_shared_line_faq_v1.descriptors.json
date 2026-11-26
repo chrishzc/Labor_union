@@ -1,0 +1,89 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-shared-line-faq-2026-11-26-v1",
+  "descriptors": {
+    "1087_shared_line_faq.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "parent_columns": {
+        "knowledge_items": {
+          "published_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "faq_legacy_aliases": {
+            "column_type": "json",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "faq_legacy_category_id": {
+            "column_type": "varchar(80)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          },
+          "faq_legacy_category_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "knowledge_item_versions": {
+          "title": {
+            "column_type": "varchar(300)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          },
+          "source_uri": {
+            "column_type": "varchar(500)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          },
+          "source_trust_tier": {
+            "column_type": "enum('internal_policy','government_source','approved_partner')",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        },
+        "line_configuration_revisions": {
+          "configuration_kind": {
+            "column_type": "enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules','faq_chat_layout')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        },
+        "line_configuration_current": {
+          "configuration_kind": {
+            "column_type": "enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules','faq_chat_layout')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        }
+      }
+    }
+  }
+}

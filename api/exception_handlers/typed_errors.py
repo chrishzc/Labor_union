@@ -121,6 +121,7 @@ class CorrelationBoundaryMiddleware:
         correlation_id, should_reject = _resolve_correlation(header_values)
         state = scope.setdefault("state", {})
         state["correlation_id"] = correlation_id
+        state["correlation_id_provided"] = bool(header_values)
 
         async def send_with_correlation(message: Message) -> None:
             if message["type"] == "http.response.start":

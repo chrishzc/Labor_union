@@ -739,15 +739,15 @@ def test_service_menu_legacy_copy_keeps_faq_label_and_drops_retired_handoff():
     old_saved_copy["contents/body/contents/4/action/label"] = "呼叫專員"
     old_saved_copy["contents/body/contents/5/action/label"] = "更多常見問答"
     old_saved_copy["contents/footer/contents/0/text"] = "請點選呼叫專員。"
+    old_saved_copy["contents/header/contents/2/text"] = "請開啟 AI 智慧問答。"
     definition = {"templates": [{**template, "content": json.dumps(old_saved_copy)}]}
 
     payload = render_copy_payload(definition, "service-menu", _service_menu_payload())
     body, footer = payload["contents"]["body"], payload["contents"]["footer"]
-    assert len(body["contents"]) == 5
-    action = body["contents"][-1]["action"]
-    assert action["type"] == "uri" and action["uri"].endswith("?target=ai_assistant")
-    assert action["label"] == "更多常見問答"
-    assert footer["contents"][0]["text"] == "點選問題分類可展開常見題目；點選「問 AI 客服」可直接跳出智慧問答視窗。"
+    assert len(body["contents"]) == 4
+    assert all(button["action"]["type"] != "uri" for button in body["contents"])
+    assert "請開啟 AI 智慧問答。" not in json.dumps(payload, ensure_ascii=False)
+    assert "直接在聊天室留言" in footer["contents"][0]["text"]
     assert json.loads(definition["templates"][0]["content"]) == old_saved_copy
 
 

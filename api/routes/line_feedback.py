@@ -5,6 +5,7 @@ import os
 from fastapi import APIRouter, HTTPException
 
 from api.dependencies.line_identity import get_liff_token_verifier
+from api.error_contracts import typed_http_error
 from api.dependencies.line_runtime import get_line_feedback_application
 from api.schemas.base import BaseResponse
 from api.schemas.line_feedback import (
@@ -36,6 +37,7 @@ _KNOWLEDGE_RESPONSE_PREFIX = "knowledge-answer-receipt:"
 @router.post("/preview", response_model=BaseResponse[LineFeedbackPreviewView])
 def preview_feedback(payload: RecordLineFeedbackRequest):
     """Preview feedback for the verified actor without writing."""
+    _reject_retired_liff_feedback(payload.source_response_id)
     line_user_id, binding_version = _verified_feedback_actor(payload)
     command = _feedback_command(payload, line_user_id.value, binding_version)
     result = get_line_feedback_application().preview(command)
@@ -51,6 +53,7 @@ def preview_feedback(payload: RecordLineFeedbackRequest):
 
 @router.post("", response_model=BaseResponse[LineFeedbackReceiptView])
 def record_feedback(payload: RecordLineFeedbackRequest):
+    _reject_retired_liff_feedback(payload.source_response_id)
     line_user_id, binding_version = _verified_feedback_actor(payload)
     try:
         result = get_line_feedback_application().apply(
@@ -83,6 +86,14 @@ def query_feedback(payload: LineFeedbackQueryRequest):
     if result is None:
         raise HTTPException(status_code=404, detail="line_feedback_not_found")
     return BaseResponse(data=_readback_view(result))
+
+
+def _reject_retired_liff_feedback(source_response_id: str) -> None:
+    if source_response_id.startswith(KNOWLEDGE_LIFF_RESULT_PREFIX):
+        raise typed_http_error(
+            410, "validation", "line_service_help_retired",
+            "此問答回饋已停用。請回到 LINE 官方帳號聊天室。", "line-service-help:retired",
+        )
 
 
 def _feedback_command(payload: RecordLineFeedbackRequest, actor_id: str, binding_version: int):

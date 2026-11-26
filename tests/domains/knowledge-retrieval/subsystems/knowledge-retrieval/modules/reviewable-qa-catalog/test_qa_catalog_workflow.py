@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -8,13 +9,14 @@ import api.dependencies.knowledge_retrieval as knowledge_dependencies
 import api.routes.knowledge_retrieval as knowledge_routes
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
 from api.dependencies.llm_configuration import _qa_id_from_source
-from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
+from domains.knowledge_retrieval.qa_catalog import decode_governed_qa, encode_governed_qa
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.knowledge_retrieval.application import KnowledgeApplication
 from subsystems.knowledge_retrieval.contracts import (
     PublishKnowledgeItemCommand,
     RetireKnowledgeItemCommand,
 )
+from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
 from subsystems.knowledge_retrieval.qa_catalog_import import build_qa_import_commands
 
 
@@ -127,6 +129,57 @@ def test_lifecycle_action_atomically_requests_index_update(
         ("index", "7", f"qa-{action}-41:index"),
     ]
     assert unit_of_work.commits == 1
+
+
+def test_faq_02_projection_reads_the_same_official_snapshot_by_id_alias_and_page() -> None:
+    actor = ActorContext("7")
+    source, *_ = build_qa_import_commands(load_line_ai_qa_catalog(), actor, "one-import", "faq-02")
+    original = decode_governed_qa(source.content)
+    assert original is not None
+    revised = replace(
+        original,
+        category_id="new-category",
+        question="公開題目 B",
+        answer="正式答案 B",
+        aliases=("別名 B",),
+        source_ref="policy-v2",
+    )
+    row = {
+        "source_identity": source.source_identity,
+        "source_version": 2,
+        "source_uri": None,
+        "legacy_category_id": "old-category",
+        "content": source.content,
+    }
+
+    class PublishedRepository:
+        def published_faq_by_id(self, qa_id):
+            assert qa_id == original.qa_id
+            return (row,)
+
+        def published_faq_by_alias(self, text):
+            assert text in decode_governed_qa(row["content"]).aliases
+            return (row,)
+
+        def published_faq_page(self, cursor, limit):
+            assert (cursor, limit) == (None, 51)
+            return (row,)
+
+    uow = _UnitOfWork(PublishedRepository())
+    catalog = PublishedFaqCatalog(lambda: uow)
+    official = catalog.get(original.qa_id)
+    assert official == catalog.match_alias(original.aliases[0])[0] == catalog.page(None).items[0]
+    assert (official.source_version, official.category_id, official.source_uri) == (
+        2, "old-category", original.source_ref,
+    )
+    assert (official.question, official.answer) == (original.question, original.answer)
+
+    row.update(content=encode_governed_qa(revised), source_version=4, source_uri=revised.source_ref)
+    official = catalog.get(original.qa_id)
+    assert official == catalog.match_alias("別名 B")[0] == catalog.page(None).items[0]
+    assert (official.source_version, official.category_id, official.source_uri) == (4, "new-category", "policy-v2")
+    assert (official.question, official.answer) == ("公開題目 B", "正式答案 B")
+    assert uow.commits == 0
 
 
 def test_semantic_readback_reports_managed_qa_identity() -> None:

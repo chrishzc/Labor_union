@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from api.schemas.private_operations import WorkerRuntimeIdentity
+from api.dependencies.line_faq_layout import get_service_help_faq_readers
 from api.dependencies.runtime_heartbeat import record_runtime_heartbeat
 from domains.line.media import LineMediaPolicy
 from infrastructure.line.media_adapters import (
@@ -178,6 +179,7 @@ def _event_handlers(now):
         service_help_application=LineServiceHelpApplication(
             now,
             _identity_flow_url,
+            faq_reader=get_service_help_faq_readers(),
         ),
         menu_command_application=LineMenuCommandApplication(),
         feedback_application=LineFeedbackApplication(open_line_unit_of_work, now),

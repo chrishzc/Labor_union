@@ -12,6 +12,7 @@ class KnowledgeIngestBody(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     content: str = Field(min_length=1, max_length=100000)
     source_uri: str | None = Field(default=None, max_length=1000)
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class KnowledgeTransitionBody(BaseModel):

@@ -146,7 +146,7 @@ class _Embedder:
         return [[1.0, 0.0, 0.0] for _ in queries]
 
 
-def _gateway(tmp_path, *, llm=None, min_confidence: float = 0.60):
+def _gateway(tmp_path, *, llm=None, min_confidence: float = 0.60, published_source_versions=None):
     client = _Client()
     embedder = _Embedder()
     gateway = ChromaKnowledgeGateway(
@@ -154,6 +154,7 @@ def _gateway(tmp_path, *, llm=None, min_confidence: float = 0.60):
         llm=llm,
         embedder=embedder,
         min_confidence=min_confidence,
+        published_source_versions=published_source_versions,
     )
     gateway._client = lambda: client
     return gateway, client
@@ -271,6 +272,34 @@ def test_exact_combined_alias_returns_published_answer_without_model(tmp_path) -
     answer = gateway.answer("我要自己買菜嗎，買菜錢是我出嗎", 9)
 
     assert answer.answer == "食材由客戶自行購買並負擔費用，月嫂不代買或代墊。"
+
+
+@pytest.mark.parametrize("official_version", [None, 5], ids=["retired", "superseded"])
+def test_faq_02_index_rejects_inactive_faq_versions(tmp_path, official_version) -> None:
+    item = _published_qa()
+
+    def published_sources(identities):
+        assert identities == (item["source_identity"],)
+        if official_version is None:
+            return set()
+        return {(item["source_identity"], official_version)}
+
+    gateway, _ = _gateway(tmp_path, published_source_versions=published_sources)
+    gateway.rebuild(11, (item,))
+
+    with pytest.raises(KnowledgeAnswerUnsupported, match="knowledge_answer_unsupported"):
+        gateway.answer("可以換月嫂嗎？", 11)
+
+
+def test_faq_02_index_rechecks_selected_faq_before_returning(tmp_path) -> None:
+    item = _published_qa()
+    source = (item["source_identity"], item["source_version"])
+    reads = iter(({source}, set()))
+    gateway, _ = _gateway(tmp_path, published_source_versions=lambda _: next(reads))
+    gateway.rebuild(12, (item,))
+
+    with pytest.raises(KnowledgeAnswerUnsupported, match="knowledge_answer_unsupported"):
+        gateway.answer("可以換月嫂嗎？", 12)
 
 
 def test_natural_food_preparation_paraphrase_reaches_only_matching_candidate(tmp_path) -> None:

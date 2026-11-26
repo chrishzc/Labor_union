@@ -123,6 +123,7 @@ def ingest_knowledge_item(
             body.source_identity, body.source_trust_tier, body.title,
             body.content, body.source_uri,
             _actor(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id),
+            ExpectedVersion(body.expected_version) if body.expected_version is not None else None,
         )
     ))
     _set_knowledge_audit(request, "ingest", "knowledge_item", result[0])

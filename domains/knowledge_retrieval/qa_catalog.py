@@ -3,12 +3,35 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from shared_kernel.validation import require_canonical_text
 
 QA_CONTENT_SCHEMA = "line.common_qa.v1"
 QA_SOURCE_PREFIX = "line-common-qa:"
+_FAQ_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}")
+
+
+LINE_FAQ_REPLY_MAX_UNITS = 5000
+
+
+def format_line_faq_reply(answer: str, source_ref: str) -> str:
+    sources = f"資料來源：{source_ref}\n" if source_ref else ""
+    return (
+        f"{answer}\n\n"
+        f"{sources}此資訊僅供說明，請以工會確認為準。\n\n"
+        "如需進一步協助，請直接在此留言。"
+    )
+
+
+def line_faq_reply_fits(text: str) -> bool:
+    # LINE counts Unicode text in UTF-16 code units.
+    return sum(2 if ord(char) > 0xFFFF else 1 for char in text) <= LINE_FAQ_REPLY_MAX_UNITS
+
+
+def is_faq_id(value: str) -> bool:
+    return _FAQ_ID.fullmatch(value) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,9 +45,14 @@ class GovernedQaContent:
     source_ref: str
     notes: str | None = None
     migration_status: str | None = None
+    category_id: str | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.qa_id, "qa_id", 80)
+        if not is_faq_id(self.qa_id):
+            raise ValueError("knowledge_qa_id_invalid")
+        if self.category_id is not None and not is_faq_id(self.category_id):
+            raise ValueError("knowledge_qa_category_id_invalid")
         require_canonical_text(self.category, "category", 100)
         require_canonical_text(self.tag, "tag", 100)
         require_canonical_text(self.question, "question", 500)
@@ -56,6 +84,8 @@ def encode_governed_qa(content: GovernedQaContent) -> str:
         "notes": content.notes,
         "migration_status": content.migration_status,
     }
+    if content.category_id is not None:
+        payload["category_id"] = content.category_id
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
@@ -71,6 +101,9 @@ def decode_governed_qa(encoded: str) -> GovernedQaContent | None:
         raise ValueError("knowledge_qa_alias_invalid")
     if any(not isinstance(payload.get(key), str) for key in ("id", "category", "tag", "question", "answer", "source_ref")):
         raise ValueError("knowledge_qa_content_invalid")
+    category_id = payload.get("category_id")
+    if category_id is not None and not isinstance(category_id, str):
+        raise ValueError("knowledge_qa_category_id_invalid")
     notes = payload.get("notes")
     migration_status = payload.get("migration_status")
     if notes is not None and not isinstance(notes, str):
@@ -81,8 +114,8 @@ def decode_governed_qa(encoded: str) -> GovernedQaContent | None:
         qa_id=payload["id"], category=payload["category"], tag=payload["tag"],
         question=payload["question"], aliases=tuple(value.strip() for value in aliases if value.strip()),
         answer=payload["answer"], source_ref=payload["source_ref"],
-        notes=notes, migration_status=migration_status,
+        notes=notes, migration_status=migration_status, category_id=category_id,
     )
 
 
-__all__ = ["GovernedQaContent", "QA_CONTENT_SCHEMA", "QA_SOURCE_PREFIX", "decode_governed_qa", "encode_governed_qa"]
+__all__ = ["GovernedQaContent", "QA_CONTENT_SCHEMA", "QA_SOURCE_PREFIX", "decode_governed_qa", "encode_governed_qa", "is_faq_id"]

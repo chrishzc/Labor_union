@@ -38,6 +38,8 @@
 - `staff-payout-view` — 已驗證月嫂依本人綁定與目標付款月份查詢逐案薪資明細；path: `modules/staff-payout-view.md`
 - `rich-menu-management` — Rich Menu typed draft editing, publication preparation and role-scoped management presentation; path: `modules/rich-menu-management.md`
 
+- `faq-chat-layout` — AI 客服工作室分類卡片、草稿／發布與 LINE 聊天室 FAQ 呈現；path: `modules/faq-chat-layout.md`
+
 ## Dependencies
 - outbound: `scheduling | case-import | orders | other owning domains` — typed commands only。
 - outbound: external LINE provider — only after committed durable intent/outbox when side effect is required。

@@ -7,6 +7,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, CircleHelp, Download, Pencil, Plus, RefreshCw, Search, SearchCheck } from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
 import { Drawer } from '../../components/Drawer';
+import { faqRequest, type PublishedFaq } from './faqLayoutApi';
 
 const QA_SCHEMA = 'line.common_qa.v1';
 const QA_SOURCE_PREFIX = 'line-common-qa:';
@@ -19,6 +20,7 @@ interface KnowledgeItem {
   title: string;
   lifecycle_status: LifecycleStatus;
   current_version: number;
+  published_version?: number | null;
   source_uri: string | null;
   content: string;
 }
@@ -27,6 +29,7 @@ interface QaContent {
   schema: typeof QA_SCHEMA;
   id: string;
   category: string;
+  category_id?: string;
   tag: string;
   question: string;
   aliases: string[];
@@ -77,6 +80,7 @@ async function apiError(response: Response): Promise<string> {
   const code = typeof payload.detail === 'string' ? payload.detail : payload.detail?.code;
   const messages: Record<string, string> = {
     knowledge_qa_answer_required: '標準回答尚未完成，不能發布。',
+    knowledge_qa_line_reply_too_long: '答案加上來源與固定提示後超過 LINE 上限，請縮短答案再發布。',
     knowledge_item_version_conflict: '內容已被其他人更新，請重新整理後再操作。',
     knowledge_review_required: '目前狀態不能執行這個動作，請重新整理確認。',
     knowledge_state_conflict: '目前狀態不能執行這個動作，請重新整理確認。',
@@ -108,8 +112,11 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
   const [isCreating, setIsCreating] = useState(false);
   const [initialEditorOpened, setInitialEditorOpened] = useState(false);
   const [modalNotice, setModalNotice] = useState<string | null>(null);
+  const [categories, setCategories] = useState<{ category_id: string; name: string }[]>([]);
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [categoryError, setCategoryError] = useState('');
   const [formData, setFormData] = useState({
-    id: '', question: '', answer: '', category: '月嫂媒合', tag: '常見問題', aliases: '', notes: '',
+    id: '', question: '', answer: '', category: '', categoryId: '', tag: '常見問題', aliases: '', notes: '',
   });
 
   const loadState = async () => {
@@ -146,13 +153,29 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     });
   }, [items, query, statusFilter]);
 
-  const publishedCount = items.filter((item) => item.lifecycle_status === 'published').length;
+  const isPublished = (item: ManagedQa) => item.published_version != null || item.lifecycle_status === 'published';
+  const publishedCount = items.filter(isPublished).length;
 
-  const runMutation = async (operation: () => Promise<Response>, success: string) => {
+  async function loadCategories() {
+    setCategoryError('');
+    try {
+      const data = await faqRequest<{ categories: { category_id: string; name: string }[] }>('/api/v1/knowledge/faq-categories');
+      setCategories(data.categories);
+    } catch (error) {
+      setCategoryError(error instanceof Error ? error.message : '分類清單讀取失敗。');
+    }
+  }
+
+  useEffect(() => {
+    if (isCreating || editingItem) { setCategoryQuery(''); void loadCategories(); }
+  }, [isCreating, editingItem]);
+
+  const runMutation = async (operation: () => Promise<Response>, success: string, verify?: (response: Response) => Promise<void>) => {
     setBusy(true);
     try {
       const response = await operation();
       if (!response.ok) throw new Error(await apiError(response));
+      await verify?.(response);
       await loadState();
       setNotice(success);
       setNoticeKind('success');
@@ -195,23 +218,32 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
 
   const transition = (item: ManagedQa, action: 'publish' | 'retire') => {
     const identity = operationIdentity(`qa-${action}`);
-    const success = action === 'publish' ? '新答案已發布，搜尋資料更新後才會生效。' : '已停用，正在更新問答搜尋資料以移除舊答案。';
+    const success = action === 'publish' ? '已讀回正式答案。' : '已停用，聊天室不再提供該答案。';
     return runMutation(() => applicationFetch(`/api/v1/knowledge/items/${item.id}/${action}`, {
       method: 'POST',
       headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
       credentials: 'include',
-      body: JSON.stringify({ expected_version: item.current_version, reason: `AI 客服工作室：${action} ${item.qa.id}` }),
-    }), success);
+      body: JSON.stringify({ expected_version: item.current_version, reason: `LINE 常見問答：${action} ${item.qa.id}` }),
+    }), success, async (response) => {
+      const result = await response.json() as { version: number };
+      const data = await faqRequest<{ items: PublishedFaq[] }>(
+        `/api/v1/line/faq-layout/published-questions?qa_id=${encodeURIComponent(item.qa.id)}`,
+      );
+      const visible = data.items.find((row) => row.qa_id === item.qa.id);
+      if (action === 'publish' ? visible?.version !== result.version : Boolean(visible)) {
+        throw new Error('操作已受理，正式題庫讀回的版本與本次操作不同。請重新整理確認。');
+      }
+    });
   };
 
   const openCreate = () => {
-    setFormData({ id: '', question: '', answer: '', category: '月嫂媒合', tag: '常見問題', aliases: '', notes: '' });
+    setFormData({ id: '', question: '', answer: '', category: '', categoryId: '', tag: '常見問題', aliases: '', notes: '' });
     setEditingItem(null); setIsCreating(true); setModalNotice(null);
   };
 
   const openEdit = (item: ManagedQa) => {
     setFormData({
-      id: item.qa.id, question: item.qa.question, answer: item.qa.answer, category: item.qa.category,
+      id: item.qa.id, question: item.qa.question, answer: item.qa.answer, category: item.qa.category, categoryId: item.qa.category_id ?? '',
       tag: item.qa.tag, aliases: item.qa.aliases.join('\n'), notes: item.qa.notes ?? '',
     });
     setEditingItem(item); setIsCreating(false); setModalNotice(null);
@@ -247,8 +279,14 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     if (isCreating && items.some((item) => item.qa.id === qaId)) {
       setModalNotice('此題目編號已存在，請從清單開啟原題目編輯。'); return;
     }
+    const category = categories.find((item) => item.category_id === formData.categoryId);
+    if (!category && !editingItem?.qa.category_id) {
+      setModalNotice('請選擇共用分類。');
+      return;
+    }
     const qa: QaContent = {
-      schema: QA_SCHEMA, id: qaId, category: formData.category.trim() || '一般諮詢',
+      schema: QA_SCHEMA, id: qaId, category: category?.name ?? formData.category,
+      category_id: category?.category_id ?? editingItem?.qa.category_id,
       tag: formData.tag.trim() || '常見問題', question: formData.question.trim(),
       aliases: formData.aliases.split('\n').map((value) => value.trim()).filter(Boolean),
       answer: formData.answer.trim(), source_ref: editingItem?.qa.source_ref || 'admin-created',
@@ -262,6 +300,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
         body: JSON.stringify({
           source_identity: `${QA_SOURCE_PREFIX}${qa.id}`, source_trust_tier: 'internal_policy',
           title: qa.question, content: JSON.stringify(qa), source_uri: qa.source_ref,
+          expected_version: editingItem?.current_version,
         }),
       });
       if (!response.ok) throw new Error(await apiError(response));
@@ -272,7 +311,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
       setModalNotice(error instanceof Error ? error.message : '儲存失敗。');
     } finally { setBusy(false); }
   };
-  useUnsavedDraft('常見問答', { '題號': formData.id, '問題': formData.question, '答案': formData.answer, '分類': formData.category, '標籤': formData.tag, '其他問法': formData.aliases, '備註': formData.notes }, { enabled: isCreating || !!editingItem, busy, resetKey: editingItem });
+  useUnsavedDraft('常見問答', { '題號': formData.id, '問題': formData.question, '答案': formData.answer, '分類': formData.category, '分類識別': formData.categoryId, '標籤': formData.tag, '其他問法': formData.aliases, '備註': formData.notes }, { enabled: isCreating || !!editingItem, busy, resetKey: editingItem });
 
 
   return (
@@ -302,7 +341,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
           <strong>問答搜尋資料：</strong>{readStatus === 'loading' ? '讀取中' : readStatus === 'error' ? '無法確認更新狀態' : latestIndex ? indexLabels[latestIndex.index_status] : '尚未建立'}
           {readStatus === 'ready' && <span className="studio-count">共 {items.length} 筆 · {publishedCount} 筆已發布</span>}
         </div>
-        <details className="studio-help"><summary><CircleHelp aria-hidden="true" />發布與生效說明</summary><p>發布後，新答案會在搜尋資料更新時生效。停用會保留歷程，並從搜尋資料移除舊答案。</p>{latestIndex && <small>索引版本：{latestIndex.index_version}</small>}</details>
+        <details className="studio-help"><summary><CircleHelp aria-hidden="true" />發布與生效說明</summary><p>題目正式發布後，LINE 聊天室會立即使用新的正式答案。停用會保留歷程，並從搜尋資料移除舊答案。</p>{latestIndex && <small>索引版本：{latestIndex.index_version}</small>}</details>
       </div>
       {notice && <div className={noticeKind === 'error' ? 'line-error' : noticeKind === 'success' ? 'line-success' : 'studio-description'} role="status">{notice}</div>}
 
@@ -325,7 +364,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
               {item.qa.notes && <div><strong>備註：</strong>{item.qa.notes}</div>}
               <div className="qa-catalog-actions">
                 {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={() => void transition(item, 'publish')}>發布</button>}
-                {item.lifecycle_status === 'published' && <button type="button" className="line-danger-btn" disabled={busy} onClick={() => void transition(item, 'retire')}>停用</button>}
+                {isPublished(item) && <button type="button" className="line-danger-btn" disabled={busy} onClick={() => void transition(item, 'retire')}>停用</button>}
               </div>
             </div>
           </details>
@@ -338,7 +377,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
 
       <Drawer isOpen={isCreating || editingItem !== null} onClose={closeEditor} title={isCreating ? '新增問答草稿' : `編輯問答（${editingItem?.qa.id}）`} size="normal" className="studio-qa-drawer" closeDisabled={busy} closeLabel="關閉問答編輯器" footer={<div className="line-drawer-footer">
         {editingItem && (editingItem.lifecycle_status === 'draft' || editingItem.lifecycle_status === 'reviewed') && <button type="button" disabled={busy || !editingItem.qa.answer} className="line-secondary-btn" onClick={() => { void transition(editingItem, 'publish').then((ok) => { if (ok) closeEditor(); }); }}>發布已儲存草稿</button>}
-        {editingItem?.lifecycle_status === 'published' && <button type="button" disabled={busy} className="line-danger-btn" onClick={() => { void transition(editingItem, 'retire').then((ok) => { if (ok) closeEditor(); }); }}>停用這則問答</button>}
+        {editingItem && isPublished(editingItem) && <button type="button" disabled={busy} className="line-danger-btn" onClick={() => { void transition(editingItem, 'retire').then((ok) => { if (ok) closeEditor(); }); }}>停用這則問答</button>}
         <button type="button" disabled={busy} className="line-secondary-btn" onClick={closeEditor}>取消</button><button type="button" disabled={busy} className="line-primary-btn" onClick={save}>{busy ? '儲存中…' : '儲存為草稿'}</button>
       </div>}>
         <p className="studio-description">編輯後會先建立草稿，確認答案後再發布。</p>
@@ -350,7 +389,18 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
           <label className="qa-editor-field"><span>常見問法／別名（每行一筆）</span><textarea rows={3} value={formData.aliases} onChange={(event) => setFormData({ ...formData, aliases: event.target.value })} /></label>
           <details className="studio-editor-secondary" open={isCreating || undefined}><summary>分類與其他資訊</summary>
             <label className="qa-editor-field"><span>題目編號 *</span><input ref={qaIdRef} required disabled={!isCreating} value={formData.id} placeholder="例如 QA-030" onChange={(event) => setFormData({ ...formData, id: event.target.value })} /></label>
-            <div className="qa-editor-columns"><label className="qa-editor-field"><span>業務分類</span><input value={formData.category} onChange={(event) => setFormData({ ...formData, category: event.target.value })} /></label><label className="qa-editor-field"><span>標籤</span><input value={formData.tag} onChange={(event) => setFormData({ ...formData, tag: event.target.value })} /></label></div>
+            <div className="qa-editor-columns"><div className="qa-editor-field">
+              <label>搜尋分類<input value={categoryQuery} onChange={(event) => setCategoryQuery(event.target.value)} /></label>
+              <label>業務分類<select value={formData.categoryId} onChange={(event) => {
+                const choice = categories.find((item) => item.category_id === event.target.value);
+                if (choice) setFormData({ ...formData, category: choice.name, categoryId: choice.category_id });
+              }}>
+                <option value="">{formData.categoryId ? '選擇分類' : formData.category || '選擇分類'}</option>
+                {formData.categoryId && !categories.some(item => item.category_id === formData.categoryId) && <option value={formData.categoryId}>{formData.category}</option>}
+                {categories.filter(item => item.category_id === formData.categoryId || item.name.toLocaleLowerCase().includes(categoryQuery.trim().toLocaleLowerCase())).map(item => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}
+              </select></label>
+              {categoryError && <div role="alert">{categoryError} <button type="button" onClick={() => void loadCategories()}>重試</button></div>}
+            </div><label className="qa-editor-field"><span>標籤</span><input value={formData.tag} onChange={(event) => setFormData({ ...formData, tag: event.target.value })} /></label></div>
             <label className="qa-editor-field"><span>內部備註</span><input value={formData.notes} onChange={(event) => setFormData({ ...formData, notes: event.target.value })} /></label>
           </details>
         </form>
