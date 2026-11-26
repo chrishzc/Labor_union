@@ -1,13 +1,14 @@
 /**
  * File: path-router.mjs
- * Description: 轉送 /test 前綴至受 Access 保護的 Windows origin，僅對經驗證版本化 JS／CSS 放行瀏覽器私有快取。
+ * Description: 轉送 /admin 與相容 /test 前綴至受 Access 保護的 Windows origin，僅對經驗證版本化 JS／CSS 放行瀏覽器私有快取。
  */
 // Keep the existing root website on its Tunnel; forward only the remote prefix.
 const PUBLIC_HOST = 'chrishzc.com';
 const ORIGIN_HOST = 'lu-windows-origin.chrishzc.com';
 const ELIGIBILITY_HEADER = 'X-React-Admin-Asset-Eligibility';
 const PRIVATE_IMMUTABLE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
-const VERSIONED_ASSET_PATH = /^\/test\/assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(js|css)$/;
+const MANAGEMENT_PREFIXES = ['/admin', '/test'];
+const VERSIONED_ASSET_PATH = /^\/(?:admin|test)\/assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(js|css)$/;
 const ELIGIBILITY_PROOF = /^v1;artifact=[0-9a-f]{64};sha256=[0-9a-f]{64}$/;
 const JS_MEDIA_TYPES = new Set(['text/javascript', 'application/javascript']);
 
@@ -47,7 +48,7 @@ function isEligibleImmutableAsset(request, url, upstream) {
 export default {
   async fetch(request) {
     const url = new URL(request.url);
-    if (url.hostname !== PUBLIC_HOST || !(url.pathname === '/test' || url.pathname.startsWith('/test/'))) {
+    if (url.hostname !== PUBLIC_HOST || !MANAGEMENT_PREFIXES.some(prefix => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) {
       return new Response('Not Found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
     }
     // Access owns identity validation. The target's connector validates the JWT again.

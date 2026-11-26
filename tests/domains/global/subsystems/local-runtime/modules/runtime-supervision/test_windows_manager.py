@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -34,6 +35,40 @@ $statePath=Join-Path $runtimeDirectory 'frontend-control\state.json'
              'MANAGER_TEST_DIRECTORY': str(directory), **environment},
         capture_output=True, text=True, encoding='utf-8', timeout=30,
     )
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows startup configuration')
+@pytest.mark.parametrize('override,configured,expected', [
+    ('', '', 'development'),
+    ('', 'APP_ENV="production" # formal host', 'production'),
+    ('development', 'APP_ENV=production', 'development'),
+    ('production', 'APP_ENV=development', 'production'),
+    ('', 'APP_ENV=staging', 'rejected'),
+])
+def test_full_start_resolves_app_environment(tmp_path, override, configured, expected):
+    if configured:
+        (tmp_path / '.env').write_text(configured + '\n', encoding='utf-8')
+    result = run_manager_functions(r'''
+$PythonPath = $env:TEST_PYTHON
+$appEnvironmentOverride = $env:APP_ENV
+function Assert-ProgramEnvironment {}
+function Get-Service { return $null }
+try { Set-RuntimeEnvironment }
+catch {
+    if ($env:EXPECTED_MODE -eq 'rejected' -and $_.Exception.Message -like '*development or production*') {
+        Write-Output 'Invalid APP_ENV rejected'
+        exit 0
+    }
+    throw
+}
+if ($env:APP_ENV -ne $env:EXPECTED_MODE) { throw 'Wrong application environment' }
+$profile = if ($env:EXPECTED_MODE -eq 'production') { 'windows-remote-gateway' } else { 'source' }
+if ($env:REACT_ADMIN_RUNTIME_PROFILE -ne $profile) { throw 'Wrong React runtime profile' }
+if ($env:ACCESS_CONTROL_PROFILE -ne 'production' -or $env:ENABLE_ADMIN_AUTH -ne 'true') { throw 'Formal login must be required' }
+''', tmp_path, APP_ENV=override, EXPECTED_MODE=expected, TEST_PYTHON=sys.executable)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if expected == 'rejected':
+        assert 'Invalid APP_ENV rejected' in result.stdout
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Native Windows UTF-8 control channel')
@@ -162,7 +197,8 @@ function Invoke-ManagerAction {
 @pytest.mark.skipif(os.name != 'nt', reason='Native Windows startup ordering')
 @pytest.mark.parametrize('failure', ['', 'build', 'containers', 'database', 'supervisor'])
 @pytest.mark.parametrize('registration_mode', ['0', '1'])
-def test_start_checks_build_database_and_redis_before_launching(tmp_path, failure, registration_mode):
+@pytest.mark.parametrize('mode', ['development', 'production'])
+def test_start_checks_build_database_and_redis_before_launching(tmp_path, failure, registration_mode, mode):
     result = run_manager_functions(r'''
 $LocalOnly=$true
 $PythonPath='Invoke-TestPython'
@@ -184,7 +220,9 @@ function Invoke-TestPython {
         $global:LASTEXITCODE=0
         return $env:REGISTRATION_MODE
     }
-    if(($args -join '|') -ne '-m|scripts.check_runtime_database'){throw 'Unexpected Python invocation'}
+    $readiness = '-m|scripts.check_runtime_database'
+    if ($env:APP_ENV -eq 'production') { $readiness += '|--windows-production' }
+    if(($args -join '|') -ne $readiness){throw 'Unexpected Python invocation'}
     $script:calls.Add('database');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'database')
 }
 function docker.exe {
@@ -209,7 +247,7 @@ if($rejected -ne [bool]$env:FAIL_AT){throw 'Startup failure was hidden or startu
 $expected=@('build','containers','database','supervisor')
 if($env:FAIL_AT){$expected=$expected[0..([array]::IndexOf($expected,$env:FAIL_AT))]}
 if(($script:calls -join ',') -ne ($expected -join ',')){throw ('Unexpected startup effects: '+($script:calls -join ','))}
-''', tmp_path, FAIL_AT=failure, REGISTRATION_MODE=registration_mode)
+''', tmp_path, FAIL_AT=failure, REGISTRATION_MODE=registration_mode, APP_ENV=mode)
     assert result.returncode == 0, result.stdout + result.stderr
 
 

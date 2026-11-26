@@ -45,6 +45,20 @@ def test_dry_run_uses_process_target_without_opening_connection(database_environ
     connect.assert_not_called()
 
 
+def test_only_windows_production_check_accepts_production_loopback(database_environment, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DB_HOST", "127.0.0.1")
+    connect = Mock(side_effect=AssertionError("dry-run connected"))
+    monkeypatch.setattr(readiness.pymysql, "connect", connect)
+    with pytest.raises(readiness.RuntimeDatabaseBlocked, match="development launcher"):
+        readiness.check_database(dry_run=True)
+    assert readiness.check_database(dry_run=True, windows_production=True)["status"] == "configured"
+    monkeypatch.setenv("DB_HOST", "nas.test")
+    with pytest.raises(readiness.RuntimeDatabaseBlocked, match="loopback DB_HOST"):
+        readiness.check_database(dry_run=True, windows_production=True)
+    connect.assert_not_called()
+
+
 @pytest.mark.parametrize("key,value", [
     ("APP_ENV", "production"), ("DB_DATABASE", "mysql"),
     ("DB_DATABASE", "bad;database"), ("DB_PORT", "65536"), ("DB_PASSWORD", ""),

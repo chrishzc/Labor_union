@@ -12,6 +12,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from domains.orders.lifecycle import OrderLifecycleStatus
 from subsystems.reporting.weekly_operations_report_query import (
     WeeklyCaseRow,
     WeeklyCaseTotals,
@@ -256,7 +257,8 @@ def _append_subsidy_partition_rows(ws, rows: list[WeeklySubsidyRow], identity_la
             "",  # 備註留空
             row.subsidy_amount_ntd,
             row.unit_price_ntd,
-            row.reconciliation_status or "結案",
+            "結案" if row.reconciliation_status == OrderLifecycleStatus.ESTABLISHED_UNSERVED
+            else (row.reconciliation_status or "結案"),
             row.claim_period_label or "",
         ])
         curr_r = ws.max_row

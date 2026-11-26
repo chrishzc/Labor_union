@@ -18,6 +18,7 @@ higher_boundary:
 - `ui_react/src/tests/reports_weekly_api_versions.test.tsx` — v3／v4 可用性提示及缺值、版本錯誤呈現。
 - `ui_react/src/tests/reports_weekly_service_display.test.tsx` — 以替身查詢回應核對服務工時、空狀態及查詢失敗；包括每日時數留空、週工時仍顯示的案例。不驗實際排班 SQL。
 - `ui_react/src/tests/weekly_operations_report_client.test.ts` — canonical week conversion與typed transport contract。
+- `WEEKLY-SUB-01～03`：`tests/test_weekly_operations_report_contract.py::test_weekly_subsidy_established_unserved_increases_count_not_amount_in_json_and_xlsx` 驗週報 API 及 XLSX 真數值零、件數與經費；`ui_react/src/tests/weekly_operations_report_client.test.ts` 驗週報專用解碼與 adapter。`ui_react/src/tests/reports_query_page.test.tsx` 的 `WEEKLY-SUB-01` 驗一般市民分區實際顯示 2 筆、NT$ 12,000、零補助及「結案」。CI 選跑 `Weekly report API contracts` 與 `Weekly report frontend`，檢查測項而非整張 PR 綠燈。此處只登記案例，不是執行紀錄。
 
 # 逐日工時核對
 - 業務情境見 [需求書 §2.2](../../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-service-daily-hours)。條款、SQL 與畫面接線見上方架構書。

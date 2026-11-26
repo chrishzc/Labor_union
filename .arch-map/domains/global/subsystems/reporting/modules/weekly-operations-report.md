@@ -24,6 +24,38 @@
   target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^established-case-count'
 ```
 
+<a id="reporting-subsidy-established-unserved"></a>
+
+### 補助統計零服務列：角色、接線與輸出 ^reporting-subsidy-established-unserved
+
+依 [#34 零服務規則](../../../../../requirements/34_營運報表與統計口徑正式規格.md#subsidy-established-unserved)。#437 已有程式候選，以下是待實作／驗收的目標契約，不能用候選或綠燈取代驗收結果。
+
+| 責任 | 接手資訊 | 交付 |
+|---|---|---|
+| PM | #34 的目的、狀態界線與 STAR | 決定誰計件、哪些量為零、怎麼顯示；不指定 storage 或 UI 實作。 |
+| 前端 | 本節畫面狀態及 JSON 欄位 | 沿原 14 欄顯示零、結案和原分區件數；不從欄位缺漏自判成立或計算補助。 |
+| 後端 | #34、Government Subsidy 的狀態和日期來源 | 唯讀投影、分區與合計；同候選 JSON 和 Excel 不產生兩套分類。 |
+| DB | [Government Subsidy 資料保證](../../../../government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query.md#weekly-subsidy-zero-source) | 核對原狀態、身分、有效日期和案號去重；無欄位／表／寫入或遷移。 |
+
+**畫面。** 保留 Finance 既有「政府補助清單」的週報補助統計入口、三分區、前一年度／本年度摘要、案號連結及匯出。載入、查詢錯誤、空態及匯出沿原行為，錯誤不當成零件。零是可辨識的數值（0、0.00、NT$ 0），不是空白／破折號／待確認。此列「結案/核銷」呈現「結案」，不呈現「已核銷」。只讀與重查不會累加畫面計數。
+
+**介面。** 沿用 GET /api/v1/operations-reports/weekly 與 GET /api/v1/operations-reports/weekly/export，以及現有 start_date、end_date、支援版本和權限。API 由原 Government Subsidy builder → MySQL Reporting adapter → WeeklyOperationsReportQuery 產生 data.subsidy_partitions 與 row_count、total_amount_ntd；Excel 以同一讀模型產出原 14 欄，不新增端點。
+
+| 零列欄位 | 契約 |
+|---|---|
+| case_no、eligibility、application_roc_year、claim_period_label | 原案號、身分及年度季度；不從顯示標籤推導資格。 |
+| subsidy_hours、subsidy_days | Decimal 字串零（「0」「0.00」皆可），不是 null、負值或未知。 |
+| service_days、subsidy_amount_ntd、unit_price_ntd | 整數 0。單價的 0 僅表示此列不適用計薪，不更改案件費率。 |
+| reconciliation_status | wire 保留「成立後未服務」供驗證來源；React adapter 與 XLSX 轉成「結案」。不更改 Orders 或核銷狀態。 |
+
+週報專用 Pydantic 和 Zod 驗證零值僅適用此正式狀態，零列不接受非零補助；其他列及政府季／年度共用核銷 schema 不放寬。XLSX 的零是數值。成功、錯誤與選取資料沿既有契約，不引入新的寫入、回執或權限。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-subsidy-established-unserved
+  target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^subsidy-established-unserved'
+```
+
 ## Implementation
 - primary:
   - `subsystems/reporting/weekly_operations_report_query.py`

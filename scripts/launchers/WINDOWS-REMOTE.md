@@ -1,6 +1,15 @@
 # Windows 遠端入口
 
-## Windows 統一管理入口（目前操作方式）
+## 正式管理網址切換（待核准及驗收）
+
+目標是 `https://chrishzc.com/admin/`，本機仍是 `http://localhost:5173/admin/`。尚未切換時，依下方 `/test/` 操作；合併此版本不會自行切換正式入口。
+
+1. 切換前先保留 `/test`、`/test/*` 的既有 Access 及路由。在同一 Access 應用與既有驗證政策中新增精確 `/admin` 與其子路徑，再將對應 Worker Routes 及 Tunnel ingress 指向同一受保護 Windows origin。比對正式站既有路由，不能覆蓋根網站、其他應用或 LINE Webhook。未登入必須仍被 Access 擋住，origin 的 connector 繼續驗原 AUD。
+2. 在同一個 PowerShell 設置 `$env:WINDOWS_REMOTE_PREFIX = '/admin'`，由該 shell 在專案根目錄呼叫 `.\Windows管理.bat -Action restart` 完整重建與重啟，不能用「只更新前端」切換路徑。後續管理操作應沿用相同程序環境設定。切換同時改建置 base、閘道路由與 supervisor 健康檢查，與 `APP_ENV`、DB 或登入規則無關。
+3. 核對本機及遠端新入口、Access、網站登入與 MFA、唯讀 API、靜態載入，確認瀏覽器 API 用 `/admin/api/`。舊 `/test/` 頁面重新整理後導向新入口；相容期間 `/test/api/` 的請求仍直達同一後端，不靠跳轉重送。舊頁面若仍引用舊 build 的資源，重新整理即可。尚未驗證前不移除舊路由或 Access。
+4. 若驗收失敗，用 `$env:WINDOWS_REMOTE_PREFIX = '/test'` 從同一 shell 完整重建與重啟，恢復既有入口；保留新版路徑的 Access 保護，回復後再移除新增的路由（不移除原路徑）。不更換資料庫或 LINE 設定。
+
+## Windows 統一管理入口（切換前操作方式）
 
 日常雙擊專案根目錄的 **`Windows管理.bat`**。選單提供啟動全部、停止全部、套用更新／整組重啟、只更新前端、狀態／版本、備份資料庫、安全升級資料庫、復原資料庫備份、首次安裝程式依賴及檢查程式環境；不再顯示「產生部署包」。關閉選單不會停止背景服務；離開前或切換主機前，請明確選「停止全部」。
 
@@ -16,9 +25,11 @@
 
 啟動全部會先建置前端、啟動本機 Docker MySQL（`db`）與 Redis（`redis`）並等待健康檢查通過、唯讀檢查 DB current schema，再交給原 supervisor 啟動 API、前端、Tunnel、monitor、durable／incident workers，以及原設定啟用的 LINE／knowledge workers。遠端連線不會停用背景工作或推播。空白資料庫建立、帳號與檔案目錄由操作者準備，啟動器不自動初始化、遷移、清空或換庫。
 
+正式主機在 `.env` 設 `APP_ENV=production` 後，選「套用更新／整組重啟」。也可在呼叫批次檔的 PowerShell 設定 `$env:APP_ENV = 'production'`，其值優先於 `.env`。皆未設定時使用 `development`。兩種模式都要求正式管理員登入。正式模式以本機 Docker MySQL 為資料庫目標，沿用 LINE 正式啟動檢查，前端仍由 Windows Gateway 提供，不需為 FastAPI 另外設定兩份前端產物。
+
 「套用更新／整組重啟」針對已放到本機的新版程式：先建置成功，再整組停止並重啟，因此會套用你修改的設定。它不會自行 Git pull、下載其他版本或同步其他主機；依賴清單改變時，先停止、執行安裝依賴，再啟動。「只更新前端」保留 API／workers／Tunnel 的原程序並有前端失敗回復。完整更新若新後端啟動失敗會明確報錯，不宣稱自動回復整個後端；保留原程式版本以人工回復。
 
-一般管理、檢查、建置、封裝與前端更新不解析或改寫 `.env`。只有明確選擇資料庫升級／復原，才由 NAS 維護工具在確認與副本驗證後切換資料庫設定。完整啟動／重啟時，原應用程式及其既有 preflight／supervisor 正常載入自己需要的設定；不把設定值輸出到管理選單或部署包。正常背景工作仍可能處理真實待辦與推播，測試驗證不另外建立訊息。
+完整啟動／重啟只在呼叫端未提供 `APP_ENV` 時從 `.env` 取得模式，應用程式及既有檢查各自載入所需設定。「只更新前端」不切換 API 模式。資料庫升級／復原仍須由操作者選擇，經確認與副本驗證後才會切換資料庫設定。正常背景工作仍可能處理真實待辦與推播。
 
 命令列同樣只有根目錄入口：
 
