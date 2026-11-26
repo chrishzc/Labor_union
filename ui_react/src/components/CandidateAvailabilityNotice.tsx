@@ -1,4 +1,5 @@
 import type { MatchingAvailability } from '../api/scheduling/matching_candidate_workflow_client';
+import { candidateDateAssessment, missingCandidateServiceDates } from '../adapters/scheduling/candidate_date_status';
 import { calendarServicePeriod } from '../../../line/static/service-date-calendar.js';
 
 const reasonLabels: Record<string, string> = {
@@ -14,18 +15,21 @@ const reasonLabels: Record<string, string> = {
   buffer: '七天緩衝期重疊，僅提醒',
 };
 
-export function CandidateAvailabilityNotice({ availability, staffId, showAdvisories = true }: {
+export function CandidateAvailabilityNotice({ availability, staffId, showAdvisories = true, segmentIndex, showCoverageGaps = false }: {
   availability: MatchingAvailability;
   staffId: number;
   showAdvisories?: boolean;
+  segmentIndex?: number;
+  showCoverageGaps?: boolean;
 }) {
-  const conflicts = availability.conflicts.filter(conflict => conflict.staff_id === staffId);
-  const option = availability.candidate_options.find(candidate => candidate.staff_id === staffId);
+  const conflicts = availability.conflicts.filter(conflict => conflict.staff_id === staffId
+    && (segmentIndex === undefined || conflict.segment_index === segmentIndex));
+  const option = availability.candidate_options.find(candidate => candidate.staff_id === staffId
+    && (segmentIndex === undefined || candidate.segment_index === segmentIndex));
   if (!option && conflicts.length === 0) return <p className="order-case-review-note" role="status">
     此月嫂目前未列入可詢問人選，請先核對狀態。
   </p>;
-  const hasConflict = conflicts.some(conflict => !['active_lock', 'buffer', 'historical_reservation'].includes(conflict.reason_code))
-    || option?.full_case_coverage === false;
+  const hasConflict = candidateDateAssessment(option, conflicts).status === 'conflict';
   const datesByReason = new Map<string, Set<string>>();
   for (const { reason_code, work_date, case_no, service_start_at, service_end_at } of conflicts) {
     const dates = datesByReason.get(reason_code) ?? new Set<string>();
@@ -34,6 +38,11 @@ export function CandidateAvailabilityNotice({ availability, staffId, showAdvisor
     const servicePeriod = period?.full ?? dateWithUnknownTime;
     dates.add(case_no ? `案件 ${case_no}，${servicePeriod}` : servicePeriod);
     datesByReason.set(reason_code, dates);
+  }
+
+  const missingDates = showCoverageGaps ? missingCandidateServiceDates(option) : [];
+  if (missingDates.length > 0) {
+    datesByReason.set('coverage_gap', new Set([...(datesByReason.get('coverage_gap') ?? []), ...missingDates]));
   }
 
   return <>

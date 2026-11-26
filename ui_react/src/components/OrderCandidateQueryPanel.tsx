@@ -17,6 +17,7 @@ import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/ty
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { CaregiverCommuteQuery, CommuteUsagePanel } from './CaregiverCommute';
+import { candidateDateAssessment, type CandidateDateStatus } from '../adapters/scheduling/candidate_date_status';
 import { CandidateAvailabilityNotice } from './CandidateAvailabilityNotice';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
@@ -107,9 +108,39 @@ function formalCandidates(data: MatchingAvailability): MatchingCandidateOption[]
   ));
 }
 
-function matchesServicePreferences({ matching_conditions }: MatchingCandidateOption): boolean {
-  return matching_conditions.region.status === 'matched'
-    && matching_conditions.preferred_service_days.status === 'matched';
+const CANDIDATE_DATE_GROUPS = [
+  { status: 'clear', label: '無日期衝突', symbol: '✓' },
+  { status: 'advisory', label: '有日期警示', symbol: '!' },
+  { status: 'conflict', label: '有日期衝突', symbol: '×' },
+  { status: 'unverified', label: '尚未比對', symbol: '·' },
+] as const satisfies readonly { status: CandidateDateStatus; label: string; symbol: string }[];
+
+function preferencePriority({ matching_conditions }: MatchingCandidateOption): number {
+  const region = matching_conditions.region.status === 'matched' ? 1 : 0;
+  const weekly = matching_conditions.preferred_service_days.status === 'matched' ? 2 : 0;
+  return weekly + region;
+}
+
+function groupWorkbenchCandidates(
+  candidates: readonly MatchingCandidateOption[],
+  conflicts: MatchingAvailability['conflicts'],
+) {
+  const evidenceByStaff = new Map<number, MatchingAvailability['conflicts']>();
+  for (const conflict of conflicts) {
+    if (conflict.segment_index !== 0 || conflict.staff_id === null) continue;
+    const evidence = evidenceByStaff.get(conflict.staff_id) ?? [];
+    evidence.push(conflict);
+    evidenceByStaff.set(conflict.staff_id, evidence);
+  }
+  const observed = candidates.map(candidate => ({
+    candidate,
+    ...candidateDateAssessment(candidate, evidenceByStaff.get(candidate.staff_id) ?? []),
+  })).sort((left, right) => preferencePriority(right.candidate) - preferencePriority(left.candidate));
+
+  return CANDIDATE_DATE_GROUPS.map(group => ({
+    ...group,
+    entries: observed.filter(entry => entry.status === group.status),
+  })).filter(group => group.entries.length > 0);
 }
 
 function sameStaffIds(expected: readonly number[], actual: readonly number[]): boolean {
@@ -184,9 +215,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   }, [availabilityRevision, queryCandidates, multiBusy, addState.status, flow]);
 
   const candidates = queryState.status === 'ready' ? formalCandidates(queryState.data) : [];
-  if (presentation === 'workbench') {
-    candidates.sort((left, right) => Number(matchesServicePreferences(right)) - Number(matchesServicePreferences(left)));
-  }
+
 
   const toggleCandidate = (staffId: number) => {
     setSelectedStaffIds((current) => {
@@ -345,7 +374,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
 
   return (
     <section aria-label={`案件 ${caseNo} 候選月嫂查詢`}>
-      <p className="order-v2-row-meta">區域與週間服務僅作提示，不符合仍可加入候選池並協調。</p>
+      <p className="order-v2-row-meta">{presentation === 'workbench'
+        ? '先依日期狀態分組，各組再依週間服務與區域偏好排序。偏好不符合仍可加入並協調。'
+        : '區域與週間服務僅作提示，不符合仍可加入候選池並協調。'}</p>
       <CommuteUsagePanel />
 
       <button
@@ -396,18 +427,30 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                 <span>有檔期衝突仍可加入候選池並協調。選定推薦人選前請先確認完整檔期。</span>
               </div>
               <div className="order-v2-business-summary" aria-label="可詢問月嫂">
-                {candidates.map((candidate) => presentation === 'workbench' ? <div key={candidate.staff_id} className="candidate-add-row">
-                  <div className="candidate-add-details"><div className="candidate-name-and-preferences"><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><CandidateServicePreferences candidate={candidate} /></div>空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
-                    <CandidateAvailabilityNotice availability={queryState.data} staffId={candidate.staff_id} />
-                    <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} />
-                  </div>
-                  {outdatedStaffIds.has(candidate.staff_id) && <p role="status">原詢問期間與本次不同；更新後須重新記錄接案意願。</p>}
-                  <button type="button" aria-label={`${joinedStaffIds.has(candidate.staff_id) ? '已加入候選池' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}（${candidate.staff_name}）`}
-                    disabled={joinedStaffIds.has(candidate.staff_id) || busy || recoveryPending}
-                    onClick={() => addSelectedCandidates(new Set([candidate.staff_id]))}>
-                    {joinedStaffIds.has(candidate.staff_id) ? '已加入' : addState.status === 'saving' && flow?.command.candidates.some(value => value.staff_id === candidate.staff_id) ? '儲存中…' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}
-                  </button>
-                </div> : (
+                {presentation === 'workbench' ? groupWorkbenchCandidates(candidates, queryState.data.conflicts).map(group => (
+                  <section key={group.status} className="candidate-date-group" aria-label={group.label}>
+                    <h3>{group.label}（{group.entries.length}）</h3>
+                    {group.entries.map(({ candidate, dates }) => <div key={candidate.staff_id} className="candidate-add-row">
+                        <div className="candidate-add-details">
+                          <div className="candidate-name-and-preferences">
+                            <strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong>
+                            <span className={`candidate-date-badge ${group.status}`}><span aria-hidden="true">{group.symbol} </span>{group.label}</span>
+                          </div>
+                          <CandidateServicePreferences candidate={candidate} />
+                          <div>空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天</div>
+                          {dates.length > 0 && <p className="candidate-date-summary">影響日期：{dates.slice(0, 3).join('、')}{dates.length > 3 && `，另有 ${dates.length - 3} 天`}</p>}
+                          <CandidateAvailabilityNotice availability={queryState.data} staffId={candidate.staff_id} segmentIndex={candidate.segment_index} showCoverageGaps />
+                          <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} />
+                        </div>
+                        {outdatedStaffIds.has(candidate.staff_id) && <p role="status">原詢問期間與本次不同；更新後須重新記錄接案意願。</p>}
+                        <button type="button" aria-label={`${joinedStaffIds.has(candidate.staff_id) ? '已加入候選池' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}（${candidate.staff_name}）`}
+                          disabled={joinedStaffIds.has(candidate.staff_id) || busy || recoveryPending}
+                          onClick={() => addSelectedCandidates(new Set([candidate.staff_id]))}>
+                          {joinedStaffIds.has(candidate.staff_id) ? '已加入' : addState.status === 'saving' && flow?.command.candidates.some(value => value.staff_id === candidate.staff_id) ? '儲存中…' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}
+                        </button>
+                    </div>)}
+                  </section>
+                )) : candidates.map((candidate) => (
                   <article key={candidate.staff_id}>
                     <label>
                       <input
