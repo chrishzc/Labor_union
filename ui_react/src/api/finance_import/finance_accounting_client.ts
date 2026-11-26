@@ -44,6 +44,7 @@ const caseDetail = detail.extend({
     obligation_identities: z.array(z.string()), status: z.enum(['formal','not_established','needs_review']),
     pending_reasons: z.array(z.string()), estimated_self_pay_date: z.string().nullable(), estimated_subsidy_date: z.string().nullable(),
     recorded_due_date: z.string().nullable().optional(),
+    estimated_amount_ntd: exactNtd.nullable().optional(),
   })).optional(),
   estimated_subsidy_payment_date: z.string().nullable().optional(),
   subsidy_payments: z.array(z.strictObject({

@@ -49,6 +49,7 @@ export type FinanceImportBatchPreview = z.infer<typeof previewSchema>;
 export type FinanceImportJobAccepted = z.infer<typeof jobAcceptedSchema>;
 export type FinanceImportBatchOutcome = z.infer<typeof batchOutcomeSchema>;
 
+export const FINANCE_WORKBOOK_EXTENSIONS = ['.xlsx', '.xls'] as const;
 const MAXIMUM_BYTES = 20 * 1024 * 1024;
 
 export class FinanceWorkbookSnapshot {
@@ -58,7 +59,10 @@ export class FinanceWorkbookSnapshot {
   public readonly sha256: string;
   private constructor(filename: string, contentType: string, bytes: Uint8Array, sha256Text: string) { this.filename = filename; this.contentType = contentType; this.#bytes = bytes; this.sha256 = sha256Text; }
   static async fromFile(file: File): Promise<FinanceWorkbookSnapshot> {
-    if (!file.name.toLowerCase().endsWith('.xlsx')) throw new FinanceImportQueryError('FINANCE_IMPORT_FILE_TYPE', '銀行流水僅支援 .xlsx 檔案。');
+    const filename = file.name.toLowerCase();
+    if (!FINANCE_WORKBOOK_EXTENSIONS.some(extension => filename.endsWith(extension))) {
+      throw new FinanceImportQueryError('FINANCE_IMPORT_FILE_TYPE', '銀行流水僅支援 .xlsx 或 .xls 檔案。');
+    }
     if (file.size <= 0) throw new FinanceImportQueryError('FINANCE_IMPORT_FILE_EMPTY', '銀行流水工作簿不可為空檔。');
     if (file.size > MAXIMUM_BYTES) throw new FinanceImportQueryError('FINANCE_IMPORT_FILE_TOO_LARGE', '銀行流水工作簿不可超過 20 MiB。');
     if (!globalThis.crypto?.subtle) throw new FinanceImportQueryError('FINANCE_IMPORT_SHA256_UNAVAILABLE', '此瀏覽器無法驗證檔案內容。');

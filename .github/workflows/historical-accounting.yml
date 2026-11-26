@@ -57,6 +57,7 @@ jobs:
           tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_query.py
           tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_repository_recovery.py
           tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py
+          tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_export_sources.py
           tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_owning_domain_composite.py
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_source_projection.py
           tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_baseline_obligation_sync.py
@@ -67,7 +68,11 @@ jobs:
           tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_client_registry_query.py
           tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_service_accounting.py
           tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_service_accounting_workflow.py
+          tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_order_adoption.py
           tests/domains/orders/subsystems/orders/modules/historical-adoption/contract/test_historical_service_accounting_router.py
+          tests/domains/orders/subsystems/orders/integration/test_order_auto_completion_workflow.py
+          tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py
+          tests/domains/payroll/subsystems/payroll/integration/test_payroll_rebuild_workflow.py
           tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/test_pricing_policy.py
           tests/domains/client-finance/subsystems/client-finance/modules/receipt-reconciliation/unit/test_difference_resolution.py
           tests/domains/orders/subsystems/orders/modules/order-terms/contract/test_incomplete_order_terms.py
@@ -76,6 +81,31 @@ jobs:
         run: |
           python -m pytest -vv tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py -k historical_accounting
           python -m pytest -vv tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py
+      - name: Verify historical completion writes payroll with unknown funding
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          password="$(python -c 'import secrets; print(secrets.token_hex(24))')"
+          echo "::add-mask::$password"
+          export LABOR_UNION_TEST_MYSQL_DATABASE="$DB_DATABASE"
+          export LABOR_UNION_TEST_MYSQL_HOST="$DB_HOST" LABOR_UNION_TEST_MYSQL_PORT="$DB_PORT"
+          export LABOR_UNION_TEST_MYSQL_USER=lu_historical_fixture LABOR_UNION_TEST_MYSQL_PASSWORD="$password"
+          python - <<'PY'
+          import os
+          from argparse import Namespace
+          import pymysql
+          from scripts.bootstrap_disposable_mysql_schema import bootstrap
+          database = os.environ['LABOR_UNION_TEST_MYSQL_DATABASE']
+          assert database.startswith('lu_test_historical_')
+          bootstrap(Namespace(host='127.0.0.1', port=3307, user='root', password='',
+                              database=database, confirm_database=database))
+          with pymysql.connect(host='127.0.0.1', port=3307, user='root', password='', autocommit=True) as connection:
+              with connection.cursor() as cursor:
+                  cursor.execute("CREATE USER 'lu_historical_fixture'@'%%' IDENTIFIED BY %s",
+                                 (os.environ['LABOR_UNION_TEST_MYSQL_PASSWORD'],))
+                  cursor.execute(f"GRANT ALL PRIVILEGES ON `{database}`.* TO 'lu_historical_fixture'@'%'")
+          PY
+          export DB_USER="$LABOR_UNION_TEST_MYSQL_USER" DB_PASSWORD="$LABOR_UNION_TEST_MYSQL_PASSWORD"
+          python -m pytest -vv tests/domains/orders/subsystems/orders/modules/historical-adoption/integration/test_wp80_disposable_mysql_e2e.py::test_rollover_creates_undated_payroll_and_preserves_unknown_funding_reason
       - name: Verify refunds from confirmed service shortening
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
@@ -148,6 +178,13 @@ jobs:
       - name: Install strict drawer test dependencies
         working-directory: ui_react
         run: npm ci --ignore-scripts
+      - name: Exercise historical payroll through the browser and real accounting API
+        env:
+          PAYROLL_BROWSER_E2E: "1"
+        run: |
+          python -m pip install 'playwright>=1.60.0'
+          python -m playwright install --with-deps chromium
+          python -m pytest -vv tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py::test_historical_payroll_via_real_browser
       - name: Render actual synthetic MySQL API responses through the strict client
         working-directory: ui_react
         env:

@@ -3,17 +3,28 @@ File: test_order_auto_completion_workflow.py
 Description: 驗證 canonical Orders 服務完成 Preview、Apply、冪等與 typed blocker。
 """
 
-from datetime import datetime
+from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 
 from domains.orders.auto_completion import build_auto_completion_candidate
+from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.payroll.calculation import (
+    OfficialAssignmentServiceFacts,
+    PayrollPolicyKind,
+    PayrollTerms,
+    rate_snapshot,
+)
+from infrastructure.mysql import payroll_rebuild_repository
+from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
 from infrastructure.mysql.order_auto_completion_repository import (
     MySqlOrderAutoCompletionRepository,
 )
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from shared_kernel.money import MoneyNTD
 from subsystems.orders.auto_completion_workflow import (
     AutoCompleteOrderService,
     AutoCompletionApplyRequest,
@@ -24,6 +35,7 @@ from subsystems.orders.auto_completion_workflow import (
     AutoCompletionRepositoryNotFoundError,
     AutoCompletionWorkflowError,
 )
+from subsystems.payroll.rebuild_workflow import PayrollRebuildFacts, StaffObligationActionKind
 
 
 class _UnitOfWork:
@@ -150,6 +162,69 @@ class _SqlConnection:
 
     def cursor(self):
         return self.cursor_value
+
+
+def test_formal_completion_synchronizes_payroll_without_an_unproven_payment_date(monkeypatch):
+    connection = _SqlConnection()
+    request = _request()
+    facts = _facts()
+    day = date.fromisoformat(facts["authoritative_facts"]["official_service_dates"][0])
+    assignment_identity = "assignment:7"
+    persisted_payroll = []
+
+    class PayrollRepository:
+        def load(self, case_no, *, for_update):
+            assert for_update and case_no == request.case_no
+            due_date = payroll_rebuild_repository._payment_due_date({
+                "staff_payment_due_date": None,
+                "actual_end_date": day,
+                "client_payable_ntd": None,
+                "identity_status": "一般市民",
+                "service_hours_per_day": 8,
+            }, SimpleNamespace(subsidy_hours=40), service_day_count=1)
+            return PayrollRebuildFacts(
+                case_no, 0,
+                (OfficialAssignmentServiceFacts(assignment_identity, 17, (day,)),),
+                (rate_snapshot(assignment_identity, "policy-v1", PayrollPolicyKind.CITIZEN),),
+                PayrollTerms(1, 8, MoneyNTD(0)),
+                (), (), due_date, OrderLifecycleStatus.COMPLETED,
+            )
+
+        def find_receipt(self, key):
+            return None
+
+        def persist_rebuild(self, persistence):
+            persisted_payroll.append(persistence)
+
+    def make_payroll_repository(caller_connection):
+        assert caller_connection is connection
+        return PayrollRepository()
+
+    class CompletionRepository(_ReplayRepository):
+        def append_outbox(self, request, candidate, lifecycle_event_id):
+            MySqlOrderAutoCompletionRepository(connection).synchronize_completion_accounting(
+                request, lifecycle_event_id,
+            )
+            super().append_outbox(request, candidate, lifecycle_event_id)
+
+    monkeypatch.setattr(payroll_rebuild_repository, "MySqlPayrollRebuildRepository", make_payroll_repository)
+    monkeypatch.setattr(MySqlAccountingWorkspaceState, "subsidy_plan",
+                        lambda *args: SimpleNamespace(selected_scheme=None))
+    monkeypatch.setattr("infrastructure.mysql.automatic_client_accounting.synchronize_terminal_subsidy_return",
+                        lambda *args, **kwargs: None)
+
+    repository = CompletionRepository(facts)
+    completion = AutoCompleteOrderService(repository, _UnitOfWork)
+    receipt = completion.apply(request)
+    assert completion.apply(request) == receipt
+    assert repository.writes == ["event", "order", "outbox", "receipt"]
+    assert len(persisted_payroll) == 1
+    action, = persisted_payroll[0].preview.actions
+    assert action.action is StaffObligationActionKind.CREATE
+    assert action.assignment_identity == assignment_identity
+    assert action.after_amount == MoneyNTD(2400)
+    assert action.due_date is None
+    assert connection.cursor_value.statements == []
 
 
 def test_auto_completion_event_immediately_forms_financial_principal_lock():

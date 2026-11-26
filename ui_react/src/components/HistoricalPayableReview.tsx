@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { accountsPayableQueryClient, type HistoricalUnpaidPayableCommand } from '../api/accounts_payable/accounts_payable_query_client';
+import { accountsPayableQueryClient, type HistoricalPayrollSyncItem, type HistoricalUnpaidPayableCommand } from '../api/accounts_payable/accounts_payable_query_client';
 import type { HistoricalPayableAuditItem } from '../api/accounts_payable/accounts_payable_query_schemas';
+import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedChanges } from './UnsavedChanges';
 import { financeMoney } from './FinanceReceiptsWorkspace';
@@ -70,26 +71,31 @@ export function HistoricalPayableEditor({ item, onSaved }: { item: HistoricalPay
 
 function HistoricalPayableSync({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState<string[]>([]);
 
   async function synchronize() {
+    if (busy) return;
     setBusy(true);
-    setMessage('');
+    setMessages([]);
     try {
       const result = await accountsPayableQueryClient.synchronizeHistorical(item.case_no);
-      if (result && (result.action !== 'skipped' || result.reason === 'already_synced')) {
-        const pending = result.payment_arrangement_pending || (result.action !== 'skipped' && result.due_date === null);
-        const base = pending
-          ? '已建立正式應付，付款安排或預計付款日待確認，清冊將重新讀取。'
-          : '已查回月嫂應付，清冊將重新讀取。';
-        setMessage(result.detail ? `${base} ${result.detail}` : base);
+      if (!result) {
+        setMessages(['未取得正式同步回執，請重新查核本案。']);
+        return;
+      }
+      const outcomes = result.items?.length ? result.items : [result];
+      if (!outcomes.some(outcome => outcome.action !== 'skipped' || outcome.obligation_identity)) {
+        setMessages(outcomes.map(outcome => historicalSyncMessage(outcome)));
+        return;
+      }
+      try {
+        const accounting = await financeAccountingClient.query(item.case_no);
+        setMessages(outcomes.map(outcome => historicalReadback(outcome, accounting)));
+      } finally {
         onSaved();
-      } else {
-        setMessage(result?.detail ?? historicalSyncMessages[result?.reason ?? '']
-          ?? '本案目前無法同步，請重新查核案件狀態。');
       }
     } catch {
-      setMessage('無法確認同步結果，請重新查核本案。');
+      setMessages(['尚未查回正式應付，請重新查核本案。']);
     } finally {
       setBusy(false);
     }
@@ -101,7 +107,7 @@ function HistoricalPayableSync({ item, onSaved }: { item: HistoricalPayableAudit
     <button type="button" className="finance-btn-primary" disabled={busy} onClick={() => void synchronize()}>
       {busy ? '同步中…' : '同步月嫂應付'}
     </button>
-    {message && <p role="status">{message}</p>}
+    {messages.length > 0 && <div role="status">{messages.map((message, index) => <p key={index}>{message}</p>)}</div>}
   </section>;
 }
 
@@ -118,6 +124,35 @@ const historicalSyncMessages: Record<string, string> = {
   historical_payroll_end_date_missing: '請查核已採納之歷史服務結束日。',
   historical_payroll_attribution_pending: '請回到歷史服務歸屬更正，查核應付與原付款證據。',
 };
+
+function historicalSyncMessage(outcome: HistoricalPayrollSyncItem): string {
+  return outcome.detail ?? historicalSyncMessages[outcome.pending_reason ?? '']
+    ?? (outcome.action === 'skipped' ? historicalSyncMessages[outcome.reason] : undefined)
+    ?? '本案目前無法同步，請重新查核案件狀態。';
+}
+
+function historicalReadback(outcome: HistoricalPayrollSyncItem, accounting: CaseAccounting): string {
+  const person = accounting.staff_accounting_availability?.find(person =>
+    outcome.staff_id != null && outcome.assignment_id != null &&
+    person.staff_id === outcome.staff_id && person.assignment_id === outcome.assignment_id,
+  );
+  const identity = outcome.obligation_identity;
+  const payable = identity && person?.status === 'formal' && person.obligation_identities.includes(identity)
+    ? accounting.staff_items.find(row => row.direction === 'payable' && row.identity === identity)
+    : undefined;
+  const name = person?.party || (outcome.staff_id ? `月嫂編號 ${outcome.staff_id}` : '月嫂歸屬待確認');
+  if (!payable) {
+    const detail = outcome.action === 'skipped' ? historicalSyncMessage(outcome) : '尚未查回對應指派的正式應付。';
+    return `${name} · ${detail}`;
+  }
+  const settled = payable.settled === true || payable.remaining_ntd === 0;
+  const arrangementPending = !settled && (outcome.payment_arrangement_pending === true ||
+    (payable.funding_portions?.length ? payable.funding_portions.some(portion => portion.due_date === null) : payable.due_date === null));
+  const status = arrangementPending ? '付款安排待確認' : settled ? '已結清' : '付款日已讀回';
+  const detail = outcome.action === 'skipped' && outcome.reason !== 'already_synced'
+    ? ` · ${historicalSyncMessage(outcome)}` : '';
+  return `${name} · 正式應付 ${financeMoney(payable.expected_ntd)} · ${status}${detail}`;
+}
 
 function HistoricalPayableCorrection({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {
   const [amount, setAmount] = useState(item.amount_due_ntd?.toString() ?? '');

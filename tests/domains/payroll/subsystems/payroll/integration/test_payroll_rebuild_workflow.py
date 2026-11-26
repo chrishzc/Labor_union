@@ -420,6 +420,8 @@ def test_apply_rejects_stale_preview_version_with_typed_conflict():
     ('補助市民',24000,8,date(2026,11,15)),
     ('社福',24000,8,date(2026,11,15)),
     ('社福',0,8,date(2026,12,15)),
+    ('一般市民',None,8,None),
+    ('一般市民',0,8,None),
 ])
 def test_official_schedule_can_form_missing_payment_date_without_waiting_for_completion(identity,amount,hours,expected):
     root={'staff_payment_due_date':None,'order_status':'訂單完成','actual_end_date':date(2026,10,12),'client_payable_ntd':amount,'identity_status':identity,'service_days':10,'service_hours_per_day':hours,'floor_fee':0}
@@ -430,6 +432,28 @@ def test_official_schedule_can_form_missing_payment_date_without_waiting_for_com
     assert mysql_rebuild._payment_due_date(root)==expected
     root['actual_end_date']=None
     assert mysql_rebuild._payment_due_date(root) is None
+
+
+@pytest.mark.parametrize(("identity", "client_payable", "expected_due_date"), [
+    ("一般市民", None, None),
+    ("一般市民", 0, None),
+    ("一般市民", 12000, date(2026, 11, 15)),
+    ("原住民", None, date(2026, 12, 15)),
+    ("補助市民", 0, date(2026, 12, 15)),
+])
+def test_bound_pricing_does_not_infer_self_pay_from_an_unknown_client_obligation(
+    identity, client_payable, expected_due_date,
+):
+    root = {
+        "staff_payment_due_date": None,
+        "actual_end_date": date(2026, 10, 12),
+        "client_payable_ntd": client_payable,
+        "identity_status": identity,
+        "service_hours_per_day": 8,
+    }
+    assert mysql_rebuild._payment_due_date(
+        root, SimpleNamespace(subsidy_hours=40), service_day_count=1,
+    ) == expected_due_date
 
 
 @pytest.mark.parametrize("completed_on", [None, date(2026, 10, 31)])

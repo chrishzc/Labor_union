@@ -14,8 +14,8 @@ describe('Finance Import mutation client', () => {
   beforeEach(() => sessionClient.setSession('finance-mutation-token', { id: 7, username: 'finance', display_name: 'Finance', role: 'admin' }));
   afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
 
-  it('keeps workbook digest, command identity, accepted replay and terminal receipt typed', async () => {
-    const snapshot = await FinanceWorkbookSnapshot.fromFile(new File(['bank'], 'bank.xlsx'));
+  it.each(['bank.xlsx', 'bank.xls', 'bank.XLS'])('uploads %s with its original name and keeps the command and receipt typed', async (filename) => {
+    const snapshot = await FinanceWorkbookSnapshot.fromFile(new File(['bank'], filename));
     const ingestion = { batch_identity: 'finance-import-batch:9', source_content_digest: snapshot.sha256, source_row_count: 1, canonical_created_count: 1, duplicate_occurrence_count: 0, source_warning_count: 0, source_warning_created_count: 0, replayed: false };
     const preview = { batch_identity: ingestion.batch_identity, batch_version: 1, source_content_digest: snapshot.sha256, classifier_version: 'v1', fingerprint_version: 'v1', counts: { source_rows: 1, canonical_created: 1, duplicate_occurrences: 0, ready_dispatch: 1, existing: 0, manual_review: 0, business_pending: 0, blocked: 0 }, dispatch_summaries: [], rows: [], blocking_codes: [], apply_allowed: true, preview_fingerprint: fingerprint };
     const accepted = { job_id: 'job-finance-1', status_url: '/api/v1/jobs/job-finance-1', replayed: true };
@@ -28,9 +28,18 @@ describe('Finance Import mutation client', () => {
     await expect(financeImportMutationClient.queryBatchOutcome(accepted.job_id)).resolves.toEqual(outcome);
     const [uploadPath, uploadOptions] = vi.mocked(globalThis.fetch).mock.calls[0] ?? [];
     expect(uploadPath).toBe('/api/v1/finance-import/workbooks/ingest');
-    expect((uploadOptions?.body as FormData).get('workbook')).toBeInstanceOf(File);
+    const uploadBody = uploadOptions?.body;
+    const uploadedWorkbook = uploadBody instanceof FormData ? uploadBody.get('workbook') : null;
+    expect(uploadedWorkbook).toBeInstanceOf(File);
+    expect(uploadedWorkbook).toHaveProperty('name', filename);
     const [, applyOptions] = vi.mocked(globalThis.fetch).mock.calls[2] ?? [];
     expect(new Headers(applyOptions?.headers).get('Idempotency-Key')).toBe('apply-1');
+  });
+
+  it('rejects unsupported file extensions before upload', async () => {
+    await expect(FinanceWorkbookSnapshot.fromFile(new File(['bank'], 'bank.csv'))).rejects.toMatchObject({
+      code: 'FINANCE_IMPORT_FILE_TYPE',
+    });
   });
 
   it('rejects raw or incomplete terminal receipt payloads', async () => {

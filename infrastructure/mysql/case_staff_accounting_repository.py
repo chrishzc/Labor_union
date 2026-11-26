@@ -17,7 +17,7 @@ def query_case_staff_accounting_availability(
     """Read each person's historical basis without running Payroll synchronization."""
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT o.status,o.service_days,o.service_hours_per_day,o.actual_end_date,"
+            "SELECT o.status,"
             "o.staff_payment_due_date,p.current_event_id AS day_event_id,"
             "(SELECT receipt.id FROM historical_order_adoption_receipts receipt "
             "WHERE receipt.case_no=o.case_no AND receipt.outcome='adopted' "
@@ -32,8 +32,7 @@ def query_case_staff_accounting_availability(
         if root["day_event_id"] is not None:
             cursor.execute(
                 "SELECT item.assignment_id,item.staff_id,s.name AS staff_name,"
-                "item.actual_service_days AS service_days,item.actual_service_hours AS service_hours,"
-                "item.hourly_rate_ntd,a.id IS NOT NULL AS assignment_valid,"
+                "a.id IS NOT NULL AS assignment_valid,"
                 "(SELECT CASE WHEN COUNT(*)=1 THEN MIN(evidence.source_end_date) END "
                 "FROM historical_order_pairing_evidence evidence "
                 "WHERE evidence.receipt_id=%s AND evidence.assignment_id=item.assignment_id "
@@ -51,20 +50,12 @@ def query_case_staff_accounting_availability(
         else:
             cursor.execute(
                 "SELECT evidence.assignment_id,evidence.staff_id,s.name AS staff_name,"
-                "o.service_days,o.service_days*o.service_hours_per_day AS service_hours,"
-                "COALESCE(rate.hourly_rate_ntd,base.hourly_rate_ntd) AS hourly_rate_ntd,"
-                "a.id IS NOT NULL AS assignment_valid,evidence.source_end_date,1 AS pairing_evidence_count,"
-                "(SELECT COUNT(DISTINCT sched.work_date) FROM staff_schedule sched "
-                "WHERE sched.case_no=receipt.case_no AND sched.assignment_id=a.id AND sched.staff_id=a.staff_id "
-                "AND sched.effective_marker=1 AND sched.is_work_day=1) AS schedule_service_days "
+                "a.id IS NOT NULL AS assignment_valid,evidence.source_end_date,1 AS pairing_evidence_count "
                 "FROM historical_order_pairing_evidence evidence "
                 "JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id "
-                "JOIN orders o ON o.case_no=receipt.case_no "
                 "LEFT JOIN case_staff_assignments a ON a.id=evidence.assignment_id "
                 "AND a.staff_id=evidence.staff_id AND a.case_no=receipt.case_no "
                 "LEFT JOIN staff s ON s.id=evidence.staff_id "
-                "LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=a.id "
-                "LEFT JOIN case_payroll_rate_policy_snapshots base ON base.case_no=receipt.case_no "
                 "WHERE evidence.receipt_id=%s AND evidence.resolution <> 'blank' ORDER BY evidence.assignment_id",
                 (root["adoption_receipt_id"],),
             )
@@ -98,6 +89,7 @@ def query_case_staff_accounting_availability(
             None, None, "", (), "needs_review", ("historical_payroll_unique_assignment_required",),
         ),)
     result: list[StaffAccountingAvailability] = []
+    baseline_preview = None
     for assignment_id, staff_id in people:
         person_sources = source_by_person.get((assignment_id, staff_id), ())
         source = person_sources[0] if len(person_sources) == 1 else None
@@ -155,21 +147,31 @@ def query_case_staff_accounting_availability(
             continue
         if not person_sources or (source is not None and (not source["assignment_valid"] or pairing_evidence_count == 0)):
             reasons.append("historical_payroll_assignment_source_missing")
-        if root["day_event_id"] is None and len(sources) > 1:
-            if source is not None and "schedule_service_days" in source:
-                if not _positive_number(source["schedule_service_days"]) or not _positive_number(root.get("service_hours_per_day")):
-                    reasons.append("historical_payroll_service_basis_missing")
+        estimated_amount = None
+        if not reasons:
+            if root["status"] == "歷史訂單－帳務完成":
+                reasons.append("historical_payroll_settled_source_required")
+            elif root["status"] != "歷史訂單－服務完成":
+                reasons.append("historical_service_not_completed")
             else:
-                reasons.append("historical_payroll_service_attribution_missing")
-        elif source is not None and (not _positive_number(source["service_days"]) or not _positive_number(source["service_hours"])):
-            reasons.append("historical_payroll_service_basis_missing")
-        if source is not None and not _positive_number(source["hourly_rate_ntd"]):
-            reasons.append("payroll_rate_policy_not_found")
-        if end_date is None:
-            reasons.append("historical_payroll_end_date_missing")
+                if baseline_preview is None:
+                    from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
+
+                    baseline_preview = synchronize_historical_payroll(connection, case_no, dry_run=True)
+                outcomes = baseline_preview.get("items") or [baseline_preview]
+                matching = [row for row in outcomes if row.get("assignment_id") == assignment_id and row.get("staff_id") == staff_id]
+                outcome = matching[0] if len(matching) == 1 else {}
+                if outcome.get("action") == "created" and _positive_number(outcome.get("amount_ntd")):
+                    estimated_amount = int(outcome["amount_ntd"])
+                    if outcome.get("pending_reason"):
+                        reasons.append(outcome["pending_reason"])
+                else:
+                    reasons.append(outcome.get("reason") or (
+                        baseline_preview.get("reason") if not baseline_preview.get("items") else None
+                    ) or "historical_payroll_baseline_preview_unmatched")
         result.append(StaffAccountingAvailability(
-            assignment_id, staff_id, party, (), "needs_review" if reasons else "not_established",
-            tuple(reasons) if reasons else ("historical_payroll_obligation_not_established",),
+            assignment_id, staff_id, party, (), "not_established" if estimated_amount is not None else "needs_review",
+            tuple(reasons), estimated_amount_ntd=estimated_amount,
         ))
     return tuple(result)
 

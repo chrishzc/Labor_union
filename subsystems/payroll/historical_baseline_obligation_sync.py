@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, cast
 
 from domains.payroll.calculation import AssignmentRateSnapshot, PayrollPolicyKind, PayrollTerms
 from domains.payroll.historical_calculation import (
     HistoricalAssignmentServiceFacts,
+    allocate_historical_floor_fee,
     build_historical_case_payroll_candidate,
 )
 from domains.payroll.installments import PayrollInstallment, confirmed_subsidy_installments
@@ -23,6 +25,7 @@ from infrastructure.mysql.payroll_rebuild_repository import (
 from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
+from shared_kernel.validation import require_positive_half_hour
 from subsystems.payroll.rebuild_workflow import (
     PayrollRebuildWorkflow,
     StaffObligationAction,
@@ -143,10 +146,11 @@ def _synchronize_single_assignment(connection, cursor, case_no, order, assignmen
                      or existing[0]["staff_id"] != staff_id):
         return _skipped("historical_payroll_obligation_binding_conflict")
     original = existing[0] if existing else None
-    preserved = _preserved_existing_result(original)
-    if preserved is not None:
-        return preserved
-    if not original and order["status"] == _COMPLETED[1]:
+    if original is not None:
+        preserved = _preserved_existing_result(original)
+        if preserved is not None:
+            return _original_sync_outcome(original, preserved)
+    if original is None and order["status"] == _COMPLETED[1]:
         return _skipped("historical_payroll_settled_source_required")
 
     days = _positive_int_or_zero(
@@ -154,26 +158,23 @@ def _synchronize_single_assignment(connection, cursor, case_no, order, assignmen
         or order.get("service_days")
         or assignment.get("schedule_service_days")
     )
-    if days <= 0 or not _positive_decimal(order.get("service_hours_per_day")):
+    service_hours = _historical_service_hours(order.get("service_hours_per_day"))
+    if days <= 0 or service_hours is None:
         return _skipped("historical_payroll_service_basis_missing")
-    if not assignment.get("hourly_rate_ntd"):
+    identity = f"assignment:{assignment_id}"
+    rate = _historical_assignment_rate(identity, assignment)
+    if rate is None:
         return _skipped("payroll_rate_policy_not_found")
 
-    person_order = {**order, "actual_end_date": assignment.get("source_end_date") or order.get("actual_end_date")}
-    identity = f"assignment:{assignment_id}"
+    person_order = {**order, "actual_end_date": assignment.get("source_end_date")}
     terms = PayrollTerms(
         days,
-        Decimal(str(order["service_hours_per_day"])),
+        service_hours,
         MoneyNTD(int(order.get("floor_fee") or 0)),
     )
     payroll = build_historical_case_payroll_candidate(
         (HistoricalAssignmentServiceFacts(identity, staff_id, days),),
-        (AssignmentRateSnapshot(
-            identity,
-            assignment["policy_version"],
-            PayrollPolicyKind(assignment["policy_kind"]),
-            MoneyNTD(int(assignment["hourly_rate_ntd"])),
-        ),),
+        (rate,),
         terms,
         _payroll_adjustments(_amount_index(_load_adjustments(cursor, (assignment,), not dry_run))),
     )
@@ -184,7 +185,7 @@ def _synchronize_single_assignment(connection, cursor, case_no, order, assignmen
 
     funding = _funding_schedule(connection, case_no, person_order, effective_amount.amount, allow_split_installments=True)
     if original and funding.due_date is None:
-        return _already_synced_pending(funding)
+        return _original_sync_outcome(original, _already_synced_pending(funding))
 
     obligation_identity = original["obligation_identity"] if original else f"staff-obligation:{identity}"
     before = source_amount if original else MoneyNTD(0)
@@ -199,7 +200,9 @@ def _synchronize_single_assignment(connection, cursor, case_no, order, assignmen
     )
     result = _single_sync_outcome(
         action_name="updated" if original else "created",
+        assignment_id=assignment_id,
         staff_id=staff_id,
+        obligation_identity=obligation_identity,
         amount_ntd=effective_amount.amount,
         funding=funding,
     )
@@ -254,43 +257,22 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
         )
         floor_fee_blocked = has_incomplete_peer
 
-    hours_valid = _positive_decimal(order.get("service_hours_per_day"))
-    service_hours = Decimal(str(order["service_hours_per_day"])) if hours_valid else Decimal(0)
+    service_hours = _historical_service_hours(order.get("service_hours_per_day"))
     case_floor_allocations: dict[str, MoneyNTD] = {}
     if floor_fee_ntd > 0 and not floor_fee_blocked and valid_entries:
-        floor_facts = tuple(sorted(
-            (
-                HistoricalAssignmentServiceFacts(
-                    f"assignment:{entry['id']}",
-                    int(entry["staff_id"]),
-                    _positive_int_or_zero(entry.get("item_service_days") or entry.get("schedule_service_days")),
-                )
-                for entry in valid_entries
-            ),
-            key=lambda item: item.assignment_identity,
-        ))
-        dummy_rates = tuple(
-            AssignmentRateSnapshot(
-                item.assignment_identity,
-                "floor-probe",
-                PayrollPolicyKind.CITIZEN,
-                MoneyNTD(1),
+        floor_facts = tuple(
+            HistoricalAssignmentServiceFacts(
+                f"assignment:{entry['id']}",
+                int(entry["staff_id"]),
+                _positive_int_or_zero(entry.get("item_service_days") or entry.get("schedule_service_days")),
             )
-            for item in floor_facts
+            for entry in valid_entries
         )
-        case_floor = build_historical_case_payroll_candidate(
+        _, case_floor_allocations = allocate_historical_floor_fee(
             floor_facts,
-            dummy_rates,
-            PayrollTerms(
-                int(order.get("service_days") or sum(item.actual_service_days for item in floor_facts)),
-                service_hours if hours_valid else Decimal(1),
-                MoneyNTD(floor_fee_ntd),
-            ),
+            int(order.get("service_days") or sum(item.actual_service_days for item in floor_facts)),
+            MoneyNTD(floor_fee_ntd),
         )
-        case_floor_allocations = {
-            item.assignment_identity: item.floor_fee_allocated
-            for item in case_floor.assignments
-        }
 
     items: list[dict[str, Any]] = []
     planned: list[_PlannedAssignmentSync] = []
@@ -323,16 +305,12 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             })
             continue
         original = existing_rows[0] if existing_rows else None
-        preserved = _preserved_existing_result(original)
-        if preserved is not None:
-            items.append({
-                "assignment_id": assignment_id,
-                "staff_id": staff_id,
-                "obligation_identity": original["obligation_identity"] if original else None,
-                **preserved,
-            })
-            continue
-        if not original and order["status"] == _COMPLETED[1]:
+        if original is not None:
+            preserved = _preserved_existing_result(original)
+            if preserved is not None:
+                items.append(_original_sync_outcome(original, preserved))
+                continue
+        if original is None and order["status"] == _COMPLETED[1]:
             items.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
@@ -340,14 +318,16 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             })
             continue
         days = _positive_int_or_zero(entry.get("item_service_days") or entry.get("schedule_service_days"))
-        if days <= 0 or not hours_valid:
+        if days <= 0 or service_hours is None:
             items.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped("historical_payroll_service_basis_missing"),
             })
             continue
-        if not entry.get("hourly_rate_ntd"):
+        identity = f"assignment:{assignment_id}"
+        person_rate = _historical_assignment_rate(identity, entry)
+        if person_rate is None:
             items.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
@@ -355,7 +335,6 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             })
             continue
         item_floor = entry.get("item_floor_fee_ntd")
-        identity = f"assignment:{assignment_id}"
         if floor_fee_ntd > 0 and floor_fee_blocked and item_floor is None:
             items.append({
                 "assignment_id": assignment_id,
@@ -372,12 +351,6 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             else case_floor_allocations.get(identity, MoneyNTD(0))
         )
         person_fact = HistoricalAssignmentServiceFacts(identity, staff_id, days)
-        person_rate = AssignmentRateSnapshot(
-            identity,
-            entry["policy_version"],
-            PayrollPolicyKind(entry["policy_kind"]),
-            MoneyNTD(int(entry["hourly_rate_ntd"])),
-        )
         person_adjustments = _payroll_adjustments(
             {identity: adjustments_by_identity[identity]} if identity in adjustments_by_identity else {},
         )
@@ -396,7 +369,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
                 **_skipped("historical_payroll_nonpositive_amount"),
             })
             continue
-        person_order = {**order, "actual_end_date": entry.get("source_end_date") or order.get("actual_end_date")}
+        person_order = {**order, "actual_end_date": entry.get("source_end_date")}
         funding = _funding_schedule(
             connection,
             case_no,
@@ -406,12 +379,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
         )
         obligation_identity = original["obligation_identity"] if original else f"staff-obligation:{identity}"
         if original and funding.due_date is None:
-            items.append({
-                "assignment_id": assignment_id,
-                "staff_id": staff_id,
-                "obligation_identity": obligation_identity,
-                **_already_synced_pending(funding),
-            })
+            items.append(_original_sync_outcome(original, _already_synced_pending(funding)))
             continue
         before = source_amount if original else MoneyNTD(0)
         action = StaffObligationAction(
@@ -427,17 +395,14 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             assignment_id, staff_id, person_fact, person_rate, action, effective_amount, funding,
             original["obligation_identity"] if original else None,
         ))
-        items.append({
-            "assignment_id": assignment_id,
-            "staff_id": staff_id,
-            "obligation_identity": obligation_identity,
-            **_single_sync_outcome(
-                action_name="updated" if original else "created",
-                staff_id=staff_id,
-                amount_ntd=effective_amount.amount,
-                funding=funding,
-            ),
-        })
+        items.append(_single_sync_outcome(
+            action_name="updated" if original else "created",
+            assignment_id=assignment_id,
+            staff_id=staff_id,
+            obligation_identity=obligation_identity,
+            amount_ntd=effective_amount.amount,
+            funding=funding,
+        ))
 
     for row in orphans:
         items.append({
@@ -447,7 +412,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             **_skipped("historical_payroll_obligation_binding_conflict"),
         })
 
-    if planned and not dry_run:
+    if planned and service_hours is not None and not dry_run:
         ordered = sorted(planned, key=lambda item: item.service_fact.assignment_identity)
         batch_terms = (
             PayrollTerms(int(order.get("service_days") or sum(i.service_fact.actual_service_days for i in ordered)),
@@ -524,12 +489,18 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
         if first_match.get("detail"):
             summary["detail"] = first_match["detail"]
     elif unresolved:
-        first_issue = unresolved[0]
+        blocked = next((item for item in unresolved if item["action"] == "skipped"
+                        and item.get("reason") != "already_synced"), None)
+        first_issue = blocked or unresolved[0]
         issue_code = first_issue.get("pending_reason") or first_issue.get("reason")
         if issue_code:
             summary["pending_reason"] = issue_code
-        if first_issue.get("detail"):
-            summary["detail"] = first_issue["detail"]
+        detail = first_issue.get("detail")
+        if blocked:
+            summary["reason"] = blocked["reason"]
+            summary["detail"] = "已有部分月嫂款項同步，其餘仍待查核。" + (detail or "")
+        elif detail:
+            summary["detail"] = detail
     return summary
 
 
@@ -575,9 +546,7 @@ def _persist_historical_batch(
                 establish_confirmed_subsidy_installments(cursor, current["obligation_identity"], portions)
 
 
-def _preserved_existing_result(original):
-    if original is None:
-        return None
+def _preserved_existing_result(original: dict[str, Any]) -> dict[str, Any] | None:
     if original["has_formed_due_date"] and (
         original["status"] == "open" or original["payout_history_exists"] or original["has_payment"]
     ):
@@ -592,6 +561,18 @@ def _preserved_existing_result(original):
     return None
 
 
+def _original_sync_outcome(original: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    due_date = original["due_date"]
+    return {
+        **result,
+        "assignment_id": original["assignment_id"],
+        "staff_id": original["staff_id"],
+        "obligation_identity": original["obligation_identity"],
+        "amount_ntd": int(original["effective_amount_due_ntd"]),
+        "due_date": due_date.isoformat() if due_date is not None else None,
+    }
+
+
 def _already_synced_pending(funding: HistoricalFundingSchedule) -> dict[str, Any]:
     result = _skipped("already_synced", funding.pending_detail)
     result["payment_arrangement_pending"] = True
@@ -603,13 +584,17 @@ def _already_synced_pending(funding: HistoricalFundingSchedule) -> dict[str, Any
 def _single_sync_outcome(
     *,
     action_name: str,
+    assignment_id: int,
     staff_id: int,
+    obligation_identity: str,
     amount_ntd: int,
     funding: HistoricalFundingSchedule,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "action": action_name,
+        "assignment_id": assignment_id,
         "staff_id": staff_id,
+        "obligation_identity": obligation_identity,
         "amount_ntd": amount_ntd,
         "due_date": funding.due_date.isoformat() if funding.due_date is not None else None,
     }
@@ -628,9 +613,20 @@ def _read_attributed_payables(cursor, case_no, attribution):
         return _skipped(reason, "原付款證據仍待核對，請從歷史服務歸屬更正補證後重查。")
     cursor.execute(_ATTRIBUTED_PAYABLES_SQL, (case_no, attribution["event_id"]))
     payables = tuple(cursor.fetchall())
-    if not payables or not all(item["has_verified_obligation"] for item in payables):
-        return _skipped(reason, "請從歷史服務歸屬更正查核各月嫂的應付、付款日或結清證據。")
-    return _skipped("already_synced")
+    detail = "請從歷史服務歸屬更正查核各月嫂的應付、付款日或結清證據。"
+    items = [
+        {
+            "assignment_id": row["assignment_id"],
+            "staff_id": row["staff_id"],
+            "obligation_identity": row["obligation_identity"],
+            **(_skipped("already_synced") if row["obligation_identity"] else _skipped(reason, detail)),
+        }
+        for row in payables
+    ]
+    outcome = _skipped("already_synced") if items and all(
+        item["obligation_identity"] for item in items
+    ) else _skipped(reason, detail)
+    return {**outcome, "items": items}
 
 
 def _funding_schedule(
@@ -702,14 +698,30 @@ def _positive_int_or_zero(value: object) -> int:
     return parsed if parsed > 0 else 0
 
 
-def _positive_decimal(value: object) -> bool:
-    if value is None or isinstance(value, bool):
-        return False
+def _historical_service_hours(value: object) -> Decimal | None:
     try:
-        parsed = Decimal(str(value))
-    except Exception:
-        return False
-    return parsed.is_finite() and parsed > 0
+        hours = Decimal(str(value))
+        require_positive_half_hour(hours, "service hours per day")
+    except (InvalidOperation, ValueError):
+        return None
+    return hours
+
+
+def _historical_assignment_rate(identity: str, row: Mapping[str, Any]) -> AssignmentRateSnapshot | None:
+    version = row.get("policy_version")
+    kind = row.get("policy_kind")
+    amount = row.get("hourly_rate_ntd")
+    if not isinstance(version, str) or not isinstance(kind, str) or not isinstance(amount, int):
+        return None
+    try:
+        return AssignmentRateSnapshot(
+            identity,
+            version,
+            PayrollPolicyKind(kind),
+            MoneyNTD(amount),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _skipped(reason, detail=None) -> dict[str, Any]:
@@ -726,19 +738,19 @@ COALESCE((SELECT MIN(part.due_date IS NOT NULL) FROM staff_obligation_installmen
 """
 
 
-_ATTRIBUTED_PAYABLES_SQL = f"""
-SELECT item.assignment_id, EXISTS (
-    SELECT 1 FROM staff_obligations o
-    JOIN case_staff_assignments a ON a.id=o.assignment_id AND a.case_no=o.case_no AND a.staff_id=o.staff_id
-    WHERE o.case_no=%s AND o.assignment_id=item.assignment_id AND o.staff_id=item.staff_id
-      AND a.status IN ('planned','active','completed')
-      AND o.obligation_kind='service_pay' AND o.direction='payable_to_staff'
-      AND (
-        (o.status='open' AND o.amount_due_ntd>0 AND {_FORMED_DUE_DATE_SQL})
-        OR (o.status='settled' AND o.payout_history_exists=1)
-      )
-) AS has_verified_obligation
-FROM historical_service_day_items item WHERE item.event_id=%s
+_ATTRIBUTED_PAYABLES_SQL = """
+SELECT item.assignment_id,item.staff_id,o.obligation_identity
+FROM historical_service_day_items item
+LEFT JOIN case_staff_assignments a
+  ON a.id=item.assignment_id AND a.staff_id=item.staff_id AND a.case_no=%s
+  AND a.status IN ('planned','active','completed')
+LEFT JOIN staff_obligations o
+  ON o.case_no=a.case_no AND o.assignment_id=a.id AND o.staff_id=a.staff_id
+  AND o.obligation_kind='service_pay' AND o.direction='payable_to_staff'
+  AND ((o.status='open' AND o.amount_due_ntd>0)
+       OR (o.status='settled' AND o.payout_history_exists=1))
+WHERE item.event_id=%s
+ORDER BY item.assignment_id,o.obligation_identity
 """
 
 

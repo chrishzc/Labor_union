@@ -137,6 +137,12 @@
 - **逐案直付及其他款項**：逐案直付沿原 append-only `confirm_direct` 與 `withdraw_direct` 事件。前端依 Query 隱藏該筆工會補助退款的操作，一般退款仍走原入口。Payroll 月嫂應付與 Staff Payables 出款資格分別讀取。
 - **驗證入口**：按 22A §4 的 STAR 從原收款及出款命令核對兩種順序、同鍵重播、既有確認、沖正及失敗。一般業務矩陣用替身 ports。隔離 MySQL 覆蓋原核銷正式讀回、同交易回滾及冪等。
 
+### 自動核銷與方案確認的邊界 ^subsidy-auto-reconciliation-routing
+
+- 延續單筆原流水身分、主責 writer 及成功回執分工。Finance Import 提供原交易和預檢；Staff Payables 核對方案一月嫂出款，Client Finance 核對方案二客戶退款。只能在已有正式收付款結果或原命令成功提交時按 [方案辨識](../../../../../requirements/22A_案件帳務三方案與補助流向正式規格.md#scheme-classification) 記錄確認。Query、Preview 與 HTTP 202 均不等同正式核銷。
+- `subsystems/finance_import/import_workflow.py` 的 `_build_resolved_plan` 自動模式與 `reconcile_pending` 保留各自的背景選入條件。`infrastructure/mysql/subsidy_confirmation_repository.py::resolve_subsidy_confirmation` 與各 owner 預檢提供候選、缺項、既有正式款及擬建款證據。方案二尚無正式退款時，依 [22A §2.4.1](../../../../../requirements/22A_案件帳務三方案與補助流向正式規格.md#subsidy-classification-and-auto-reconciliation) 只在原同名退補助特例符合背景選入條件時自動核銷。人工 Preview／Apply 沿原入口，正式 Apply 沿同一 outer UoW、來源防重及原收據讀回。
+- 單案抽屜依 [顯示契約](../../../../../requirements/22B_帳務差額處置與工作台UI正式規格.md#case-drawer-payroll-and-subsidy-readback) 呈現，不承擔 Government Subsidy 整期核銷。方案三沿既有人工確認，不從銀行候選推論；相反方向或一般款項維持各自用途。
+
 ## 國定假日計價接線 ^statement-workspace-holiday-pricing
 
 ```yaml archmap-impact
