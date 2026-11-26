@@ -265,7 +265,7 @@ function Initialize-AdoptedRemoteRuntime {
         [void](Add-Identity -ProcessId $entry.Pid -StartTime $entry.StartTime -Label $entry.Label -RootPid $entry.Pid -IsRoot $true -Process $entry.Process)
     }
     $env:WINDOWS_REMOTE_ARTIFACT_DIR = $state.artifact_path
-    $env:WINDOWS_REMOTE_PREFIX = '/test' # Legacy adoption is always from the existing /test host.
+    $env:WINDOWS_REMOTE_PREFIX = if ($state.management_prefix -eq '/admin') { '/admin' } else { '/test' }
     $script:SkipRuntimeCleanup = $false
     Refresh-OwnedIdentityRegistry
     Write-RuntimeEvent -Event 'runtime_adopted' -Detail 'existing runtime children preserved; no DB or worker startup'
@@ -275,12 +275,17 @@ function Get-FrontendUpdateSupervisor {
     param([switch]$ForStop)
     $directory = Get-FrontendControlDirectory
     $statePath = Join-Path $directory 'state.json'
+    $activePrefix = '/test'
     if (Test-Path -LiteralPath $statePath) {
         $state = Read-FrontendControlJson $statePath
         $snapshot = Get-ProcessSnapshot ([int]$state.supervisor_pid)
         if ($state.contract -eq 'windows-frontend-control/v1' -and $state.project_root -eq $ProjectRoot -and
             $state.api_port -eq $ApiPort -and $state.react_port -eq $ReactPort -and
             $snapshot.State -eq 'alive' -and (Test-SameProcessIdentity ([pscustomobject]@{StartTime=[datetime]$state.supervisor_start_time}) $snapshot)) {
+            if ($state.management_prefix -eq '/admin') { $activePrefix = '/admin' }
+            if (-not $ForStop -and (Get-WindowsManagementPrefix) -ne $activePrefix) {
+                throw 'Changing the Windows management path requires a full restart.'
+            }
             if ($state.controller_digest -eq $script:FrontendControllerDigest) { return $state }
             # Existing lifecycle-aware supervisors already understand the same
             # run-bound stop request. Source updates must not require replacing
@@ -317,7 +322,7 @@ function Get-FrontendUpdateSupervisor {
         if ($snapshot.State -ne 'alive') { throw 'Legacy child is not verifiably alive.' }
         $roots += @{label=$roles[$label[0]]; pid=[int]$child.ProcessId; start_time=$snapshot.StartTime.ToUniversalTime().ToString('o')}
     }
-    $current = (Invoke-WebRequest -Uri "http://127.0.0.1:$ReactPort/test/artifact-manifest.json" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
+    $current = (Invoke-WebRequest -Uri "http://127.0.0.1:$ReactPort$activePrefix/artifact-manifest.json" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
     $artifact = @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'scratch\windows-remote') -Directory -Filter 'artifact-*' | Where-Object {
         $manifest = Join-Path $_.FullName 'artifact-manifest.json'
         (Test-Path -LiteralPath $manifest) -and (Get-Content -Raw -LiteralPath $manifest -Encoding UTF8 | ConvertFrom-Json).artifact_digest -eq $current.artifact_digest
@@ -328,7 +333,7 @@ function Get-FrontendUpdateSupervisor {
     Write-FrontendControlJson $adoptionPath @{
         contract='windows-frontend-adoption/v1'; project_root=$ProjectRoot; api_port=$ApiPort; react_port=$ReactPort
         legacy=@{pid=[int]$legacy.ProcessId; start_time=$legacySnapshot.StartTime.ToUniversalTime().ToString('o')}
-        roots=$roots; artifact_path=$artifact[0].FullName
+        roots=$roots; artifact_path=$artifact[0].FullName; management_prefix=$activePrefix
     }
     $supervisorPath = Join-Path $ProjectRoot 'scripts\launchers\supervise_local_runtime.ps1'
     $command = "& '" + $supervisorPath.Replace("'", "''") + "' -ProjectRoot '" + $ProjectRoot.Replace("'", "''") +
