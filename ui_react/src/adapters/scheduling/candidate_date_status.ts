@@ -11,17 +11,23 @@ export function missingCandidateServiceDates(option: MatchingCandidateOption | u
   return option.required_service_dates.filter(date => !supportedDates.has(date));
 }
 
-export function candidateDateAssessment(
+export function candidateDateStatus(
   option: MatchingCandidateOption | undefined,
   conflicts: readonly CandidateConflict[],
+): CandidateDateStatus {
+  if (option?.full_case_coverage === false || conflicts.some(({ reason_code }) => !ADVISORY_REASONS.has(reason_code))) {
+    return 'conflict';
+  }
+  if (conflicts.length > 0) return 'advisory';
+  return option?.full_case_coverage === true ? 'clear' : 'unverified';
+}
+
+export function candidateDateAssessment(
+  option: MatchingCandidateOption,
+  conflicts: readonly CandidateConflict[],
 ): { status: CandidateDateStatus; dates: readonly string[] } {
-  const hardConflicts = conflicts.filter(({ reason_code }) => !ADVISORY_REASONS.has(reason_code));
-  if (hardConflicts.length > 0 || option?.full_case_coverage === false) {
-    const dates = new Set([...hardConflicts.map(({ work_date }) => work_date), ...missingCandidateServiceDates(option)]);
-    return { status: 'conflict', dates: [...dates].sort() };
-  }
-  if (conflicts.length > 0) {
-    return { status: 'advisory', dates: [...new Set(conflicts.map(({ work_date }) => work_date))].sort() };
-  }
-  return { status: option?.full_case_coverage === true ? 'clear' : 'unverified', dates: [] };
+  const status = candidateDateStatus(option, conflicts);
+  const dates = conflicts.filter(({ reason_code }) => status !== 'conflict' || !ADVISORY_REASONS.has(reason_code))
+    .map(({ work_date }) => work_date);
+  return { status, dates: [...new Set([...dates, ...missingCandidateServiceDates(option)])].sort() };
 }

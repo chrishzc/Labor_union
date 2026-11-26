@@ -24,6 +24,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install locked frontend dependencies without lifecycle hooks
+        id: dependencies
         run: npm ci --ignore-scripts
       - name: Verify candidate query and addition
         run: >-
@@ -31,6 +32,7 @@ jobs:
           src/tests/order_workbench_v2_candidate_query.test.tsx
           src/tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/candidate_single_add.test.tsx
       - name: Lint affected frontend files
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: >-
           npm run lint --
           src/adapters/scheduling/candidate_date_status.ts
@@ -38,4 +40,5 @@ jobs:
           src/components/OrderCandidateQueryPanel.tsx
           src/tests/order_workbench_v2_candidate_query.test.tsx
       - name: Typecheck and build frontend
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run build

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { OrderCandidateQueryPanel } from '../../../../../../../components/OrderCandidateQueryPanel';
+import type { MatchingCandidateOption } from '../../../../../../../api/scheduling/matching_candidate_workflow_client';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 
 const mocks = vi.hoisted(() => ({ search: vi.fn(), query: vi.fn(), add: vi.fn(), command: vi.fn() }));
@@ -12,9 +13,15 @@ vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () 
   candidateContactPoolClient: { query: mocks.query, addCandidates: mocks.add }, createCandidateAddCommand: mocks.command,
 }));
 
-const option = (staffId: number, name: string) => ({
+const requestedDates = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'];
+const option = (staffId: number, name: string): MatchingCandidateOption => ({
   matching_conditions: { region: { status: 'not_matched', required_value: '新竹市', staff_values: ['桃園市'] }, preferred_service_days: { status: 'not_matched', required_value: '週休一日', staff_values: ['週休二日'] } },
   segment_index: 0, staff_id: staffId, staff_name: name, supported_day_count: 5, required_day_count: 5,
+  coverage_day_count: 5, available_ranges: [{ start_date: requestedDates[0], end_date: requestedDates[4] }],
+  case_period_start: requestedDates[0], case_period_end: requestedDates[4],
+  required_service_dates: requestedDates, supported_service_dates: requestedDates,
+  supported_ranges: [{ start_date: requestedDates[0], end_date: requestedDates[4], service_day_count: 5 }],
+  source_scheduling_version: 1, filter_results: {}, full_selected_segment_coverage: true, uncovered_segment_dates: [],
   full_case_coverage: true, selected_segment_start: '2026-09-01', selected_segment_end: '2026-09-05',
 });
 const entry = (staffId: number, name: string, id: number, status = 'active') => ({
@@ -61,7 +68,9 @@ it.each(['workbench', 'legacy'] as const)('shows a waiting-deposit reminder and 
 it('keeps a confirmed scheduling conflict visible alongside the waiting-deposit reminder', async () => {
   mocks.query.mockResolvedValue(pool([]));
   mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
-    candidate_options: [{ ...option(11, '月嫂甲'), supported_day_count: 4, full_case_coverage: false }], conflicts: [
+    candidate_options: [{ ...option(11, '月嫂甲'), supported_day_count: 4, coverage_day_count: 4,
+      supported_service_dates: requestedDates.filter(date => date !== '2026-09-02'),
+      full_case_coverage: false, full_selected_segment_coverage: false, uncovered_segment_dates: ['2026-09-02'] }], conflicts: [
       { staff_id: 11, segment_index: 0, work_date: '2026-09-01', reason_code: 'active_lock', case_no: 'CASE-DEPOSIT' },
       { staff_id: 11, segment_index: 0, work_date: '2026-09-02', reason_code: 'schedule', case_no: 'CASE-SCHEDULE' },
     ] });

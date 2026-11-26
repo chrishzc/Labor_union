@@ -1,5 +1,5 @@
 import type { MatchingAvailability } from '../api/scheduling/matching_candidate_workflow_client';
-import { candidateDateAssessment, missingCandidateServiceDates } from '../adapters/scheduling/candidate_date_status';
+import { candidateDateStatus, missingCandidateServiceDates } from '../adapters/scheduling/candidate_date_status';
 import { calendarServicePeriod } from '../../../line/static/service-date-calendar.js';
 
 const reasonLabels: Record<string, string> = {
