@@ -92,7 +92,14 @@
 - **錯誤與未知結果**：檔案／分段欄位數不符、檔案類型不符或超限是 422 `contract_external_signing_input_invalid`；缺漏、重複或非目前案件的必要目標在 owner 查驗回 409 `final_signed_contract_documents_incomplete`。同鍵異指紋回 409 `contract_signature_idempotency_conflict`。回應遺失優先查同案已歸檔結果；若要重送，沿用同一人、同案、原 key 和完全相同的檔案。未讀回、已選檔或本機試算不顯示完約。
 - Contract Signing 依 `subsystems/contract_signing/final_document_workflow.py` 交 Controlled File 納管，並在同一交易記錄 Orders 完約與歸檔回執。成功回執可讀各目標的檔名及檔案識別；同一請求重送回原結果，不再完約一次。歸檔失敗不能標完約；已有的完約事實不因重送而覆寫。排班、訂金與帳務仍由各自的規格判定。
 
+### 前端接手與驗收邊界
+
+在案件「回收簽署文件」使用 `ContractExternalSigningActions`。首次進入由 GET 讀回目標與既有檔案，依當前分段列出獨立上傳欄位；少任何必要檔案時「儲存簽署文件」不可送出。送出中顯示歸檔處理，成功回應有正式檔案才顯示「簽約已完成」及檔名，再通知案件重新讀取。不要把送交已記錄、暫存或異常回應當作成功。
+
+**現況與上文設計的差異**：現在的「重新確認歸檔結果」在同次頁面逾時後直接以保留的原檔和原識別重送 POST，並未如上文設計先 GET。重開頁面才會走初始 GET。既有測試驗了同鍵重送，不是先讀回；不能把這項視為已符合 GET 優先。若依此設計驗收，設計例：首筆 POST 回應遺失，GET 若已讀回同一組歸檔結果，不再送 POST；只靠同檔名不能辨識是否是本次操作。若未能確認原結果，只能沿原檔及原鍵核對。這次文件不修改前端。
+
 ## Verification
+- 前端現況覆蓋：`contract_external_signing_actions.test.tsx` 的 `archives directly with no session, handoff, unsigned version, or ready scheduling` 與 `retains the files and reuses the same archive command after a timeout` 確認操作、回條與同命令重送；不是正式環境瀏覽器或 GET 優先驗收。
 - 直接歸檔接線對照：`test_contract_external_signing_api.py::test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_session` 核對 multipart 到既有歸檔入口，不要求先產生未簽版本或 session。
 - 歸檔應用層正反例：`test_final_document_workflow.py::test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files` 同時覆蓋只有客戶檔與另有月嫂分段、缺任何應傳檔拒絕、成功回讀、同鍵重送及不同內容衝突。`test_archive_storage_failure_rolls_back_without_recording_completion` 使用假交易與單份客戶 PDF，在第一次 `apply_borrowed` 就失敗，核對不保存回執、不標完約。若要驗證正式檔案、Orders 完約及歸檔回執一起回滾，需在三類紀錄均已寫入同一交易、尚未提交時令交易失敗，再用新連線確認三者皆未留下，並以同一組輸入的成功案例對照。若在第二份檔案寫入時就失敗，只能驗證第一份正式檔案紀錄回滾，以及尚未執行的完約與歸檔回執沒有寫入。檔案暫存早於正式交易，不要求跟著回滾。這些隔離案例也不驗通知或待辦看板推進。
 - layout_status: `custom_current`
