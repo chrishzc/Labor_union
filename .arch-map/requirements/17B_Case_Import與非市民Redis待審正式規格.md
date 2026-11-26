@@ -57,7 +57,7 @@
 #### 送件欄位與原申請查詢
 
 - 非市民正式頁與表單工作室預覽依 `NC-FORM-01～02` 呈現。新非市民送件明確傳入 `registration_kind="non_citizen"`，省略 `passbook_image_id`，不選圖、不呼叫共用存摺上傳入口，也不以空字串或虛構圖片識別代替缺席欄位。銀行代號、分行代碼、帳號及其他必填資料仍須合法。
-- 共用 `POST /api/v1/line/identity/registration/preview` 與 `POST /api/v1/line/identity/registration/apply` 的 request schema 及收件檢核依申請類型分流。`non_citizen` 可省略圖片欄位，兩入口均不得要求對應暫存圖；一般市民的 `subsidy` 類型維持圖片識別必填及同一已驗證 LINE 主體的暫存圖檢查。未指定類型維持既有 `subsidy` 語意，不因共用欄位可省略而放寬市民規則。非法銀行文字資料仍經原領域驗證拒絕，圖片移除不改身分、版本及同鍵重送契約。切換前已開啟舊頁而送入圖片識別的相容性見 §3.1.2。
+- 共用 `POST /api/v1/line/identity/registration/preview` 與 `POST /api/v1/line/identity/registration/apply` 的 request schema 及收件檢核依申請類型分流。`non_citizen` 可省略圖片欄位，兩入口均不得要求對應暫存圖；一般市民的 `subsidy` 類型維持圖片識別必填及同一已驗證 LINE 主體的暫存圖檢查。未指定類型維持既有 `subsidy` 語意，不因共用欄位可省略而放寬市民規則。非法銀行文字資料仍經原領域驗證拒絕，圖片移除不改身分、版本及同鍵重送契約。
 - Preview 的 `status=ready` 僅證明輸入可供送件，不表示已保存申請。Apply 沿既有 `Idempotency-Key` 保存待審申請；以 `registration_id` 與 `status=pending`／`identity_status=pending_approval` 表示收件，`client_id`、`beclass_record_id`、`case_no` 此時均為 null，不表示正式建案或完成綁定。
 - 送件回應逾時或結果不明時，以原 LINE token 及原 `submission_id` 呼叫 `POST /api/v1/line/identity/registration/status` 唯讀查詢原申請。`not_received` 不等於已收件；取得原申請狀態後才依既有同鍵規則接續，不另換識別製造新申請。正式建案及核准收尾的判定依 §3.2。
 
@@ -82,10 +82,11 @@
 
 ### 3.1.2 存摺圖片規則切換前的資料
 
-| 資料情境 | 權威與處理規則 | 可觀察結果或待決責任 |
+切換前已送件的舊申請及已正式歸檔資料維持原處理流程。
+
+| 資料情境 | 權威與處理規則 | 可觀察結果 |
 | --- | --- | --- |
 | 切換前已送件、待審申請已有暫存圖 | 依 §3.2 的既有有圖核准流程，由 Controlled File 納管，不因新表單移除圖片而刪除既有附件或要求重填。 | 核准以原申請／操作取得正式案號；圖片歸檔確認後才完成待審終態及暫存清理。若歸檔失敗，原申請可回讀已有的 SQL 回執，但不顯示核准完成。 |
-| 切換前已開啟舊非市民頁面、尚未送件 | `NC-PASSBOOK-COMPAT-01` 待決。舊頁可能先呼叫共用 `/registration/passbook`，再帶 `passbook_image_id` 呼叫 Preview／Apply。現有正式規格未定義切換後這組舊請求應接受、拒絕或忽略圖片；現行程式行為只作證據，不能代替決策。 | Case Import owner 負責收斂接受條件及既有暫存圖的處置，LINE／External Integration owner 負責可辨識的請求條件、錯誤提示與接續操作，Controlled File owner 確認被接受圖片的納管。需定案舊頁是否須重載、上傳及送件的回應與讀回結果、已上傳但未成件圖片的清理責任。此項影響切換相容性與其驗收，定案前不得宣稱舊頁可無縫送件，也不得以「沿用現況」當作政策。 |
 | 已正式歸檔的存摺圖片 | 依[受控檔案規格 §3](30_Controlled_File_Storage_NAS正式規格.md#3-file_purpose_registry-與排除範圍)及 §8.2 保存既有 identity、版本與讀取位置；移除新非市民收集不觸發刪除、搬移或重寫。 | 具權限者仍可經受控 Query／Download 讀取原正式檔案；正式歸檔不受 Redis 問卷及暫存圖清理影響。 |
 
 <a id="registration-storage-refund-projection"></a>
@@ -156,4 +157,4 @@
    | NC-PASSBOOK-03 | 一般需求調查其他必填資料均合法 | 維持市民存摺圖片規則 | 開啟 `/line-registration`，以 `subsidy` 及未指定類型分別省略圖片欄位、帶無效暫存圖識別呼叫 Preview／Apply；再以合法 JPG／PNG／WebP 圖片完成送件核准並讀回歸檔 | 頁面圖片仍必填；兩 API 均拒絕缺圖或未通過原暫存圖檢查的請求。合法圖片依 §3.2 與受控檔案規格納管，歸檔可讀後才完成對應待審收尾。 |
    | NC-PASSBOOK-04 | 非市民缺少、空白或格式不合法的銀行帳號／分行代碼等既有必填文字資料 | 防止圖片移除放寬銀行驗證 | 省略圖片欄位，逐項以缺值、空白及非法格式經正式頁與 Preview／Apply 送出 | 仍依原欄位規則拒絕且不建立待審申請，不以取消圖片上傳為由略過銀行資料驗證。 |
 
-   切換前資料另依 §3.1.2 逐類驗收。有圖舊待審須覆蓋 SQL 已提交、歸檔失敗時讀回 `approving` 及原正式案號，再以原操作恢復歸檔和清理，最終讀回 `approved` 且不重複建案。已正式歸檔者須能由受控 Query／Download 依原 identity 讀取。舊頁尚未送件者須先能定位 `NC-PASSBOOK-COMPAT-01` 的待決問題與責任人；其接受／拒絕 oracle 在決策前不視為已定案。
+   切換前資料另依 §3.1.2 逐類驗收。有圖舊待審須覆蓋 SQL 已提交、歸檔失敗時讀回 `approving` 及原正式案號，再以原操作恢復歸檔和清理，最終讀回 `approved` 且不重複建案。已正式歸檔者須能由受控 Query／Download 依原 identity 讀取。

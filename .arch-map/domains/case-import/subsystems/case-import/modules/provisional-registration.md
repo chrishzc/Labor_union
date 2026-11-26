@@ -54,7 +54,6 @@
 
 - 現況來源是 `api/schemas/line_identity.py`：共用 request 的 `passbook_image_id` 仍為非空字串必填，`registration_kind` 未指定時為 `subsidy`。`api/registration_intake.py::preview`／`submit` 均呼叫 `_require_passbook_staged`，查找同一已驗證 LINE 主體的暫存圖。這是來源走讀，不能當作已按申請類型分流的證據。
 - 目標分流以 [Case Import §3.1「送件欄位與原申請查詢」](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#送件欄位與原申請查詢) 為準。接手者須同時對齊共用 schema、Preview 與 Apply 的暫存圖檢核，保留 `subsidy` 的原檢查，不能只移除前端控制項或只把欄位改為全域選填。目標及 `NC-PASSBOOK-01～04` 尚待程式實作與行為驗證。
-- 現況共用 `/registration/passbook` 上傳入口接收檔案及身分 token，沒有申請類型參數，不能從前端隱藏欄位推定它已拒收舊非市民頁面。這組相容性請求的政策尚未定案，責任及影響只記在 [Case Import §3.1.2](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#312-存摺圖片規則切換前的資料) 的 `NC-PASSBOOK-COMPAT-01`。
 
 ## Handoff boundaries
 
@@ -64,7 +63,7 @@
 | 原申請 → 正式 writer 與 MySQL 回執 | Case Import §3.2；`api/routes/registration_applications.py` → `RegistrationReviewApplication` → `subsystems/line/identity_application.py::approve_staged_registration`。 | 管理端原申請 detail 依 `registration_id` 查回 `case_no`／`approved_at_utc`；收尾中仍為 `approving`。正式名冊依相同案號核對正式案件。 |
 | SQL 已提交 → Controlled File → Redis 終態 | Case Import §3.2 分有圖／無圖；有圖才經 `_archive_client_passbook_cover` 及 [Controlled File §§3、5、8.2](../../../../../requirements/30_Controlled_File_Storage_NAS正式規格.md#3-file_purpose_registry-與排除範圍) 確認歸檔。 | 有圖可依正式 file identity 經受控 Query／Download 讀取；無圖沒有圖片回執可等。兩者都由原申請讀回 `approved` 證明適用收尾已完成，圖片本身或 SQL 回執單獨不能證明。 |
 
-由核准／歸檔端反向走讀時，先以原申請與操作核對 SQL 回執，再依 Case Import §3.2 判斷是否有圖；Controlled File 不反推收集資格。回到 §3.1.2 可區分舊待審、舊頁與已歸檔資料，最後由 LINE presentation 找到原畫面與正式送件入口。此處是原文導航，不表示 Archmap 索引工具已成功正查或反查。
+由核准／歸檔端反向走讀時，先以原申請與操作核對 SQL 回執，再依 Case Import §3.2 判斷是否有圖；Controlled File 不反推收集資格。回到 §3.1.2 可區分舊待審與已歸檔資料，最後由 LINE presentation 找到原畫面與正式送件入口。此處是原文導航，不表示 Archmap 索引工具已成功正查或反查。
 
 ## Verification
 - 待驗情境：用附有合成存摺封面的非市民申請。令第一次核准在 SQL 提交後、受控歸檔時失敗；以管理端唯讀查原申請，再讓復原作業用同一操作完成。預期中斷時仍只有一筆正式案件，原案號可讀但未顯示核准完成；恢復後歸檔可讀、原問卷及暫存圖已清理，同案號進入已核准。再次查詢或重送同一核准不再建案。驗證不接正式 LINE。
