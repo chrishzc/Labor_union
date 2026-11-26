@@ -165,12 +165,11 @@ def default_copy_templates():
             continue  # The weekly picture contains owner data, not editable copy.
         fields = copy_fields(payload, fixed_text=fixed_guidance)
         if key == "service-menu":
-            fields = [field for field in fields if field["id"] != "contents/footer/contents/0/text"]
-            for field in fields:
-                if field["id"] == "contents/body/contents/4/action/label":
-                    # Keep the saved FAQ label identity after removing the preceding button.
-                    field["path"] = field["id"]
-                    field["id"] = "contents/body/contents/5/action/label"
+            # Do not reapply old AI promotions from persisted service-menu copy.
+            fields = [field for field in fields if field["id"] not in {
+                "contents/footer/contents/0/text",
+                "contents/header/contents/2/text",
+            }]
         if key.startswith("card-"):
             # Owner-projected rows, profile values and authored questions are
             # facts, not reusable announcement copy.

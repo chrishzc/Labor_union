@@ -78,7 +78,7 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "service_help_menu": {
         "tier": "navigation",
-        "public_route": "/line-service-help?tab=ai",
+        "public_route": None,
         "postback_identity": None,
     },
     "order_update_menu": {
@@ -93,12 +93,12 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "service_flow": {
         "tier": "navigation",
-        "public_route": "/line-service-help?tab=ai",
+        "public_route": None,
         "postback_identity": None,
     },
     "payment_subsidy": {
         "tier": "navigation",
-        "public_route": "/line-service-help?tab=ai",
+        "public_route": None,
         "postback_identity": None,
     },
     "service_progress": {
@@ -113,7 +113,7 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "other": {
         "tier": "navigation",
-        "public_route": "/line-service-help?tab=ai",
+        "public_route": None,
         "postback_identity": None,
     },
     "resume_ai_assistant": {

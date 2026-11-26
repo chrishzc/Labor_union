@@ -57,11 +57,13 @@ class LineConfigurationApplication:
 
     def get(self, kind: LineConfigurationKind, actor: ActorContext):
         require_line_capability(actor, LineCapability.CONFIG_READ)
+        _require_generic_faq_kind(kind)
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.configurations.get(kind)
 
     def get_applied(self, kind: LineConfigurationKind, key: IdempotencyKey, actor: ActorContext):
         require_line_capability(actor, LineCapability.CONFIG_READ)
+        _require_generic_faq_kind(kind)
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.configurations.get_by_idempotency_key(kind,key)
 
@@ -85,11 +87,13 @@ class LineConfigurationApplication:
 
     def history(self, kind: LineConfigurationKind, actor: ActorContext):
         require_line_capability(actor, LineCapability.CONFIG_READ)
+        _require_generic_faq_kind(kind)
         with self._unit_of_work_factory() as unit:
             return unit.configurations.history(kind)
 
     def get_revision(self, kind: LineConfigurationKind, revision: LineConfigurationRevision, actor: ActorContext):
         require_line_capability(actor, LineCapability.CONFIG_READ)
+        _require_generic_faq_kind(kind)
         with self._unit_of_work_factory() as unit:
             return unit.configurations.get_revision(kind, revision)
 
@@ -386,6 +390,7 @@ class LineConfigurationApplication:
         return result
 
     def _validate(self, unit_of_work, kind, definition):
+        _require_generic_faq_kind(kind)
         if kind is LineConfigurationKind.MESSAGE_TEMPLATES:
             validate_message_templates(definition)
         elif kind is LineConfigurationKind.MESSAGE_SCHEDULES:
@@ -399,6 +404,11 @@ class LineConfigurationApplication:
             raise ValueError('customer_service configuration is retired; only an empty definition is allowed')
         elif kind is LineConfigurationKind.NOTIFICATION_RULES:
             validate_notification_rules(definition)
+
+
+def _require_generic_faq_kind(kind: LineConfigurationKind) -> None:
+    if kind is LineConfigurationKind.FAQ_CHAT_LAYOUT:
+        raise ValueError("FAQ chat layout requires its dedicated application")
 
 
 def _validate_rich_menu_media_assets(

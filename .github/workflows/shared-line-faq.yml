@@ -1,0 +1,221 @@
+name: Shared LINE FAQ
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/shared-line-faq.yml'
+      - '.arch-map/**/faq-chat-*.md'
+      - 'api/**/knowledge_retrieval.py'
+      - 'api/**/line_faq_layout.py'
+      - 'api/routes/line_ai_events.py'
+      - 'api/routes/line_service_help.py'
+      - 'db/**/1087_shared_line_faq.sql'
+      - 'db/**/labor_union_2026_11_26_shared_line_faq_v1*.json'
+      - 'db/cutover_releases/labor_union_validation_schema_v1.json'
+      - 'db/fresh_schema/**'
+      - 'db/schema_assembly/**'
+      - 'domains/knowledge_retrieval/**'
+      - 'domains/line/faq_chat_layout.py'
+      - 'infrastructure/knowledge/**'
+      - 'infrastructure/mysql/knowledge_retrieval*.py'
+      - 'infrastructure/mysql/line_configuration_publication_repository.py'
+      - 'line/static/service_help.html'
+      - 'scripts/backfill_shared_line_faq.py'
+      - 'scripts/nas_database_maintenance.py'
+      - 'api/dependencies/line_worker_operation.py'
+      - 'scripts/migrate_preserved_database_additive_schema.py'
+      - 'subsystems/knowledge_retrieval/**'
+      - 'subsystems/line/faq_chat_layout.py'
+      - 'subsystems/line/service_help_application.py'
+      - 'subsystems/line/webhook_identity_handlers.py'
+      - 'tests/domains/**/test_*faq*.py'
+      - 'tests/domains/**/test_*knowledge*.py'
+      - 'tests/domains/**/test_line_configuration_public_query_route.py'
+      - 'tests/domains/**/test_line_service_help_error_contracts.py'
+      - 'tests/domains/**/test_qa_catalog_workflow.py'
+      - 'tests/test_access_knowledge_disposable_mysql_e2e.py'
+      - 'tests/test_line_ai_qa_catalog.py'
+      - 'tests/test_line_service_help.py'
+      - 'ui_react/src/pages/line_management/LineFaqStudioPage.tsx'
+      - 'ui_react/src/pages/line_management/CommonQaCatalogPanel.tsx'
+      - 'ui_react/src/pages/line_management/FaqChatLayoutPanel.*'
+      - 'ui_react/src/pages/line_management/faqLayoutApi.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Record PR head, base and checked out revision
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          echo "PR head: $PR_HEAD"
+          echo "PR base: $PR_BASE"
+          echo "Checkout: $(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$PR_HEAD"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt pytest httpx2
+      - name: Verify FAQ behaviors with fake ports
+        run: >-
+          python -m pytest -vv
+          tests/test_line_service_help.py
+          tests/test_line_ai_qa_catalog.py
+          tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_error_contracts.py
+          tests/domains/external-integration/subsystems/line/integration/test_line_configuration_public_query_route.py
+          tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog/test_qa_catalog_workflow.py
+          tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog/test_chroma_knowledge_gateway.py
+          tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog/test_knowledge_publication_policy.py
+          -k 'test_faq_'
+
+  mysql:
+    name: MySQL (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: regression
+            node: ''
+          - suite: cutover
+            node: test_faq_cutover_preserved_release_reads_official_a_and_replays
+          - suite: ambiguous
+            node: test_faq_cutover_blocked_keeps_legacy_readers[ambiguous]
+          - suite: unproven
+            node: test_faq_cutover_blocked_keeps_legacy_readers[unproven]
+          - suite: backfill-failure
+            node: test_faq_cutover_blocked_keeps_legacy_readers[backfill-failure]
+          - suite: readback-failure
+            node: test_faq_cutover_blocked_keeps_legacy_readers[readback-failure]
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - '127.0.0.1:3307:3306'
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3307"
+      DB_USER: lu_faq_ci
+      DB_SSL_MODE: disabled
+      DB_DATABASE: lu_test_faq_${{ github.run_id }}_${{ github.run_attempt }}
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: "3307"
+      LABOR_UNION_TEST_MYSQL_USER: lu_faq_ci
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_faq_${{ github.run_id }}_${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Record PR head, base and checked out revision
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          echo "PR head: $PR_HEAD"
+          echo "PR base: $PR_BASE"
+          echo "Checkout: $(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$PR_HEAD"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt pytest httpx2
+      - name: Prepare isolated MySQL credentials and regression schemas
+        env:
+          FAQ_SUITE: ${{ matrix.suite }}
+        run: |
+          python - <<'PY'
+          import os
+          import secrets
+          import pymysql
+          from argparse import Namespace
+          from scripts.bootstrap_disposable_mysql_schema import bootstrap
+          database = os.environ["DB_DATABASE"]
+          if os.environ["FAQ_SUITE"] == "regression":
+              for name, maximum in ((database + "_fresh", None), (database, 1086)):
+                  print(bootstrap(Namespace(host="127.0.0.1", port=3307, user="root", password="",
+                                            database=name, confirm_database=name, max_schema_part=maximum)))
+          password = secrets.token_urlsafe(24)
+          print("::add-mask::" + password)
+          with pymysql.connect(host="127.0.0.1", port=3307, user="root", autocommit=True) as connection:
+              with connection.cursor() as cursor:
+                  cursor.execute("CREATE USER 'lu_faq_ci'@'%%' IDENTIFIED BY %s", (password,))
+                  cursor.execute(f"GRANT ALL ON `{database}`.* TO 'lu_faq_ci'@'%'")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"LABOR_UNION_TEST_MYSQL_PASSWORD={password}\n")
+          PY
+      - name: Verify compatible upgrade and atomic Knowledge publication
+        if: matrix.suite == 'regression'
+        run: >-
+          python -m pytest -vv
+          tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_compatible_upgrade_rerun
+          tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_publication_and_receipt_rollback
+          tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_legacy_audit_and_backfill_rerun
+      - name: Verify preserved FAQ through controlled upgrade and reader cutover
+        if: matrix.suite != 'regression'
+        env:
+          FAQ_CUTOVER_MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+          FAQ_CUTOVER_TEST: ${{ matrix.node }}
+        run: python -m pytest -vv "tests/test_access_knowledge_disposable_mysql_e2e.py::$FAQ_CUTOVER_TEST"
+
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FAQ_E2E_URL: http://127.0.0.1:5173/trial
+      VITE_PUBLIC_PATH_PREFIX: /trial
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Record PR head, base and checked out revision
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          echo "PR head: $PR_HEAD"
+          echo "PR base: $PR_BASE"
+          echo "Checkout: $(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$PR_HEAD"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: npm ci --ignore-scripts
+        working-directory: ui_react
+      - run: npm run build
+        working-directory: ui_react
+      - run: python -m pip install --constraint requirements.txt pytest playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify Studio journey with synthetic API
+        run: |
+          npm --prefix ui_react run dev -- --host 127.0.0.1 --port 5173 --strictPort > "$RUNNER_TEMP/faq-vite.log" 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          curl --retry-connrefused --retry 15 --retry-delay 1 --fail --silent "$FAQ_E2E_URL/" > /dev/null
+          python -m pytest -vv tests/domains/external-integration/subsystems/line/integration/test_line_faq_layout_playwright.py::test_faq_01_playwright_add_preview_publish_reopen

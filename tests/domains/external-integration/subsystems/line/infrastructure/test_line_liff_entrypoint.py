@@ -242,8 +242,8 @@ def test_liff_targets_route_to_existing_pages() -> None:
     assert 'staff_payout: "/line-staff-payout"' in staff_route
     assert 'staff_baby_log' not in gateway
     assert "staff_payout: '/line-identity?target=staff_payout'" in gateway
-    assert 'faq: "/line-service-help?tab=faq"' in standalone_route
-    assert 'ai_assistant: "/line-service-help?tab=ai"' in standalone_route
+    assert 'faq: "/line-service-help"' in standalone_route
+    assert 'ai_assistant: "/line-service-help"' in standalone_route
     for target in ("order_tracking", "anomalies_center", "dashboard"):
         assert f"{target}:" in mobile_admin_route
         assert f"/line-mobile-admin?target={target}" in gateway
@@ -813,10 +813,10 @@ def test_root_endpoint_serves_gateway_html_for_purpose_and_schedule_liff_params(
 
         for params in ({"target": "ai_assistant"}, {"liff.state": "/?target=ai_assistant"}):
             res = client.get("/", params=params)
-            assert res.status_code == 200
+            assert res.status_code == 410
             assert res.history == []
-            assert 'id="qaFlow"' in res.text
-            assert "await liff.init" in res.text
+            assert "常見問題" in res.text
+            assert "await liff.init" not in res.text
             assert res.headers["cache-control"] == "no-cache, no-store, must-revalidate"
 
 

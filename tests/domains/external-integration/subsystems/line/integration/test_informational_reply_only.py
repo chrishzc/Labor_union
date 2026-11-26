@@ -225,16 +225,14 @@ def test_menu_help_uses_reply():
     assert unit.delivery_tasks.tasks[1].request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
 
 
-def test_private_reply_to_a_group_participant_keeps_existing_cross_chat_push():
+def test_faq_menu_does_not_reply_or_push_to_a_group_participant():
     unit, sender = Unit(), provider()
     text = "服務說明"
     application = LineServiceHelpApplication(lambda: NOW)
-    assert application.handle(inbox(text, group=True), unit, USER, text)
-    task = unit.delivery_tasks.tasks[1]
-    assert task.request.source_aggregate_type == "line_webhook_event"
-    assert task.request.recipient == LineRecipient(LineRecipientType.USER, USER)
-    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
-    sender.send.assert_called_once()
+    assert not application.handle(inbox(text, group=True), unit, USER, text)
+    assert not unit.delivery_tasks.tasks
+    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 0
+    sender.send.assert_not_called()
     sender.reply.assert_not_called()
 
 

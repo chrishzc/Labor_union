@@ -7,23 +7,10 @@ from datetime import datetime, time, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.dependencies.admin_auth import optional_admin, require_line_configuration_reader
-from api.dependencies.line_ai_qa_catalog import (
-    CATALOG_SOURCE_IDENTITY as QA_CATALOG_SOURCE_IDENTITY,
-    create_line_ai_qa_item,
-    delete_line_ai_qa_item,
-    load_line_ai_qa_catalog,
-    toggle_line_ai_qa_item,
-    update_line_ai_qa_item,
-)
 from api.dependencies.line_runtime import get_line_feedback_application
 from api.schemas.base import BaseResponse
 from api.schemas.line_ai_events import (
     LineNavigationAliasesUpdateRequest,
-    LineQaCatalogItemView,
-    LineQaCatalogView,
-    LineQaItemCreateRequest,
-    LineQaItemToggleRequest,
-    LineQaItemUpdateRequest,
     LineRouterPreviewRequest,
     LineRouterPreviewView,
 )
@@ -127,148 +114,15 @@ def reset_catalog_aliases(
     )
 
 
-@router.get("/qa-catalog", response_model=BaseResponse[LineQaCatalogView])
-def get_qa_catalog(
+@router.get("/qa-catalog", include_in_schema=False)
+@router.post("/qa-catalog", include_in_schema=False)
+@router.put("/qa-catalog/{qa_id}", include_in_schema=False)
+@router.patch("/qa-catalog/{qa_id}/status", include_in_schema=False)
+@router.delete("/qa-catalog/{qa_id}", include_in_schema=False)
+def retired_file_qa_catalog(
     _: AdminPrincipal = Depends(require_line_configuration_reader),
 ):
-    try:
-        items = load_line_ai_qa_catalog()
-    except (OSError, ValueError, KeyError):
-        raise HTTPException(status_code=503, detail="line_ai_qa_catalog_unavailable")
-    views = tuple(
-        LineQaCatalogItemView(
-            id=item.id,
-            category=item.category,
-            tag=item.tag,
-            question=item.question,
-            aliases=item.aliases,
-            answer=item.answer,
-            enabled=item.enabled,
-            source_ref=item.source_ref,
-            notes=item.notes,
-        )
-        for item in items
-    )
-    return BaseResponse(
-        data=LineQaCatalogView(
-            source_identity=QA_CATALOG_SOURCE_IDENTITY,
-            total_count=len(views),
-            enabled_count=sum(1 for item in views if item.enabled),
-            items=views,
-        )
-    )
-
-
-@router.put("/qa-catalog/{qa_id}", response_model=BaseResponse[LineQaCatalogItemView])
-def update_qa_item(
-    qa_id: str,
-    payload: LineQaItemUpdateRequest,
-    _: AdminPrincipal = Depends(require_line_configuration_reader),
-):
-    try:
-        item = update_line_ai_qa_item(
-            qa_id,
-            question=payload.question,
-            answer=payload.answer,
-            category=payload.category,
-            tag=payload.tag,
-            aliases=payload.aliases,
-            enabled=payload.enabled,
-            notes=payload.notes,
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="qa_item_not_found")
-    except (OSError, ValueError) as error:
-        raise HTTPException(status_code=500, detail=str(error))
-    return BaseResponse(
-        data=LineQaCatalogItemView(
-            id=item.id,
-            category=item.category,
-            tag=item.tag,
-            question=item.question,
-            aliases=item.aliases,
-            answer=item.answer,
-            enabled=item.enabled,
-            source_ref=item.source_ref,
-            notes=item.notes,
-        ),
-        message="QA 項目已成功更新",
-    )
-
-
-@router.patch("/qa-catalog/{qa_id}/status", response_model=BaseResponse[LineQaCatalogItemView])
-def toggle_qa_status(
-    qa_id: str,
-    payload: LineQaItemToggleRequest,
-    _: AdminPrincipal = Depends(require_line_configuration_reader),
-):
-    try:
-        item = toggle_line_ai_qa_item(qa_id, enabled=payload.enabled)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="qa_item_not_found")
-    except (OSError, ValueError) as error:
-        raise HTTPException(status_code=500, detail=str(error))
-    return BaseResponse(
-        data=LineQaCatalogItemView(
-            id=item.id,
-            category=item.category,
-            tag=item.tag,
-            question=item.question,
-            aliases=item.aliases,
-            answer=item.answer,
-            enabled=item.enabled,
-            source_ref=item.source_ref,
-            notes=item.notes,
-        ),
-        message=f"QA 項目已{'啟用' if item.enabled else '停用'}",
-    )
-
-
-@router.delete("/qa-catalog/{qa_id}", response_model=BaseResponse[dict[str, str]])
-def delete_qa_catalog_item(
-    qa_id: str,
-    _: AdminPrincipal = Depends(require_line_configuration_reader),
-):
-    try:
-        delete_line_ai_qa_item(qa_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="qa_item_not_found")
-    except (OSError, ValueError) as error:
-        raise HTTPException(status_code=500, detail=str(error))
-    return BaseResponse(data={"deleted_id": qa_id}, message="QA 項目已成功移除")
-
-
-@router.post("/qa-catalog", response_model=BaseResponse[LineQaCatalogItemView])
-def create_qa_catalog_item(
-    payload: LineQaItemCreateRequest,
-    _: AdminPrincipal = Depends(require_line_configuration_reader),
-):
-    try:
-        item = create_line_ai_qa_item(
-            question=payload.question,
-            answer=payload.answer,
-            category=payload.category,
-            tag=payload.tag,
-            aliases=payload.aliases,
-            enabled=payload.enabled,
-            notes=payload.notes,
-        )
-    except (OSError, ValueError) as error:
-        raise HTTPException(status_code=500, detail=str(error))
-    return BaseResponse(
-        data=LineQaCatalogItemView(
-            id=item.id,
-            category=item.category,
-            tag=item.tag,
-            question=item.question,
-            aliases=item.aliases,
-            answer=item.answer,
-            enabled=item.enabled,
-            source_ref=item.source_ref,
-            notes=item.notes,
-        ),
-        message="已成功建立新 QA 題目",
-    )
+    raise HTTPException(status_code=410, detail="line_file_qa_catalog_retired")
 
 
 @router.get("/feedback/aggregate", response_model=BaseResponse[LineFeedbackAggregateView])

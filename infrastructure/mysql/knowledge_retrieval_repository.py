@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -12,11 +12,14 @@ from pymysql.err import IntegrityError
 
 from domains.knowledge_retrieval.knowledge import (
     KnowledgeAnswer,
+    KnowledgeAnswerUnsupported,
     KnowledgeItemStatus,
     source_digest,
     transition_item_status,
 )
-from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
+from domains.knowledge_retrieval.qa_catalog import (
+    QA_SOURCE_PREFIX, decode_governed_qa, format_line_faq_reply, line_faq_reply_fits,
+)
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineUserId
@@ -84,10 +87,11 @@ def query_published_knowledge(question: str) -> dict[str, Any] | None:
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id,source_uri,title,content,content_digest,version,"
-                "published_at FROM knowledge_items WHERE state='published' "
-                "AND (title LIKE %s OR content LIKE %s) "
-                "ORDER BY published_at DESC,id DESC LIMIT 3",
+                f"SELECT snapshot.id,snapshot.source_uri,snapshot.title,snapshot.content,"
+                f"snapshot.source_digest AS content_digest,snapshot.source_version AS version,"
+                f"snapshot.published_at FROM ({_PUBLISHED_SNAPSHOT}) snapshot "
+                "WHERE snapshot.title LIKE %s OR snapshot.content LIKE %s "
+                "ORDER BY snapshot.published_at DESC,snapshot.id DESC LIMIT 3",
                 (
                     f"%{normalized_question}%",
                     f"%{normalized_question}%",
@@ -198,9 +202,20 @@ class MySqlKnowledgeRetrievalRepository:
     # A knowledge root and its first immutable version must never commit separately.
     def ingest(self, command):
         digest = source_digest(command.content)
+        governed_qa = decode_governed_qa(command.content)
+        if governed_qa is not None:
+            if command.source_identity != governed_qa.source_identity:
+                raise ValueError("knowledge_qa_identity_mismatch")
+        elif command.source_identity.startswith(QA_SOURCE_PREFIX):
+            raise ValueError("knowledge_qa_content_invalid")
         actor_id = _admin_actor_id(command.actor.actor_id)
-        try:
-            with self._connection.cursor() as cursor:
+        with self._connection.cursor() as cursor:
+            receipt = _claim_governance_receipt(cursor, command)
+            if receipt is not None:
+                return int(receipt["knowledge_item_id"]), bool(receipt.get("created", True))
+            if command.expected_version is not None:
+                return self._revise_existing(command, digest, actor_id)
+            try:
                 cursor.execute(
                     "INSERT INTO knowledge_items "
                     "(source_identity,source_uri,source_trust_tier,title,content,"
@@ -212,46 +227,44 @@ class MySqlKnowledgeRetrievalRepository:
                         command.content, digest, actor_id,
                     ),
                 )
-                item_id = int(cursor.lastrowid)
-                cursor.execute(_INSERT_VERSION, (
-                    item_id, 1, command.content, digest, "ingested", actor_id,
-                    None, command.idempotency_key.value,
-                ))
-                _insert_governance_event(
-                    cursor, command, item_id, actor_id, "ingested", 0, 1,
-                    "draft", digest,
-                )
-            return item_id, True
-        except IntegrityError as error:
-            if mysql_error_code(error) != 1062:
-                raise
-            existing_id = self._existing_ingest(command.source_identity, digest)
-            if existing_id is not None:
-                return existing_id, False
-            return self._revise_existing(command, digest, actor_id), True
+            except IntegrityError as error:
+                if mysql_error_code(error) != 1062:
+                    raise
+                return self._revise_existing(command, digest, actor_id)
+
+            item_id = int(cursor.lastrowid)
+            cursor.execute(_INSERT_VERSION, (
+                item_id, 1, command.content, digest, "ingested", actor_id,
+                None, command.idempotency_key.value, command.title,
+                command.source_uri, command.source_trust_tier,
+            ))
+            _insert_governance_event(
+                cursor, command, item_id, actor_id, "ingested", 0, 1,
+                "draft", digest,
+            )
+        return item_id, True
 
     def review(self, command) -> int:
         """Preserved internal compatibility; current UI publishes drafts directly."""
         return self._transition(command, KnowledgeItemStatus.REVIEWED, "reviewed")
 
     def publish(self, command) -> int:
-        version = self._transition(command, KnowledgeItemStatus.PUBLISHED, "published")
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE knowledge_indexes SET index_status='stale' WHERE index_status='ready'"
-            )
-        return version
+        return self._transition(command, KnowledgeItemStatus.PUBLISHED, "published")
 
     def retire(self, command) -> int:
-        version = self._transition(command, KnowledgeItemStatus.RETIRED, "retired")
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE knowledge_indexes SET index_status='stale' WHERE index_status='ready'"
-            )
-        return version
+        return self._transition(command, KnowledgeItemStatus.RETIRED, "retired")
 
     def request_index_build(self, actor_id: str, idempotency_key: str) -> int:
         with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,created_by_actor_id,job_type FROM knowledge_jobs WHERE idempotency_key=%s",
+                (idempotency_key,),
+            )
+            job = cursor.fetchone()
+            if job is not None:
+                if job["job_type"] != "index_build" or job["created_by_actor_id"] != actor_id:
+                    raise RuntimeError("knowledge_idempotency_conflict")
+                return int(job["id"])
             cursor.execute("SELECT COALESCE(MAX(index_version),0)+1 AS version FROM knowledge_indexes FOR UPDATE")
             version = int(cursor.fetchone()["version"])
             cursor.execute(
@@ -293,6 +306,7 @@ class MySqlKnowledgeRetrievalRepository:
     def record_inline_answer(self, command, answer: KnowledgeAnswer) -> int:
         if not command.requester_line_user_id:
             raise ValueError("knowledge_inline_answer_actor_required")
+        self._require_published_citations(answer)
         try:
             with self._connection.cursor() as cursor:
                 cursor.execute(
@@ -352,6 +366,76 @@ class MySqlKnowledgeRetrievalRepository:
             cursor.execute(_PUBLISHED_ITEMS)
             rows = cursor.fetchall() or ()
         return tuple(dict(row) for row in rows)
+
+    def published_faq_by_id(self, qa_id: str, *, predecessor=False):
+        query = self._faq_publication_query(predecessor)
+        return self._rows(
+            f"{query} AND {_FAQ_ID_ORDER}=%s",
+            (QA_SOURCE_PREFIX + qa_id,),
+        )
+
+    def published_faq_page(self, cursor: str | None, limit: int, *, predecessor=False):
+        query = self._faq_publication_query(predecessor)
+        after = "" if cursor is None else f" AND {_FAQ_ID_ORDER}>%s"
+        args = () if cursor is None else (QA_SOURCE_PREFIX + cursor,)
+        return self._rows(
+            f"{query}{after} ORDER BY {_FAQ_ID_ORDER} LIMIT %s",
+            (*args, limit),
+        )
+
+    def published_faq_by_alias(self, text: str, *, predecessor=False):
+        query = self._faq_publication_query(predecessor)
+        return self._rows(
+            f"{query} AND ("
+            f"BINARY TRIM(JSON_UNQUOTE(JSON_EXTRACT({_FAQ_PAYLOAD},'$.question')))=BINARY %s "
+            f"OR JSON_CONTAINS({_FAQ_PAYLOAD},JSON_QUOTE(%s),'$.aliases'))",
+            (text, text),
+        )
+
+    def faq_by_legacy_text(self, text: str):
+        self._require_faq_backfill()
+        return self._rows(
+            f"{_FAQ_SNAPSHOT} WHERE {_IS_FAQ} "
+            "AND JSON_CONTAINS(i.faq_legacy_aliases,JSON_QUOTE(%s))",
+            (text,),
+        )
+
+    def predecessor_faq_identity_exists(self, qa_id: str) -> bool:
+        rows = self._rows(
+            f"SELECT i.id FROM knowledge_items i WHERE {_FAQ_ID_ORDER}=%s",
+            (QA_SOURCE_PREFIX + qa_id,),
+        )
+        return bool(rows)
+
+    def _faq_publication_query(self, predecessor: bool) -> str:
+        if predecessor:
+            return _PREDECESSOR_PUBLISHED_FAQ
+        self._require_faq_backfill()
+        return _PUBLISHED_FAQ
+
+    def _require_faq_backfill(self) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT i.id FROM knowledge_items i WHERE {_IS_FAQ} "
+                "AND i.published_version IS NULL AND (i.state='published' OR ("
+                "i.state IN ('draft','reviewed') AND (SELECT v.event_type FROM knowledge_item_versions v "
+                "WHERE v.item_id=i.id AND v.event_type IN ('published','retired') "
+                "ORDER BY v.item_version DESC LIMIT 1)='published')) LIMIT 1"
+            )
+            if cursor.fetchone() is not None:
+                raise RuntimeError("knowledge_faq_backfill_required")
+
+    def published_source_versions(self, source_identities: tuple[str, ...], *, lock=False):
+        if not source_identities:
+            return set()
+        marks = ",".join("%s" for _ in source_identities)
+        rows = self._rows(
+            f"SELECT i.source_identity,v.item_version FROM knowledge_items i "
+            f"JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=({_ACTIVE_VERSION}) "
+            f"AND v.event_type='published' WHERE i.source_identity IN ({marks})" + (" FOR SHARE" if lock else ""),
+            source_identities,
+        )
+        return {(row["source_identity"], int(row["item_version"])) for row in rows}
 
     def ready_index_version(self):
         with self._connection.cursor() as cursor:
@@ -445,6 +529,7 @@ class MySqlKnowledgeRetrievalRepository:
 
     # Receipt, citations, LINE task, request, and job completion are one atomic outcome.
     def complete_answer(self, job_id: int, request_id: int, answer: KnowledgeAnswer):
+        self._require_published_citations(answer)
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT requester_line_user_id,correlation_id FROM knowledge_answer_requests "
@@ -573,42 +658,72 @@ class MySqlKnowledgeRetrievalRepository:
 
     # Version CAS, append-only event, and current projection cannot be split safely.
     def _transition(self, command, target, event_type):
-        with self._connection.cursor() as cursor:
-            cursor.execute(_LOCK_ITEM, (command.item_id,))
-            item = cursor.fetchone()
-            if item is None:
-                raise LookupError("knowledge_item_not_found")
-            if int(item["version"]) != command.expected_version.value:
-                raise RuntimeError("knowledge_item_version_conflict")
-            transition_item_status(KnowledgeItemStatus(item["state"]), target)
-            actor_id = _admin_actor_id(command.actor.actor_id)
-            next_version = command.expected_version.value + 1
-            cursor.execute(_CURRENT_CONTENT, (command.item_id, command.expected_version.value))
-            version = cursor.fetchone()
-            governed_qa = decode_governed_qa(version["content"])
-            if governed_qa is not None and target is KnowledgeItemStatus.PUBLISHED:
-                governed_qa.require_publishable()
-            cursor.execute(_INSERT_VERSION, (
-                command.item_id, next_version, version["content"], version["source_digest"],
-                event_type, actor_id, command.reason, command.idempotency_key.value,
-            ))
-            update_sql, update_values = _transition_projection_update(
-                target, actor_id, command.reason,
-            )
-            cursor.execute(
-                f"UPDATE knowledge_items SET state=%s,version=%s,{update_sql} "
-                "WHERE id=%s AND version=%s",
-                (
-                    target.value, next_version, *update_values,
-                    command.item_id, command.expected_version.value,
-                ),
-            )
-            _insert_governance_event(
-                cursor, command, command.item_id, actor_id, event_type,
-                command.expected_version.value, next_version, target.value,
-                version["source_digest"],
-            )
+        try:
+            with self._connection.cursor() as cursor:
+                receipt = _claim_governance_receipt(cursor, command)
+                if receipt is not None:
+                    return int(receipt["version"])
+                cursor.execute(_LOCK_ITEM, (command.item_id,))
+                item = cursor.fetchone()
+                if item is None:
+                    raise LookupError("knowledge_item_not_found")
+                if int(item["version"]) != command.expected_version.value:
+                    raise RuntimeError("knowledge_item_version_conflict")
+                governed_qa = decode_governed_qa(item["content"])
+                current_state = KnowledgeItemStatus(item["state"])
+                published_version = item["published_version"]
+                if governed_qa is not None and target is KnowledgeItemStatus.RETIRED:
+                    # FAQ can still have an official version while the editing head is a draft.
+                    current_state = (
+                        KnowledgeItemStatus.PUBLISHED if published_version is not None
+                        else KnowledgeItemStatus.DRAFT
+                    )
+                transition_item_status(current_state, target)
+                if governed_qa is not None and target is KnowledgeItemStatus.PUBLISHED:
+                    governed_qa.require_publishable()
+                    if not line_faq_reply_fits(format_line_faq_reply(governed_qa.answer, governed_qa.source_ref)):
+                        raise ValueError("knowledge_qa_line_reply_too_long")
+
+                actor_id = _admin_actor_id(command.actor.actor_id)
+                next_version = command.expected_version.value + 1
+                cursor.execute(_INSERT_VERSION, (
+                    command.item_id, next_version, item["content"], item["source_digest"],
+                    event_type, actor_id, command.reason, command.idempotency_key.value,
+                    item["title"], item["source_uri"], item["source_trust_tier"],
+                ))
+                if target is KnowledgeItemStatus.PUBLISHED:
+                    published_version = next_version if governed_qa is not None else None
+                elif target is KnowledgeItemStatus.RETIRED:
+                    published_version = None
+                update_sql, update_values = _transition_projection_update(
+                    target, actor_id, command.reason,
+                )
+                cursor.execute(
+                    f"UPDATE knowledge_items SET state=%s,version=%s,published_version=%s,{update_sql} "
+                    "WHERE id=%s AND version=%s",
+                    (
+                        target.value, next_version, published_version, *update_values,
+                        command.item_id, command.expected_version.value,
+                    ),
+                )
+                _insert_governance_event(
+                    cursor, command, command.item_id, actor_id, event_type,
+                    command.expected_version.value, next_version, target.value,
+                    item["source_digest"],
+                )
+                if target in (KnowledgeItemStatus.PUBLISHED, KnowledgeItemStatus.RETIRED):
+                    cursor.execute(_STALE_INDEXES)
+        except IntegrityError as error:
+            if mysql_error_code(error) == 1062:
+                raise RuntimeError("knowledge_idempotency_conflict") from error
+            raise
         return next_version
+
+    def _require_published_citations(self, answer: KnowledgeAnswer) -> None:
+        cited = {(citation.source_identity, citation.source_version) for citation in answer.citations}
+        source_identities = tuple(sorted({identity for identity, _ in cited}))
+        if not cited <= self.published_source_versions(source_identities, lock=True):
+            raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
     def _insert_citations(self, cursor, receipt_id, answer):
         for order, citation in enumerate(answer.citations, start=1):
@@ -682,33 +797,39 @@ class MySqlKnowledgeRetrievalRepository:
             (job_id,),
         )
 
-    def _existing_ingest(self, identity, digest):
+    def _revise_existing(self, command, digest, actor_id) -> tuple[int, bool]:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id,content_digest FROM knowledge_items WHERE source_identity=%s",
-                (identity,),
-            )
-            row = cursor.fetchone()
-        if row is None or row["content_digest"] != digest:
-            return None
-        return int(row["id"])
-
-    # New source version and index staleness are one consistency boundary.
-    def _revise_existing(self, command, digest, actor_id):
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT id,version FROM knowledge_items "
+                "SELECT id,source_identity,version,content_digest FROM knowledge_items "
                 "WHERE source_identity=%s FOR UPDATE",
                 (command.source_identity,),
             )
             row = cursor.fetchone()
             if row is None:
                 raise RuntimeError("knowledge_source_conflict")
+
             before_version = int(row["version"])
+            governed_qa = command.source_identity.startswith(QA_SOURCE_PREFIX)
+            if governed_qa and row["source_identity"] != command.source_identity:
+                raise RuntimeError("knowledge_source_conflict")
+            if command.expected_version is not None:
+                if command.expected_version.value != before_version:
+                    raise RuntimeError("knowledge_item_version_conflict")
+            elif row["content_digest"] == digest:
+                _finish_governance_receipt(cursor, command, {
+                    "knowledge_item_id": int(row["id"]),
+                    "version": before_version,
+                    "created": False,
+                })
+                return int(row["id"]), False
+            elif governed_qa:
+                raise RuntimeError("knowledge_item_version_conflict")
+
             next_version = before_version + 1
             cursor.execute(_INSERT_VERSION, (
                 row["id"], next_version, command.content, digest, "ingested",
-                actor_id, None, command.idempotency_key.value,
+                actor_id, None, command.idempotency_key.value, command.title,
+                command.source_uri, command.source_trust_tier,
             ))
             cursor.execute(
                 "UPDATE knowledge_items SET title=%s,content=%s,content_digest=%s,"
@@ -725,8 +846,9 @@ class MySqlKnowledgeRetrievalRepository:
                 cursor, command, int(row["id"]), actor_id, "ingested",
                 before_version, next_version, "draft", digest,
             )
-            cursor.execute("UPDATE knowledge_indexes SET index_status='stale' WHERE index_status='ready'")
-        return int(row["id"])
+            if not governed_qa:
+                cursor.execute(_STALE_INDEXES)
+        return int(row["id"]), True
 
     def _existing_answer_request(self, key):
         with self._connection.cursor() as cursor:
@@ -907,31 +1029,97 @@ def _insert_governance_event(
             command.idempotency_key.value, command.correlation_id.value, receipt_json,
         ),
     )
-    fingerprint = hashlib.sha256(
-        repr(command).encode("utf-8")
-    ).hexdigest()
+    _finish_governance_receipt(cursor, command, snapshot)
+
+
+def _command_fingerprint(command) -> str:
+    canonical = replace(command, correlation_id=CorrelationId(command.idempotency_key.value))
+    return hashlib.sha256(repr(canonical).encode("utf-8")).hexdigest()
+
+
+def _claim_governance_receipt(cursor, command) -> dict | None:
+    key = command.idempotency_key.value
+    fingerprint = _command_fingerprint(command)
+    try:
+        cursor.execute(
+            "INSERT INTO knowledge_apply_receipts "
+            "(idempotency_key,command_fingerprint,receipt_json) VALUES (%s,%s,'{}')",
+            (key, fingerprint),
+        )
+        return None
+    except IntegrityError as error:
+        if mysql_error_code(error) != 1062:
+            raise
+
     cursor.execute(
-        "INSERT INTO knowledge_apply_receipts "
-        "(idempotency_key,command_fingerprint,receipt_json) VALUES (%s,%s,%s)",
-        (command.idempotency_key.value, fingerprint, receipt_json),
+        "SELECT command_fingerprint,receipt_json FROM knowledge_apply_receipts "
+        "WHERE idempotency_key=%s FOR SHARE",
+        (key,),
+    )
+    row = cursor.fetchone()
+    original = repr(command)
+    compatible = {fingerprint, hashlib.sha256(original.encode("utf-8")).hexdigest()}
+    if isinstance(command, IngestKnowledgeSourceCommand) and command.expected_version is None:
+        legacy = original.removesuffix(", expected_version=None)") + ")"
+        compatible.add(hashlib.sha256(legacy.encode("utf-8")).hexdigest())
+    if row["command_fingerprint"] not in compatible:
+        raise RuntimeError("knowledge_idempotency_conflict")
+    return json.loads(row["receipt_json"])
+
+
+def _finish_governance_receipt(cursor, command, snapshot: dict) -> None:
+    cursor.execute(
+        "UPDATE knowledge_apply_receipts SET receipt_json=%s WHERE idempotency_key=%s",
+        (json.dumps(snapshot, ensure_ascii=False, sort_keys=True), command.idempotency_key.value),
     )
 
 
 _INSERT_VERSION = """INSERT INTO knowledge_item_versions
-(item_id,item_version,content,source_digest,event_type,actor_admin_user_id,reason,idempotency_key)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"""
-_LOCK_ITEM = "SELECT id,state,version FROM knowledge_items WHERE id=%s FOR UPDATE"
-_CURRENT_CONTENT = "SELECT content,source_digest FROM knowledge_item_versions WHERE item_id=%s AND item_version=%s"
+(item_id,item_version,content,source_digest,event_type,actor_admin_user_id,reason,idempotency_key,
+title,source_uri,source_trust_tier)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+_LOCK_ITEM = """SELECT i.id,i.state,i.version,i.published_version,v.content,v.source_digest,
+COALESCE(v.title,i.title) AS title,COALESCE(v.source_uri,i.source_uri) AS source_uri,
+COALESCE(v.source_trust_tier,i.source_trust_tier) AS source_trust_tier
+FROM knowledge_items i JOIN knowledge_item_versions v
+ON v.item_id=i.id AND v.item_version=i.version WHERE i.id=%s FOR UPDATE"""
+_STALE_INDEXES = "UPDATE knowledge_indexes SET index_status='stale' WHERE index_status='ready'"
 _CLAIM_JOB = """SELECT * FROM knowledge_jobs WHERE processing_status IN ('pending','retry_pending')
 AND available_at_utc<=%s AND (lease_expires_at_utc IS NULL OR lease_expires_at_utc<=%s)
 ORDER BY available_at_utc,id LIMIT 1 FOR UPDATE SKIP LOCKED"""
-_PUBLISHED_ITEMS = """SELECT i.source_identity,i.title,i.version AS source_version,
-v.content,i.content_digest AS source_digest,i.source_uri FROM knowledge_items i
-JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
-WHERE i.state='published'
-ORDER BY i.id"""
+_IS_FAQ = f"LEFT(i.source_identity,{len(QA_SOURCE_PREFIX)})=BINARY '{QA_SOURCE_PREFIX}'"
+_ACTIVE_VERSION = f"""CASE WHEN {_IS_FAQ} THEN i.published_version
+WHEN i.state='published' THEN i.version END"""
+_FAQ_PAYLOAD = "IF(JSON_VALID(v.content),v.content,'{}')"
+_PUBLISHED_SNAPSHOT = f"""SELECT i.id,i.source_identity,
+COALESCE(v.title,CASE WHEN {_IS_FAQ}
+  THEN JSON_UNQUOTE(JSON_EXTRACT({_FAQ_PAYLOAD},'$.question')) ELSE i.title END) AS title,
+v.item_version AS source_version,v.content,v.source_digest,
+COALESCE(v.source_uri,CASE WHEN {_IS_FAQ}
+  THEN JSON_UNQUOTE(JSON_EXTRACT({_FAQ_PAYLOAD},'$.source_ref')) ELSE i.source_uri END) AS source_uri,
+v.recorded_at_utc AS published_at
+FROM knowledge_items i JOIN knowledge_item_versions v
+ON v.item_id=i.id AND v.item_version=({_ACTIVE_VERSION}) AND v.event_type='published'"""
+_PUBLISHED_ITEMS = _PUBLISHED_SNAPSHOT + " ORDER BY i.id"
+_FAQ_SNAPSHOT = """SELECT i.source_identity,i.published_version AS source_version,v.content,v.source_uri,
+CASE WHEN i.faq_legacy_category_version=i.published_version THEN i.faq_legacy_category_id END AS legacy_category_id
+FROM knowledge_items i LEFT JOIN knowledge_item_versions v
+ON v.item_id=i.id AND v.item_version=i.published_version AND v.event_type='published'"""
+_PUBLISHED_FAQ = f"{_FAQ_SNAPSHOT} WHERE {_IS_FAQ} AND i.published_version IS NOT NULL"
+_FAQ_ID_ORDER = "i.source_identity COLLATE utf8mb4_bin"
+_PREDECESSOR_PUBLISHED_FAQ = f"""
+SELECT i.source_identity,v.item_version AS source_version,v.content,
+    CASE WHEN i.version=v.item_version THEN i.source_uri END AS source_uri
+FROM knowledge_items i
+JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=(
+    SELECT previous.item_version FROM knowledge_item_versions previous
+    WHERE previous.item_id=i.id AND previous.event_type IN ('published','retired')
+    ORDER BY previous.item_version DESC LIMIT 1
+)
+WHERE {_IS_FAQ} AND i.state<>'retired' AND v.event_type='published'
+"""
 _LIST_ITEMS = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
-state AS lifecycle_status,version AS current_version,
+state AS lifecycle_status,version AS current_version,i.published_version,
 content_digest AS source_digest,source_uri,updated_at AS updated_at_utc,
 v.content
 FROM knowledge_items i
@@ -939,13 +1127,13 @@ JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
 WHERE (%s IS NULL OR state=%s)
 ORDER BY updated_at DESC,i.id DESC LIMIT %s"""
 _GET_ITEM = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
-i.state AS lifecycle_status,i.version AS current_version,
+i.state AS lifecycle_status,i.version AS current_version,i.published_version,
 i.content_digest AS source_digest,i.source_uri,i.updated_at AS updated_at_utc,
 v.content FROM knowledge_items i
 JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
 WHERE i.id=%s"""
 _GET_ITEM_BY_SOURCE_IDENTITY = """SELECT i.id,i.source_identity,i.source_trust_tier,
-i.title,i.state AS lifecycle_status,i.version AS current_version,
+i.title,i.state AS lifecycle_status,i.version AS current_version,i.published_version,
 i.content_digest AS source_digest,i.source_uri,i.updated_at AS updated_at_utc,
 v.content FROM knowledge_items i
 JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version

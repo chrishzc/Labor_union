@@ -187,18 +187,17 @@ class KnowledgeWorker:
             raise RuntimeError("knowledge_index_unavailable")
         try:
             answer = self._index_gateway.answer(job["question"], version, history=history)
+            with self._unit_of_work() as unit_of_work:
+                unit_of_work.knowledge.complete_answer(
+                    job["id"], job["answer_request_id"], answer
+                )
+                unit_of_work.commit()
         except KnowledgeAnswerUnsupported:
             with self._unit_of_work() as unit_of_work:
                 unit_of_work.knowledge.complete_unsupported(
                     job["id"], job["answer_request_id"]
                 )
                 unit_of_work.commit()
-            return
-        with self._unit_of_work() as unit_of_work:
-            unit_of_work.knowledge.complete_answer(
-                job["id"], job["answer_request_id"], answer
-            )
-            unit_of_work.commit()
 
     def _fail(self, job_id: int, error: Exception) -> None:
         retryable = isinstance(error, (ConnectionError, TimeoutError))

@@ -243,8 +243,6 @@ const CANONICAL_RICH_MENU_ROUTES: Readonly<Record<string, string>> = {
   'target:order_tracking': '/line-mobile-admin?target=order_tracking',
   'target:anomalies_center': '/line-mobile-admin?target=anomalies_center',
   'target:dashboard': '/line-mobile-admin?target=dashboard',
-  'target:faq': '/line-service-help?tab=faq',
-  'target:ai_assistant': '/line-service-help?tab=ai',
 };
 
 export function resolveRichMenuUri(uri: string | null): string | null {

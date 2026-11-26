@@ -1,0 +1,98 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-shared-line-faq-2026-11-26-v1",
+  "release_metadata": {
+    "release_name": "Shared LINE FAQ version and layout",
+    "application_version": "shared-line-faq-v1",
+    "published_at": "2026-11-26",
+    "description": "Add FAQ publication metadata and the LINE layout kind without changing historical versions."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-staff-web-feedback-2026-11-24-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1087_shared_line_faq.sql",
+      "relative_path": "db/schema_parts/1087_shared_line_faq.sql",
+      "sha256": "bc5be9d603ee1e8c5cc28720c83fe68868849503848774891decf9f58d7b8a14",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "retain-additive-columns-and-history; disable-new-entrance-until-verified",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [
+    {
+      "backfill_id": "shared-line-faq-cutover-v1",
+      "artifact": {
+        "name": "backfill_shared_line_faq.py",
+        "relative_path": "scripts/backfill_shared_line_faq.py",
+        "sha256": "16a94c54916ed352d3b216e8ac3773bcabdc0c888d401df015d962a3b52d750c",
+        "dependencies": [
+          "1087_shared_line_faq.sql"
+        ]
+      },
+      "dry_run_arguments": [],
+      "apply_arguments": [],
+      "verify_arguments": [],
+      "transaction_boundary": "preserve-runner-owned-candidate-only",
+      "receipt_contract": "shared-line-faq-cutover-backfill/v1",
+      "archive_policy": "operation-receipt-sibling-artifacts"
+    }
+  ],
+  "verification_contracts": [
+    {
+      "verification_id": "shared-line-faq-schema-exact",
+      "phase": "post-schema",
+      "policy": "Verify the exact FAQ columns and appended LINE configuration kind while preserving existing rows.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "shared-line-faq-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "shared-line-faq-schema-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_26_shared_line_faq_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_26_shared_line_faq_v1.descriptors.json",
+    "sha256": "e31629dffc3f5e690a87597cac7785ce40a4cd50b546797b7514535d24a71c77",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

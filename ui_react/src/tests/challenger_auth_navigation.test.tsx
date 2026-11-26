@@ -234,13 +234,13 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
   }, 10000);
 
   it.each([
-    { alias: '#line-llm-settings', page: 'AI 客服工作室', region: 'AI 模型設定' },
+    { alias: '#line-ai-events', page: 'LINE 常見問答' },
     { alias: '#line-liff-studio', page: 'LINE 介面設定', region: '表單清單' },
     { alias: '#line-management?tab=push_queue', page: '通知與寄送' },
     { alias: '#line-management?tab=richmenu', page: 'LINE 介面設定' },
   ])('[Hash-8] 舊連結 $alias 開啟 $page', async ({ alias, page, region }) => {
     authenticateSession();
-    if (page === 'AI 客服工作室') await import('../pages/line_management/AiCustomerServiceStudioPage');
+    if (page === 'LINE 常見問答') await import('../pages/line_management/LineFaqStudioPage');
     window.history.replaceState(null, '', alias);
     const view = render(<App />);
     try {
@@ -248,8 +248,8 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
         expect(screen.getByTitle(page)).toHaveClass('active');
         if (region) expect(screen.getByRole('region', { name: region })).toBeVisible();
       }, { timeout: 5000 });
-      if (page === 'AI 客服工作室') {
-        expect(screen.queryByRole('heading', { level: 1, name: 'AI 模型設定' })).not.toBeInTheDocument();
+      if (page === 'LINE 常見問答') {
+        for (const name of ['回答測試', '回饋分析', '模型設定']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
       }
     } finally {
       view.unmount();

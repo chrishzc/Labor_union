@@ -34,9 +34,9 @@ const ReportsPage = lazy(() =>
 const LineManagementPage = lazy(() =>
   import('./pages/LineManagementPage').then((m) => ({ default: m.LineManagementPage }))
 );
-const AiCustomerServiceStudioPage = lazy(() =>
-  import('./pages/line_management/AiCustomerServiceStudioPage').then((m) => ({
-    default: m.AiCustomerServiceStudioPage,
+const LineFaqStudioPage = lazy(() =>
+  import('./pages/line_management/LineFaqStudioPage').then((m) => ({
+    default: m.LineFaqStudioPage,
   }))
 );
 const AccountingParametersPage = lazy(() =>
@@ -70,10 +70,9 @@ export const HASH_ALIASES: Record<string, PageType> = {
   'client-roster': 'clients',
   line: 'line-management',
   'line-management': 'line-management',
-  'line-ai': 'line-ai-events',
-  'line-ai-events': 'line-ai-events',
-  'line-llm': 'line-ai-events',
-  'line-llm-settings': 'line-ai-events',
+  'line-faq': 'line-faq',
+  'line-ai': 'line-faq',
+  'line-ai-events': 'line-faq',
   'line-notifications': 'line-notifications',
   'line-interface': 'line-interface',
   'line-studio': 'line-interface',
@@ -244,7 +243,7 @@ const AppContent: React.FC = () => {
         {currentPage === 'line-management' && <LineManagementPage scope="service" />}
         {currentPage === 'line-notifications' && <LineManagementPage key={notificationNavigation} scope="notifications" />}
         {currentPage === 'line-interface' && <LineManagementPage scope="interface" />}
-        {currentPage === 'line-ai-events' && <AiCustomerServiceStudioPage />}
+        {currentPage === 'line-faq' && <LineFaqStudioPage />}
 
         {/* Finance Section */}
         {currentPage === 'finance' && <FinancePage />}
