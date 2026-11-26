@@ -202,7 +202,7 @@ def _latest_stage_computations(cursor,case_no):
         return {}
     try:
         facts,_=load_calculable_client_finance_facts(cursor,order,lock=False,
-            allow_planned=str(order['status']) not in ('訂單完成','訂單取消'))
+            allow_planned=str(order['status']) not in ('訂單完成','訂單取消','成立後未服務'))
         return {p.payment_stage.value:p.amount.amount for p in _build_stage_plans(facts)} if facts else {}
     except ValueError as error:
         # Existing historical sources may legitimately lack calculable service

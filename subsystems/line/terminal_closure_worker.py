@@ -42,9 +42,17 @@ class LineTerminalClosureWorker:
             pending = source.list_pending(limit=self._batch_size)
 
         processed = 0
+        first_error: Exception | None = None
         for _source_row_id, event in pending:
-            consume_terminal_closure(self._unit_of_work_factory, event)
+            try:
+                consume_terminal_closure(self._unit_of_work_factory, event)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+                continue
             processed += 1
+        if first_error is not None:
+            raise first_error
         return processed
 
 

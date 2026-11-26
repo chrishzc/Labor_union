@@ -15,7 +15,7 @@ SELECT
         AS global_subsidy_orders_count,
     COALESCE(SUM(details.total_employer_self_pay_payable), 0)
         AS global_total_receivable_sum,
-    COALESCE(SUM(CASE WHEN o.status NOT IN ('洽談中', '訂單取消')
+    COALESCE(SUM(CASE WHEN o.status NOT IN ('洽談中', '訂單取消', '成立後未服務')
                   AND c.identity_status <> '非市民'
                   AND o.end_date IS NOT NULL
              THEN 1 ELSE 0 END), 0) AS global_govt_claim_count

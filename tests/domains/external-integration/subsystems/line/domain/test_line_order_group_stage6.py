@@ -85,6 +85,18 @@ def test_order_group_audience_requires_a_truly_settled_deposit() -> None:
     assert audience.staff_line_user_ids == (LineUserId("U-caregiver"),)
 
 
+@pytest.mark.parametrize("status", ["訂單取消", "成立後未服務"])
+def test_order_group_audience_rejects_cancelled_and_established_unserved_orders(status: str) -> None:
+    order = {
+        "case_no": "1150729",
+        "order_status": status,
+        "customer_line_user_id": "U-customer",
+        "deposit_settlement_state": "settled",
+    }
+    with pytest.raises(RuntimeError, match="cancelled_order_cannot_bind_line_group"):
+        MySqlOrdersLineAudienceAdapter(_Connection(_Cursor(order))).get("1150729")
+
+
 def test_enabled_compatibility_roles_receive_equal_line_capabilities() -> None:
     expected = tuple(sorted(item.value for item in LineCapability))
     roles = ("line_viewer", "line_agent", "line_manager", "system_admin")

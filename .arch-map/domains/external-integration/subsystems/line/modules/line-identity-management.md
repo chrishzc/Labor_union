@@ -69,6 +69,12 @@
 - 前端以既有 reader API 讀取 `GET /api/v1/line/identity-bindings/{line_user_id}/current-fact`。當有效的客戶與月嫂根資料都與各自的 owner projection 相符時，`readback_status=complete`，findings 含 `legal_customer_staff_dual_role`；`root_binding`、`root_status`、`root_version` 可同時為 `null`。這不是未綁定。HTTP view 不回傳內部的 `root_bindings`；需要各角色版本時，分別呼叫同一資源的 detail（不帶 `/current-fact`），明確帶 `subject_type=customer` 或 `staff`。
 - 後端由 `api/routes/line_identity_management.py` 與 `api/schemas/line_identity_management.py` 定義管理端讀取契約。DB owner projection 可在 `revocation_pending` 暫留，供解除流程對帳，不代表仍有權；角色選擇只納入 `bound`。解除請求已接受也不代表 LINE 選單已回復；完成定義見需求 #23 §§3、6。兩個讀取端點不改綁定或選單，也不授予管理寫入權。
 
+### 終止事件與個人選單讀回
+
+- 依需求 #23 §7.2，Orders 提供已提交的終止事件及案件版本；LINE 只讀來源，不代為確認或修改 Orders。LINE 判定的終止狀態包含「訂單完成」「訂單取消」及「成立後未服務」。同一 LINE 帳號仍有未終止或不能確認已終止的客戶案件，不會因單一案件結束就切回月嫂選單。
+- 若月嫂綁定仍有效、沒有其他阻擋案件且版本相符，LINE 在同一交易保存 `staff_default_restore` 選單意圖與事件回執；有回執才可就同一事件防重。回執的 `restored` 表示已建立工作，不代表 LINE 已套用。管理端仍以既有個人選單工作及平台讀回區分「選單同步中／已同步／失敗」，不新增前端或公開寫入入口。
+- 批次中某事件失敗，worker 繼續處理同批其他事件後回報第一個錯誤；未取得成功或 no-op 回執的事件不標完成。驗收沿用 `test_terminal_closure_restore.py`：成立後未服務不阻擋身分回復，以及第一筆錯誤不阻擋同批第二筆的有效回執。這是本地程式契約，不等於正式 LINE 讀回已驗證。
+
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: LINE identity frontend adapter tests mirror this module under the React test domain tree. Python tests use the existing module root and the two existing focused files for personal menu binding and its outbox lease.

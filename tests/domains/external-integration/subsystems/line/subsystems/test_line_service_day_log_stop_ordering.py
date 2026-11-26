@@ -204,3 +204,44 @@ def test_worker_commits_recorded_retry_before_propagating_gate_failure(monkeypat
         worker.run_once()
 
     assert state == {"committed": 1, "closed": 1}
+
+
+def test_post_delivery_worker_failure_does_not_block_rich_menu_publication_worker():
+    order = []
+    heartbeats = []
+    runtime = CanonicalLineWorkerRuntime(
+        _Runner("inbox", order, result=1),
+        _Runner("delivery", order, result=2),
+        _Wakeup(),
+        lambda: None,
+        heartbeats.append,
+        "worker:test",
+        additional_workers={
+            "terminal_closures": _Runner(
+                "terminal_closures",
+                order,
+                error=RuntimeError("line_terminal_closure_case_not_terminal"),
+            ),
+            "rich_menu_publications": _Runner(
+                "rich_menu_publications",
+                order,
+                result=3,
+            ),
+        },
+    )
+
+    counts = runtime.run_once()
+
+    assert order == ["inbox", "delivery", "terminal_closures", "rich_menu_publications"]
+    assert counts == {
+        "inbox_events": 1,
+        "delivery_tasks": 2,
+        "terminal_closures": 0,
+        "rich_menu_publications": 3,
+    }
+    assert len(heartbeats) == 1
+    assert heartbeats[0].last_error_code == "RuntimeError"
+    assert "terminal_closures: line_terminal_closure_case_not_terminal" in (
+        heartbeats[0].last_error_message or ""
+    )
+    assert json.loads(heartbeats[0].component_status_json)["rich_menu_publications"] == 3

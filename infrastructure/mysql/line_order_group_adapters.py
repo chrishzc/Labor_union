@@ -18,7 +18,7 @@ class MySqlOrdersLineAudienceAdapter:
             order = cursor.fetchone()
             if not order:
                 return None
-            if str(order["order_status"]) == "訂單取消":
+            if str(order["order_status"]) in {"訂單取消", "成立後未服務"}:
                 raise RuntimeError("cancelled_order_cannot_bind_line_group")
             if str(order.get("deposit_settlement_state") or "") != "settled":
                 raise RuntimeError("settled_deposit_required_for_line_group")

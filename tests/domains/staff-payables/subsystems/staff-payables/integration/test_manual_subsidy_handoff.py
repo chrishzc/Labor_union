@@ -382,3 +382,10 @@ def test_historical_handoff_can_classify_verified_sources_before_first_payable(
         assert candidate.staff_subsidy_reason == '歷史補助方案或金額來源互相衝突，請由原帳務流程核對。'
     else:
         assert candidate.staff_subsidy_reason is None
+
+
+def test_established_unserved_order_is_treated_as_completed_for_subsidy_handoff() -> None:
+    decision = handoff(order_status='成立後未服務')
+
+    assert decision.client_subsidy_reason is None
+    assert decision.staff_subsidy_reason is None

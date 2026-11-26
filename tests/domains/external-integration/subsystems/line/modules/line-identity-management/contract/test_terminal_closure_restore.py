@@ -302,3 +302,52 @@ def test_unbound_noop_does_not_accept_changed_payload_for_the_same_source_identi
     with pytest.raises(TerminalClosureConsumerError, match='idempotency_conflict'):
         consume_terminal_closure(_factory(uow), _event(source_subject='U-other'))
     assert len(uow.receipts.items) == 1 and uow.commits == 1 and not uow.outbox.items
+
+
+def test_established_unserved_is_accepted_as_terminal_and_not_counted_as_active_client_case():
+    uow = _Uow(
+        [_binding()],
+        _case('成立後未服務'),
+        active_cases=({'status': '成立後未服務'},),
+    )
+
+    readback = consume_terminal_closure(_factory(uow), _event())
+
+    assert readback.decision is TerminalClosureDecision.RESTORED
+    assert len(uow.outbox.items) == 1
+    assert uow.commits == 1
+
+
+def test_terminal_closure_worker_isolates_single_bad_event_before_raising():
+    bad_event = _event(
+        source_event_identity="case-terminal:CASE-BAD:cancellation:1",
+        case_no="CASE-BAD",
+        idempotency_identity="case-terminal:CASE-BAD:cancellation:1",
+    )
+    good_event = _event()
+
+    class _CaseByNoIdentityManagement(_IdentityManagement):
+        def terminal_closure_case(self, case_no):
+            if case_no == "CASE-BAD":
+                return {
+                    "case_no": "CASE-BAD",
+                    "status": "服務中",
+                    "lifecycle_version": 4,
+                    "line_user_id": "U-M1",
+                }
+            return self.case
+
+    uow = _Uow([_binding()], _case())
+    uow.identity_management = _CaseByNoIdentityManagement(uow.identity_management.case)
+    uow.orders_terminal_closure_source = _OrdersClosureSource(
+        ((1, bad_event), (2, good_event))
+    )
+
+    worker = LineTerminalClosureWorker(_factory(uow), "line-worker:test", lambda: None)
+
+    with pytest.raises(TerminalClosureConsumerError, match="case_not_terminal"):
+        worker.run_once()
+
+    assert len(uow.outbox.items) == 1
+    assert uow.receipts.get(good_event.idempotency_key).result_reference.endswith(":restored")
+    assert uow.receipts.get(bad_event.idempotency_key) is None

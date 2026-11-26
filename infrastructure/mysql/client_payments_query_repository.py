@@ -59,7 +59,7 @@ def query_case_payment_terms(connection, case_no: str) -> ClientCasePaymentTerms
         if cursor.fetchone() is None:
             return ClientCasePaymentTerms(service_end_date=service_end_date)
         facts, _ = load_calculable_client_finance_facts(cursor, order, lock=False,
-            allow_planned=status not in ('訂單完成', '訂單取消'))
+            allow_planned=status not in ('訂單完成', '訂單取消', '成立後未服務'))
     if facts is None or not facts.charge_days:
         return ClientCasePaymentTerms(service_end_date=service_end_date)
     pricing = facts.pricing
@@ -73,7 +73,7 @@ def query_case_payment_terms(connection, case_no: str) -> ClientCasePaymentTerms
 
     # Cancellation has separate actual-service terms. An incomplete service
     # schedule or inconsistent amounts cannot establish a zero stage.
-    if status == '訂單取消' or len(facts.charge_days) != int(order['service_days']):
+    if status in ('訂單取消', '成立後未服務') or len(facts.charge_days) != int(order['service_days']):
         return ClientCasePaymentTerms(funding, service_end_date=service_end_date)
     return ClientCasePaymentTerms(funding, confirmed_zero_payment_stages(facts), service_end_date=service_end_date)
 

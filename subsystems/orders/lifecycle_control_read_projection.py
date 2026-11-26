@@ -63,12 +63,12 @@ def build_order_lifecycle_control_state(
     state = "not_required" if control.state is None else control.state
     blockers = list(facts.deposit_blockers)
     if state != "active": blockers.append(_INACTIVE_BLOCKER)
-    if facts.canonical_status == "訂單取消": blockers.append("enter_service.order_cancelled")
+    if facts.canonical_status in {"訂單取消", "成立後未服務"}: blockers.append("enter_service.order_cancelled")
     if facts.current_actual_start_date is None: blockers.append("enter_service.actual_start_date_missing")
     if state == "active" and control.required_date != facts.current_actual_start_date: blockers.append("enter_service.actual_start_date_changed")
     if state == "active" and control.required_settlement_identity != facts.deposit_settlement_identity: blockers.append("enter_service.deposit_settlement_identity_changed")
     canonical_blockers = tuple(sorted(set(blockers)))
-    actual_start = ActualStartReconfirmationControlState(state, control.required_date, facts.current_actual_start_date, canonical_blockers, state == "active" and facts.deposit_reconciled and facts.canonical_status != "訂單取消" and facts.current_actual_start_date is not None and not canonical_blockers)
+    actual_start = ActualStartReconfirmationControlState(state, control.required_date, facts.current_actual_start_date, canonical_blockers, state == "active" and facts.deposit_reconciled and facts.canonical_status not in {"訂單取消", "成立後未服務"} and facts.current_actual_start_date is not None and not canonical_blockers)
     return OrderLifecycleControlState(facts.case_no, facts.lifecycle_version, facts.canonical_status, actual_start)
 
 
