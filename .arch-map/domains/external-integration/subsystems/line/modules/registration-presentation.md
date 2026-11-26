@@ -24,8 +24,12 @@
 - outbound: `case-import` — 只經既有 typed registration Preview／Apply contract 建立或讀取 provisional registration。
 - outbound: `external LINE LIFF runtime` — 已驗證身分的瀏覽器 transport；不得以 query string user ID 作身分證明。
 
+## Planned change
+- 非市民銀行存摺圖片移除尚待實作及行為驗收。影響正式頁、表單工作室唯讀預覽、本地驗證與送件資料；一般需求調查維持原圖片規則。驗收以 Case Import `NC-PASSBOOK-01～04` 為準。
+
 ## Contracts
-- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §2、§4 — LIFF 身分與需求調查的 transport boundary。
+- [LINE §5.2](../../../../../requirements/20_LINE客服與月嫂自助服務正式規格.md#52-手機審核中心db-版控-liff-設定與非市民入口契約) — LIFF 設定、非市民入口及正式頁／表單工作室預覽邊界。
+- [Case Import §3.1](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#31-非市民進件與配號nc-entrync-formnc-approvalnc-numbernc-stat) — `NC-FORM-01～02` 表單契約；[§5](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#5-驗收標準) 定義 `NC-PASSBOOK-01～04`。
 - `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` §4 — registration Preview 零正式寫入，Apply 交由 current owner contract。
 - Apply 成功呈現待工會核准及申請編號；未核准時 client／beclass IDs 為 null，不宣稱完成綁定或已建立正式客戶。
 
