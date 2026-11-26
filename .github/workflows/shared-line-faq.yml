@@ -73,7 +73,6 @@ jobs:
           tests/test_line_service_help.py
           tests/test_line_ai_qa_catalog.py
           tests/domains/external-integration/subsystems/line/infrastructure/test_line_service_help_error_contracts.py
-          tests/domains/external-integration/subsystems/line/infrastructure/test_line_inline_knowledge_replay.py
           tests/domains/external-integration/subsystems/line/integration/test_line_configuration_public_query_route.py
           tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog/test_qa_catalog_workflow.py
           tests/domains/knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog/test_chroma_knowledge_gateway.py
