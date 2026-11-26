@@ -730,7 +730,7 @@ def _finance_values(connection, case_no):
             historical_completed = status in ("歷史訂單－服務完成", "歷史訂單－帳務完成")
             if historical_completed:
                 facts = load_contract_client_finance_facts(cursor, order_row, lock=False, historical_registry=True)
-            elif status.startswith("歷史") or status in ("訂單取消", "訂單完成"):
+            elif status.startswith("歷史") or status in ("訂單取消", "訂單完成", "成立後未服務"):
                 facts = load_contract_client_finance_facts(cursor, order_row, lock=False)
             else:
                 facts, _ = load_calculable_client_finance_facts(cursor, order_row, lock=False)

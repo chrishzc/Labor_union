@@ -41,7 +41,7 @@ def decide_subsidy_handoff(facts: SubsidyHandoffFacts) -> SubsidyPayableHandoff:
     confirmed = facts.manual_scheme in {'split', 'advance', 'direct'}
     manual = confirmed and facts.confirmation_source not in {'bank', 'receipt'}
     historical = facts.order_status.startswith('歷史')
-    completed = facts.order_status in {'訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'}
+    completed = facts.order_status in {'訂單完成', '訂單取消', '成立後未服務', '歷史訂單－服務完成', '歷史訂單－帳務完成'}
     automatic_full = not confirmed and facts.full_subsidy_order
     scheme = facts.manual_scheme if confirmed else 'split' if automatic_full else facts.historical_scheme if historical else 'unknown'
     full = facts.full_subsidy_order or (facts.customer_amount_ntd == 0 and facts.total_ntd is not None and facts.total_ntd == facts.subsidy_ntd)

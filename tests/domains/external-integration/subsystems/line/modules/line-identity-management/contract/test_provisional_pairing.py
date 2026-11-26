@@ -396,3 +396,22 @@ def test_api_routes_unbound_candidates_and_pair(monkeypatch) -> None:
     assert pair_resp.data.case_no == "115000008"
     assert pair_resp.data.status == "bound"
     assert "成功配對" in pair_resp.message
+
+
+@pytest.mark.parametrize("status", ["訂單取消", "成立後未服務"])
+def test_pair_provisional_rejects_cancelled_and_established_unserved_orders(status: str) -> None:
+    repo = _MockIdentityManagementRepo()
+    repo.orders["115000008"]["status"] = status
+    app, _ = _make_app(repo, _MockIdentities(), _MockCustomers())
+    actor = ActorContext("admin:1", (LineCapability.IDENTITY_BINDING_MANAGE.value,))
+    command = PairProvisionalRegistrationCommand(
+        provisional_registration_id=1,
+        target_case_no="115000008",
+        actor=actor,
+        reason="測試終止案件不可配對",
+        idempotency_key=IdempotencyKey(f"test-pair-cancelled-{status}"),
+        correlation_id=CorrelationId(f"test-pair-corr-{status}"),
+    )
+
+    with pytest.raises(RuntimeError, match="line_order_already_cancelled"):
+        app.pair_provisional_registration(command)

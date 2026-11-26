@@ -88,6 +88,8 @@ def test_order_reminder_source_worker_failure_is_not_reported_as_healthy_cycle()
     heartbeats = []
 
     class FailingOrderReminderWorker:
+        run_before_delivery = True
+
         def run_once(self) -> int:
             raise RuntimeError("order reminder source scan failed")
 

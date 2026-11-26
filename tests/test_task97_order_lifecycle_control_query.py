@@ -215,3 +215,28 @@ def test_route_has_no_resource_or_transaction_ownership() -> None:
 
     for forbidden in ("get_connection", "cursor", "execute", "commit", "rollback"):
         assert forbidden not in source
+
+
+def test_established_unserved_is_accepted_and_marked_cancelled_in_control_state() -> None:
+    facts = OrderLifecycleControlReadFacts(
+        case_no="CASE-UNSERVED",
+        lifecycle_version=2,
+        canonical_status="成立後未服務",
+        current_actual_start_date="2026-08-01",
+        actual_start_control=ActualStartControlReadFacts(
+            state="active",
+            current_event_id=7,
+            required_date="2026-08-01",
+            required_settlement_identity="settlement-1",
+        ),
+        deposit_reconciled=True,
+        deposit_settlement_identity="settlement-1",
+        deposit_settlement_date="2026-07-15",
+        deposit_blockers=(),
+    )
+
+    state = build_order_lifecycle_control_state(facts)
+
+    assert state.canonical_status == "成立後未服務"
+    assert "enter_service.order_cancelled" in state.actual_start_reconfirmation.blockers
+    assert state.actual_start_reconfirmation.can_reconfirm is False

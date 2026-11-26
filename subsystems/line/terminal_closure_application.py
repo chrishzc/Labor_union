@@ -13,7 +13,7 @@ from subsystems.line.terminal_closure_contracts import (
     TerminalClosureSourceEvent,
 )
 
-_TERMINAL_STATUSES = {"訂單完成", "訂單取消"}
+_TERMINAL_STATUSES = {"訂單完成", "訂單取消", "成立後未服務"}
 
 
 class TerminalClosureConsumerError(RuntimeError):
