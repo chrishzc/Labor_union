@@ -438,7 +438,7 @@ class SubsidyReceivableEstimate:
     unavailable_reason: str | None
 
 
-def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
+def project_receivable_estimate(source: dict, *, require_frozen_rate: bool = False) -> SubsidyReceivableEstimate:
     """Reuse the register's service-volume, eligibility and frozen-rate rules.
 
     This is a read-only estimate, never a claim, approval or receivable root.
@@ -464,7 +464,7 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
     if not days.is_finite() or not hours.is_finite() or days <= 0 or hours <= 0:
         return SubsidyReceivableEstimate(None, "service_volume_pending")
     total_hours, _ = _service_volume(source, hours, days)
-    rate = _effective_payroll_rate(source)
+    rate = _effective_payroll_rate(source, require_frozen_rate=require_frozen_rate)
     if rate is None:
         return SubsidyReceivableEstimate(None, "rate_snapshot_missing")
     rate = Decimal(str(rate))
@@ -502,7 +502,9 @@ def _service_volume(
     )
 
 
-def _effective_payroll_rate(source: dict) -> object | None:
+def _effective_payroll_rate(source: dict, *, require_frozen_rate: bool = False) -> object | None:
+    if require_frozen_rate and not source.get("pricing_active") and not source.get("pricing_override_active"):
+        return source.get("payroll_hourly_rate_ntd")
     if source.get("pricing_override_active"):
         return source.get("pricing_payroll_covered")
     order_information = project_order_information(source.get("survey_details"))

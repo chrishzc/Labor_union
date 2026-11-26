@@ -122,6 +122,19 @@ class CasePricingFacts:
 
 
 @dataclass(frozen=True)
+class CasePricingKnownTerms:
+    """Read-only projection when the case has pricing but no payment terms."""
+
+    case_no: str
+    revision: int
+    terms: CasePricingTerms
+    source: str
+    case_total_amount: int | None
+    historical: bool
+    accounting_pending: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class CasePricingPreview:
     facts: CasePricingFacts
     candidate: CasePricingTerms
@@ -261,6 +274,7 @@ def build_historical_repricing_plan(facts, terms, client_sources, staff_source, 
 class PricingRepository(Protocol):
     accounting_pending: tuple[str, ...]
     def catalog(self, *, lock: bool = False) -> PricingCatalog: ...
+    def case_for_query(self, case_no: str) -> CasePricingFacts | CasePricingKnownTerms: ...
     def case(self, case_no: str, *, lock: bool = False) -> CasePricingFacts: ...
     def historical_plan(self, facts: CasePricingFacts, terms: CasePricingTerms, *, lock: bool) -> HistoricalRepricingPlan: ...
     def receipt(self, key: str, actor: str, command_hash: str) -> int | None: ...
@@ -430,8 +444,14 @@ class PricingConfigurationApplication:
             unit.commit()
             return revision
 
-    def query_case(self, case_no: str):
-        facts = self.repository.case(case_no)
+    def query_case(self, case_no: str) -> tuple[CasePricingFacts | CasePricingKnownTerms, PricingImpact]:
+        facts = self.repository.case_for_query(case_no)
+        if isinstance(facts, CasePricingKnownTerms):
+            return facts, PricingImpact(
+                covered_hours=None, excess_hours=None, client_amount=None,
+                staff_covered_amount=None, staff_excess_amount=None, staff_total_amount=None,
+                subsidy_amount=None, subsidy_return_amount=None, case_total_amount=facts.case_total_amount,
+            )
         return facts, current_pricing_impact(facts)
 
     def preview_case(self, case_no: str, terms: CasePricingTerms, expected_revision: int) -> CasePricingPreview:

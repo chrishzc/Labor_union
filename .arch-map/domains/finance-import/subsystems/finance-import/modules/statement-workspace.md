@@ -21,7 +21,7 @@
 - `infrastructure/mysql/monthly_accounting_repository.py`
 - `infrastructure/mysql/finance_statement_archive_repository.py`
 - `infrastructure/mysql/accounting_workspace_repository.py`
-- `infrastructure/mysql/subsidy_confirmation_repository.py` — 一般／歷史案件共用補助確認組合：Preview 借用原 Client Refund／Staff Payout 預檢尚未建立的合法款項；台新月嫂出款僅有姓名時，按正式補助撥款月份投影案件候選。多案選擇隨原 batch Preview／Apply 傳遞並重新驗證；原 Apply 鎖定來源後，於同一 outer UoW 確認方案、承接款項與核銷，任一步失敗整筆回滾。已定位但未達服務結束條件時只確認方案。
+- `infrastructure/mysql/subsidy_confirmation_repository.py` — 一般／歷史案件共用補助確認組合：Preview 借用原 Client Refund／Staff Payout 預檢尚未建立的合法款項；台新月嫂出款僅有姓名時，按正式補助撥款月份投影案件候選。多案選擇隨原 batch Preview／Apply 傳遞並重新驗證；原 Apply 鎖定來源後，用同一 outer UoW 交原 owner 承接款項與核銷，再依正式結果辨識方案。任一步失敗整筆回滾。未達服務結束條件時，保留待核對原因。
 - `query_case_bank_memos`／typed `CaseBankMemo`：台新備註六碼經 Client Finance 正式帳號對照確認唯一案件，原文逐筆投影至案件 `bank_memos`；不要求有款項、不推用途或計入金流。方案區及既有人工選擇頁顯示原文，沿原方案 metadata writer 明確保存。
 - `api/routes/finance_statement_workspace.py`
 - `api/routes/finance_import.py` — composed router and existing bank commands
@@ -36,7 +36,7 @@
 - `ui_react/src/components/FinanceMonthlyAccounting.tsx`、`FinanceMonthlyAccounting.css`
 - `ui_react/src/components/FinanceReceivableItems.tsx` — 按到期月份列出正式應收款，未定日期款分到待確認；同一 typed Query 不建立第二份案件總額。
 - `ui_react/src/pages/FinancePage.tsx` — 進行中案件（預設）、銀行對帳、政府補助清單、每月帳務；所有案件入口開同一右側抽屜，原核銷與查證工具保留可達入口。
-- `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→方案確認；客戶款齊且人工或銀行明細已正式確認方案才移出。列表由查看案件進入共用抽屜，各期查看通知共用 LINE 同案期款來源及歷史；不可寄送仍可查閱並顯示原因。
+- `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→方案確認；依 22B §3.2 判定是否移出，結清進度與方案辨識分開；方案確認來源依 22A §2.2。列表由查看案件進入共用抽屜，各期查看通知共用 LINE 同案期款來源及歷史；不可寄送仍可查閱並顯示原因。
 - `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數。所有待核對列從同一主入口開單筆抽屜，缺件及查詢失敗仍保留原流水；用途路由不受批次提示覆蓋。匯入及匯入紀錄從原獨立入口查看。
 - 永豐待核對的同案月嫂薪資／一般退款流水可在案件抽屜開啟既有 Orders 取消結算，確認實際服務日、預覽並提交；正式回讀後重查同一筆流水與案件款項。
 - 「核對交易」以原流水及名冊候選完成單案人工配對。未核銷的誤匯入來源可排除，保留原列、指紋與排除事件，重新匯入沿原指紋判重。
@@ -61,9 +61,9 @@
 - `db/schema_parts/241_finance_case_accounting_markers.sql`、`db/schema_parts/1063_finance_case_accounting_markers.sql`
 
 - shared composition: `infrastructure/mysql/accounting_workspace_repository.py::build_accounting_workspace` — 案件、清冊與原 owner 退款同步共用 Client Finance 正式繳款來源。僅略過確認為零的缺席期款，工作台與補助交接使用同一應繳、實收結果，既有金融歷史衝突保留。
-- 歷史案件由 Client Finance typed payment terms 明示沿原正式款項身分彙總應繳與實收，不套一般訂單三期齊備門檻、不補造缺席期款。同一期多筆、未知期別、未分配款及歷史付款證據逐筆保留。`full_subsidy_eligibility` 區分不適用與來源未知；免自備僅為唯讀呈現，衝突與缺項由 `accounting_pending_reasons` 明示，不改結清證據或付款紀錄。完全沒有正式期款時不推算應繳或實收；同一查詢結果供補助預檢與收款進度使用。
+- 歷史案件由 Client Finance typed payment terms 明示沿原正式款項身分彙總應繳與實收，不套一般訂單三期齊備門檻、不補造缺席期款。同一期多筆、未知期別、未分配款及歷史付款證據逐筆保留。`full_subsidy_eligibility` 區分不適用與來源未知；免自備僅為唯讀呈現，衝突與缺項由 `accounting_pending_reasons` 明示，不改結清證據或付款紀錄。完全沒有正式期款時不推算應繳或實收；同一查詢結果供款項預檢與收款進度使用。
 
-- `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — 沿原 append-only 方案事件；伺服器保留 `bank-subsidy:<row-id>:<command-digest>` operation key 記錄銀行確認來源，人工命令不能使用該命名空間。不新增 schema 或回填歷史資料。
+- `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — 沿原 append-only 方案事件；伺服器保留 `bank-subsidy:<row-id>:<command-digest>` 及 `receipt-subsidy:<ledger-id>:<command-digest>` operation key 記錄正式補助出款與客戶收款來源。人工命令保留自己的 operation key。不新增 schema 或回填歷史資料。
 
 ## Contracts
 
@@ -79,17 +79,17 @@
 - 驗收：用同一筆合成銀行流水。僅匯入、預覽或留待核對時，「匯出對帳明細」沒有該筆；正式核銷且讀回原帳務模組的成功證據後，匯出恰有一筆原始流水。重新查詢同一筆不會重新入帳或增加匯出列。測試位置見下方 `test_statement_archive_mysql.py`。
 
 - `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` §3（成功明細與匯出）、§4（銀行對帳）、§5（帳務警示）、§6（案件補登）
-- 銀行明細匯出（#22 §3.3）：`GET /api/v1/finance-import/statements/export` 只納入原 owner 正式核銷的銀行流水及正式補登，分銀行保留原欄位，附「款項用途」（包括「訂金+第一期(組合銷帳)」等正式組合銷帳）與「關聯案件」，不顯示內部識別及資料來源欄，也不受畫面篩選限制。`GET /api/v1/finance-import/statements/manual/export` 獨立唯讀匯出舊紀錄，標為「歷史人工備查（不代表已核銷）」，不得混入成功明細。
+- 銀行明細匯出依 [規格 22 §3.3](../../../../../requirements/22_銀行流水匯入與帳務異常處理正式規格.md#33-成功明細整庫匯出bank-03)。`GET /api/v1/finance-import/statements/export` 只納入原 owner 正式核銷的銀行流水及正式補登，分銀行保留原欄位，附「款項用途」（包括「訂金+第一期(組合銷帳)」等正式組合銷帳）與「關聯案件」，不顯示內部識別及資料來源欄，也不受畫面篩選限制。`GET /api/v1/finance-import/statements/manual/export` 獨立唯讀匯出舊紀錄，標為「歷史人工備查（不代表已核銷）」，不得混入成功明細。
 - 舊版新增路徑：授權管理員呼叫 `POST /api/v1/finance-import/statements/manual` 回 `410 legacy_manual_statement_retired`，不開寫入交易。React 不提供此新增表單；要新增案件的正式補登，走 #22 §6 的案件抽屜與原款項 owner。`POST statements/duplicates` 保留原判重契約。
 - `GET /api/v1/finance-import/bank-transactions` — 同一唯讀清單／單筆查詢，以 `row_id` 精確重查原流水，`row_identity=finance-import-row:<row_id>` 供原命令使用。`classification_type` 為正式用途；`cases` 為可查閱案件，不能作核銷資格；`reconciliation_target` 保存 `case_no`、`obligation_identities`、`staff_id` 及 `requires_selection`。無目標與 `reconciliation_unavailable_reason` 不使核對入口消失，查詢失敗不轉成無候選。正式 owner 重驗核銷，不由 Query／UI 寫帳。
 - `bank_memo` 為原備註的帳號遮罩投影，不修改銀行原文。單筆 `row_id` 查詢的 `reconciliation_records` 優先讀同筆正式 `finance_import_reconciliation_receipts`，含 `owning_domain`、`amount_ntd`、`recorded_at`。無匯入回執時，讀原 Client Finance 現金收付或 Staff Payables payout 事件，不與匯入回執重複列出。兩者皆無則回空陣列並明示紀錄缺漏，不由已核銷狀態造紀錄；沖正、退匯及其他歷史事件仍由原案件帳務查閱。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
 - 台新客戶補助的當次自動配對失敗原因以 `pending_reason` 進入原 Apply 收據，清單以 `recorded_pending_reason` 讀回；不以備註六碼定位成功證據取代真正的日期、款項、金額、多候選或 owner 資格阻擋。
 - 永豐月嫂舊流水的對象辨識紀錄為空時，清單只讀原交易參考編號，沿既有完整帳號解析確認唯一主要帳戶及同案正式月嫂義務後提供核對入口，不回填舊辨識紀錄。缺帳號、帳號不唯一或無同案義務仍待確認；台新及客戶款不採此補充查核，正式 Preview／Apply 仍由原 owner 重驗。
-- 台新客戶補助的入口依原始備註六碼或客戶姓名確認案件，並排除命中月嫂姓名的來源。同名客戶依六碼或唯一合格退款月份定位，跨月或無唯一案件留待核對。候選限同案補助待退款；正式 Preview／Apply 重驗原備註、資金資格、日期及核銷規則。
+- 台新客戶補助的入口依原始備註六碼或客戶姓名確認案件，並排除命中月嫂姓名的來源。同名客戶依六碼或唯一合格退款月份定位，跨月或無唯一案件留待核對。候選限原 owner 可預檢的同案補助退款。正式 Preview／Apply 重驗原備註、資金資格、日期及核銷規則。
 - 台新待核對月嫂補助依流水 occurrence 找最近完成的正式批次，`staff_subsidy_batch_identity` 只對月嫂用途投影。客戶補助退款不產生該提示，前端即使收到舊提示也優先走退款。`staff_subsidy_manual_review_allowed` 由後端沿原 owner 補助資格及來源分期日期查核，僅確認符合例外時為 true；案件、一般應付日期及提示本身都不能替代資格。
 - `POST /api/v1/finance-import/batches/preview` 與 `batches/apply` 保留原批次入口；單筆抽屜沿同一契約傳 `review_row_identity`、`staff_subsidy_selections`，只解析及派送指定交易。Apply 重新建立相同 scope，驗證原 fingerprint 與版本，沿原 durable job／outcome 回讀；不因單筆入口核銷同批其他列。
-- 客戶退款沿 `POST /api/v1/finance-import/corrections/preview`、`corrections/apply` 與 `GET /api/v1/finance-import/jobs/{job_id}/correction-outcome`，送 `row_identity`、正式 `classification_type`、`target_obligation_identities` 及原預檢版本／fingerprint。原 correction workflow 委派 Client Finance，缺正式退款不自動建款；核對流程與錯誤投影見 `finance-import-correction`。
+- 客戶退款沿 `POST /api/v1/finance-import/corrections/preview`、`corrections/apply` 與 `GET /api/v1/finance-import/jobs/{job_id}/correction-outcome`，送 `row_identity`、正式 `classification_type`、`target_obligation_identities` 及原預檢版本／fingerprint。原 correction workflow 委派 Client Finance。僅在既有款項或擬建款通過預檢時承接；核對流程與錯誤投影見 `finance-import-correction`。
 - `import-history`、`workbooks/ingestion-outcome` — 查每次匯入的保存、核銷結果與原操作結果；待核對歷史筆數沿原匯入／核銷收據保存，缺歷史證據顯示未知。
 - manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan` 與 POST `cases/{case_no}/accounting/subsidy-plan/preview`；沿原 actor、version CAS、Orders identity lock 與同鍵重播。Preview 零寫入，原保存重驗預檢並借用既有 owner 承接已合資格款項；未具金融資格可保存已預檢的方案但不得建款或核銷。無外部付款及日期重算。
 - case/warning endpoints: `cases/{case_no}/accounting`, `cases/{case_no}/accounting/dismiss`, `accounting/warnings`
@@ -98,8 +98,8 @@
 - marker Apply fresh-locks current owner versions, preserves an immutable amount snapshot, and supports same-key/same-command replay; one application transaction, no cash or service completion effect.
 - archive command owns its outer transaction and same-command receipt; acknowledgement fresh-locks owner facts and checks existing version/amounts, writing only acknowledgement.
 
-- case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection；S 由 Government Subsidy 單案共用 Query 提供，不以方案或退款義務存在為前提，未知不轉零。方案事件明示人工／銀行來源；未收到政府款不作直付證據。舊 direct arrangement 仍沿原 append-only confirm_direct/withdraw_direct 與其 writer，不回填或改寫。
-- arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
+- 工作台 Query 投影期別、應繳、實收與方案來源。收付命令提交成功後重查同案。預檢及正式確認共用辨識規則，見下方「核銷後辨識補助方案」。
+- 逐案直付安排依 22A §3 重讀正式總額、有效實收、補助與銀行事實。後續出現衝突時保留原安排並投影原因。時間留 UTC ISO 及臺北顯示，沿原案件服務日與到期日。
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
 - 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。待核對列使用「核對交易」；已核銷列使用「查看交易」，原始事實和正式核銷明細唯讀。台新出款判為退客戶先墊補助時，只在原流水核對同案客戶退款，不帶入月嫂義務或開「單筆人工核對」。該人工入口限台新月嫂補助出款，須由後端確認同案月嫂、正式應付與人工核對資格。任何不足以核對的列顯示原因；可確認案件時仍可查看本案帳務，查看不等於核銷。正式核銷資訊只來自原 owner 回讀；通知仍由 [LINE payment-overdue-reminders](../../../../external-integration/subsystems/line/modules/payment-overdue-reminders.md) owner 負責，各核銷工具保留原 writer。
 - 客戶收款面板的全案餘額同時消費既有 Receipt Query 與案件帳務 Query：只彙總版本一致、來源完整的客戶應收正式餘額；缺來源、缺列或未知餘額保留待確認，不從未清清單為空推定結清，也不加入月嫂應付或退款結清門檻。正式成功後依收據版本與回讀再次確認。
@@ -130,6 +130,21 @@
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/`
 - cross-owner evidence: [pricing-configuration 的 MySQL 整合驗證](../../../../client-finance/subsystems/client-finance/modules/pricing-configuration.md#verification)，隔離 MySQL 查詢及帳務 API 回應由專項 CI 暫存傳入 `compact_case_drawer.test.tsx`，核對歷史免自備與原款項契約；不以 UI mock 取代後端驗證。
 - `.github/workflows/historical-accounting.yml` 執行本案 Python、隔離 MySQL、React、型別與 lint 專項。
+
+## 核銷後辨識補助方案 ^statement-workspace-scheme-classification
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: statement-workspace-scheme-classification
+  target: ".arch-map/requirements/22A_案件帳務三方案與補助流向正式規格.md#^scheme-classification"
+```
+
+- **資料來源**：Client Finance 的個案計價提供案件總額，Government Subsidy 提供正式補助。Client Finance 原收款核銷與沖正提供有效實收。台新補助出款以原 Staff Payables 或 Client Finance 核對成功證據確認案件與受款對象。客戶期款進度、工會應繳和月嫂應付仍由各 owner 投影供抽屜查閱。
+- **正式觸發**：原收款或補助出款命令在成功路徑讀取當下有效事實，依 22A §2.2 判定。預檢可試算同案擬建款和核銷。Apply 經原 owner 重驗，在同一 outer UoW 記錄核銷與符合條件的方案確認。原冪等鍵重送沿用收據。已核銷款項仍由既有 writer 負責。
+- **提前完工**：Orders Terms Apply 確認縮短後的天數及正式替代班表，Client Finance 同次承接已入帳實收的差額。若永豐入款在提前完工後才核銷，原 Client Finance 補收 writer 回傳的 ledger 來源在同一 outer UoW 觸發方案判定。用 Pricing owner 依有效班表提供的案件總額，並以正式成功回執重查同案抽屜。零服務取消仍由原取消結算承接。
+- **查詢及前端**：案件 Query 提供目前正式方案、`scheme_pending_reason` 與 `scheme_evidence_identities`。單筆預檢另提供明細候選。有效證據變更時重新判讀。失效來源及既有人工決定仍可從歷史查閱。前端收到正式成功回執後重查原單筆及同案，進行中清單依 22B §3.2 使用方案結果與收款進度。
+- **逐案直付及其他款項**：逐案直付沿原 append-only `confirm_direct` 與 `withdraw_direct` 事件。前端依 Query 隱藏該筆工會補助退款的操作，一般退款仍走原入口。Payroll 月嫂應付與 Staff Payables 出款資格分別讀取。
+- **驗證入口**：按 22A §4 的 STAR 從原收款及出款命令核對兩種順序、同鍵重播、既有確認、沖正及失敗。一般業務矩陣用替身 ports。隔離 MySQL 覆蓋原核銷正式讀回、同交易回滾及冪等。
 
 ## 國定假日計價接線 ^statement-workspace-holiday-pricing
 

@@ -48,6 +48,7 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
     service_end_receipt_case_no: z.string().nullish(),
     staff_subsidy_manual_review_allowed: z.boolean().optional(),
     staff_subsidy_batch_identity: z.string().nullish(),
+    client_subsidy_batch_identity: z.string().nullish(),
     bank_memo: z.string().nullish(),
     reconciliation_records: z.array(z.strictObject({
       owning_domain: z.enum(['client_finance', 'staff_payables']),

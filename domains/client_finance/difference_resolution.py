@@ -64,9 +64,25 @@ class ClientAmountChange:
     separate_amount_ntd: int
 
 
-def plan_client_amount_change(target: ClientDifferenceTarget, effective_ntd: int, *, frozen: bool) -> ClientAmountChange:
+def client_stage_balance(amount_ntd: int, received_ntd: int, noncash_ntd: int) -> int:
+    """Only real cash can be returned. Noncash dispositions cover receivables."""
+    cash_balance = amount_ntd - received_ntd
+    return cash_balance if cash_balance < 0 else max(0, cash_balance - noncash_ntd)
+
+
+def plan_client_amount_change(
+    target: ClientDifferenceTarget, effective_ntd: int, *, frozen: bool, cash_refund_only: bool = False,
+) -> ClientAmountChange:
     if not isinstance(effective_ntd, int) or isinstance(effective_ntd, bool) or effective_ntd < 0:
         raise ClientDifferenceConflict('client_amount_invalid')
+    if cash_refund_only:
+        balance = client_stage_balance(effective_ntd, target.actual_ntd, target.noncash_ntd)
+        if not frozen:
+            return ClientAmountChange(effective_ntd, max(0, balance),
+                                      'payable_to_client' if balance < 0 else None, max(0, -balance))
+        delta = balance - client_stage_balance(target.expected_ntd, target.actual_ntd, target.noncash_ntd)
+        direction = target.direction if delta > 0 else 'payable_to_client' if delta < 0 else None
+        return ClientAmountChange(effective_ntd, target.remaining_ntd, direction, abs(delta))
     # A previously settled source is evidence. Corrections become independent debts.
     if frozen:
         delta = effective_ntd - target.expected_ntd

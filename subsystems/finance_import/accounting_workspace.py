@@ -8,9 +8,9 @@ from domains.payroll.installments import PayrollInstallment
 from shared_kernel.fingerprints import PreviewFingerprint
 
 from domains.finance_import.statement_archive import (
-    accounting_warning, case_accounting_scheme, direct_arrangement_conflict,
+    accounting_warning, case_accounting_scheme, ReconciledSubsidyEvidence,
     direct_arrangement_ready, ArrangementEvent, CaseArrangement,
-    CaseSubsidyPlan, ongoing_case_completed,
+    CaseSubsidyPlan,
 )
 from domains.finance_import.statement_archive import CollectionProgress, CollectionStageSource, current_collection_progress
 from subsystems.client_finance.case_accounting_query import (
@@ -170,6 +170,10 @@ class CaseAccounting:
     pending_bank_row_identities: tuple[str, ...] = ()
     historical_stages: bool = False
     full_subsidy_eligibility: bool | None = None
+    scheme_pending_reason: str | None = None
+    scheme_evidence_identities: tuple[str, ...] = ()
+    reconciled_subsidy_evidence: ReconciledSubsidyEvidence | None = None
+    scheme_case_total_ntd: int | None = None
     accounting_pending_reasons: tuple[str, ...] = ()
     subsidy_pending_reason: str | None = None
     staff_accounting_availability: tuple[StaffAccountingAvailability, ...] = ()
@@ -225,7 +229,8 @@ class AccountingWorkspace:
     def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort,
                  bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None, bank_memos=None,
                  subsidy_plan_preview=None, subsidy_plan_apply=None, subsidy_detail=None, staff_availability=None,
-                 case_total: Callable[[str], int | None] | None = None):
+                 case_total: Callable[..., int | None] | None = None,
+                 subsidy_evidence: Callable[..., ReconciledSubsidyEvidence] | None = None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
         self.subsidy = subsidy
@@ -236,6 +241,7 @@ class AccountingWorkspace:
         self.subsidy_plan_preview = subsidy_plan_preview
         self.subsidy_plan_apply = subsidy_plan_apply
         self.case_total = case_total
+        self.subsidy_evidence = subsidy_evidence
         self.subsidy_detail = subsidy_detail
         self.staff_availability = staff_availability
 
@@ -253,7 +259,7 @@ class AccountingWorkspace:
 
     def save_subsidy_plan(self, case_no: str, scheme: str, expected_version: int, key: str, actor: str,
                           preview_fingerprint: str | None = None):
-        if scheme not in {"split", "advance", "direct"} or expected_version < 0 or not key.strip() or not actor.strip() or key.startswith('bank-subsidy:'):
+        if scheme not in {"split", "advance", "direct"} or expected_version < 0 or not key.strip() or not actor.strip() or key.startswith(("bank-subsidy:", "receipt-subsidy:")):
             raise ValueError("subsidy_plan_command_invalid")
         command = (case_no, expected_version, scheme, actor)
         self.state.begin()
@@ -265,6 +271,10 @@ class AccountingWorkspace:
                     raise AccountingConflict("subsidy_plan_command_changed")
                 result = SubsidyPlanApplyResult(case_no, expected_version + 1, self.state.subsidy_plan(case_no))
             else:
+                if scheme == "direct":
+                    raise ArrangementNotReady("direct_arrangement_confirmation_required")
+                if self.bank is not None and self.state.arrangement(case_no).direct_confirmed:
+                    raise ArrangementNotReady("subsidy_direct_arrangement_active")
                 current = self.state.subsidy_plan(case_no)
                 if current.version != expected_version:
                     raise AccountingConflict("subsidy_plan_version_changed")
@@ -405,7 +415,9 @@ class AccountingWorkspace:
             fully_received = all(item.received_ntd >= item.expected_ntd for item in collection_sources) if complete_terms else None
         staff_due = [item for item in staff_items if item.direction == "payable" and item.summary_included]
         staff_total = sum(item.expected_ntd for item in staff_due) if staff_due else None
-        subsidy_detail = self.subsidy_detail(case_no) if include_sources and self.subsidy_detail is not None else None
+        subsidy_detail = None
+        if include_sources and self.subsidy_detail is not None:
+            subsidy_detail = self.subsidy_detail(case_no, lock=True) if for_update else self.subsidy_detail(case_no)
         subsidy = (subsidy_detail.amount_ntd if subsidy_detail is not None else
                    self.subsidy(case_no) if include_sources and self.subsidy is not None else None)
         funding = terms.funding
@@ -416,7 +428,9 @@ class AccountingWorkspace:
         pending_reasons = list(terms.pending_reasons)
         funding_conflict = False
         service_difference = None
-        gross_total = self.case_total(case_no) if full_subsidy and not terms.historical_stages and self.case_total is not None else None
+        gross_total = None
+        if include_sources and self.case_total is not None and (not terms.historical_stages or self.subsidy_evidence is not None):
+            gross_total = self.case_total(case_no, for_update=True) if for_update else self.case_total(case_no)
         holiday_funding_difference = bool(full_subsidy and not terms.historical_stages and gross_total is not None
             and subsidy is not None and gross_total > subsidy
             and subsidy == funding.total_ntd
@@ -445,26 +459,41 @@ class AccountingWorkspace:
                 customer_amount, subsidy, fully_received = 0, funding.total_ntd, True
                 customer_paid = 0
         full_subsidy = full_subsidy and not pending_reasons
-        government = sum(bank.amount_ntd for bank in banks if bank.cash_flow == "G" and bank.cases == (case_no,))
         cash_flows = None
         if include_sources and self.bank is not None and all(bank.cash_flow in {"C", "G", "PS", "PT", "RS", "RT"} and bank.cases == (case_no,) for bank in banks):
             cash_flows = {flow: sum(bank.amount_ntd for bank in banks if bank.cash_flow == flow) for flow in ("C", "G", "PS", "PT", "RS", "RT")}
         cash_net = None if cash_flows is None else cash_flows["C"] + cash_flows["G"] - sum(cash_flows[flow] for flow in ("PS", "PT", "RS", "RT"))
         arrangement = self.state.arrangement(case_no) if include_sources and self.bank is not None else None
-        direct = bool(arrangement and arrangement.direct_confirmed)
-        conflict = funding_conflict or (direct and direct_arrangement_conflict(staff_total, customer_amount, government,
-            sum(bank.amount_ntd for bank in banks if bank.cash_flow == "PT" and bank.cases == (case_no,)),
-            sum(bank.amount_ntd for bank in banks if bank.cash_flow == "RT" and bank.cases == (case_no,))))
-        scheme = case_accounting_scheme(staff_total, customer_amount, subsidy, fully_received, government,
-            direct_confirmed=direct, bank_sources_complete=cash_flows is not None, direct_conflict=conflict,
-            full_subsidy=full_subsidy)
         plan = self.plan(case_no) if include_sources and self.plan is not None else None
+        direct = bool(arrangement and arrangement.direct_confirmed)
+        evidence = (self.subsidy_evidence(case_no, for_update=for_update)
+                    if include_sources and self.subsidy_evidence is not None else ReconciledSubsidyEvidence())
+        scheme_total = gross_total
+        if self.case_total is None and funding:
+            scheme_total = funding.total_ntd
+        decision = case_accounting_scheme(scheme_total, subsidy, evidence)
+        direct_ready = eligibility is not True and not funding_conflict and direct_arrangement_ready(scheme_total, subsidy, evidence)
+        saved_scheme = plan.selected_scheme if plan is not None else None
+        saved_source = plan.confirmation_source if plan is not None else None
+        event = plan.events[-1] if plan and plan.events else None
+        conflict = funding_conflict or (direct and (not direct_ready or saved_scheme not in (None, "direct")))
+        scheme, scheme_reason, scheme_sources = "unknown", decision.pending_reason, ()
         if conflict:
-            scheme = "unknown"
+            scheme_reason = "subsidy_confirmation_evidence_changed"
+        elif direct:
+            scheme, scheme_reason = "direct", None
         elif full_subsidy:
-            scheme = "split"
-        elif plan is not None and plan.selected_scheme is not None:
-            scheme = plan.selected_scheme
+            scheme, scheme_reason = "split", None
+        elif saved_source == "manual" and saved_scheme is not None:
+            scheme, scheme_reason = saved_scheme, None
+        elif event is not None:
+            if decision.scheme == saved_scheme and event.evidence_identity in decision.evidence_identities:
+                scheme, scheme_reason, scheme_sources = decision.scheme, None, decision.evidence_identities
+            else:
+                scheme_reason = "subsidy_confirmation_evidence_changed"
+                conflict = True
+        elif decision.source is not None:
+            scheme_reason = "subsidy_confirmation_receipt_required"
         from domains.client_finance.subsidy_advance import subsidy_advance_due_date
         estimated_subsidy_payment_date = (
             subsidy_advance_due_date(terms.service_end_date).isoformat()
@@ -485,11 +514,14 @@ class AccountingWorkspace:
             staff_total, customer_amount, fully_received, subsidy, scheme, cash_flows, cash_net,
             0 if full_subsidy and not conflict else (
                 staff_total - subsidy if staff_total is not None and subsidy is not None else None),
-            arrangement, conflict, direct_arrangement_ready(staff_total, customer_amount, subsidy, fully_received, cash_flows),
+            arrangement, conflict, direct_ready and saved_scheme in (None, "direct"),
             CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(collection_sources, historical=terms.historical_stages),
-            plan, ongoing_case_completed(fully_received, plan) and not (
-                full_subsidy and not conflict and plan is not None and plan.selected_scheme != "split"
+            plan, fully_received is True and (
+                (direct and scheme == "direct") or (saved_scheme is not None and scheme == saved_scheme)
             ),
+            scheme_pending_reason=scheme_reason, scheme_evidence_identities=scheme_sources,
+            reconciled_subsidy_evidence=evidence if include_sources else None,
+            scheme_case_total_ntd=scheme_total,
             customer_paid_ntd=customer_paid, funding=funding,
             cancellation_settlement=self.cancellation(case_no) if include_sources and self.cancellation else None,
             bank_memos=self.bank_memos(case_no) if include_sources and self.bank_memos else (),

@@ -115,7 +115,7 @@ export function bankReconciliationUnavailableReason(row: FinanceBankTransaction)
     ?? '對應款項待確認';
 }
 
-type BankReviewRoute = { kind: 'case'; caseNo: string } | { kind: 'staff-batch'; batchIdentity: string }
+type BankReviewRoute = { kind: 'case'; caseNo: string } | { kind: 'subsidy-batch'; batchIdentity: string }
   | { kind: 'government'; direction: 'incoming' | 'outgoing' } | { kind: 'unavailable' };
 
 export function isTaishinStaffSubsidy(row: FinanceBankTransaction): boolean {
@@ -126,6 +126,7 @@ export function bankReviewRoute(row: FinanceBankTransaction, manual = false): Ba
   if (row.status !== 'pending' || row.disposition === 'blocked') return { kind: 'unavailable' };
   const target = row.reconciliation_target;
   if (row.classification_type === 'client_subsidy_return') {
+    if (row.client_subsidy_batch_identity) return { kind: 'subsidy-batch', batchIdentity: row.client_subsidy_batch_identity };
     return target && target.staff_id === null
       ? { kind: 'case', caseNo: target.case_no } : { kind: 'unavailable' };
   }
@@ -137,7 +138,7 @@ export function bankReviewRoute(row: FinanceBankTransaction, manual = false): Ba
     if (manual && target?.staff_id && target.obligation_identities.length && row.staff_subsidy_manual_review_allowed === true) {
       return { kind: 'case', caseNo: target.case_no };
     }
-    if (row.staff_subsidy_batch_identity) return { kind: 'staff-batch', batchIdentity: row.staff_subsidy_batch_identity };
+    if (row.staff_subsidy_batch_identity) return { kind: 'subsidy-batch', batchIdentity: row.staff_subsidy_batch_identity };
     return { kind: 'unavailable' };
   }
   return target ? { kind: 'case', caseNo: target.case_no } : { kind: 'unavailable' };

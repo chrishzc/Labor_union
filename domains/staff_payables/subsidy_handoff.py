@@ -20,6 +20,8 @@ class SubsidyHandoffFacts:
     full_subsidy_order: bool = False
     funding_conflict: bool = False
     confirmation_source: str | None = None
+    bank_candidate: bool = False
+    direct_arrangement_active: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,14 +39,16 @@ class SubsidyPayableHandoff:
 
 def decide_subsidy_handoff(facts: SubsidyHandoffFacts) -> SubsidyPayableHandoff:
     confirmed = facts.manual_scheme in {'split', 'advance', 'direct'}
-    manual = confirmed and facts.confirmation_source != 'bank'
+    manual = confirmed and facts.confirmation_source not in {'bank', 'receipt'}
     historical = facts.order_status.startswith('歷史')
     completed = facts.order_status in {'訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'}
     automatic_full = not confirmed and facts.full_subsidy_order
     scheme = facts.manual_scheme if confirmed else 'split' if automatic_full else facts.historical_scheme if historical else 'unknown'
     full = facts.full_subsidy_order or (facts.customer_amount_ntd == 0 and facts.total_ntd is not None and facts.total_ntd == facts.subsidy_ntd)
     staff_reason = client_reason = None
-    if not confirmed and not automatic_full:
+    if facts.direct_arrangement_active and scheme != 'direct':
+        staff_reason = client_reason = '本案有政府直付安排，請沿原入口核對。'
+    elif not confirmed and not automatic_full:
         if not historical:
             staff_reason = client_reason = '補助方案尚未正式確認，請由人工或銀行明細確認補助歸屬。'
         elif facts.historical_conflict:
@@ -68,12 +72,17 @@ def decide_subsidy_handoff(facts: SubsidyHandoffFacts) -> SubsidyPayableHandoff:
             staff_reason = '已轉交月嫂的補助超出本案正式補助，請由原帳務流程核對。'
         elif facts.has_customer_subsidy_payable or (facts.customer_subsidy_paid_ntd or 0) > 0:
             staff_reason = '補助轉交月嫂與既有客戶補助退款矛盾，保留原款項並待確認。'
-        elif facts.customer_amount_ntd != facts.total_ntd - facts.subsidy_ntd or (facts.customer_paid_ntd is not None and facts.customer_paid_ntd > facts.total_ntd - facts.subsidy_ntd):
+        elif (facts.bank_candidate and (facts.customer_paid_ntd or 0) > facts.total_ntd) or (
+            not facts.bank_candidate and facts.customer_amount_ntd != facts.total_ntd - facts.subsidy_ntd
+        ):
             staff_reason = '客戶期款或實收款金額與分別入款安排不符，請由原帳務流程核對。'
         elif facts.staff_paid_ntd is not None and facts.staff_paid_ntd >= facts.total_ntd:
             staff_reason = '月嫂已收足案件總額，不再另付補助款；請核對原應付餘額。'
     elif scheme == 'advance':
-        if full or facts.customer_amount_ntd != facts.total_ntd or facts.customer_paid_ntd is None or facts.customer_paid_ntd < facts.total_ntd:
+        if full or (facts.customer_paid_ntd != facts.total_ntd and not (
+            facts.bank_candidate and facts.has_customer_subsidy_payable
+            and facts.customer_paid_ntd is not None and 0 <= facts.customer_paid_ntd < facts.total_ntd
+        )):
             client_reason = '客戶實際墊款依據不足，保留既有款項並待確認。'
         elif (facts.staff_subsidy_paid_ntd or 0) > 0:
             client_reason = '補助已有轉交月嫂紀錄，與退客戶安排矛盾；請由原帳務流程核對。'

@@ -807,20 +807,23 @@ def test_terminal_sinopac_receipt_cancels_without_inventing_receivable(import_be
     assert snapshot(case) == after
 
 
-@pytest.mark.parametrize("import_before_completion", [True, False])
-def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation(import_before_completion):
-    case, _ = new_case()
-    seed_service(case)
-    if import_before_completion:
-        bid, _ = stage(case, 50000, 14, incoming=True)
+def _seed_older_service_total(case):
+    write("INSERT INTO admin_command_receipts "
+          "(command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) "
+          "VALUES ('scheduling_holiday_maintenance/v2', %s, %s, %s, 'fixture', 'before shortening', %s)",
+          (case + ':previous-holiday-total', '1' * 64, '2' * 64,
+           json.dumps({'case_results': [{'case_no': case, 'case_total_amount': 72000}]})))
+
+
+def _shorten_matrix_service(case, service_dates):
     terms_url = f'/api/v1/orders/{case}/terms'
     initial = checked(http.get(terms_url))
     assignment = rows('SELECT id FROM case_staff_assignments WHERE case_no=%s', (case,))[0]['id']
-    service_dates = [f'2026-10-{day:02d}' for day in range(1, 16)]
     terms = {
-        'proposed_terms': {**initial['terms'], 'service_days': 15},
+        'proposed_terms': {**initial['terms'], 'service_days': len(service_dates)},
         'replacement_service_dates': service_dates,
-        'replacement_allocations': [{'assignment_id': assignment, 'service_days': 15, 'service_dates': service_dates}],
+        'replacement_allocations': [{'assignment_id': assignment, 'service_days': len(service_dates),
+                                     'service_dates': service_dates}],
         'allow_started_service_change': True,
     }
     plan = checked(http.post(terms_url + '/preview', json=terms))
@@ -829,14 +832,34 @@ def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancel
                      'preview_fingerprint': plan['preview_fingerprint'],
                      'requires_formal_apply': plan['requires_formal_apply'], 'reason': 'synthetic actual early end'}
     checked(http.post(terms_url + '/apply', json=applied_terms, headers={'Idempotency-Key': case + ':shorten'}))
+
+
+@pytest.mark.parametrize("import_before_completion", [True, False])
+@pytest.mark.parametrize("bank_amount,refund_due,expected_scheme", [(50000, 14000, 'unknown'), (24000, 0, 'split')])
+def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation(
+    import_before_completion, bank_amount, refund_due, expected_scheme,
+):
+    case, _ = new_case()
+    seed_service(case)
+    accounting_url = f'/api/v1/finance-import/cases/{case}/accounting'
+    _seed_older_service_total(case)
+    assert int(checked(http.get(accounting_url))['case_total_ntd']) == 72000
+    if import_before_completion:
+        bid, _ = stage(case, bank_amount, 14, incoming=True)
+    service_dates = [f'2026-10-{day:02d}' for day in range(1, 16)]
+    _shorten_matrix_service(case, service_dates)
     if snapshot(case)['order'][0]['status'] != '訂單完成':
         complete(case)
     if not import_before_completion:
-        bid, _ = stage(case, 50000, 14, incoming=True)
+        bid, _ = stage(case, bank_amount, 14, incoming=True)
     before = snapshot(case)
+    before_accounting = checked(http.get(accounting_url))
     assert before['order'][0]['status'] == '訂單完成'
     assert [str(row['work_date']) for row in before['schedule']] == service_dates
     assert not rows('SELECT id FROM order_cancellation_apply_receipts WHERE case_no=%s', (case,))
+    assert (int(before_accounting['case_total_ntd']), int(before_accounting['subsidy_ntd']), before_accounting['scheme']) == (
+        36000, 12000, 'unknown',
+    )
     url = '/api/v1/finance-import/corrections'
     selection = {'row_identity': f'finance-import-row:{bid}', 'classification_type': 'client_receipt',
                  'target_obligation_identities': [], 'service_end_case_no': case,
@@ -844,13 +867,54 @@ def test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancel
     preview = checked(http.post(url + '/preview', json=selection))
     # This fixture's standard rate is NT$300/h, fifteen verified eight-hour days.
     summary = preview['candidate']['service_end_receipt']
-    assert summary['service_due_ntd'] == 36000 and summary['new_refund_ntd'] == 14000
+    assert summary['service_due_ntd'] == 36000 and summary['new_refund_ntd'] == refund_due
     assert snapshot(case) == before
+    assert checked(http.get(accounting_url))['scheme'] == 'unknown'
     body = {**selection, **{f'expected_{k}_version': preview[f'{k}_version'] for k in
                             ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
     jobs(checked(http.post(url + '/apply', json=body, headers={'Idempotency-Key': case + ':late-early-end'}), 202))
     after = snapshot(case)
     assert after['order'] == before['order'] and after['schedule'] == before['schedule']
-    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', 50000)]
+    assert [(item['entry_type'], item['amount_ntd']) for item in after['ledger']] == [('receipt', bank_amount)]
     assert [(item['status'], item['amount_due_ntd']) for item in after['client']
-            if item['obligation_type'] == 'refund'] == [('open', 14000)]
+            if item['obligation_type'] == 'refund'] == ([('open', refund_due)] if refund_due else [])
+    accounting = checked(http.get(accounting_url))
+    assert accounting['scheme'] == expected_scheme
+    if expected_scheme == 'split':
+        assert accounting['subsidy_plan']['events'][-1]['source'] == 'receipt'
+
+
+def test_terminal_sinopac_receipt_keeps_current_shortened_total_after_holiday_change():
+    from infrastructure.mysql.holiday_repricing import MySqlHolidayRepricing
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.scheduling.holiday_maintenance import HolidayCommand, HolidayMaintenanceApplication
+
+    case, _ = new_case()
+    bank(case, 12000, 1)
+    seed_service(case)
+    _seed_older_service_total(case)
+    _shorten_matrix_service(case, [f'2026-10-{day:02d}' for day in range(1, 16)])
+    accounting_url = f'/api/v1/finance-import/cases/{case}/accounting'
+    assert int(checked(http.get(accounting_url))['case_total_ntd']) == 36000
+
+    before_ledger = snapshot(case)['ledger']
+    connection = mysql_adapter.get_connection()
+    try:
+        repricing = MySqlHolidayRepricing(connection)
+        application = HolidayMaintenanceApplication(
+            MySqlSchedulingHolidayQuery(connection), lambda: MySqlUnitOfWork(connection), lambda: None,
+            repricing, repricing.prepare,
+        )
+        holiday_date = date(2026, 10, 2)
+        command = HolidayCommand('upsert', holiday_date, 'Synthetic holiday', True, holiday_date, holiday_date)
+        preview = application.preview(command)
+        receipt = application.apply(command, preview.calendar.holiday_version, preview.preview_fingerprint,
+                                    case + ':post-shortening-holiday', 'fixture', 'frozen after payment')
+    finally:
+        connection.close()
+
+    case_result = next(result for result in receipt.case_results if result.case_no == case)
+    assert (case_result.outcome, case_result.case_total_amount) == ('preserved_cash_history', 36000)
+    assert snapshot(case)['ledger'] == before_ledger
+    assert int(checked(http.get(accounting_url))['case_total_ntd']) == 36000

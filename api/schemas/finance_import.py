@@ -195,8 +195,9 @@ class SubsidyPlanEventView(_StrictModel):
     scheme: Literal["split", "advance", "direct"]
     actor: str
     created_at: str
-    source: Literal['manual', 'bank'] = 'manual'
+    source: Literal['manual', 'bank', 'receipt'] = 'manual'
     bank_row_identity: str | None = None
+    receipt_identity: str | None = None
 
 
 class CaseSubsidyPlanView(_StrictModel):
@@ -313,6 +314,7 @@ class CaseAccountingView(_StrictModel):
     historical_marker: HistoricalAccountingMarkerView | None = None
     remaining_in_ntd: ExactNtd | None = None
     remaining_out_ntd: ExactNtd | None = None
+    case_total_ntd: ExactNtd | None = None
     staff_receivable_ntd: int | None = None
     customer_amount_ntd: int | None = None
     customer_fully_received: bool | None = None
@@ -323,6 +325,8 @@ class CaseAccountingView(_StrictModel):
     customer_burden_ntd: int | None = None
     arrangement: CaseArrangementView | None = None
     scheme_conflict: bool = False
+    scheme_pending_reason: str | None = None
+    scheme_evidence_identities: list[str] = Field(default_factory=list)
     unallocated_service_difference_ntd: int | None = None
     can_confirm_direct: bool = False
     collection_progress: CollectionProgressView | None = None
@@ -463,6 +467,7 @@ class FinanceBankTransactionView(_StrictModel):
     reconciliation_records: list[FinanceBankReconciliationRecordView] = Field(default_factory=list)
     staff_subsidy_manual_review_allowed: bool = False
     staff_subsidy_batch_identity: str | None = None
+    client_subsidy_batch_identity: str | None = None
     pairing_candidates: list[FinanceBankPairingCandidateView] = Field(default_factory=list)
     pairing_memo: str | None = None
     purpose_review: FinanceBankPurposeReviewView | None = None

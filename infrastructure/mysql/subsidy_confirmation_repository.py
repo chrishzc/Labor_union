@@ -103,7 +103,7 @@ def _staff_subsidy_month_cases(connection, transaction_date, staff_id, cases):
         case = workspace.query(case_no)
         if case.subsidy_plan.selected_scheme not in (None, 'split') or not case.subsidy_ntd:
             continue
-        handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme='split')
+        handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme='split', bank_candidate=True)
         if not handoff.service_completed or handoff.staff_subsidy_reason:
             continue
         staff_identities = open_identities[case_no]
@@ -111,7 +111,7 @@ def _staff_subsidy_month_cases(connection, transaction_date, staff_id, cases):
         portions = [(portion.due_date, portion.remaining_ntd) for item in staff_items
                     for portion in item.funding_portions if portion.funding_kind == 'subsidy']
         if not portions and staff_items:
-            preview = preview_manual_subsidy_plan(connection, case_no, 'split', case.subsidy_plan.version)
+            preview = preview_manual_subsidy_plan(connection, case_no, 'split', case.subsidy_plan.version, bank_candidate=True)
             identities = {item.identity for item in staff_items}
             missing_due_date |= preview.blocker == 'subsidy_service_end_missing'
             if not preview.blocker:
@@ -143,20 +143,20 @@ def match_client_subsidy_month(connection, cursor, transaction_date, client_ids,
     matches = []
     missing_due_date = False
     for case_no in cases:
-        plan = state.subsidy_plan(case_no)
-        if plan.selected_scheme not in (None, 'advance'):
+        plan = state.subsidy_plan(case_no, for_update=lock)
+        if state.arrangement(case_no, for_update=lock).direct_confirmed or plan.selected_scheme not in (None, 'advance'):
             continue
         cursor.execute("SELECT status,amount_due_ntd,due_date FROM client_obligations "
                        "WHERE case_no=%s AND direction='payable_to_client' AND obligation_type='subsidy_return'"
                        + (' FOR UPDATE' if lock else ''), (case_no,))
         refunds = tuple(cursor.fetchall())
         if refunds:
-            handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme='advance')
+            handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme='advance', bank_candidate=True)
             if not handoff.service_completed or handoff.client_subsidy_reason:
                 continue
             dates = [row['due_date'] for row in refunds if row['status'] == 'open' and row['amount_due_ntd'] > 0]
         else:
-            preview = preview_manual_subsidy_plan(connection, case_no, 'advance', plan.version, for_update=lock)
+            preview = preview_manual_subsidy_plan(connection, case_no, 'advance', plan.version, for_update=lock, bank_candidate=True)
             missing_due_date |= preview.blocker == 'subsidy_service_end_missing'
             dates = [preview.refund_plan.due_date] if not preview.blocker and preview.refund_plan else []
         missing_due_date |= None in dates
@@ -261,25 +261,23 @@ def resolve_subsidy_confirmation(connection, candidate, *, for_update=False):
                               'government_subsidy_amount_controls','historical_service_day_projections'):
                     cursor.execute(f'SELECT case_no FROM {table} WHERE case_no=%s FOR UPDATE', (case_no,))
                     cursor.fetchall()
-        plan = state.subsidy_plan(case_no)
+        plan = state.subsidy_plan(case_no, for_update=for_update)
+        if state.arrangement(case_no, for_update=for_update).direct_confirmed:
+            raise ValueError("subsidy_direct_arrangement_active")
         if plan.selected_scheme not in (None, scheme):
             raise ValueError('subsidy_confirmation_plan_conflict')
         case = build_accounting_workspace(connection).query(case_no, for_update=for_update)
         if scheme == 'split' and '補助' not in (source.get('memo') or '') and not (
                 case.subsidy_ntd is not None and case.subsidy_ntd > 0 and case.staff_receivable_ntd is not None):
             raise ValueError('staff_subsidy_purpose_unconfirmed')
-        handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme=scheme)
-        preflight = SubsidyConfirmationPreflight(case_no, scheme, plan.version, case.subsidy_ntd, case.staff_receivable_ntd,
+        handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme=scheme, bank_candidate=True)
+        preflight = SubsidyConfirmationPreflight(case_no, scheme, plan.version, case.subsidy_ntd, case.scheme_case_total_ntd,
             candidate.target_identities[0] if len(candidate.target_identities) == 1 else '')
         pending = replace(pending, subsidy_preflight=preflight)
         if case.subsidy_ntd == 0:
             raise ValueError('subsidy_amount_not_positive')
         if not handoff.service_completed:
-            if TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON in candidate.evidence:
-                raise ValueError('subsidy_service_not_completed')
-            return _annotate(replace(pending, disposition=FinanceImportDisposition.CREATE,
-                target_identities=(), available_actions=('confirm_subsidy_scheme',),
-                pending_reason='subsidy_service_not_completed', subsidy_preflight=replace(preflight, confirmation_only=True)), case)
+            raise ValueError('subsidy_service_not_completed')
         reason = handoff.client_subsidy_reason if scheme == 'advance' else handoff.staff_subsidy_reason
         if reason:
             raise ValueError(reason)
@@ -335,7 +333,7 @@ def _annotate(candidate, case, owner_fingerprint=None):
         'row': candidate.row_identity, 'canonical_version': candidate.canonical_fact_version,
         'classification': candidate.classification_type.value,
         'case': preflight.case_no, 'plan_version': preflight.plan_version,
-        'subsidy': case.subsidy_ntd, 'total': case.staff_receivable_ntd,
+        'subsidy': case.subsidy_ntd, 'total': case.scheme_case_total_ntd,
         'customer_due': case.customer_amount_ntd, 'customer_paid': case.customer_paid_ntd,
         'staff': [(item.identity, item.version, item.expected_ntd, item.actual_ntd, item.due_date) for item in case.staff_items],
         'client': [(item.identity, item.version, item.expected_ntd, item.actual_ntd, item.due_date) for item in case.client_items],
@@ -374,7 +372,7 @@ def _preview_new_refund(connection, candidate, source, case):
         return replace(candidate, pending_reason=error.error.code,
             subsidy_preflight=replace(preflight, blocker=error.error.code))
     ready = replace(candidate, disposition=FinanceImportDisposition.CREATE,
-        target_identities=(proposed.obligation_identity,), available_actions=('confirm_subsidy_scheme','reconcile'), pending_reason=None)
+        target_identities=(proposed.obligation_identity,), available_actions=('reconcile',), pending_reason=None)
     return _annotate(ready, case, preview.fingerprint.value)
 
 
@@ -399,7 +397,7 @@ def _preview_staff_split(connection, candidate, source, case, identity):
     if not 0 <= split.subsidy_remaining_ntd - candidate.amount.amount <= 100:
         raise ValueError('staff_payout_amount_mismatch')
     ready = replace(candidate, disposition=FinanceImportDisposition.CREATE, target_identities=(identity,),
-        available_actions=('confirm_subsidy_scheme','reconcile'), pending_reason=None,
+        available_actions=('reconcile',), pending_reason=None,
         subsidy_preflight=replace(candidate.subsidy_preflight, staff_confirm_split=True,
             payable_amount_ntd=split.subsidy_remaining_ntd, payable_due_date=due.isoformat() if due else None))
     return _annotate(ready, case, preview.fingerprint.value)
@@ -418,17 +416,53 @@ def apply_subsidy_confirmation(connection, candidate, context):
     # Apply rebuilt and compared the complete plan while holding these owner
     # locks. Do not compare the original whole-case snapshot again after a
     # preceding row's legitimate confirmation/establishment/settlement.
-    current = state.subsidy_plan(preflight.case_no)
-    if current.version != preflight.plan_version:
-        # A preceding row in this same batch may have confirmed the same scheme.
-        if current.selected_scheme != preflight.scheme or current.confirmation_source != 'bank':
-            raise ValueError('subsidy_confirmation_version_changed')
-    elif current.selected_scheme is None:
-        state.append_subsidy_plan(preflight.case_no, current.version + 1, preflight.scheme,
-            context.actor.actor_id, context.idempotency_key.value, bank_row_id=int(candidate.row_identity.rsplit(':',1)[-1]))
+    current = state.subsidy_plan(preflight.case_no, for_update=True)
+    if current.version != preflight.plan_version and current.selected_scheme != preflight.scheme:
+        raise ValueError('subsidy_confirmation_version_changed')
+    if state.arrangement(preflight.case_no, for_update=True).direct_confirmed:
+        raise ValueError('subsidy_direct_arrangement_active')
     if preflight.proposed_refund is not None:
         persist_confirmed_refund(connection, preflight.case_no, preflight.proposed_refund,
             context.actor, context.idempotency_key, context.correlation_id, candidate.row_identity)
+
+
+def confirm_reconciled_subsidy_scheme(
+    connection, case_no: str, actor: str, operation_key: str, *,
+    receipt_identity: str | None = None, bank_row_id: int | None = None,
+) -> None:
+    """Called once by the successful money owner's Apply in the same transaction."""
+    from domains.finance_import.statement_archive import case_accounting_scheme
+    from infrastructure.mysql.accounting_workspace_repository import (
+        MySqlAccountingWorkspaceState, query_reconciled_subsidy_evidence,
+    )
+    from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
+    from infrastructure.mysql.pricing_configuration_repository import query_case_pricing_total
+
+    state = MySqlAccountingWorkspaceState(connection)
+    state.lock_arrangement_case(case_no)
+    plan = state.subsidy_plan(case_no, for_update=True)
+    if plan.confirmation_source == "manual" or state.arrangement(case_no, for_update=True).direct_confirmed:
+        return
+    evidence = query_reconciled_subsidy_evidence(connection, case_no, for_update=True)
+    if receipt_identity is not None and receipt_identity not in dict(evidence.receipts):
+        return
+    if bank_row_id is not None and f"bank:{bank_row_id}" not in (*evidence.staff_payouts, *evidence.customer_refunds):
+        return
+    total = query_case_pricing_total(connection, case_no, for_update=True)
+    subsidy = query_case_subsidy_amount(connection, case_no, lock=True).amount_ntd
+    decision = case_accounting_scheme(total, subsidy, evidence)
+    if plan.events:
+        previous = plan.events[-1]
+        if previous.scheme != decision.scheme or previous.evidence_identity in decision.evidence_identities:
+            return
+    if decision.source == "receipt":
+        source = receipt_identity or evidence.receipts[-1][0]
+        state.append_subsidy_plan(case_no, plan.version + 1, decision.scheme, actor, operation_key,
+            receipt_id=int(source.split(':')[1]))
+    elif decision.source == "bank":
+        source = f"bank:{bank_row_id}" if bank_row_id is not None else decision.evidence_identities[-1]
+        state.append_subsidy_plan(case_no, plan.version + 1, decision.scheme, actor, operation_key,
+            bank_row_id=int(source.split(':')[1]))
 
 
 def persist_confirmed_refund(connection, case_no, plan, actor, key, correlation, source, *, advance_version=True):
@@ -453,7 +487,7 @@ def persist_confirmed_refund(connection, case_no, plan, actor, key, correlation,
             persist_subsidy_return_plan(cursor, command)
 
 
-def preview_manual_subsidy_plan(connection, case_no, scheme, version, *, for_update=False):
+def preview_manual_subsidy_plan(connection, case_no, scheme, version, *, for_update=False, bank_candidate=False):
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace, query_subsidy_payable_handoff
     from subsystems.finance_import.accounting_workspace import SubsidyPlanPreview, SubsidyPlanPayable
     from domains.client_finance.obligation_planning import confirmed_subsidy_return_plan
@@ -461,7 +495,7 @@ def preview_manual_subsidy_plan(connection, case_no, scheme, version, *, for_upd
     from infrastructure.mysql.payroll_installments import query_subsidy_completion_date
     from infrastructure.mysql.staff_payout_repository import _funding_settlements
     case = build_accounting_workspace(connection).query(case_no, for_update=for_update)
-    handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme=scheme)
+    handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme=scheme, bank_candidate=bank_candidate)
     payables, refund, staff_identity, installments = (), None, None, ()
     blocker = None
     only = not handoff.service_completed
