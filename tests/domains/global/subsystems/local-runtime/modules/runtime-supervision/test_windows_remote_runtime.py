@@ -329,3 +329,32 @@ def test_root_setup_preserves_validated_origin_and_replaces_forwarded_input(arti
     assert calls[0].headers['origin'] == 'https://chrishzc.com'
     assert calls[0].headers['x-forwarded-proto'] == 'https'
     assert 'x-forwarded-host' not in calls[0].headers
+
+
+def test_admin_cutover_redirects_old_page_but_keeps_api_methods_and_body(artifact):
+    requests: list[tuple[str, str, bytes, bytes]] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v1/admin/auth/me':
+            return httpx.Response(401)
+        requests.append((request.method, request.url.path, request.url.query, request.read()))
+        return httpx.Response(202)
+
+    app = remote.create_gateway(artifact, prefix='/admin', transport=httpx.MockTransport(api))
+    with TestClient(app, base_url='https://chrishzc.com') as client:
+        assert '<div id="root"></div>' in client.get('/admin/').text
+        assert client.get('/admin/app.js').status_code == 200
+        prior_page = client.get('/test/?tab=orders', follow_redirects=False)
+        assert prior_page.status_code == 307
+        assert prior_page.headers['location'] == '/admin/?tab=orders'
+        assert prior_page.headers['cache-control'] == 'no-store'
+        for prefix in ('/admin', '/test'):
+            result = client.post(f'{prefix}/api/v1/orders?mode=preview', content=b'payload',
+                                 follow_redirects=False)
+            assert result.status_code == 202
+            assert result.headers['cache-control'] == 'no-store'
+            assert client.get(prefix + '/api/v1/admin/auth/me').status_code == 401
+            assert client.post(prefix + '/api/v1/admin/auth/development-session').status_code == 404
+        for path in ('/', '/administration/', '/testing/', '/webhook/line', '/internal', '/api/v1/orders'):
+            assert client.get(path).status_code == 404
+    assert requests == [('POST', '/api/v1/orders', b'mode=preview', b'payload')] * 2

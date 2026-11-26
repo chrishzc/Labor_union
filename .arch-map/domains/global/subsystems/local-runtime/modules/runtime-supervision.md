@@ -69,3 +69,7 @@
 
 ## Change triggers
 Reconcile when Windows startup ownership, child set, session-key lifecycle, Private API authentication readiness, or focused test root changes.
+
+### 正式管理路徑切換
+
+Windows 管理閘道沿用原授權組成，可在完整建置與啟動時選擇 `WINDOWS_REMOTE_PREFIX=/admin`，未選仍保留 `/test` 作為切換前的部署路徑。新建置、靜態閘道與健康探測都採同一路徑。切換後原 `/test/` 網頁導向 `/admin/`；既有 `/test/api/` 仍轉送同一 loopback API 並保留方法、內容和授權，不重送。Edge 路由與 Access 需先準備並另外核驗；不更動根站、LINE Webhook 或正式業務資料。[Windows 操作說明](../../../../../../scripts/launchers/WINDOWS-REMOTE.md#正式管理網址切換待核准及驗收)

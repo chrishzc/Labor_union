@@ -1,6 +1,15 @@
 # Windows 遠端入口
 
-## Windows 統一管理入口（目前操作方式）
+## 正式管理網址切換（待核准及驗收）
+
+目標是 `https://chrishzc.com/admin/`，本機仍是 `http://localhost:5173/admin/`。尚未切換時，依下方 `/test/` 操作；合併此版本不會自行切換正式入口。
+
+1. 切換前先保留 `/test`、`/test/*` 的既有 Access 及路由。在同一 Access 應用與既有驗證政策中新增精確 `/admin` 與其子路徑，再將對應 Worker Routes 及 Tunnel ingress 指向同一受保護 Windows origin。比對正式站既有路由，不能覆蓋根網站、其他應用或 LINE Webhook。未登入必須仍被 Access 擋住，origin 的 connector 繼續驗原 AUD。
+2. 在同一個 PowerShell 設置 `$env:WINDOWS_REMOTE_PREFIX = '/admin'`，由該 shell 在專案根目錄呼叫 `.\Windows管理.bat -Action restart` 完整重建與重啟，不能用「只更新前端」切換路徑。後續管理操作應沿用相同程序環境設定。切換同時改建置 base、閘道路由與 supervisor 健康檢查，與 `APP_ENV`、DB 或登入規則無關。
+3. 核對本機及遠端新入口、Access、網站登入與 MFA、唯讀 API、靜態載入，確認瀏覽器 API 用 `/admin/api/`。舊 `/test/` 頁面重新整理後導向新入口；相容期間 `/test/api/` 的請求仍直達同一後端，不靠跳轉重送。舊頁面若仍引用舊 build 的資源，重新整理即可。尚未驗證前不移除舊路由或 Access。
+4. 若驗收失敗，用 `$env:WINDOWS_REMOTE_PREFIX = '/test'` 從同一 shell 完整重建與重啟，恢復既有入口；保留新版路徑的 Access 保護，回復後再移除新增的路由（不移除原路徑）。不更換資料庫或 LINE 設定。
+
+## Windows 統一管理入口（切換前操作方式）
 
 日常雙擊專案根目錄的 **`Windows管理.bat`**。選單提供啟動全部、停止全部、套用更新／整組重啟、只更新前端、狀態／版本、備份資料庫、安全升級資料庫、復原資料庫備份、首次安裝程式依賴及檢查程式環境；不再顯示「產生部署包」。關閉選單不會停止背景服務；離開前或切換主機前，請明確選「停止全部」。
 

@@ -233,6 +233,7 @@ function Start-ManagedRuntime {
 }
 
 function Get-RemoteDisplayUrl {
+    if ($env:WINDOWS_REMOTE_PREFIX -eq '/admin') { return 'https://chrishzc.com/admin/' }
     $envPath = Join-Path $ProjectRoot '.env'
     if (Test-Path -LiteralPath $envPath) {
         $lines = Get-Content -LiteralPath $envPath -Encoding UTF8 -ErrorAction SilentlyContinue
