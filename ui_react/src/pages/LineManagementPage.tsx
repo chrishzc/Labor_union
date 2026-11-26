@@ -456,7 +456,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     if (publicationReadState === 'loading') return;
     const revision = richMenuDraftSnapshot?.revision;
     const menuId = selectedMenuId;
-    if (revision === undefined || !menuId) {
+    if (richMenuReloadRequired || revision === undefined || !menuId) {
       setRichMenuReload(value => value + 1);
       return;
     }
