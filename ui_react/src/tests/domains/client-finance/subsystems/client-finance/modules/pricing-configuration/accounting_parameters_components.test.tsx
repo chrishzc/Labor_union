@@ -94,7 +94,7 @@ function registryBirthCount(value: '單胞胎' | '雙胞胎' | null, editable = 
   };
 }
 
-const twinChange = { multi_birth_count: '雙胞胎' };
+const twinChange = { multi_birth_count: '雙胞胎' } as const;
 const birthFingerprint = 'b'.repeat(64);
 
 function mockBirthCorrection() {
@@ -312,6 +312,39 @@ describe('AccountingParametersDrawer component', () => {
     expect(clientRegistryClient.apply).toHaveBeenCalledOnce();
     expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
     expect(committed).toHaveBeenCalledOnce();
+  });
+
+  it('previews an already corrected twin and reads the confirmed payroll difference', async () => {
+    mockBirthCorrection();
+    const registered = registryBirthCount(twinChange.multi_birth_count);
+    vi.mocked(clientRegistryClient.query).mockResolvedValue({
+      ...registered, beclass: { ...registered.beclass, birth_count_correction_mode: 'historical_service_completed' },
+    });
+    const person = {
+      assignment_identity: 'assignment:81', staff_id: 81, staff_name: 'Synthetic staff', hours: 320,
+      before_amount: null, after_amount: 96000, delta: null,
+      snapshot_hourly_rate: 300, effective_hourly_rate: 450, calculated_amount: 144000,
+    };
+    const confirmed = { ...person, before_amount: 96000, after_amount: 144000, delta: 48000 };
+    const initial = { ...mockPricing, source: 'legacy' as const, historical: true, historical_payroll: [person] };
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValueOnce(initial)
+      .mockResolvedValue({ ...initial, revision: 2, historical_payroll: [confirmed] });
+    vi.mocked(clientRegistryClient.preview).mockResolvedValueOnce({
+      owner: 'client_beclass', aggregate_identity: mockPricing.case_no, current_version: 7,
+      before: twinChange, after: twinChange, preview_fingerprint: birthFingerprint,
+      historical_impact: {
+        client_updates: [], staff_updates: [], persons: [confirmed], client_delta: 0,
+        subsidy_delta: 0, client_exempt: false, pending: [],
+      },
+    });
+    render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen onClose={vi.fn()} onCommitted={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '預覽雙胞胎薪資差額' }));
+    expect(clientRegistryClient.preview).toHaveBeenCalledWith(mockPricing.case_no, 'beclass', twinChange, 7);
+    fireEvent.click(await screen.findByRole('button', { name: '確認胎數並儲存' }));
+    await waitFor(() => expect(screen.getByRole('table', { name: '歷史雙胞胎月嫂應付' })).toHaveTextContent('48,000'));
+    expect(clientRegistryClient.apply).toHaveBeenCalledOnce();
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
   });
 
   it('confirms a historical manual rate separately with the pricing preview fingerprint', async () => {

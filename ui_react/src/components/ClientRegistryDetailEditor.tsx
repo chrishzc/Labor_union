@@ -119,6 +119,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   const [staffState, setStaffState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [accountState, setAccountState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [pricingState, setPricingState] = useState<RegistryEditState>({ dirty: false, busy: false });
+  const [twinsReviewAvailable, setTwinsReviewAvailable] = useState(false);
   const [refreshError, setRefreshError] = useState('');
   const previous = useRef(detail);
   const alive = useRef(true);
@@ -200,7 +201,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...current[section], applied: true, loading: false, message: `已儲存，但最新資料讀取失敗：${errorText(error)}` } }));
     }
   };
-  const apply = async (section: Section, confirmHistorical = false, currentDetail = detail) => {
+  const apply = async (section: Section, confirmHistorical = false, currentDetail = detail, reviewTwins = false) => {
     let approved = actions[section];
     const expectedVersion = section === 'profile' ? currentDetail.client.version : currentDetail.beclass.version ?? 0;
     if (!approved.unknown && approved.preview?.current_version !== expectedVersion) approved = idle();
@@ -212,11 +213,12 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     try {
       if (!approved.preview || !approved.key) {
         const submitted = section === 'profile' ? diff(drafts.profile, currentDetail.client.values, section)
+          : reviewTwins ? { multi_birth_count: '雙胞胎' }
           : section === 'beclass' && historicalBirthChanged ? { multi_birth_count: changes.beclass.multi_birth_count } : changes[section];
         const result = await clientRegistryClient.preview(detail.case_no, owner(section), submitted as ClientProfileChanges | BeClassChanges, expectedVersion);
         if (!alive.current || sequence !== request.current) return;
         approved = { ...idle(), preview: result, changes: submitted, key: `client-${owner(section)}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}` };
-        if (section === 'beclass' && historicalBirthChanged && !result.historical_impact) {
+        if (section === 'beclass' && (historicalBirthChanged || reviewTwins) && !result.historical_impact) {
           setActions(current => ({ ...current, [section]: { ...idle(), message: '案件的更正資格已更新，請重新讀取案件資料。' } }));
           return;
         }
@@ -294,6 +296,13 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
             {action.preview?.historical_impact ? '確認歷史胎數更正'
               : section === 'beclass' && historicalBirthChanged ? '預覽歷史胎數更正' : '儲存'}
           </button>
+          {section === 'beclass' && twinsReviewAvailable && !action.preview
+            && detail.beclass.birth_count_correction_mode === 'historical_service_completed'
+            && detail.beclass.field_capabilities.multi_birth_count?.editable
+            && detail.beclass.values?.multi_birth_count === '雙胞胎' && !historicalBirthChanged && (
+            <button type="button" disabled={pending || termsState.busy || pricingState.dirty}
+              onClick={() => void apply('beclass', false, detail, true)}>預覽雙胞胎薪資差額</button>
+          )}
           {action.applied && !action.loading && <button type="button" onClick={() => { const sequence = ++request.current; setActions((current) => ({ ...current, [section]: { ...current[section], loading: true } })); void refresh(section, sequence); }}>重新讀取已儲存資料</button>}
           {action.unknown && !action.loading && <button type="button" onClick={() => void apply(section)}>確認同一筆儲存結果</button>}
         </div>
@@ -338,7 +347,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       {intakeOpened && !intakeNeeded && detail.order_terms.status === 'ready' && <button type="button" disabled={pending || intakeState.dirty} onClick={() => setIntakeOpened(false)}>編輯完整服務條件</button>}
     </section>
     <ClientRegistryVirtualAccount caseNo={detail.case_no} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy || intakeState.busy || pricingState.busy} onRefresh={onRefresh} onStateChange={setAccountState} />
-    <CasePricingAdjustmentPanel caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy || intakeState.busy || accountState.busy} onCommitted={refreshRelated} onStateChange={setPricingState} />
+    <CasePricingAdjustmentPanel caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy || intakeState.busy || accountState.busy} onCommitted={refreshRelated} onStateChange={setPricingState} onTwinsReviewAvailable={setTwinsReviewAvailable} />
     <section className="registry-editor"><h3>客戶帳務</h3>{detail.finance.status === 'ready' && detail.finance.values
       ? <dl className="registry-information-fields">{Object.entries(financeLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{display(detail.finance.values![field as keyof typeof detail.finance.values])}</dd></div>)}</dl>
       : <p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>}

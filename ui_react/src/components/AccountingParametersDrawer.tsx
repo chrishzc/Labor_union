@@ -18,7 +18,7 @@ import { clientRegistryClient } from '../api/client_registry/client_registry_cli
 import type { ClientRegistryDetail, RegistryMutationPreview } from '../api/client_registry/client_registry_schemas';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { HistoricalServiceAccountingWorkbench } from './HistoricalServiceAccountingWorkbench';
-import { HistoricalAccountingPending, HistoricalCorrectionAccounting } from './HistoricalCorrectionAccounting';
+import { HistoricalAccountingPending, HistoricalCorrectionAccounting, HistoricalTwinsPayroll } from './HistoricalCorrectionAccounting';
 import { useUnsavedChanges, useUnsavedNavigation } from './UnsavedChanges';
 import './AccountingParameters.css';
 import './Drawer.css';
@@ -164,7 +164,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
   const confirmedBirth = confirmation && confirmation.kind !== 'historical-pricing' ? confirmation.birth : undefined;
   const confirmedPricing = confirmation?.kind === 'historical-pricing' ? confirmation.preview : undefined;
 
-  const handleApply = async () => {
+  const handleApply = async (reviewTwins = false) => {
     if (inFlight.current || saving) return;
     inFlight.current = true;
     setSaving(true);
@@ -175,12 +175,13 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
     let accountingPending = pendingSave?.stage === 'readback' ? pendingSave.accountingPending : [];
     let stage: 'preview' | 'birth' | 'pricing' | 'readback' | 'refresh' = 'preview';
     let standardBirthCommitted = false;
+    const submitBirth = birthChanged || reviewTwins;
 
     try {
       if (!command) {
         const reasonText = reason.trim();
         let pricing: PricingSave | undefined;
-        if (current && draft && (!birthChanged || (!historicalBirth && pricingDraftChanges.length > 0))) {
+        if (current && draft && (!submitBirth || (!historicalBirth && pricingDraftChanges.length > 0))) {
           const validationError = pricingTermsError(draft);
           const parsed = PricingTermsSchema.safeParse(draft);
           if (validationError || !parsed.success) {
@@ -189,7 +190,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
           }
           pricing = { terms: parsed.data, revision: current.revision, key: `case-pricing-param:${crypto.randomUUID()}` };
         }
-        if (birthChanged && birthCount !== null) {
+        if (submitBirth && birthCount !== null) {
           if (birthVersion === null) {
             setError('目前無法更正胎數，請重新開啟抽屜確認。');
             return;
@@ -266,7 +267,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
       await onCommitted();
       if (command.kind === 'standard') onClose();
     } catch (err: unknown) {
-      const owner = stage === 'birth' || (stage === 'preview' && birthChanged) ? '胎數' : '計價參數';
+      const owner = stage === 'birth' || (stage === 'preview' && submitBirth) ? '胎數' : '計價參數';
       const outcomeUncertain = (stage === 'birth' || stage === 'pricing')
         && (!(err instanceof ApiHttpError) || err.status >= 500 || err.status === 408);
       if (stage === 'readback' && command && command.kind !== 'standard') {
@@ -348,9 +349,12 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
           )}
           {saveNotice && <p role="status">{saveNotice}</p>}
           <HistoricalAccountingPending pending={pendingSave?.stage === 'readback' ? pendingSave.accountingPending : current?.accounting_pending ?? []} />
+          <HistoricalTwinsPayroll people={current?.historical_payroll ?? []} />
           {confirmedBirth && (
             <div className="case-banner-note">
-              <p>胎數將由{confirmedBirth.preview.before.multi_birth_count ?? '待確認'}更正為{confirmedBirth.value}。</p>
+              <p>{confirmedBirth.preview.before.multi_birth_count === confirmedBirth.value
+                ? '正式胎數為雙胞胎，請確認下列帳務更正。'
+                : `胎數將由${confirmedBirth.preview.before.multi_birth_count ?? '待確認'}更正為${confirmedBirth.value}。`}</p>
               {confirmedBirth.preview.historical_impact && <HistoricalCorrectionAccounting impact={confirmedBirth.preview.historical_impact} />}
             </div>
           )}
@@ -388,6 +392,12 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
                     : '胎數更正會套用本案適用費率。'}
                 </p>
                 {birthCount === null && <p className="accounting-drawer-hint">正式胎數待確認。</p>}
+                {historicalBirth && birthCount === '雙胞胎' && !birthChanged && birthVersion !== null
+                  && current?.historical_payroll?.some(person => person.delta === null) && (
+                  <button type="button" className="finance-btn-secondary"
+                    disabled={fieldsDisabled || pricingDraftChanges.length > 0}
+                    onClick={() => void handleApply(true)}>預覽雙胞胎薪資差額</button>
+                )}
               </div>
 
               {draft && <>

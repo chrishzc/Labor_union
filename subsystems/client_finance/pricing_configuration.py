@@ -95,6 +95,7 @@ class HistoricalPricingPerson:
     actual_service_days: int | None
     adjustment: int = 0
     rate_snapshot: AssignmentRateSnapshot | None = None
+    original_hourly_rate: int | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,8 @@ class CasePricingFacts:
     financial_sources_digest: str = ""
     historical_plan: "HistoricalRepricingPlan | None" = None
     accounting_carry: tuple["HistoricalAccountingCarry", ...] = ()
+    historical_payroll_rate: MoneyNTD | None = None
+    historical_payroll: tuple["HistoricalPersonPricing", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -171,6 +174,9 @@ class HistoricalPersonPricing:
     before_amount: int | None
     after_amount: int | None
     delta: int | None
+    snapshot_hourly_rate: int | None = None
+    effective_hourly_rate: int | None = None
+    calculated_amount: int | None = None
 
 
 @dataclass(frozen=True)
@@ -304,7 +310,12 @@ def _base_pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts, *,
             for person in facts.historical_people:
                 if person.hours is None:
                     continue
-                if use_legacy_person_rates and facts.source == 'legacy':
+                if use_legacy_person_rates and facts.historical_payroll_rate is not None:
+                    covered_hours = min(person.hours, max(Decimal(0), terms.subsidy_hours - consumed))
+                    salary = historical_service_salary(person.hours, facts.historical_payroll_rate).amount
+                    covered_amount = historical_service_salary(covered_hours, facts.historical_payroll_rate).amount
+                    excess_amount = salary - covered_amount
+                elif use_legacy_person_rates and facts.source == 'legacy':
                     covered_hours = min(person.hours, max(Decimal(0), terms.subsidy_hours - consumed))
                     covered_amount = legacy_historical_service_salary(person, covered_hours)
                     excess_amount = legacy_historical_service_salary(person, person.hours - covered_hours)
@@ -415,6 +426,9 @@ def current_pricing_impact(facts: CasePricingFacts) -> PricingImpact:
             staff_covered_amount=None, staff_excess_amount=None,
             union_income_amount=(result.case_total_amount - facts.formal_staff_amount + facts.payroll_adjustment)
                 if result.union_income_amount is not None and result.case_total_amount is not None else None)
+    elif facts.historical_payroll_rate is not None:
+        result = replace(result, staff_total_amount=None, staff_covered_amount=None,
+            staff_excess_amount=None, union_income_amount=None)
     client_amount = facts.formal_client_amount if facts.formal_client_amount is not None else facts.legacy_client_amount
     return replace(result, client_amount=client_amount) if client_amount is not None else result
 
