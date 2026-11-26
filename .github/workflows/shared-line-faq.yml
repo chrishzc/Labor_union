@@ -81,8 +81,25 @@ jobs:
           -k 'test_faq_'
 
   mysql:
+    name: MySQL (${{ matrix.suite }})
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 28
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: regression
+            node: ''
+          - suite: cutover
+            node: test_faq_cutover_preserved_release_reads_official_a_and_replays
+          - suite: ambiguous
+            node: test_faq_cutover_blocked_keeps_legacy_readers[ambiguous]
+          - suite: unproven
+            node: test_faq_cutover_blocked_keeps_legacy_readers[unproven]
+          - suite: backfill-failure
+            node: test_faq_cutover_blocked_keeps_legacy_readers[backfill-failure]
+          - suite: readback-failure
+            node: test_faq_cutover_blocked_keeps_legacy_readers[readback-failure]
     services:
       mysql:
         image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
@@ -125,7 +142,9 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install -r requirements.txt pytest httpx2
-      - name: Prepare current and predecessor schemas on isolated MySQL
+      - name: Prepare isolated MySQL credentials and regression schemas
+        env:
+          FAQ_SUITE: ${{ matrix.suite }}
         run: |
           python - <<'PY'
           import os
@@ -134,9 +153,10 @@ jobs:
           from argparse import Namespace
           from scripts.bootstrap_disposable_mysql_schema import bootstrap
           database = os.environ["DB_DATABASE"]
-          for name, maximum in ((database + "_fresh", None), (database, 1086)):
-              print(bootstrap(Namespace(host="127.0.0.1", port=3307, user="root", password="",
-                                        database=name, confirm_database=name, max_schema_part=maximum)))
+          if os.environ["FAQ_SUITE"] == "regression":
+              for name, maximum in ((database + "_fresh", None), (database, 1086)):
+                  print(bootstrap(Namespace(host="127.0.0.1", port=3307, user="root", password="",
+                                            database=name, confirm_database=name, max_schema_part=maximum)))
           password = secrets.token_urlsafe(24)
           print("::add-mask::" + password)
           with pymysql.connect(host="127.0.0.1", port=3307, user="root", autocommit=True) as connection:
@@ -147,18 +167,19 @@ jobs:
               env.write(f"LABOR_UNION_TEST_MYSQL_PASSWORD={password}\n")
           PY
       - name: Verify compatible upgrade and atomic Knowledge publication
+        if: matrix.suite == 'regression'
         run: >-
           python -m pytest -vv
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_compatible_upgrade_rerun
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_publication_and_receipt_rollback
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_legacy_audit_and_backfill_rerun
       - name: Verify preserved FAQ through controlled upgrade and reader cutover
+        if: matrix.suite != 'regression'
         env:
           FAQ_CUTOVER_MYSQL_CONTAINER: ${{ job.services.mysql.id }}
-        run: >-
-          python -m pytest -vv
-          tests/test_access_knowledge_disposable_mysql_e2e.py
-          -k 'test_faq_cutover_'
+          FAQ_CUTOVER_TEST: ${{ matrix.node }}
+        run: python -m pytest -vv "tests/test_access_knowledge_disposable_mysql_e2e.py::$FAQ_CUTOVER_TEST"
+
 
   browser:
     runs-on: ubuntu-latest
