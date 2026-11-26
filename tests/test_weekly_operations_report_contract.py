@@ -684,6 +684,59 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert styled_service_sheet.page_setup.fitToWidth == 1
 
 
+def test_weekly_subsidy_established_unserved_increases_count_not_amount_in_json_and_xlsx():
+    class EstablishedUnservedFacts(_Facts):
+        def list_subsidy_facts(self, start_date, end_date):
+            facts = super().list_subsidy_facts(start_date, end_date)
+            served = replace(facts.general[0], case_no="115000007", application_roc_year=115)
+            unserved = replace(
+                served, serial_number=2, case_no="115000099",
+                subsidy_hours=Decimal(0), subsidy_days=Decimal(0), service_days=0,
+                subsidy_amount_ntd=0, unit_price_ntd=0, reconciliation_status="成立後未服務",
+            )
+            carried_in = replace(
+                unserved, serial_number=1, case_no="114000098", application_roc_year=114,
+                eligibility="補助市民",
+            )
+            return replace(facts, general=(served, unserved), subsidized=(carried_in,))
+
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(
+        EstablishedUnservedFacts(), lambda: datetime(2026, 8, 23, 12, tzinfo=TAIPEI_TIME_ZONE),
+    )
+    client = TestClient(app)
+    params = {"start_date": "2026-08-20", "end_date": "2026-08-26"}
+    response = client.get("/api/v1/operations-reports/weekly", params=params)
+    assert response.status_code == 200
+    partitions = response.json()["data"]["subsidy_partitions"]
+    general, subsidized, _ = partitions
+    assert (general["row_count"], general["total_amount_ntd"]) == (2, 12000)
+    row = next(row for row in general["rows"] if row["case_no"] == "115000099")
+    assert isinstance(row["subsidy_hours"], str) and Decimal(row["subsidy_hours"]) == 0
+    assert isinstance(row["subsidy_days"], str) and Decimal(row["subsidy_days"]) == 0
+    assert (row["service_days"], row["subsidy_amount_ntd"], row["unit_price_ntd"]) == (0, 0, 0)
+    assert row["reconciliation_status"] == "成立後未服務"
+    assert (subsidized["row_count"], subsidized["total_amount_ntd"]) == (1, 0)
+    carried_in, = subsidized["rows"]
+    assert (carried_in["case_no"], carried_in["application_roc_year"], carried_in["claim_period_label"]) == (
+        "114000098", 114, "2026年第三季",
+    )
+
+    export = client.get("/api/v1/operations-reports/weekly/export", params=params)
+    assert export.status_code == 200
+    sheet = load_workbook(BytesIO(export.content), data_only=True)["補助案件統計表"]
+    assert (sheet["G2"].value, sheet["K2"].value) == (2, 12000)
+    assert (sheet["G3"].value, sheet["K3"].value) == (1, 0)
+    for case_no in ("115000099", "114000098"):
+        exported_row, = (row for row in sheet.values if row[1] == case_no)
+        assert (exported_row[7], exported_row[8], exported_row[10], exported_row[12]) == (0, 0, 0, "結案")
+        assert exported_row[13] == "2026年第三季"
+
+    repeated = client.get("/api/v1/operations-reports/weekly", params=params)
+    assert repeated.status_code == 200
+    assert repeated.json()["data"]["subsidy_partitions"] == partitions
+
+
 def test_weekly_export_appends_current_application_year_quarter_amount_summary():
     app = _app()
     app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(

@@ -97,6 +97,27 @@ describe('ReportsPage query-only presentation', () => {
     expect(screen.queryByText(/未開放|後端尚未提供/)).not.toBeInTheDocument();
   });
 
+  it('WEEKLY-SUB-01 顯示成立後未服務為結案與零補助，分區為 2 筆與 NT$ 12,000', async () => {
+    const report = structuredClone(WEEKLY_OPERATIONS_REPORT);
+    const general = report.subsidy_partitions[0];
+    const served = { ...general.rows[0], case_no: '115000007', application_roc_year: 115 };
+    general.rows = [served, {
+      ...served, serial_number: 2, case_no: '115000099',
+      subsidy_hours: '0', subsidy_days: '0.00', service_days: 0,
+      subsidy_amount_ntd: 0, unit_price_ntd: 0, reconciliation_status: '成立後未服務',
+    }];
+    general.row_count = 2;
+    vi.mocked(weeklyOperationsReportQueryClient.query).mockResolvedValue(report);
+
+    render(<FinanceGovernmentSubsidyList onCase={vi.fn()} />);
+    const table = await screen.findByRole('table', { name: '一般市民補助案件統計明細' });
+    expect(within(table).getAllByRole('row')).toHaveLength(3);
+    expect(screen.getByText('2筆｜NT$ 12,000')).toBeInTheDocument();
+    const row = within(table).getByRole('row', { name: /115000099/ });
+    const cells = within(row).getAllByRole('cell').map((cell) => cell.textContent);
+    expect([cells[7], cells[8], cells[10], cells[12]]).toEqual(['0', '0.00', 'NT$ 0', '結案']);
+  });
+
   it('日期範圍與 reload 變更會清除 stale export success', async () => {
     render(<ReportsPage />);
     await screen.findByRole('table', { name: '週報案件受理總表' });
