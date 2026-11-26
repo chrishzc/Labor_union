@@ -346,7 +346,7 @@ def test_rollover_creates_undated_payroll_and_preserves_unknown_funding_reason()
     staff_name = f"歷史待核對-{token[:8]}"
     connection = get_connection()
     try:
-        _seed_case(connection, case_no, staff_name, verified_self_funded=False)
+        staff_id = _seed_case(connection, case_no, staff_name, verified_self_funded=False)
         row = _source_row(case_no, token, staff_name)
         adoption = HistoricalOrderAdoptionWorkflow(
             MySqlHistoricalOrderAdoptionRepository(connection),
@@ -377,17 +377,11 @@ def test_rollover_creates_undated_payroll_and_preserves_unknown_funding_reason()
         assert replay.replayed and replay.lifecycle_event_id == completed.lifecycle_event_id
         assert replay.payroll_sync == completed.payroll_sync
 
-        for dry_run in (True, False):
-            result = synchronize_historical_payroll(connection, case_no, dry_run=dry_run)
-            assert result == {
-                "action": "skipped",
-                "reason": "already_synced",
-                "payment_arrangement_pending": True,
-                "pending_reason": "historical_payroll_funding_pending",
-                "detail": completed.payroll_sync.detail,
-            }
         with connection.cursor() as cursor:
-            cursor.execute("SELECT obligation_identity,amount_due_ntd,due_date,status FROM staff_obligations WHERE case_no=%s", (case_no,))
+            cursor.execute(
+                "SELECT obligation_identity,assignment_id,amount_due_ntd,due_date,status "
+                "FROM staff_obligations WHERE case_no=%s", (case_no,),
+            )
             obligations = cursor.fetchall()
             assert len(obligations) == 1
             assert obligations[0]["amount_due_ntd"] == 72000
@@ -397,6 +391,20 @@ def test_rollover_creates_undated_payroll_and_preserves_unknown_funding_reason()
             assert cursor.fetchone()["count"] == 0
             cursor.execute("SELECT staff_payment_due_date FROM orders WHERE case_no=%s", (case_no,))
             assert cursor.fetchone()["staff_payment_due_date"] is None
+        for dry_run in (True, False):
+            result = synchronize_historical_payroll(connection, case_no, dry_run=dry_run)
+            assert result == {
+                "action": "skipped",
+                "reason": "already_synced",
+                "payment_arrangement_pending": True,
+                "pending_reason": "historical_payroll_funding_pending",
+                "detail": completed.payroll_sync.detail,
+                "assignment_id": obligations[0]["assignment_id"],
+                "staff_id": staff_id,
+                "obligation_identity": obligations[0]["obligation_identity"],
+                "amount_ntd": 72000,
+                "due_date": None,
+            }
     finally:
         connection.close()
 

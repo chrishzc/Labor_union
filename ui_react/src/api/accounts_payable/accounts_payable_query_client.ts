@@ -21,9 +21,14 @@ export type HistoricalUnpaidPayableCommand = {
   amount_ntd: number; due_date: string | null; evidence: string; confirmed_unpaid: true; key: string;
 };
 
-const HistoricalPayrollSyncOutcomeSchema = z.discriminatedUnion('action', [
+const historicalAssignmentBinding = {
+  assignment_id: z.number().int().positive().nullish(),
+  staff_id: z.number().int().positive().nullish(),
+  obligation_identity: z.string().min(1).nullish(),
+};
+const HistoricalPayrollSyncItemSchema = z.discriminatedUnion('action', [
   z.object({
-    case_no: z.string(),
+    ...historicalAssignmentBinding,
     action: z.enum(['created', 'updated']),
     due_date: z.string().nullable().optional(),
     payment_arrangement_pending: z.boolean().optional(),
@@ -31,7 +36,7 @@ const HistoricalPayrollSyncOutcomeSchema = z.discriminatedUnion('action', [
     detail: z.string().nullable().optional(),
   }),
   z.object({
-    case_no: z.string(),
+    ...historicalAssignmentBinding,
     action: z.literal('skipped'),
     reason: z.string().min(1),
     pending_reason: z.string().nullable().optional(),
@@ -39,11 +44,16 @@ const HistoricalPayrollSyncOutcomeSchema = z.discriminatedUnion('action', [
     detail: z.string().min(1).optional(),
   }),
 ]);
+const HistoricalPayrollSyncOutcomeSchema = z.intersection(
+  HistoricalPayrollSyncItemSchema,
+  z.object({ case_no: z.string(), items: z.array(HistoricalPayrollSyncItemSchema).optional() }),
+);
 const HistoricalPayrollSyncResponseSchema = z.object({
   success: z.literal(true),
   data: z.object({ details: z.array(HistoricalPayrollSyncOutcomeSchema).max(1) }),
 });
 type HistoricalPayrollSyncOutcome = z.infer<typeof HistoricalPayrollSyncOutcomeSchema>;
+export type HistoricalPayrollSyncItem = z.infer<typeof HistoricalPayrollSyncItemSchema>;
 
 let correlationSequence = 0;
 

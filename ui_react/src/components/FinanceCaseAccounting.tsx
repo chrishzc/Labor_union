@@ -918,7 +918,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   {data.staff_accounting_availability&&data.staff_accounting_availability.length>0&&<section aria-label="歷史月嫂應付依據">
     {data.staff_accounting_availability.map((item,index)=><div key={`${item.assignment_id??'unknown'}:${item.staff_id??'unknown'}:${index}`}>
       <strong>{item.party||'月嫂歸屬待確認'}</strong>
-      <p>{item.status==='formal'?'已有正式應付':item.status==='not_established'?'尚未建立正式應付':'應付來源待核對'}</p>
+      <p>{item.status==='formal'?'已有正式應付':item.status==='not_established'?'可建帳，尚未同步':'應付來源待核對'}</p>
+      {item.status==='not_established'&&item.estimated_amount_ntd!=null&&<p>薪資試算 {money(item.estimated_amount_ntd)}，尚未建帳。</p>}
       {item.pending_reasons.map(reason=><p key={reason}>{accountingReason(reason)}</p>)}
       {item.estimated_self_pay_date&&<p>自備款預計付款日 {item.estimated_self_pay_date}</p>}
       {item.estimated_subsidy_date&&<p>補助款預計付款日 {item.estimated_subsidy_date}</p>}
@@ -930,8 +931,11 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     <HistoricalPayableLookup caseNo={initialCase} month={today.slice(0, 7)} revision={revision} onCase={onPayableReview} />}
   <div className="finance-staff-summary-cards" aria-label="月嫂薪資匯總">
     <div className="finance-staff-summary-card">
-      <small>{staffItems.length ? '應付月嫂總額' : '月嫂薪資金額'}</small>
+      <small>{staffItems.length
+        ? data.staff_accounting_availability?.some(item=>item.status!=='formal') ? '已建立應付合計' : '應付月嫂總額'
+        : '月嫂薪資金額'}</small>
       <strong>{money(staffItems.length ? staffPayableTotal : staffEstimate)}</strong>
+      {!staffItems.length && staffEstimate != null && !isEstablishedUnserved && <small>薪資試算，尚未建帳</small>}
     </div>
     <div className="finance-staff-summary-card">
       <small>已核銷金額（含內扣手續費）</small>
@@ -940,7 +944,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     <div className="finance-staff-summary-card">
       <small>尚待出款</small>
       <strong className={staffItems.length > 0 && staffRemainingTotal === 0 ? 'finance-paid' : ''}>
-        {staffItems.length === 0 ? '待確認' : staffRemainingTotal === 0 ? '已付齊' : money(staffRemainingTotal)}
+        {staffItems.length === 0 ? '待確認' : staffRemainingTotal === 0 ? (staffPaidTotal > 0 ? '已付齊' : '已結清') : money(staffRemainingTotal)}
       </strong>
     </div>
   </div>
@@ -1036,7 +1040,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                   {isFeeSettled ? (
                     <span className="finance-tag-imported" title="跨行轉帳 100 元以內手續費由收款方負擔並結清">手續費內扣結清</span>
                   ) : isSettled ? (
-                    <span className="finance-paid">出款已結清</span>
+                    <span className="finance-paid">{item.has_payment && item.actual_ntd > 0 ? '出款已結清' : '應付已結清'}</span>
                   ) : item.has_payment ? (
                     <span>{paymentArrangementPending ? '部分出款 · 付款安排待確認' : '部分出款'}</span>
                   ) : (

@@ -52,6 +52,12 @@ const accountingReasons: Record<string,string> = {
  historical_payroll_end_date_missing: '缺少已採納的歷史結束日，預計付款日待確認。',
  historical_payroll_obligation_not_established: '已有計薪來源，正式應付尚未建立。',
  historical_payroll_unique_assignment_required: '歷史月嫂指派歸屬待確認。',
+ historical_payroll_obligation_binding_conflict: '現有應付與歷史指派不一致，請核對原應付歸屬。',
+ historical_payroll_settled_source_required: '本案已帳務完成，請核對原應付及付款證據。',
+ historical_payroll_nonpositive_amount: '計薪結果須大於零，請核對服務與費率來源。',
+ historical_payroll_attribution_pending: '請在原歷史服務歸屬更正查核應付及付款證據。',
+ historical_payroll_baseline_preview_unmatched: '尚未查回對應指派的計薪試算。',
+ historical_service_not_completed: '歷史服務尚未完成，請在完工後查核正式應付。',
 };
 export function accountingReason(reason:string):string {
  return accountingReasons[reason] ?? `帳務來源待核對（${reason}）。`;

@@ -336,6 +336,7 @@ describe('精簡案件抽屜',()=>{
    const staffSummary=within(screen.getByLabelText('月嫂薪資匯總'));
    expect(staffSummary.getByText('月嫂薪資金額',{exact:true})).toBeVisible();
    expect(staffSummary.getByText(amount,{exact:true})).toBeVisible();
+   expect(staffSummary.getByText('薪資試算，尚未建帳')).toBeVisible();
    expect(staffSummary.getAllByText('待確認',{exact:true})).toHaveLength(2);
    expect(staffSummary.queryByText('已付齊')).not.toBeInTheDocument();
    expect(screen.getByText(/尚未建立月嫂應付明細/)).toBeVisible();
@@ -1375,6 +1376,30 @@ it('正常未付款只有待付，不以應付減已付顯示差額操作',async
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);const table=await screen.findByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'});
  expect(table).toHaveTextContent('待排程出款');expect(within(table).queryByRole('button',{name:'處置差額'})).not.toBeInTheDocument();
 });
+it('有逐人薪資試算時仍無正式應付，缺費率只標在受影響的人',async()=>{
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({
+  ...facts(), historical_stages:true, scheme:'waiting', staff_items:[],
+  staff_accounting_availability:[{
+   assignment_id:1,staff_id:7,party:'合成月嫂甲',obligation_identities:[],status:'not_established',
+   estimated_amount_ntd:48000,pending_reasons:['historical_payroll_funding_pending'],
+   estimated_self_pay_date:null,estimated_subsidy_date:null,
+  },{
+   assignment_id:2,staff_id:8,party:'合成月嫂乙',obligation_identities:[],status:'needs_review',
+   pending_reasons:['payroll_rate_policy_not_found'],estimated_self_pay_date:null,estimated_subsidy_date:null,
+  }],
+ });
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ const availability=within(await screen.findByRole('region',{name:'歷史月嫂應付依據'}));
+ expect(availability.getByText('合成月嫂甲').parentElement).toHaveTextContent('可建帳，尚未同步');
+ expect(availability.getByText('合成月嫂甲').parentElement).toHaveTextContent('薪資試算 NT$ 48,000，尚未建帳');
+ expect(availability.getByText('合成月嫂乙').parentElement).toHaveTextContent('缺少本人的有效計薪費率');
+ expect(availability.getByText('合成月嫂乙').parentElement).not.toHaveTextContent('NT$ 48,000');
+ const table=screen.getByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'});
+ expect(table).toHaveTextContent('尚未建立月嫂應付明細');
+ expect(table).not.toHaveTextContent('NT$ 48,000');
+ expect(table).not.toHaveTextContent('待排程出款');
+ expect(differenceResolutionClient.syncHistoricalBaseline).not.toHaveBeenCalled();
+});
 it('已建立應付但付款日與補助流向未定時顯示付款安排待確認，不推定為可排程出款',async()=>{
  vi.mocked(financeAccountingClient.query).mockResolvedValue({
   ...facts(),historical_stages:true,scheme:'waiting',subsidy_ntd:12000,customer_amount_ntd:48000,
@@ -1383,6 +1408,8 @@ it('已建立應付但付款日與補助流向未定時顯示付款安排待確�
  });
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
  const table=await screen.findByRole('region',{name:'月嫂薪資與核銷明細，可左右捲動'});
+ expect(table).toHaveTextContent('NT$ 48,000');
+ expect(table).toHaveTextContent('尚無已核銷出款');
  expect(table).toHaveTextContent('付款安排待確認');
  expect(table).not.toHaveTextContent('待排程出款');
  expect(screen.getByText('原正式應付缺少到期日，金額與付款紀錄保留。')).toBeVisible();

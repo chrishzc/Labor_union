@@ -31,8 +31,8 @@ from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersio
 from shared_kernel.money import MoneyNTD
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.cancellation_workflow import CancellationWorkflowError, CancellationWorkflowFacts, OrderCancellationApplyRequest, OrderCancellationWorkflow, OrderCancellationReceipt
-from subsystems.orders.terms_workflow import CommandClaimState, SchedulingReplacementResult
-from subsystems.payroll.terms_impact import PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
+from subsystems.orders.terms_workflow import CommandClaimState, PayrollImpactPersistenceCommand, SchedulingReplacementResult
+from subsystems.payroll.terms_impact import PayrollTermsActionKind, PayrollTermsSourceFacts, SourceAssignmentPayrollTerms
 
 
 class _UnitOfWork:
@@ -94,12 +94,17 @@ def test_cancellation_preview_apply_persists_canonical_cross_domain_chain():
     repository = _Repository(_facts())
     workflow = _workflow(repository)
     preview = workflow.preview("CASE-1", ())
+    assert repository.persisted == []
     receipt = workflow.apply(_request(preview))
     assert receipt.order_version == 5
     assert receipt.scheduling_version == 3
     assert receipt.client_finance_version == 6
     assert receipt.payroll_version == 4
     assert receipt.lifecycle_status is OrderLifecycleStatus.ESTABLISHED_UNSERVED
+    assert receipt.official_service_hours == 0
+    payroll, = (item for item in repository.persisted if isinstance(item, PayrollImpactPersistenceCommand))
+    assert payroll.candidate.payroll.total_payable == MoneyNTD(0)
+    assert all(action.action is not PayrollTermsActionKind.ESTABLISH for action in payroll.candidate.actions)
     assert repository.persisted[-1].stored_receipt.receipt == receipt
     order_update = repository.persisted[-2]
     assert order_update.actor == ActorContext("admin")

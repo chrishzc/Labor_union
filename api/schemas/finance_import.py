@@ -295,6 +295,7 @@ class StaffAccountingAvailabilityView(_StrictModel):
     estimated_self_pay_date: str | None = None
     estimated_subsidy_date: str | None = None
     recorded_due_date: str | None = None
+    estimated_amount_ntd: ExactNtd | None = None
 
 
 class CaseAccountingView(_StrictModel):

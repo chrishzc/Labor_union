@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
 import type { HistoricalPayableAuditItem } from '../../../../../../../api/accounts_payable/accounts_payable_query_schemas';
+import { financeAccountingClient, type CaseAccounting } from '../../../../../../../api/finance_import/finance_accounting_client';
 import { transport } from '../../../../../../../api/shared/transport';
 import { HistoricalPayableEditor, HistoricalPayableLookup } from '../../../../../../../components/HistoricalPayableReview';
 
@@ -11,6 +12,25 @@ const pending: HistoricalPayableAuditItem = {
   obligation_identity: null, current_event_id: null, amount_due_ntd: null, balance_ntd: null,
   order_due_date: null, effective_due_date: null, source: 'order_facts',
   disposition: 'date_not_formed', reason: '尚未建立月嫂應付帳務及付款日。',
+};
+const formalPayroll: CaseAccounting = {
+  case_no: pending.case_no, client_name: '合成客戶', pending_warning_count: 0,
+  receivable_ntd: null, received_ntd: null, payable_ntd: 48000, paid_ntd: 0,
+  client_items: [], transactions: [], warnings: [],
+  staff_items: [{
+    identity: 'original-42', direction: 'payable', label: '月嫂付款', party: '合成月嫂甲',
+    expected_ntd: 48000, actual_ntd: 0, has_payment: false, remaining_ntd: 48000,
+    version: '1', due_date: null,
+  }],
+  staff_accounting_availability: [{
+    assignment_id: 17, staff_id: 42, party: '合成月嫂甲', obligation_identities: ['original-42'],
+    status: 'formal', estimated_self_pay_date: null, estimated_subsidy_date: null,
+    pending_reasons: ['historical_payroll_funding_pending'],
+  }, {
+    assignment_id: 18, staff_id: 43, party: '合成月嫂乙', obligation_identities: [],
+    status: 'needs_review', estimated_self_pay_date: null, estimated_subsidy_date: null,
+    pending_reasons: ['payroll_rate_policy_not_found'],
+  }],
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -24,7 +44,11 @@ it('帶入同案及月嫂，同步後重新查核清冊', async () => {
       source: 'formal_obligation', disposition: 'selected_month', reason: '列入所選付款月份。',
     }]);
   const sync = vi.spyOn(accountsPayableQueryClient, 'synchronizeHistorical')
-    .mockResolvedValue({ case_no: pending.case_no, action: 'created' });
+    .mockResolvedValue({
+      case_no: pending.case_no, action: 'created', assignment_id: 17,
+      staff_id: 42, obligation_identity: 'original-42',
+    });
+  const readback = vi.spyOn(financeAccountingClient, 'query').mockResolvedValue(formalPayroll);
 
   function Workspace() {
     const [selected, setSelected] = useState<HistoricalPayableAuditItem>();
@@ -46,6 +70,7 @@ it('帶入同案及月嫂，同步後重新查核清冊', async () => {
   await waitFor(() => expect(sync).toHaveBeenCalledWith('CASE-OLD-1'));
   expect(await screen.findByText(/列入所選付款月份/)).toBeInTheDocument();
   expect(lookup).toHaveBeenCalledTimes(2);
+  expect(readback).toHaveBeenCalledWith('CASE-OLD-1');
 });
 
 it('已結清款項只顯示查核原因', () => {
@@ -74,27 +99,36 @@ it('顯示歷史歸屬更正的待核對原因，無成功回報或清冊重讀'
   expect(onSaved).not.toHaveBeenCalled();
 });
 
-it('建立正式應付但付款日仍未定時，顯示付款安排待確認並重查清冊', async () => {
+it.each([17, 99])('同步回執逐人讀回應付，驗證指派 %s 與另一人的缺項', async assignmentId => {
   vi.spyOn(transport, 'post').mockResolvedValue({
     success: true,
     data: {
       details: [{
         case_no: pending.case_no,
         action: 'created',
-        due_date: null,
-        payment_arrangement_pending: true,
-        pending_reason: 'historical_payroll_funding_pending',
-        detail: '月嫂付款來源與補助流向尚未確認，預計付款日與分期保留待確認。',
+        items: [{
+          action: 'created', assignment_id: assignmentId, staff_id: 42, obligation_identity: 'original-42',
+          due_date: null, payment_arrangement_pending: true, pending_reason: 'historical_payroll_funding_pending',
+        }, {
+          action: 'skipped', assignment_id: 18, staff_id: 43, reason: 'payroll_rate_policy_not_found',
+        }],
       }],
     },
   });
+  const query = vi.spyOn(financeAccountingClient, 'query').mockResolvedValue(formalPayroll);
   const onSaved = vi.fn();
   render(<HistoricalPayableEditor item={pending} onSaved={onSaved} />);
 
   fireEvent.click(screen.getByRole('button', { name: '同步月嫂應付' }));
 
   const status = await screen.findByRole('status');
-  expect(status).toHaveTextContent('已建立正式應付，付款安排或預計付款日待確認');
-  expect(status).toHaveTextContent('月嫂付款來源與補助流向尚未確認');
+  expect(query).toHaveBeenCalledWith(pending.case_no);
+  expect(status).toHaveTextContent('合成月嫂乙 · 請查核本案保存的月嫂時薪。');
+  if (assignmentId === 17) {
+    expect(status).toHaveTextContent('合成月嫂甲 · 正式應付 NT$ 48,000 · 付款安排待確認');
+  } else {
+    expect(status).toHaveTextContent('尚未查回對應指派的正式應付');
+    expect(status).not.toHaveTextContent('NT$ 48,000');
+  }
   expect(onSaved).toHaveBeenCalledOnce();
 });

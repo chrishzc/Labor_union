@@ -332,8 +332,9 @@ def test_subsidy_handoff_does_not_recursively_query_staff_availability(monkeypat
     assert configuration == [{"include_staff_availability": False}]
 
 
-def test_staff_availability_distinguishes_unestablished_payable_and_missing_rate_per_person():
+def test_staff_availability_distinguishes_unestablished_payable_and_missing_rate_per_person(monkeypatch):
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+    from subsystems.payroll import historical_baseline_obligation_sync
 
     connection = ReadOnlyConnection(
         _availability_root(day_event_id=23),
@@ -341,18 +342,28 @@ def test_staff_availability_distinguishes_unestablished_payable_and_missing_rate
                                                      staff_name="合成月嫂乙", hourly_rate_ntd=None)),
         (),
     )
+    def preview(connection_arg, case_no, *, dry_run=False):
+        assert connection_arg is connection and case_no == "CASE-1" and dry_run
+        return {"action": "created", "items": [
+            {"action": "created", "assignment_id": 17, "staff_id": 3, "amount_ntd": 12000},
+            {"action": "skipped", "assignment_id": 18, "staff_id": 4, "reason": "payroll_rate_policy_not_found"},
+        ]}
+    monkeypatch.setattr(historical_baseline_obligation_sync, "synchronize_historical_payroll", preview)
 
     result = query_case_staff_accounting_availability(connection, "CASE-1")
 
     assert result[0].status == "not_established"
-    assert result[0].pending_reasons == ("historical_payroll_obligation_not_established",)
+    assert result[0].estimated_amount_ntd == 12000
+    assert not result[0].pending_reasons
     assert result[1].status == "needs_review"
     assert result[1].pending_reasons == ("payroll_rate_policy_not_found",)
+    assert result[1].estimated_amount_ntd is None
     assert not result[0].obligation_identities
 
 
-def test_staff_availability_does_not_distribute_whole_case_service_between_ambiguous_assignments():
+def test_staff_availability_does_not_distribute_whole_case_service_between_ambiguous_assignments(monkeypatch):
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+    from subsystems.payroll import historical_baseline_obligation_sync
 
     connection = ReadOnlyConnection(
         _availability_root(),
@@ -360,11 +371,22 @@ def test_staff_availability_does_not_distribute_whole_case_service_between_ambig
         (),
     )
 
+    calls = []
+
+    def preview(connection_arg, case_no, *, dry_run=False):
+        calls.append((connection_arg, case_no, dry_run))
+        return {"action": "skipped", "items": [
+            {"action": "skipped", "assignment_id": 17, "staff_id": 3, "reason": "historical_payroll_service_basis_missing"},
+            {"action": "skipped", "assignment_id": 18, "staff_id": 4, "reason": "historical_payroll_service_basis_missing"},
+        ]}
+
+    monkeypatch.setattr(historical_baseline_obligation_sync, "synchronize_historical_payroll", preview)
     result = query_case_staff_accounting_availability(connection, "CASE-1")
 
+    assert calls == [(connection, "CASE-1", True)]
     assert len(result) == 2
     assert all(row.status == "needs_review" for row in result)
-    assert all("historical_payroll_service_attribution_missing" in row.pending_reasons for row in result)
+    assert all(row.pending_reasons == ("historical_payroll_service_basis_missing",) for row in result)
 
 
 def test_staff_availability_preserves_reopened_formal_dates_and_estimates_only_missing_funding_dates():
@@ -404,17 +426,37 @@ def test_staff_availability_retains_existing_payables_when_original_assignment_i
     assert result[0].pending_reasons == ("historical_payroll_assignment_source_missing",)
 
 
-def test_staff_availability_keeps_missing_end_date_distinct_from_missing_service_and_rates():
+@pytest.mark.parametrize("status", ["歷史訂單－服務完成", "歷史訂單－服務中", "歷史訂單－帳務完成"])
+def test_staff_availability_keeps_missing_end_date_distinct_from_missing_service_and_rates(monkeypatch, status):
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting_availability
+    from subsystems.payroll import historical_baseline_obligation_sync
 
     connection = ReadOnlyConnection(
-        _availability_root(actual_end_date=None), (_availability_source(source_end_date=None),), (),
+        _availability_root(status=status, actual_end_date=None),
+        (_availability_source(service_days=20, service_hours=Decimal("160"), source_end_date=None),), (),
     )
+    calls = []
 
+    def preview(connection_arg, case_no, *, dry_run=False):
+        calls.append((connection_arg, case_no, dry_run))
+        return {"action": "created", "assignment_id": 17, "staff_id": 3, "amount_ntd": 48000,
+                "pending_reason": "historical_payroll_end_date_missing"}
+
+    monkeypatch.setattr(historical_baseline_obligation_sync, "synchronize_historical_payroll", preview)
     result = query_case_staff_accounting_availability(connection, "CASE-1")
 
-    assert result[0].status == "needs_review"
-    assert result[0].pending_reasons == ("historical_payroll_end_date_missing",)
+    if status == "歷史訂單－服務完成":
+        assert calls == [(connection, "CASE-1", True)]
+        assert result[0].status == "not_established"
+        assert result[0].estimated_amount_ntd == 48000
+        assert result[0].pending_reasons == ("historical_payroll_end_date_missing",)
+    else:
+        assert calls == []
+        assert result[0].status == "needs_review"
+        assert result[0].estimated_amount_ntd is None
+        expected = ("historical_service_not_completed" if status == "歷史訂單－服務中"
+                    else "historical_payroll_settled_source_required")
+        assert result[0].pending_reasons == (expected,)
     assert result[0].estimated_self_pay_date is None
     assert result[0].estimated_subsidy_date is None
 
@@ -456,6 +498,9 @@ def test_unknown_payment_source_establishes_payable_without_due_date_or_installm
     dry_connection = ReadOnlyConnection(_ORDER, None, (_ASSIGNMENT,), (), ())
     dry_result = synchronize_historical_payroll(dry_connection, "CASE-1", dry_run=True)
     assert dry_result["action"] == "created"
+    assert dry_result["assignment_id"] == 17
+    assert dry_result["staff_id"] == 3
+    assert dry_result["obligation_identity"] == "staff-obligation:assignment:17"
     assert dry_result["amount_ntd"] == 12000
     assert dry_result["due_date"] is None
     assert dry_result["payment_arrangement_pending"] is True
@@ -493,15 +538,21 @@ def test_unknown_payment_source_establishes_payable_without_due_date_or_installm
     assert rerun["action"] == "skipped"
     assert rerun["reason"] == "already_synced"
     assert rerun["payment_arrangement_pending"] is True
+    assert {field: rerun[field] for field in (
+        "assignment_id", "staff_id", "obligation_identity", "amount_ntd", "due_date",
+    )} == {field: created[field] for field in (
+        "assignment_id", "staff_id", "obligation_identity", "amount_ntd", "due_date",
+    )}
     assert len(actions) == 1
 
 
-def test_missing_end_date_establishes_payable_without_fabricating_due_date(monkeypatch):
+@pytest.mark.parametrize("case_end", [None, date(2026, 11, 30)])
+def test_missing_person_end_date_establishes_payable_without_fabricating_due_date(monkeypatch, case_end):
     class RecordingConnection(ReadOnlyConnection):
         def execute(self, sql, params):
             self.selects.append((sql, params))
 
-    no_end_order = {**_ORDER, "actual_end_date": None}
+    no_end_order = {**_ORDER, "actual_end_date": case_end}
     no_end_assignment = {**_ASSIGNMENT, "source_end_date": None}
     actions = []
     monkeypatch.setattr(
@@ -520,14 +571,19 @@ def test_missing_end_date_establishes_payable_without_fabricating_due_date(monke
     assert all("UPDATE orders SET staff_payment_due_date" not in sql for sql, _ in connection.selects)
 
 
-def test_multi_caregiver_sync_creates_only_verifiable_assignment_without_copying_case_totals(monkeypatch):
+@pytest.mark.parametrize(("days", "rate", "blocker"), [
+    (0, 300, "historical_payroll_service_basis_missing"),
+    (5, None, "payroll_rate_policy_not_found"),
+    (5, 450, "payroll_rate_policy_not_found"),
+])
+def test_multi_caregiver_sync_creates_only_verifiable_assignment_without_copying_case_totals(monkeypatch, days, rate, blocker):
     class RecordingConnection(ReadOnlyConnection):
         def execute(self, sql, params):
             self.selects.append((sql, params))
 
     case_order = {**_ORDER, "service_days": 20}
     caregiver_a = {**_ASSIGNMENT, "id": 17, "staff_id": 3, "schedule_service_days": 8, "hourly_rate_ntd": 300}
-    caregiver_b = {**_ASSIGNMENT, "id": 18, "staff_id": 4, "schedule_service_days": 0, "hourly_rate_ntd": 300}
+    caregiver_b = {**_ASSIGNMENT, "id": 18, "staff_id": 4, "schedule_service_days": days, "hourly_rate_ntd": rate}
     caregiver_c = {**_ASSIGNMENT, "id": 19, "staff_id": 5, "schedule_service_days": 6, "hourly_rate_ntd": 300}
     paid_c = {
         "obligation_identity": "staff-obligation:assignment:19", "assignment_id": 19, "staff_id": 5,
@@ -551,11 +607,15 @@ def test_multi_caregiver_sync_creates_only_verifiable_assignment_without_copying
         dry_run=True,
     )
     assert dry["action"] == "created"
+    assert dry["reason"] == blocker
+    assert "其餘仍待查核" in dry["detail"]
     assert [(item["staff_id"], item["action"], item.get("amount_ntd"), item.get("reason")) for item in dry["items"]] == [
         (3, "created", 19200, None),
-        (4, "skipped", None, "historical_payroll_service_basis_missing"),
-        (5, "skipped", None, "already_synced"),
+        (4, "skipped", None, blocker),
+        (5, "skipped", 14400, "already_synced"),
     ]
+    assert dry["items"][2]["obligation_identity"] == paid_c["obligation_identity"]
+    assert dry["items"][2]["due_date"] == "2026-12-15"
     assert not actions
 
     applied = synchronize_historical_payroll(
@@ -571,11 +631,46 @@ def test_multi_caregiver_sync_creates_only_verifiable_assignment_without_copying
     assert actions[0].due_date is None
 
 
+def test_multi_caregiver_sync_allocates_prorated_floor_fee_without_a_probe_rate(monkeypatch):
+    order = {**_ORDER, "service_days": 20, "floor_fee": 3000}
+    caregiver_a = {**_ASSIGNMENT, "id": 17, "staff_id": 3, "schedule_service_days": 8}
+    caregiver_b = {**_ASSIGNMENT, "id": 18, "staff_id": 4, "schedule_service_days": 4}
+    monkeypatch.setattr(
+        "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
+        lambda *_, payroll_candidate_total: SubsidyPayableHandoff("unknown", False, True, 12000, False),
+    )
+
+    result = synchronize_historical_payroll(
+        ReadOnlyConnection(order, None, (caregiver_a, caregiver_b), (), ()),
+        "CASE-MULTI-FLOOR", dry_run=True,
+    )
+
+    assert result["action"] == "created"
+    assert [(item["assignment_id"], item["amount_ntd"], item["due_date"]) for item in result["items"]] == [
+        (17, 20400, None),
+        (18, 10200, None),
+    ]
+
+
+def test_malformed_service_hours_are_reported_without_writing_payroll():
+    order = {**_ORDER, "service_hours_per_day": Decimal("8.1")}
+    connection = ReadOnlyConnection(order, None, (_ASSIGNMENT,), ())
+
+    result = synchronize_historical_payroll(connection, "CASE-1")
+
+    assert result["action"] == "skipped"
+    assert result["reason"] == "historical_payroll_service_basis_missing"
+
+
+_ATTRIBUTED_PAYABLE = {"assignment_id": 17, "staff_id": 3, "obligation_identity": "attributed-17"}
+_ATTRIBUTED_PERSON_MISSING_PAYABLE = {"assignment_id": 18, "staff_id": 4, "obligation_identity": None}
+
+
 @pytest.mark.parametrize("pending_count,payables,expected_reason", [
     (1, (), "historical_payroll_attribution_pending"),
     (None, (), "historical_payroll_attribution_pending"),
-    (None, ({"has_verified_obligation": 1}, {"has_verified_obligation": 0}), "historical_payroll_attribution_pending"),
-    (None, ({"has_verified_obligation": 1}, {"has_verified_obligation": 1}), "already_synced"),
+    (None, (_ATTRIBUTED_PAYABLE, _ATTRIBUTED_PERSON_MISSING_PAYABLE), "historical_payroll_attribution_pending"),
+    (None, (_ATTRIBUTED_PAYABLE,), "already_synced"),
 ])
 def test_attribution_requires_current_formal_payables(pending_count, payables, expected_reason):
     connection = ReadOnlyConnection(_ORDER, {"event_id": 41, "pending_count": pending_count}, payables)
@@ -588,6 +683,12 @@ def test_attribution_requires_current_formal_payables(pending_count, payables, e
         assert "原付款證據" in result["detail"]
     else:
         assert connection.selects[-1][1] == ("CASE-1", 41)
+        assert [(item["assignment_id"], item["staff_id"], item["obligation_identity"], item["reason"])
+                for item in result["items"]] == [
+            (row["assignment_id"], row["staff_id"], row["obligation_identity"],
+             "already_synced" if row["obligation_identity"] else "historical_payroll_attribution_pending")
+            for row in payables
+        ]
 
 
 @pytest.mark.parametrize("has_payment,has_installments,formed,expected_reason", [
@@ -635,7 +736,8 @@ def test_missing_date_uses_effective_amount_without_rewriting_original_amount(mo
     )
 
     assert synchronize_historical_payroll(connection, "CASE-1", dry_run=dry_run) == {
-        "action": "updated", "staff_id": 3, "amount_ntd": 14000, "due_date": "2026-12-15",
+        "action": "updated", "assignment_id": 17, "staff_id": 3, "obligation_identity": _UNPAID["obligation_identity"],
+        "amount_ntd": 14000, "due_date": "2026-12-15",
     }
     if dry_run:
         assert not actions and not installments

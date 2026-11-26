@@ -81,19 +81,9 @@ def build_historical_case_payroll_candidate(
         if adjustment.assignment_identity not in adjustment_totals:
             raise ValueError("payroll_adjustment_assignment_not_effective")
         adjustment_totals[adjustment.assignment_identity] += adjustment.amount
-    total_days = sum(item.actual_service_days for item in service_facts)
-    floor_fee = prorate_historical_floor_fee(
-        terms.floor_fee,
-        terms.contracted_service_days,
-        total_days,
+    floor_fee, floor_allocations = allocate_historical_floor_fee(
+        service_facts, terms.contracted_service_days, terms.floor_fee,
     )
-    ordered = sorted(service_facts, key=lambda item: assignment_floor_fee_order(item.assignment_identity))
-    width = len(str(len(ordered)))
-    indexed = tuple((str(index).zfill(width), item) for index, item in enumerate(ordered))
-    allocated = allocate_largest_remainder(
-        floor_fee, {key: item.actual_service_days for key, item in indexed},
-    )
-    floor_allocations = {item.assignment_identity: allocated[key] for key, item in indexed}
     assignments = tuple(
         _assignment_candidate(
             item,
@@ -134,6 +124,23 @@ def build_historical_case_payroll_candidate(
         total_payable=MoneyNTD(sum(item.total_payable.amount for item in assignments)),
         fingerprint=fingerprint_payload(payload),
     )
+
+
+def allocate_historical_floor_fee(
+    service_facts: tuple[HistoricalAssignmentServiceFacts, ...],
+    contracted_service_days: int,
+    floor_fee: MoneyNTD,
+) -> tuple[MoneyNTD, dict[str, MoneyNTD]]:
+    earned = prorate_historical_floor_fee(
+        floor_fee, contracted_service_days, sum(item.actual_service_days for item in service_facts),
+    )
+    ordered = sorted(service_facts, key=lambda item: assignment_floor_fee_order(item.assignment_identity))
+    width = len(str(len(ordered)))
+    indexed = {str(index).zfill(width): item for index, item in enumerate(ordered)}
+    allocated = allocate_largest_remainder(
+        earned, {key: item.actual_service_days for key, item in indexed.items()},
+    )
+    return earned, {item.assignment_identity: allocated[key] for key, item in indexed.items()}
 
 
 def _assignment_candidate(
