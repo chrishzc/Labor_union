@@ -83,7 +83,7 @@ function financeErrorMessage(error: unknown, fallback: string): string {
   if (status >= 500 || code.includes('unavailable') || code.includes('network') || code.includes('timeout')) {
     return '服務暫時無法使用，請稍後再試。';
   }
-  if (code.includes('file_type')) return '檔案格式不符，請選擇 .xlsx 銀行交易明細工作簿。';
+  if (code.includes('file_type')) return '檔案格式不符，請選擇 .xlsx 或 .xls 銀行交易明細工作簿。';
   if (code.includes('file_empty')) return '選擇的工作簿沒有內容，請重新選擇檔案。';
   if (code.includes('file_too_large')) return '選擇的工作簿超過允許大小，請改用較小的檔案。';
   if (code.includes('file_changed')) return '工作簿內容已變更，請重新選擇並上傳。';
@@ -279,7 +279,7 @@ export const FinancePage: React.FC = () => {
 
   const ingestWorkbook = async (original?: IngestionCommand) => {
     if (importBusy || (unconfirmedIngestion && !original)) return;
-    if (financeWorkbook === null) { setIngestion({ kind: 'error', message: '請先選擇 .xlsx 銀行交易明細工作簿。' }); return; }
+    if (financeWorkbook === null) { setIngestion({ kind: 'error', message: '請先選擇 .xlsx 或 .xls 銀行交易明細工作簿。' }); return; }
     setImportBusy(true);
     setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     setIngestionRecordMissing(false);
