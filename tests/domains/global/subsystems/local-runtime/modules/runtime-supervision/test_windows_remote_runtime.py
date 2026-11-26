@@ -17,11 +17,12 @@ from scripts import windows_remote_runtime as remote
 
 
 @pytest.fixture
-def artifact(tmp_path):
+def artifact(tmp_path, request):
+    prefix = getattr(request, 'param', '/test')
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'index.html').write_text(
-        '<div id="root"></div><script src="/test/app.js"></script>', encoding='utf-8',
+        f'<div id="root"></div><script src="{prefix}/app.js"></script>', encoding='utf-8',
     )
     (source / 'app.js').write_text('console.log("remote")', encoding='utf-8')
     output = tmp_path / 'artifact'
@@ -331,18 +332,19 @@ def test_root_setup_preserves_validated_origin_and_replaces_forwarded_input(arti
     assert 'x-forwarded-host' not in calls[0].headers
 
 
+@pytest.mark.parametrize('artifact', ['/admin'], indirect=True)
 def test_admin_cutover_redirects_old_page_but_keeps_api_methods_and_body(artifact):
     requests: list[tuple[str, str, bytes, bytes]] = []
 
     def api(request: httpx.Request) -> httpx.Response:
         if request.url.path == '/api/v1/admin/auth/me':
-            return httpx.Response(401)
+            return httpx.Response(401, stream=httpx.ByteStream(b''))
         requests.append((request.method, request.url.path, request.url.query, request.read()))
-        return httpx.Response(202)
+        return httpx.Response(202, stream=httpx.ByteStream(b''))
 
     app = remote.create_gateway(artifact, prefix='/admin', transport=httpx.MockTransport(api))
     with TestClient(app, base_url='https://chrishzc.com') as client:
-        assert '<div id="root"></div>' in client.get('/admin/').text
+        assert '<script src="/admin/app.js"></script>' in client.get('/admin/').text
         assert client.get('/admin/app.js').status_code == 200
         prior_page = client.get('/test/?tab=orders', follow_redirects=False)
         assert prior_page.status_code == 307
