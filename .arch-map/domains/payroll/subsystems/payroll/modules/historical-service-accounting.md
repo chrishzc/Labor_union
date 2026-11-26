@@ -11,7 +11,9 @@
 ## Implementation
 - `domains/payroll/historical_calculation.py` — 候選要求服務事實與費率快照逐筆對應，快照缺漏、重複或多出時拒絕。
 - `subsystems/payroll/historical_baseline_obligation_sync.py` — historical source synchronization in the caller's transaction；拆開正式應付建立與資金分期／預計付款日形成（`HistoricalFundingSchedule`）。單人與多人歷史完工案按已採納指派逐筆評估：可證實服務量與費率且無衝突者先建立正式應付（`due_date` 與分期未確認時保留 `None` 及具體原因，不填假日期、不預設補助為零），資料不足或已有原帳／衝突者保留待查或原狀；後續補齊付款日時由 `infrastructure/mysql/payroll_rebuild_repository.py::_set_historical_missing_due_date` 沿既有應付識別與版本更新日期，不改寫應付金額。
-- `api/routes/accounting_differences.py`、`scripts/sync_historical_staff_obligations.py` — existing historical synchronization entry points.
+- `api/routes/accounting_differences.py`：管理員在應付清冊「查未列入原因」→「查核歷史月嫂款」選擇案件後，若處理面板提供「同步月嫂應付」，由 `POST /api/v1/orders/{case_no}/payroll/sync-historical-baseline-obligations` 觸發正式建帳；打開帳務頁或查核結果不寫入。既有維運入口為 `scripts/sync_historical_staff_obligations.py`。
+  - `created` 是首次建立；`updated` 是已存在且可更新；`skipped` 要看原因，不能當成已入帳。若已有正式服務歸屬更正，基準同步只讀回該更正應付與待核對，不從早期採納資料另外建帳；若歷史帳務完成卻沒有原應付，也不由基準同步補造。
+  - 「已有計薪來源，正式應付尚未建立」是唯讀判定，不表示正式同步已執行。缺付款日或補助資金分期時，按實際建帳回執區分「尚未建立」與「已建立、付款安排待確認」。
 - `infrastructure/mysql/historical_service_accounting_repository.py` — reads calculation inputs and persists the Orders comparison snapshot.
 - `infrastructure/mysql/case_staff_accounting_repository.py::query_case_staff_accounting_availability` — 逐人唯讀查核正式應付、原日期與歷史計薪來源（含已採納指派與 `staff_schedule` 出席日數），分開呈現已建帳缺日期、來源齊全尚未建立及具體缺項。既有應付不因他人缺件消失，無逐日班表不構成單人歷史計薪缺項；查詢不呼叫同步 writer。
   - 預計付款日須有適用該應付的唯一、可證實服務結束日及資金來源。採納或服務量投影的指派來源缺失／歧義時，不以整案結束日補推日期；保留正式金額、原到期日與原已保存付款日期，並按人回傳具體缺項。唯一來源的正例僅補原缺席的唯讀預計日，不改已形成日期。
