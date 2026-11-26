@@ -41,6 +41,15 @@
 - `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §6
 - `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` §3
 
+- [17A LINE Gateway §5](../../../../../requirements/17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)
+
+### 發布讀回及換版契約
+
+- 後台沿用一次點擊與內部 Preview／Queue。以 `api/routes/line_rich_menus.py` 的 `GET /api/v1/line/rich-menus/publications/{publication_id}` 作為工作結果入口；稿件版本仍由 draft Query 管理。兩個查詢不可互相替代。由既有選單與版本資訊找回同一個工作，不恢復完整歷史頁，也不拿舊草稿鎖藏住本次失敗。顯示已確認步驟與安全錯誤碼，不顯示金鑰、原始授權內容或使用者識別。
+- `subsystems/line/rich_menu_definition.py` 負責把草稿的 `rich_menu_alias_id` 轉成 LINE 的 `richMenuAliasId`，保留 `data`，並沿用草稿檢查的目標對象限制。預檢使用同一份實際 LINE payload；LINE 的選用驗證可用於隔離診斷，不將新外部檢查變成儲存草稿的前置條件。
+- 保留 worker 的建立→上圖→別名→預設分步回執。別名不存在才用 Create；讀回是本次 ID 就不再寫；比對同選單上一版正式 ID 才用 Update 並讀回。讀回為第三個 ID、缺比對依據或回讀不可靠時停下核對。LINE 沒有提供條件式別名更新，本地應避免同一別名並行換版，不把先查再改當成能防所有外部競爭。通訊結果不明先回讀，不重做已確認的建立、圖片上傳或別名操作。
+- 依 [LINE 預設選單](https://developers.line.biz/en/docs/messaging-api/using-rich-menus/)、[分頁切換](https://developers.line.biz/en/docs/messaging-api/switch-rich-menus/)及[更新別名](https://developers.line.biz/en/reference/messaging-api/#update-rich-menu-alias)。新版啟用與角色綁定分開讀回；失敗不主動刪除或解除前一版。
+
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_backup.py`
@@ -61,4 +70,4 @@
 ## Change triggers
 Reconcile when role menu draft editability, publication state gating, Preview／Apply／Queue flow, management presentation or focused verification paths change.
 
-Management presentation opens the editor directly, with 發布 beside the common draft save action and one-click publication; the Drawer tracks queued status without another confirmation; publication history has no UI entry or list query. Appearance and button fields share one in-memory definition; button names are edited only in the button editor. The common save action verifies a fresh server Query after Apply. Queued publication status and retryable failures remain in the publication Drawer.
+Management presentation opens the editor directly, with 發布 beside the common draft save action and one-click publication; the Drawer is the entry for current-version publication readback, without another confirmation or a history list. Appearance and button fields share one in-memory definition; button names are edited only in the button editor. The common save action verifies a fresh server Query after Apply. Queued publication status and retryable failures remain in the publication Drawer.
