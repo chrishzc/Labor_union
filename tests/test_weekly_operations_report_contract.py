@@ -714,7 +714,8 @@ def test_weekly_subsidy_established_unserved_increases_count_not_amount_in_json_
     sheet = load_workbook(BytesIO(export.content), data_only=True)["補助案件統計表"]
     rows = [row for row in sheet.values if row[1] == "115000099"]
     assert len(rows) == 1
-    assert (rows[0][7], rows[0][8], rows[0][10], rows[0][12]) == (0, 0, 0, "成立後未服務")
+    assert row["reconciliation_status"] == "成立後未服務"
+    assert (rows[0][7], rows[0][8], rows[0][10], rows[0][12]) == (0, 0, 0, "結案")
 
 
 def test_weekly_export_appends_current_application_year_quarter_amount_summary():

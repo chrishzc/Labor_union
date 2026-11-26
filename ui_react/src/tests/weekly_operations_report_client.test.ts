@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
+import { adaptWeeklyOperationsReport } from '../adapters/reports/weekly_operations_report_adapter';
 import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operations_report_export_client';
 import { weeklyReportMetricsClient } from '../api/reports/weekly_report_metrics_client';
 import { WeeklyOperationsSubsidyRowSchema } from '../api/reports/weekly_operations_report_schemas';
@@ -24,7 +25,15 @@ it('accepts terminal unserved zero subsidy in weekly statistics only', () => {
     ...baseline, reconciliation_status: '成立後未服務',
     subsidy_hours: '0', subsidy_days: '0.00', service_days: 0, subsidy_amount_ntd: 0, unit_price_ntd: 0,
   };
-  expect(WeeklyOperationsSubsidyRowSchema.safeParse(row).success).toBe(true);
+  const accepted = WeeklyOperationsSubsidyRowSchema.parse(row);
+  const view = adaptWeeklyOperationsReport({
+    ...WEEKLY_OPERATIONS_REPORT,
+    subsidy_partitions: WEEKLY_OPERATIONS_REPORT.subsidy_partitions.map((partition, index) => index === 0
+      ? { ...partition, rows: [accepted] }
+      : partition),
+  });
+  expect(view.subsidy.partitions[0].rows[0].reconciliationStatus).toBe('結案');
+  expect(accepted.reconciliation_status).toBe('成立後未服務');
   expect(WeeklyOperationsSubsidyRowSchema.safeParse({ ...row, reconciliation_status: '結案' }).success).toBe(false);
   expect(WeeklyOperationsSubsidyRowSchema.safeParse({ ...row, subsidy_amount_ntd: 300 }).success).toBe(false);
   expect(SubsidyReportRowSchema.shape.subsidy_hours.safeParse(row.subsidy_hours).success).toBe(false);
