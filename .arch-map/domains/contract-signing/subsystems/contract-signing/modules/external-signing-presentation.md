@@ -89,14 +89,14 @@
 - 規格 #21 §3.3 的「記錄已送交」只留下交接回執；不代表拿到已簽 PDF 或 Orders 完約。§3.4 的直接歸檔不要求交接回執或 session；操作人確認簽名及內容，系統檢查檔案、案件與當前目標，不以 PDF 格式驗證代替簽名查核。
 - 前端用案件的 `GET /api/v1/orders/{case_no}/contract-external-signing/signed-archive` 取得當前 `staff_segments` 與既有 `files`（未歸檔為 `null`）。同一路徑的 POST 接收客戶 PDF `client`，每份月嫂 PDF `staff` 必須對應同位置的 `staff_segment_ids`；後端以 segment ID 重核當前目標，不以月嫂姓名或檔名配對。若沒有可列出的月嫂分段，只需客戶 PDF；若有分段卻缺一份，拒絕整批。
 - **直接歸檔接線**：POST 使用 `multipart/form-data`；`client` 恰一份，每位月嫂各附一個 `staff_segment_ids` 整數與一個 `staff` 檔案，對齊重複欄位的順序。送 `Idempotency-Key` 和 `X-Correlation-ID` header。每份須為 `.pdf`、MIME `application/pdf`、`%PDF-` 檔頭且不超過 20 MiB；這不驗內容是否有簽名。GET 正式讀回 `data.staff_segments` 與 `data.files`；POST 成功回 `data.files`。每項檔案帶 `target`（`client` 或 `staff:{segment_id}`）、`filename`、`file_id`。
-- **錯誤與未知結果**：檔案／分段欄位數不符、檔案類型不符或超限是 422 `contract_external_signing_input_invalid`；缺漏、重複或非目前案件的必要目標在 owner 查驗回 409 `final_signed_contract_documents_incomplete`。同鍵異指紋回 409 `contract_signature_idempotency_conflict`。回應遺失優先查同案已歸檔結果；若要重送，沿用同一人、同案、原 key 和完全相同的檔案。未讀回、已選檔或本機試算不顯示完約。
+- **錯誤與未知結果**：檔案／分段欄位數不符、檔案類型不符或超限是 422 `contract_external_signing_input_invalid`；缺漏、重複或非目前案件的必要目標在 owner 查驗回 409 `final_signed_contract_documents_incomplete`。同鍵異指紋回 409 `contract_signature_idempotency_conflict`。同頁逾時後如以「重新確認歸檔結果」重送，沿用同一人、同案、原 key 和完全相同的檔案。未讀回、已選檔或本機試算不顯示完約。
 - Contract Signing 依 `subsystems/contract_signing/final_document_workflow.py` 交 Controlled File 納管，並在同一交易記錄 Orders 完約與歸檔回執。成功回執可讀各目標的檔名及檔案識別；同一請求重送回原結果，不再完約一次。歸檔失敗不能標完約；已有的完約事實不因重送而覆寫。排班、訂金與帳務仍由各自的規格判定。
 
 ### 前端接手與驗收邊界
 
 在案件「回收簽署文件」使用 `ContractExternalSigningActions`。首次進入由 GET 讀回目標與既有檔案，依當前分段列出獨立上傳欄位；少任何必要檔案時「儲存簽署文件」不可送出。送出中顯示歸檔處理，成功回應有正式檔案才顯示「簽約已完成」及檔名，再通知案件重新讀取。不要把送交已記錄、暫存或異常回應當作成功。
 
-**現況與上文設計的差異**：現在的「重新確認歸檔結果」在同次頁面逾時後直接以保留的原檔和原識別重送 POST，並未如上文設計先 GET。重開頁面才會走初始 GET。既有測試驗了同鍵重送，不是先讀回；不能把這項視為已符合 GET 優先。若依此設計驗收，設計例：首筆 POST 回應遺失，GET 若已讀回同一組歸檔結果，不再送 POST；只靠同檔名不能辨識是否是本次操作。若未能確認原結果，只能沿原檔及原鍵核對。這次文件不修改前端。
+**現行逾時處理**：在同一頁按「重新確認歸檔結果」會用保留的原檔與原操作識別重送 POST；重開頁面才走初始 GET。既有測試覆蓋同鍵重送。先唯讀查核的後續設計見 [#439 DS-01](https://github.com/chrishzc/Labor_union/pull/439)。
 
 ## Verification
 - 前端現況覆蓋：`contract_external_signing_actions.test.tsx` 的 `archives directly with no session, handoff, unsigned version, or ready scheduling` 與 `retains the files and reuses the same archive command after a timeout` 確認操作、回條與同命令重送；不是正式環境瀏覽器或 GET 優先驗收。
