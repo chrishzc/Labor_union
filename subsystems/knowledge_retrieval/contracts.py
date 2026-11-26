@@ -18,6 +18,7 @@ class IngestKnowledgeSourceCommand:
     actor: ActorContext
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+    expected_version: ExpectedVersion | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from api.routes import line_service_help
+from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
 
 
 PAGE_PATH = Path(__file__).resolve().parents[6] / "line" / "static" / "service_help.html"
@@ -96,31 +97,17 @@ def test_unexpected_semantic_exception_does_not_become_unsupported() -> None:
     assert "provider raw detail" not in error.detail["error"]["message"]
 
 
-def test_faq_repository_failure_is_not_a_successful_empty_catalog(monkeypatch) -> None:
-    monkeypatch.setattr(
-        line_service_help,
-        "open_knowledge_retrieval_unit_of_work",
-        lambda: _FailingKnowledgeUnitOfWork(),
-    )
+def test_faq_repository_failure_is_not_a_successful_empty_catalog() -> None:
+    catalog = PublishedFaqCatalog(_FailingKnowledgeUnitOfWork)
+    layout = SimpleNamespace(category_names=lambda: {})
 
     with pytest.raises(HTTPException) as caught:
-        line_service_help.get_published_faqs()
+        line_service_help.get_published_faqs(catalog, layout)
 
     error = caught.value
     assert error.status_code == 503
     assert error.detail["error"]["code"] == "knowledge_catalog_unavailable"
     assert error.detail["error"]["retryable"] is True
-
-
-def test_liff_distinguishes_unsupported_from_runtime_and_malformed_failures() -> None:
-    source = PAGE_PATH.read_text(encoding="utf-8")
-
-    assert "if (!response.ok || !result?.data" in source
-    assert "!Array.isArray(result.data.items)" in source
-    assert "result.data.outcome === 'unsupported'" in source
-    assert "系統目前無法完成知識庫查詢" in source
-    assert "問答服務暫時無法使用" in source
-    assert "result.data?.suggestion ||" not in source
 
 
 _FAQ_UI_REGRESSION = r"""
@@ -169,62 +156,67 @@ class Element {
 }
 
 const elements = Object.fromEntries(
-  ['faqList', 'faqSearchInput', 'categoriesBar'].map(id => [id, new Element('div')])
+  ['tabFaq', 'tabAi', 'faqTabLink', 'aiTabLink', 'faqStatus', 'faqRetry', 'faqContent']
+    .map(id => [id, new Element('div')])
 );
+elements.faqRetry.addEventListener = () => {};
+elements.aiTabLink.setAttribute = () => {};
 const document = {
   getElementById: id => elements[id],
   createElement: tag => new Element(tag),
-  querySelectorAll: selector => Object.values(elements).flatMap(node => node.querySelectorAll(selector))
+  createDocumentFragment: () => new Element('fragment')
 };
 const response = (ok, data) => ({ok, json: async () => ({data})});
-const context = vm.createContext({document, window: {}, console: {error() {}}});
+const window = {location: {href: 'https://example.invalid/prefix/line-service-help?tab=ai', search: '?tab=ai'}};
+const context = vm.createContext({document, window, URL, URLSearchParams, console});
 vm.runInContext(source, context, {timeout: 1000});
 
 async function main() {
-  elements.faqSearchInput.value = '服務';
-  const item = {
-    question: '服務問題', answer: '核准回答', tag: '服務',
-    category: '服務', source_ref: '正式來源'
+  const rows = Array.from({length: 101}, (_, i) => ({
+    qa_id: 'faq-' + i, question: '服務問題 ' + i, answer: '核准回答 ' + i,
+    category: '服務', category_id: 'service',
+  }));
+  const seen = [];
+  context.fetch = async url => {
+    assert.equal(url.pathname, '/prefix/api/v1/line/service-help/faq');
+    const cursor = url.searchParams.get('cursor');
+    seen.push(cursor);
+    if (scenario === 'empty') return response(true, {items: [], next_cursor: null});
+    if (cursor === null) return response(true, {items: rows.slice(0, 50), next_cursor: 'faq-49'});
+    if (scenario === 'http503') return response(false, null);
+    if (scenario === 'loop') return response(true, {items: rows.slice(50, 100), next_cursor: 'faq-49'});
+    if (cursor === 'faq-49') return response(true, {items: rows.slice(50, 100), next_cursor: 'faq-99'});
+    return response(true, {items: rows.slice(100), next_cursor: null});
   };
 
+  await context.loadFaq();
   if (scenario === 'empty') {
-    context.fetch = async () => response(true, {items: [], categories: []});
-    await context.loadFaqs();
-    context.filterFaqs();
-    assert.match(elements.faqList.textContent, /查無相符問題/);
-    assert.equal(elements.faqSearchInput.disabled, false);
+    assert.match(elements.faqStatus.textContent, /目前沒有已發布/);
+    assert.equal(elements.faqRetry.hidden, true);
+    return;
+  }
+  if (scenario !== 'all-pages') {
+    assert.match(elements.faqStatus.textContent, /載入失敗/);
+    assert.equal(elements.faqRetry.hidden, false);
+    assert.equal(elements.faqContent.children.length, 0);
+    context.fetch = async () => response(true, {items: rows.slice(-1), next_cursor: null});
+    await context.loadFaq();
+    assert.match(elements.faqContent.textContent, /核准回答 100/);
     return;
   }
 
-  if (scenario === 'stale') {
-    context.fetch = async () => response(true, {items: [item], categories: ['服務']});
-    await context.loadFaqs();
-    assert.match(elements.faqList.textContent, /核准回答/);
-  }
-
-  context.fetch = async () => response(false, null);
-  await context.loadFaqs();
-  const unavailable = elements.faqList.textContent;
-  assert.match(unavailable, /服務暫時無法使用/);
-  assert.equal(elements.faqSearchInput.disabled, true);
-
-  context.filterFaqs();
-  context.selectCategory('服務', new Element('div'));
-  assert.equal(elements.faqList.textContent, unavailable);
-
-  context.fetch = async () => response(true, {items: [item], categories: ['服務']});
-  await context.loadFaqs();
-  context.filterFaqs();
-  assert.match(elements.faqList.textContent, /核准回答/);
-  assert.equal(elements.faqSearchInput.disabled, false);
+  assert.deepEqual(seen, [null, 'faq-49', 'faq-99']);
+  assert.equal(elements.faqContent.querySelectorAll('details').length, 101);
+  assert.match(elements.faqContent.textContent, /核准回答 100/);
+  assert.equal(elements.faqRetry.hidden, true);
 }
 
 main().catch(error => {console.error(error); process.exitCode = 1;});
 """
 
 
-@pytest.mark.parametrize("scenario", ["http503", "stale", "empty"])
-def test_faq_failure_state_cannot_be_replaced_by_normal_filtering(scenario: str) -> None:
+@pytest.mark.parametrize("scenario", ["all-pages", "http503", "loop", "empty"])
+def test_faq_03_web_reads_every_page_and_preserves_load_errors(scenario: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is required for the FAQ JavaScript regression")

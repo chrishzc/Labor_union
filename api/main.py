@@ -80,6 +80,7 @@ from api.routes import (
     line_onboarding,
     line_ai_events,
     line_feedback,
+    line_faq_layout,
     line_identity,
     line_service_help,
     line_staff_self_service,
@@ -315,6 +316,8 @@ app.include_router(line_deposit_payment.router)
 app.include_router(line_deposit_payment.page_router)
 app.include_router(line_service_help.public_router)
 app.include_router(line_service_help.page_router)
+app.include_router(line_faq_layout.router)
+app.include_router(line_faq_layout.knowledge_router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

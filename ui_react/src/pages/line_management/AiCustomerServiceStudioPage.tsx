@@ -6,12 +6,13 @@ import { ManagementPageHeader } from '../../components/ManagementPageHeader';
 import React, { useState } from 'react';
 import { useUnsavedNavigation } from '../../components/UnsavedChanges';
 import { Bot, BookOpenText, FlaskConical, KeyRound, MessageSquareHeart } from 'lucide-react';
+import { FaqChatLayoutPanel } from './FaqChatLayoutPanel';
 import { CommonQaCatalogPanel } from './CommonQaCatalogPanel';
 import { RealLlmSemanticTestPanel } from './RealLlmSemanticTestPanel';
 import { KnowledgeFeedbackPanel } from './KnowledgeFeedbackPanel';
 import { LlmConfigurationPage } from './LlmConfigurationPage';
 
-type StudioTab = 'qa' | 'test' | 'feedback' | 'model';
+type StudioTab = 'qa' | 'layout' | 'test' | 'feedback' | 'model';
 
 export const AiCustomerServiceStudioPage: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
@@ -32,7 +33,10 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
 
       <nav className="line-hub-section-tabs" aria-label="AI 客服工作室功能">
         <button type="button" className={activeTab === 'qa' ? 'active' : ''} aria-current={activeTab === 'qa' ? 'page' : undefined} onClick={() => requestLeave(() => { setQaTarget({}); setActiveTab('qa'); })}>
-          <BookOpenText aria-hidden="true" />常見問答
+          <BookOpenText aria-hidden="true" />常見問答題庫
+        </button>
+        <button type="button" className={activeTab === 'layout' ? 'active' : ''} aria-current={activeTab === 'layout' ? 'page' : undefined} onClick={() => { if (activeTab !== 'layout') requestLeave(() => setActiveTab('layout')); }}>
+          <BookOpenText aria-hidden="true" />LINE 聊天室版面
         </button>
         <button type="button" className={activeTab === 'test' ? 'active' : ''} aria-current={activeTab === 'test' ? 'page' : undefined} onClick={() => { if (('test') !== activeTab) requestLeave(() => setActiveTab('test')); }}>
           <FlaskConical aria-hidden="true" />回答測試
@@ -47,6 +51,7 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
 
       <div className="line-hub-tab-panel">
         {activeTab === 'qa' && <CommonQaCatalogPanel initialQaId={qaTarget.id} initialQuestion={qaTarget.question} />}
+        {activeTab === 'layout' && <FaqChatLayoutPanel />}
         {activeTab === 'test' && (
           <RealLlmSemanticTestPanel onOpenQa={openQa} onCreateQa={createQa} />
         )}

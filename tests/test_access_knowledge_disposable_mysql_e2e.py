@@ -147,3 +147,110 @@ def _session_is_active(admin_user_id: int) -> bool:
             return row["revoked_at"] is None and row["expires_at"] > datetime.now(timezone.utc).replace(tzinfo=None)
     finally:
         connection.close()
+
+
+def test_faq_04_mysql_publication_and_receipt_rollback(monkeypatch):
+    from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
+    from infrastructure.mysql.knowledge_retrieval_unit_of_work import KnowledgeRetrievalMySqlUnitOfWork
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
+
+    actors = _seed_admin_users()
+    actor = ActorContext(str(actors["author"]))
+    reviewer = ActorContext(str(actors["reviewer"]))
+    qa_id = "CI-" + uuid4().hex[:16].upper()
+
+    def key(operation):
+        return IdempotencyKey(f"{qa_id}:{operation}")
+
+    def save(answer, expected_version):
+        content = GovernedQaContent(
+            qa_id=qa_id, category="服務流程", category_id="service_flow", tag="合成",
+            question=f"測試題 {qa_id}？", aliases=("合成別名",), answer=answer, source_ref=f"source-{answer}-{qa_id}",
+        )
+        return app.ingest(IngestKnowledgeSourceCommand(
+            content.source_identity, "internal_policy", content.question, encode_governed_qa(content),
+            content.source_ref, actor, key(f"draft-{answer}"), CorrelationId(f"{qa_id}:draft"),
+            ExpectedVersion(expected_version) if expected_version is not None else None,
+        ))[0]
+
+    def publish(version, attempt):
+        return PublishKnowledgeItemCommand(
+            item_id, ExpectedVersion(version), reviewer, "合成發布", key(attempt),
+            CorrelationId(f"{qa_id}:publish"),
+        )
+
+    app = KnowledgeApplication(open_knowledge_retrieval_unit_of_work)
+    catalog = PublishedFaqCatalog(open_knowledge_retrieval_unit_of_work)
+    item_id = save("A", None)
+    first = publish(1, "publish-A")
+    first_version, index_job = app.publish_and_request_index(first)
+    assert app.publish_and_request_index(first) == (first_version, index_job)
+    assert save("B", first_version) == item_id
+    second = publish(first_version + 1, "publish-B")
+    assert catalog.get(qa_id).answer == "A"
+    assert catalog.get(qa_id).source_uri == f"source-A-{qa_id}"
+
+    original_commit = KnowledgeRetrievalMySqlUnitOfWork.commit
+
+    def fail_after_writes(unit):
+        with unit._connection.cursor() as cursor:
+            cursor.execute("SELECT published_version FROM knowledge_items WHERE id=%s", (item_id,))
+            assert cursor.fetchone()["published_version"] == first_version + 2
+            cursor.execute("SELECT COUNT(*) AS n FROM knowledge_apply_receipts WHERE idempotency_key=%s", (second.idempotency_key.value,))
+            assert cursor.fetchone()["n"] == 1
+        raise RuntimeError("synthetic failure after official pointer and receipt")
+
+    monkeypatch.setattr(KnowledgeRetrievalMySqlUnitOfWork, "commit", fail_after_writes)
+    with pytest.raises(RuntimeError, match="synthetic failure after official pointer and receipt"):
+        app.publish_and_request_index(second)
+
+    assert catalog.get(qa_id).answer == "A"
+    with get_connection() as fresh:
+        with fresh.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS n FROM knowledge_apply_receipts WHERE idempotency_key=%s", (second.idempotency_key.value,))
+            assert cursor.fetchone()["n"] == 0
+            cursor.execute("SELECT COUNT(*) AS n FROM knowledge_item_versions WHERE item_id=%s AND item_version=%s", (item_id, first_version + 2))
+            assert cursor.fetchone()["n"] == 0
+
+    monkeypatch.setattr(KnowledgeRetrievalMySqlUnitOfWork, "commit", original_commit)
+    assert app.publish_and_request_index(second)[0] == first_version + 2
+    assert catalog.get(qa_id).answer == "B"
+
+
+def test_faq_04_mysql_compatible_upgrade_rerun():
+    import json
+    from pathlib import Path
+
+    from scripts.migrate_preserved_database_additive_schema import (
+        DatabaseConfig, _schema_snapshot, local_additive_descriptor_state,
+    )
+    from scripts.reset_fake_database import split_sql
+
+    root = Path(__file__).resolve().parents[1]
+    sql = root / "db/schema_parts/1087_shared_line_faq.sql"
+    descriptor_path = root / "db/migration_releases/labor_union_2026_11_26_shared_line_faq_v1.descriptors.json"
+    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))["descriptors"][sql.name]
+    config = DatabaseConfig(
+        os.environ["LABOR_UNION_TEST_MYSQL_HOST"], int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        os.environ["LABOR_UNION_TEST_MYSQL_USER"], os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+    )
+    assert DATABASE.startswith("lu_test_faq_")
+    assert config.host == "127.0.0.1"
+
+    def migrate():
+        before = _schema_snapshot(config, DATABASE)
+        status = local_additive_descriptor_state(before, descriptor, sql.name)
+        if status == "absent":
+            with config.connect(DATABASE) as connection:
+                with connection.cursor() as cursor:
+                    for statement in split_sql(sql.read_text(encoding="utf-8")):
+                        cursor.execute(statement)
+        else:
+            assert status == "exact"
+        after = _schema_snapshot(config, DATABASE)
+        assert local_additive_descriptor_state(after, descriptor, sql.name) == "exact"
+        return status
+
+    assert migrate() == "absent"
+    assert migrate() == "exact"

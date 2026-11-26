@@ -10,18 +10,29 @@ from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.navigation_catalog import route_aliases
 
 from datetime import datetime, timedelta
-import json
 import os
-from pathlib import Path
-from typing import Any, Callable, Sequence, Mapping
+import re
+from typing import Callable
 
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
+from domains.line.faq_chat_layout import FAQ_ID_PATTERN, FaqCardView, FaqCategory, faq_short_label
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.identities import LineSourceType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.knowledge_retrieval.faq_catalog import (
+    KnowledgeCatalogUnavailable,
+    PublishedFaq,
+    PublishedFaqCatalog,
+    is_faq_id,
+)
+from subsystems.line.faq_chat_layout import (
+    FaqCategoryNotPublished,
+    FaqChatLayoutApplication,
+    FaqLayoutUnavailable,
+)
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.ai_router_contracts import (
     Clarification,
@@ -36,8 +47,11 @@ from shared_kernel.identities import IdempotencyReceipt
 from subsystems.line.runtime_human_escalation_source import normalize_complaint_text
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-QA_CATALOG_FILE = PROJECT_ROOT / "document" / "line" / "AI客服QA題庫.jsonl"
+_FAQ_PREFIX = "faq:v1:"
+_FAQ_PAGE_SIZE = 6
+_LEGACY_POLICY_LABELS = {"一般市民（最高40小時）", "補助市民（最高120小時）"}
+_FAQ_NOT_FOUND = "這個問答目前無法讀取。請返回常見問題，或直接在此聊天室留言。"
+_FAQ_UNAVAILABLE = "常見問答暫時無法使用。請稍後再試，或直接在此聊天室留言。"
 
 _HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-rejected"
 _HANDOFF_CONTINUE_POSTBACK = "customer-service:handoff:continue-ai"
@@ -53,7 +67,7 @@ _RESUME_AI_ALIASES = {
 _REPLY_ONLY_SUFFIXES = frozenset({
     "menu", "order-update-menu", "registration", "clarification", "unavailable",
     "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "profile-update-form", "other",
-    "ai_assistant_menu", "knowledge", "category_faq",
+    "ai_assistant_menu", "knowledge", "category_faq", "faq-guidance",
 })
 
 
@@ -66,57 +80,15 @@ class LineServiceHelpApplication:
         self,
         now: Callable[[], datetime],
         identity_url: Callable[[str, str], str] | None = None,
-        qa_catalog_loader: Callable[[], list[dict[str, Any]]] | None = None,
+        *,
+        faq_catalog: PublishedFaqCatalog | None = None,
+        faq_layout: FaqChatLayoutApplication | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
-        self._qa_catalog_loader = qa_catalog_loader
+        self._faq_catalog = faq_catalog
+        self._faq_layout = faq_layout
         self._router = DeterministicLineRouter()
-        self._qa_cache: list[dict[str, Any]] | None = None
-        self._qa_cache_mtime: float | None = None
-
-    def _load_qa_items(self) -> list[dict[str, Any]]:
-        if self._qa_catalog_loader is not None:
-            return self._qa_catalog_loader()
-        if not QA_CATALOG_FILE.exists():
-            return []
-        try:
-            mtime = os.path.getmtime(QA_CATALOG_FILE)
-            if self._qa_cache is not None and self._qa_cache_mtime == mtime:
-                return self._qa_cache
-            items: list[dict[str, Any]] = []
-            with QA_CATALOG_FILE.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    payload = json.loads(line)
-                    if payload.get("enabled") is True and str(payload.get("answer", "")).strip():
-                        items.append(payload)
-            self._qa_cache = items
-            self._qa_cache_mtime = mtime
-            return items
-        except Exception:
-            return self._qa_cache or []
-
-    def _find_matching_qa(self, text: str) -> dict[str, Any] | None:
-        normalized = text.strip()
-        if not normalized:
-            return None
-        for item in self._load_qa_items():
-            if item.get("question") == normalized:
-                return item
-            if normalized in item.get("aliases", []):
-                return item
-        return None
-
-    def _get_category_qa_items(self, category: CustomerServiceCategory) -> list[dict[str, Any]]:
-        category_targets = {
-            CustomerServiceCategory.SERVICE_FLOW: {"服務流程", "服務登記", "月嫂媒合", "服務排程", "請假代班", "餐飲服務"},
-            CustomerServiceCategory.PAYMENT_SUBSIDY: {"費用", "收費與補助", "補助", "社福補助"},
-        }
-        targets = category_targets.get(category, set())
-        return [item for item in self._load_qa_items() if item.get("category") in targets]
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str, *, reply_only: bool = False) -> bool:
         normalized = text.strip()
@@ -129,6 +101,8 @@ class LineServiceHelpApplication:
             return True
         if normalize_complaint_text(normalized) is not None:
             return False
+        if normalized in _LEGACY_POLICY_LABELS:
+            return self._handle_faq_text(inbox, unit_of_work, line_user_id, normalized)
         event_id = inbox.event.event_id.value
         outcome = self._router.route(normalized, source_event_id=event_id)
         if reply_only and isinstance(outcome, DeterministicAnswer):
@@ -145,8 +119,7 @@ class LineServiceHelpApplication:
                 )
                 return True
             if outcome.route_key == "service_help_menu":
-                self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu", reason_code=outcome.reason_code)
-                return True
+                return self._handle_faq_action(inbox, unit_of_work, line_user_id, "menu", "0")
             if outcome.route_key == "ai_assistant_menu":
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _ai_assistant_payload(), "ai_assistant_menu", reason_code=outcome.reason_code)
                 return True
@@ -155,18 +128,8 @@ class LineServiceHelpApplication:
                 return True
             if outcome.category is None:
                 return False
-            self._handle_category(inbox, unit_of_work, line_user_id, outcome.category)
-            return True
-        matched = self._find_matching_qa(normalized)
-        if matched is not None:
-            self._reply_or_enqueue(
-                inbox,
-                unit_of_work,
-                line_user_id,
-                _qa_answer_payload(matched),
-                "knowledge",
-                reason_code="catalog_match",
-            )
+            return self._handle_category(inbox, unit_of_work, line_user_id, outcome.category)
+        if self._handle_faq_text(inbox, unit_of_work, line_user_id, normalized):
             return True
         if isinstance(outcome, SafeMenu):
             return False
@@ -205,6 +168,9 @@ class LineServiceHelpApplication:
     def handle_postback(
         self, inbox, unit_of_work, line_user_id, postback_data: str
     ) -> bool:
+        if postback_data.startswith("faq:"):
+            action, _, value = postback_data.removeprefix(_FAQ_PREFIX).partition(":")
+            return self._handle_faq_action(inbox, unit_of_work, line_user_id, action, value)
         if postback_data not in {
             _HANDOFF_WRONG_ANSWER_POSTBACK,
             _HANDOFF_CONTINUE_POSTBACK,
@@ -225,18 +191,94 @@ class LineServiceHelpApplication:
             reason_code="chat_ai_retired",
         )
 
-    def _handle_category(self, inbox, unit_of_work, line_user_id, category):
+    def _handle_category(self, inbox, unit_of_work, line_user_id, category) -> bool:
         if category in {CustomerServiceCategory.SERVICE_FLOW, CustomerServiceCategory.PAYMENT_SUBSIDY}:
-            items = self._get_category_qa_items(category)
-            payload = _category_faq_payload(category, items)
-        elif category is CustomerServiceCategory.SERVICE_PROGRESS:
+            return self._handle_faq_action(inbox, unit_of_work, line_user_id, "category", category.value)
+        if category is CustomerServiceCategory.SERVICE_PROGRESS:
             payload = self._progress_payload(inbox, unit_of_work, line_user_id)
         elif category is CustomerServiceCategory.PROFILE_UPDATE:
             payload = _profile_update_payload()
         else:
-            payload = _service_menu_payload()
+            return self._handle_faq_action(inbox, unit_of_work, line_user_id, "menu", "0")
         suffix = "profile-update-form" if category is CustomerServiceCategory.PROFILE_UPDATE else category.value
         self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, suffix)
+        return True
+
+    def _handle_faq_text(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
+        if not text or not _same_private_chat(inbox, line_user_id):
+            return False
+        if self._faq_catalog is None:
+            return False
+        try:
+            matches = self._faq_catalog.match_legacy_text(text)
+            if matches is None:
+                matches = self._faq_catalog.match_alias(text)
+                if not matches and text not in _LEGACY_POLICY_LABELS:
+                    return False
+            elif len(matches) == 1 and any(
+                item.qa_id != matches[0].qa_id for item in self._faq_catalog.match_alias(text)
+            ):
+                matches = ()
+        except KnowledgeCatalogUnavailable:
+            self._faq_guidance(inbox, unit_of_work, line_user_id, unavailable=True)
+            return True
+        if len(matches) != 1:
+            self._faq_guidance(inbox, unit_of_work, line_user_id)
+            return True
+        self._reply_or_enqueue(
+            inbox, unit_of_work, line_user_id, _qa_answer_payload(matches[0]),
+            "knowledge", reason_code="catalog_match",
+        )
+        return True
+
+    def _handle_faq_action(self, inbox, unit_of_work, line_user_id, action: str, value: str) -> bool:
+        if not _same_private_chat(inbox, line_user_id):
+            return False
+        try:
+            if action == "menu":
+                if self._faq_layout is None:
+                    raise FaqLayoutUnavailable()
+                layout = self._faq_layout.published_layout()
+                categories = layout.categories if layout else ()
+                page = int(value) if re.fullmatch(r"[0-9]{1,9}", value) else 0
+                payload, suffix = _published_menu_payload(unit_of_work, categories, page), "menu"
+            elif action == "category" and re.fullmatch(FAQ_ID_PATTERN, value):
+                if self._faq_layout is None:
+                    raise FaqLayoutUnavailable()
+                preview = self._faq_layout.preview_published(value)
+                payload, suffix = _category_card_payload(preview.view), "category_faq"
+            elif action == "question" and is_faq_id(value):
+                if self._faq_catalog is None:
+                    raise KnowledgeCatalogUnavailable()
+                question = self._faq_catalog.get(value)
+                if question is None:
+                    self._faq_guidance(inbox, unit_of_work, line_user_id)
+                    return True
+                payload, suffix = _qa_answer_payload(question), "knowledge"
+            else:
+                self._faq_guidance(inbox, unit_of_work, line_user_id)
+                return True
+        except FaqCategoryNotPublished:
+            self._faq_guidance(inbox, unit_of_work, line_user_id)
+            return True
+        except (FaqLayoutUnavailable, KnowledgeCatalogUnavailable):
+            self._faq_guidance(inbox, unit_of_work, line_user_id, unavailable=True)
+            return True
+        self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, suffix)
+        return True
+
+    def _faq_guidance(self, inbox, unit_of_work, line_user_id, *, unavailable: bool = False) -> None:
+        payload = _text_payload(_FAQ_UNAVAILABLE if unavailable else _FAQ_NOT_FOUND)
+        payload["quickReply"] = {
+            "items": [
+                *_faq_back_quick_reply()["items"],
+                *_fixed_service_quick_actions(),
+            ],
+        }
+        self._reply_or_enqueue(
+            inbox, unit_of_work, line_user_id, payload, "faq-guidance",
+            reason_code="faq_source_unavailable" if unavailable else "faq_not_available",
+        )
 
     def _progress_payload(self, inbox, unit_of_work, line_user_id):
         context = unit_of_work.customer_service.latest_client_case(line_user_id.value)
@@ -261,14 +303,7 @@ class LineServiceHelpApplication:
 
     def _enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
         event_id = inbox.event.event_id.value
-        source = getattr(inbox.event, "source", None)
-        same_private_chat = (
-            getattr(source, "source_type", None) is LineSourceType.USER
-            and getattr(source, "user_id", None) == line_user_id
-        )
-        copy_key = {"menu": "service-menu", "other": "service-menu"}.get(suffix)
-        if copy_key:
-            payload = configured_payload(unit_of_work, copy_key, payload)
+        same_private_chat = _same_private_chat(inbox, line_user_id)
         request = LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, line_user_id),
                 LineMessageKind.FLEX if payload.get("type") == "flex" else LineMessageKind.TEXT,
@@ -319,6 +354,15 @@ class LineServiceHelpApplication:
     def _reply_or_enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
         self._enqueue(inbox, unit_of_work, line_user_id, payload, suffix, reason_code=reason_code)
 
+def _same_private_chat(inbox, line_user_id) -> bool:
+    source = getattr(inbox.event, "source", None)
+    return (
+        line_user_id is not None
+        and getattr(source, "source_type", None) is LineSourceType.USER
+        and getattr(source, "user_id", None) == line_user_id
+    )
+
+
 def _text_payload(text):
     return {"type": "text", "text": text}
 
@@ -359,22 +403,25 @@ def _ai_assistant_liff_url():
     return f"https://liff.line.me/{liff_id}?target=ai_assistant"
 
 
-def _common_category_quick_replies(current: str | None = None) -> dict[str, object]:
-    items = []
-    if current:
-        items.append({"type": "action", "action": {"type": "message", "label": "📚 全部常見問題", "text": "常見問題"}})
-    presets = [
-        ("📋 服務流程", "常見問題：服務流程"),
-        ("💰 費用補助", "常見問題：收費與補助"),
-        ("🔍 查詢進度", "查詢服務進度"),
-        ("✏️ 修改資料", "修改登記資料"),
-        ("🤖 詢問 AI 客服", "AI客服"),
+def _fixed_service_quick_actions():
+    return [
+        {"type": "action", "action": {"type": "message", "label": label, "text": text}}
+        for label, text in (
+            ("查詢進度", "查詢服務進度"),
+            ("修改資料", "修改登記資料"),
+            ("詢問 AI 客服", "AI客服"),
+        )
     ]
-    for label, text in presets:
-        if current and current in label:
-            continue
-        items.append({"type": "action", "action": {"type": "message", "label": label, "text": text}})
-    return {"items": items[:13]}
+
+
+def _common_category_quick_replies() -> dict[str, object]:
+    return {"items": [
+        {"type": "action", "action": {"type": "message", "label": label, "text": text}}
+        for label, text in (
+            ("📋 服務流程", "常見問題：服務流程"),
+            ("💰 費用補助", "常見問題：收費與補助"),
+        )
+    ] + _fixed_service_quick_actions()}
 
 
 def _service_menu_payload(quick_reply=None):
@@ -396,60 +443,70 @@ def _service_menu_payload(quick_reply=None):
     )
 
 
-def _category_faq_payload(category: CustomerServiceCategory, qa_items: Sequence[dict[str, Any]] | None = None):
-    meta = {
-        CustomerServiceCategory.SERVICE_FLOW: (
-            "📋 服務流程 常見問題",
-            "整理月嫂媒合、申請流程與服務預約相關問題，點選題目即可查看說明：",
-            [
-                "服務流程如何進行？",
-                "如果和月嫂合作不適合，可以更換月嫂嗎？",
-                "服務天數或每日時數可以延長嗎？",
-                "實際生產日期和預產期不同時可以改期嗎？",
-            ],
-            "服務流程",
-        ),
-        CustomerServiceCategory.PAYMENT_SUBSIDY: (
-            "💰 費用與補助 常見問題",
-            "整理到宅月子費用收費、補助申請與退費相關問題，點選題目即可查看說明：",
-            [
-                "一般市民（最高40小時）",
-                "補助市民（最高120小時）",
-                "符合補助退還條件後，大約什麼時候會收到款項？",
-                "如果提前取消服務，退費或補收如何處理？",
-            ],
-            "費用",
-        ),
-    }
-    title, desc, default_questions, cat_name = meta.get(
-        category,
-        ("常見問題", "請點選下方題目查看說明：", ["如何申請服務？", "費用與補助怎麼算？"], "常見問題"),
-    )
+def _faq_action(kind, value, label):
+    return {"type": "postback", "label": label, "data": f"{_FAQ_PREFIX}{kind}:{value}"}
 
-    questions = []
-    if qa_items:
-        for item in qa_items:
-            q = item.get("question")
-            if q and q not in questions:
-                questions.append(q)
-    if not questions:
-        questions = default_questions
 
-    actions = []
-    for q in questions[:4]:
-        label = q if len(q) <= 18 else q[:17] + "…"
-        actions.append((label, q, "secondary"))
-    actions.append(("🤖 找不到答案？試試 AI 智慧問答", "ai_assistant", "primary"))
+def _quick_faq_action(action):
+    return {"type": "action", "action": {**action, "label": faq_short_label(action["label"], 20)}}
 
-    return _navigation_card_payload(
-        alt_text=f"新竹市月子工會：{title}",
+
+def _faq_back_quick_reply():
+    return {"items": [_quick_faq_action(_faq_action("menu", 0, "返回常見問題"))]}
+
+
+def _published_menu_payload(unit_of_work, categories: tuple[FaqCategory, ...], page: int):
+    if page * _FAQ_PAGE_SIZE >= len(categories):
+        page = 0
+    start = page * _FAQ_PAGE_SIZE
+    actions = [
+        _faq_action("category", category.category_id, category.name)
+        for category in categories[start:start + _FAQ_PAGE_SIZE]
+    ]
+    if page > 0:
+        actions.append(_faq_action("menu", page - 1, "上一頁"))
+    if start + _FAQ_PAGE_SIZE < len(categories):
+        actions.append(_faq_action("menu", page + 1, "下一頁"))
+
+    payload = configured_payload(unit_of_work, "service-menu", _service_menu_payload())
+    body = payload["contents"]["body"]["contents"]
+    body[:] = [_flex_action_button(action) for action in actions] + body[2:]
+    quick_items = [_quick_faq_action(action) for action in actions]
+    payload["quickReply"]["items"] = quick_items + _fixed_service_quick_actions()
+    if not categories:
+        payload["contents"]["header"]["contents"][2]["text"] = "目前尚無已發布的常見問答分類。您可使用下方入口或直接留言。"
+    return payload
+
+
+def _category_card_payload(view: FaqCardView):
+    actions = [
+        _faq_action("question", button.qa_id, button.label)
+        for button in view.buttons
+    ]
+    quick_items = [_quick_faq_action(action) for action in actions]
+    quick_items.extend(_faq_back_quick_reply()["items"])
+    payload = _navigation_card_payload(
+        alt_text=f"新竹市月子工會：{view.title}",
         eyebrow="新竹市月子工會 · 常見問題",
-        title=title,
-        description=desc,
-        actions=actions,
-        hint="點選問題即可在對話中查看解答；點選「問 AI 客服」可直接彈出 LIFF 提問。",
-        quick_reply=_common_category_quick_replies(cat_name),
+        title=view.title,
+        description=view.description,
+        actions=(),
+        hint="點選題目即可查看解答。" if actions else _FAQ_NOT_FOUND,
+        quick_reply={"items": quick_items},
     )
+    if actions:
+        payload["contents"]["body"]["contents"] = [_flex_action_button(action) for action in actions]
+    else:
+        payload["contents"].pop("body")
+    if view.footer_label:
+        payload["contents"]["footer"]["contents"].append(
+            _navigation_button(view.footer_label, "ai_assistant", "primary")
+        )
+    return payload
+
+
+def _flex_action_button(action):
+    return {"type": "button", "style": "secondary", "height": "sm", "action": action}
 
 
 def _ai_assistant_payload():
@@ -468,10 +525,10 @@ def _ai_assistant_payload():
     )
 
 
-def _qa_answer_payload(item: dict[str, Any]):
-    sources = f"資料來源：{item['source_ref']}\n" if item.get("source_ref") else ""
+def _qa_answer_payload(item: PublishedFaq):
+    sources = f"資料來源：{item.source_ref}\n" if item.source_ref else ""
     text = (
-        f"{item['answer']}\n\n"
+        f"{item.answer}\n\n"
         f"{sources}此資訊僅供說明，請以工會確認為準。\n\n"
         "💡 若有特殊或客製化需求，歡迎開啟【AI 智慧問答】提問，或直接在此留言由專員為您服務。"
     )
@@ -480,7 +537,7 @@ def _qa_answer_payload(item: dict[str, Any]):
         "text": text,
         "quickReply": {
             "items": [
-                {"type": "action", "action": {"type": "message", "label": "📚 返回常見問題", "text": "常見問題"}},
+                *_faq_back_quick_reply()["items"],
                 {"type": "action", "action": {"type": "message", "label": "🤖 詢問 AI 客服", "text": "AI客服"}},
                 {"type": "action", "action": {"type": "message", "label": "👍 有幫助", "text": "有幫助"}},
                 {"type": "action", "action": {"type": "message", "label": "👎 未解決", "text": "未解決"}},
@@ -513,7 +570,7 @@ def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, 
                 "contents": [
                     {"type": "text", "text": eyebrow, "size": "xs", "weight": "bold", "color": "#9A3412"},
                     {"type": "text", "text": title, "size": "xl", "weight": "bold", "color": "#1E1B19"},
-                    {"type": "text", "text": description, "size": "sm", "color": "#57423B", "wrap": True},
+                    *([{"type": "text", "text": description, "size": "sm", "color": "#57423B", "wrap": True}] if description else []),
                 ],
             },
             "body": {

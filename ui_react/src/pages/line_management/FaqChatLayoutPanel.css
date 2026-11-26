@@ -1,0 +1,33 @@
+.faq-layout-columns {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(17rem, 2fr) minmax(14rem, 1.4fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.faq-layout-columns h2 { font-size: 1.15rem; margin-block: 0 0.75rem; }
+.faq-layout-columns ul, .faq-layout-columns ol { padding-inline-start: 1.25rem; }
+.faq-layout-columns li { margin-block: 0.6rem; }
+.faq-layout-columns li small { display: block; }
+.faq-layout-columns label { display: grid; gap: 0.25rem; margin-block: 0.6rem; }
+.faq-layout-columns fieldset { border: 0; padding: 0; min-width: 0; }
+.faq-layout-columns button[aria-pressed="true"] { font-weight: bold; border-color: currentColor; }
+
+.faq-layout-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-block: 0.6rem; }
+
+.faq-preview-phone {
+  border: 2px solid #65756c;
+  border-radius: 1.25rem;
+  background: #f1f7f3;
+  color: #172e21;
+  padding: 1rem;
+  display: grid;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.faq-preview-phone p { white-space: pre-wrap; margin: 0; }
+
+@media (max-width: 960px) {
+  .faq-layout-columns { grid-template-columns: minmax(0, 1fr); }
+}

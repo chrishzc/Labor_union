@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from api.dependencies.knowledge_retrieval import published_index_source_versions
 from domains.knowledge_retrieval.knowledge import (
     KnowledgeAnswer,
     KnowledgeAnswerUnsupported,
@@ -228,6 +229,7 @@ def _gateway_factory(selector: CandidateSelectorPort) -> ChromaKnowledgeGateway:
     return ChromaKnowledgeGateway(
         os.getenv("KNOWLEDGE_CHROMA_PATH", "db/chroma_knowledge"),
         llm=selector,
+        published_source_versions=published_index_source_versions,
     )
 
 

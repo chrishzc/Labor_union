@@ -396,9 +396,11 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_24_staff_payable_projection_zero_v1.json",
     "labor_union_2026_11_24_staff_web_file_management_v1.json",
     "labor_union_2026_11_24_staff_web_feedback_v1.json",
+    "labor_union_2026_11_26_shared_line_faq_v1.json",
 )
 _STAFF_WEB_PROFILE_ARTIFACT = "1083_staff_web_profile.sql"
 _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT = "1085_staff_web_file_management.sql"
+_SHARED_LINE_FAQ_ARTIFACT = "1087_shared_line_faq.sql"
 _STAFF_WEB_FEEDBACK_ARTIFACT = "1086_staff_web_feedback.sql"
 _STAFF_WEB_ENTRY_TABLE = "staff_web_entries"
 _STAFF_WEB_TEMPLATE_TABLE = "staff_web_template_items"
@@ -2345,7 +2347,15 @@ def _modified_parent_predecessor_absent_state(
     defer_missing_triggers: bool,
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
+    old_line_configuration_kind = _column_contract(
+        "enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules')",
+        "NO",
+    )
     predecessor_columns = {
+        _SHARED_LINE_FAQ_ARTIFACT: {
+            table: {"configuration_kind": old_line_configuration_kind}
+            for table in ("line_configuration_current", "line_configuration_revisions")
+        },
         _STAFF_WEB_FEEDBACK_ARTIFACT: {
             _STAFF_WEB_TEMPLATE_TABLE: {
                 "category": _column_contract("enum('photo','certificate','other')", "NO"),
@@ -4251,6 +4261,16 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked(
                 "unpublished staff payable projection ALTER", code="forbidden_sql_effect",
             )
+        if normalized.startswith((
+            "alter table line_configuration_current modify column configuration_kind ",
+            "alter table line_configuration_revisions modify column configuration_kind ",
+        )):
+            path = ROOT / "db/schema_parts" / _SHARED_LINE_FAQ_ARTIFACT
+            if normalized in {
+                re.sub(r"\s+", " ", sql.strip()).casefold()
+                for sql in split_sql(path.read_text(encoding="utf-8"))
+            }:
+                return "alter_add_only"
         unserved_part = ROOT / "db/schema_parts/1081_order_established_unserved_status.sql"
         if normalized.rstrip(";") in {
             re.sub(r"\s+", " ", sql.strip()).casefold().rstrip(";")
@@ -6312,6 +6332,11 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         path = ROOT / "db/schema_parts" / part_name
     if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
+    if part_name == _SHARED_LINE_FAQ_ARTIFACT:
+        source = ROOT / "db/migration_releases/labor_union_2026_11_26_shared_line_faq_v1.descriptors.json"
+        descriptor = json.loads(source.read_text(encoding="utf-8"))["descriptors"][part_name]
+        descriptor["triggers"] = {}
+        return descriptor
     if part_name == "1081_order_established_unserved_status.sql":
         document = json.loads((ROOT / "db/migration_releases/labor_union_2026_11_23_order_established_unserved_v1.descriptors.json").read_text(encoding="utf-8"))
         descriptor = document["descriptors"][part_name]
@@ -8295,7 +8320,7 @@ def _artifact_metadata_state(
             ):
                 return "drift"
         allowed_extra_columns = _allowed_later_artifact_columns(
-            part_name, table
+            part_name, table, set(actual)
         )
         if table in required_tables and actual:
             if set(actual) != set(expected_columns) | allowed_extra_columns:
@@ -8616,13 +8641,19 @@ def _apply_legacy_knowledge_identifier_contract(
 def _allowed_later_artifact_columns(
     part_name: str,
     table: str,
+    actual: set[str],
 ) -> set[str]:
-    if (
-        part_name == "148_knowledge_retrieval.sql"
-        and table == "knowledge_items"
-    ):
-        return {"source_identity"}
-    return set()
+    extra = set()
+    if part_name == "148_knowledge_retrieval.sql" and table == "knowledge_items":
+        extra.add("source_identity")
+    faq_owned = {
+        "148_knowledge_retrieval.sql": "knowledge_items",
+        "163_knowledge_runtime.sql": "knowledge_item_versions",
+    }
+    if faq_owned.get(part_name) == table and any(path.name == _SHARED_LINE_FAQ_ARTIFACT for path in SCHEMA_PARTS):
+        successor = _canonical_artifact_descriptor(_SHARED_LINE_FAQ_ARTIFACT)
+        extra.update(actual.intersection(successor["parent_columns"][table]))
+    return extra
 
 
 def _allowed_successor_column_types(

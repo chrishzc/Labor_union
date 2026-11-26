@@ -13,11 +13,21 @@ from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.knowledge_retrieval.application import KnowledgeApplication
 from subsystems.knowledge_retrieval.contracts import PublishKnowledgeItemCommand
+from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
 from subsystems.knowledge_retrieval.qa_catalog_import import build_qa_import_commands
 
 
 def get_knowledge_application() -> KnowledgeApplication:
     return KnowledgeApplication(open_knowledge_retrieval_unit_of_work)
+
+
+def get_published_faq_catalog() -> PublishedFaqCatalog:
+    return PublishedFaqCatalog(open_knowledge_retrieval_unit_of_work)
+
+
+def published_index_source_versions(source_identities: tuple[str, ...]) -> set[tuple[str, int]]:
+    with open_knowledge_retrieval_unit_of_work() as unit:
+        return unit.knowledge.published_source_versions(source_identities)
 
 
 def import_builtin_knowledge_catalog(
@@ -120,5 +130,7 @@ def ensure_builtin_knowledge_catalog() -> None:
 __all__ = [
     "ensure_builtin_knowledge_catalog",
     "get_knowledge_application",
+    "get_published_faq_catalog",
     "import_builtin_knowledge_catalog",
+    "published_index_source_versions",
 ]

@@ -62,7 +62,9 @@ class SqlCursor:
         self.connection.statements.append(sql)
         if self.connection.fail_on and self.connection.fail_on in sql:
             raise DriverIntegrityError(1452, "synthetic storage failure")
-        sql = sql.replace("%s", "?").replace("CURRENT_TIMESTAMP(6)", "CURRENT_TIMESTAMP")
+        sql = (sql.replace("%s", "?").replace("CURRENT_TIMESTAMP(6)", "CURRENT_TIMESTAMP")
+               .replace("LEFT(i.source_identity,", "SUBSTR(i.source_identity,1,")
+               .replace("=BINARY '", "='").removesuffix(" FOR SHARE"))
         try:
             self.raw.execute(sql, values)
         except sqlite3.IntegrityError as error:
@@ -90,6 +92,12 @@ class SqlConnection:
         self.fail_on = None
         self.db.executescript("""
             PRAGMA foreign_keys=ON;
+            CREATE TABLE knowledge_items (
+                id INTEGER PRIMARY KEY, source_identity TEXT, state TEXT,
+                version INTEGER, published_version INTEGER);
+            CREATE TABLE knowledge_item_versions (item_id INTEGER, item_version INTEGER, event_type TEXT);
+            INSERT INTO knowledge_items VALUES (1,'line-common-qa:service-flow','published',4,4);
+            INSERT INTO knowledge_item_versions VALUES (1,4,'published'),(1,5,'published');
             CREATE TABLE knowledge_answer_requests (
                 id INTEGER PRIMARY KEY, question TEXT NOT NULL,
                 requester_line_user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE,
@@ -135,7 +143,7 @@ def app(monkeypatch):
               QA_SOURCE_PREFIX="line-common-qa:", _IDENTITY_MAXIMUM_LENGTH=191)
     load_definitions("shared_kernel/validation.py", ns, {"require_canonical_text"})
     load_definitions("shared_kernel/identities.py", ns, {"IdempotencyKey", "CorrelationId"})
-    load_definitions("domains/knowledge_retrieval/knowledge.py", ns, {"KnowledgeAnswer", "KnowledgeCitation"})
+    load_definitions("domains/knowledge_retrieval/knowledge.py", ns, {"KnowledgeAnswer", "KnowledgeCitation", "KnowledgeAnswerUnsupported"})
     load_definitions("subsystems/knowledge_retrieval/contracts.py", ns, {"AskKnowledgeQuestionCommand"})
     load_definitions("api/dependencies/llm_configuration.py", ns,
                      {"LlmSemanticTestResult", "_qa_id_from_source", "_LEGACY_CATALOG_MARKER"})
@@ -144,9 +152,11 @@ def app(monkeypatch):
     exec(compile((ROOT / "api/schemas/base.py").read_text(encoding="utf-8"), "api/schemas/base.py", "exec"), ns)
     load_definitions("infrastructure/mysql/unit_of_work.py", ns, {"MySqlUnitOfWork"})
     repo_methods = {"record_inline_answer", "_existing_inline_answer_receipt",
-                    "_insert_citations", "get_answer_request", "_rows"}
+                    "_insert_citations", "get_answer_request", "_rows",
+                    "published_source_versions", "_require_published_citations"}
     load_definitions("infrastructure/mysql/knowledge_retrieval_repository.py", ns,
-                     {"MySqlKnowledgeRetrievalRepository", "_GET_ANSWER_REQUEST", "_GET_ANSWER_SOURCES"},
+                     {"MySqlKnowledgeRetrievalRepository", "_GET_ANSWER_REQUEST", "_GET_ANSWER_SOURCES",
+                      "_IS_FAQ", "_ACTIVE_VERSION"},
                      methods={"MySqlKnowledgeRetrievalRepository": repo_methods})
     # Keep every actual UoW method except the infrastructure-composing constructor.
     tree = ast.parse((ROOT / "infrastructure/mysql/knowledge_retrieval_unit_of_work.py").read_text())
@@ -161,6 +171,7 @@ def app(monkeypatch):
         unit.knowledge._connection = connection
         return unit
     ns["open_knowledge_retrieval_unit_of_work"] = open_uow
+    load_definitions("api/dependencies/knowledge_retrieval.py", ns, {"published_index_source_versions"})
     initial = ns["LlmSemanticTestResult"](
         outcome="answered", provider="synthetic", model="synthetic", index_version=7,
         qa_id="service-flow", source_identity="line-common-qa:service-flow", source_version=4,
@@ -231,6 +242,7 @@ def test_answer_replay_uses_original_receipt_without_requery_or_write(app, chang
 def test_new_interaction_still_queries_current_catalog(app):
     first = request(app)
     app.state.result = replace(app.state.result, index_version=8, source_version=5, answer_text="updated governed answer")
+    app.db.db.execute("UPDATE knowledge_items SET published_version=5,version=5 WHERE id=1")
     second = request(app, interaction_id="test-interaction-b")
     assert first.status_code == second.status_code == 200
     assert app.state.calls == 2
@@ -239,6 +251,19 @@ def test_new_interaction_still_queries_current_catalog(app):
     assert second.json()["data"]["source_version"] == 5
     assert second.json()["data"]["answer_text"] == "updated governed answer"
     assert tuple(map(len, app.db.snapshot())) == (2, 2, 2)
+
+
+@pytest.mark.parametrize("published_version", [None, 5])
+def test_faq_02_answer_replay_rejects_retired_or_replaced_faq(app, published_version):
+    assert request(app).status_code == 200
+    app.db.db.execute("UPDATE knowledge_items SET published_version=? WHERE id=1", (published_version,))
+    before = app.db.snapshot()
+    replay = request(app)
+    assert replay.status_code == 503
+    assert replay.json()["detail"]["error"]["code"] == "knowledge_answer_source_changed"
+    assert "synthetic governed answer" not in replay.text
+    assert app.state.calls == 1
+    assert app.db.snapshot() == before
 
 
 @pytest.mark.parametrize("change", [{"question": "different question"}, {"line_id_token": "test-token-b"}])

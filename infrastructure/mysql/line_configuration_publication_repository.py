@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
-from pymysql.err import IntegrityError
+from pymysql.err import IntegrityError, OperationalError
 
 from domains.line.configuration import (
     LineConfigurationKind,
@@ -40,7 +40,10 @@ from subsystems.line.configuration_contracts import (
     ApplyLineConfigurationCommand,
     ApplyLineConfigurationResult,
     LineConfigurationCommandOutcome,
+    LineConfigurationCurrentConflict,
     LineConfigurationHistoryEntry,
+    LineConfigurationKeyConflict,
+    LineConfigurationWriteRace,
 )
 from subsystems.line.rich_menu_contracts import (
     ClaimLineRichMenuPublicationsQuery,
@@ -107,13 +110,21 @@ class MySqlLineConfigurationRepository:
         self,
         command: ApplyLineConfigurationCommand,
     ) -> ApplyLineConfigurationResult:
-        with self._connection.cursor() as cursor:
-            existing = self._existing_revision(cursor, command)
-            if existing is not None:
-                return self._existing_result(existing, command)
-            self._require_current_revision(cursor, command)
-            revision_id = self._insert_revision(cursor, command)
-            self._move_current(cursor, command, revision_id)
+        try:
+            with self._connection.cursor() as cursor:
+                existing = self._existing_revision(cursor, command)
+                if existing is not None:
+                    return self._existing_result(existing, command)
+                self._require_current_revision(cursor, command)
+                revision_id = self._insert_revision(cursor, command)
+                self._move_current(cursor, command, revision_id)
+        except (IntegrityError, OperationalError) as error:
+            if (
+                command.candidate.kind is LineConfigurationKind.FAQ_CHAT_LAYOUT
+                and mysql_error_code(error) in {1062, 1213}
+            ):
+                raise LineConfigurationWriteRace from error
+            raise
         return ApplyLineConfigurationResult(
             LineConfigurationCommandOutcome.CREATED,
             LineConfigurationSnapshot(
@@ -140,7 +151,7 @@ class MySqlLineConfigurationRepository:
             candidate.fingerprint.value,
         )
         if actual != expected:
-            raise RuntimeError("line_configuration_idempotency_conflict")
+            raise LineConfigurationKeyConflict
         return ApplyLineConfigurationResult(
             LineConfigurationCommandOutcome.EXISTING,
             _configuration_snapshot(row),
@@ -151,7 +162,7 @@ class MySqlLineConfigurationRepository:
         row = optional_row(cursor.fetchone())
         current_revision = 0 if row is None else int(row["revision"])
         if current_revision != command.candidate.before_revision.value:
-            raise RuntimeError("line_configuration_revision_conflict")
+            raise LineConfigurationCurrentConflict
 
     def _insert_revision(self, cursor, command):
         candidate = command.candidate

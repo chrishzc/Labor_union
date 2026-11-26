@@ -12,6 +12,7 @@ from typing import Mapping
 
 from domains.line.canonical_payload import (
     canonical_line_payload_json,
+    canonical_line_payload_json_without_validation,
     validate_canonical_line_payload_json,
 )
 from domains.line.identities import LineConfigurationRevision
@@ -25,6 +26,7 @@ class LineConfigurationKind(StrEnum):
     LIFF = "liff"
     CUSTOMER_SERVICE = "customer_service"
     NOTIFICATION_RULES = "notification_rules"
+    FAQ_CHAT_LAYOUT = "faq_chat_layout"
 
 
 class LineConfigurationRevisionConflict(ValueError):
@@ -49,7 +51,14 @@ class LineConfigurationSnapshot:
     def __post_init__(self) -> None:
         if not isinstance(self.kind, LineConfigurationKind):
             raise TypeError("LINE configuration kind is invalid")
-        validate_canonical_line_payload_json(self.definition_json)
+        if self.kind is LineConfigurationKind.FAQ_CHAT_LAYOUT:
+            definition = json.loads(self.definition_json)
+            if not isinstance(definition, dict) or self.definition_json != (
+                canonical_line_payload_json_without_validation(definition)
+            ):
+                raise ValueError("FAQ layout definition JSON must be a canonical object")
+        else:
+            validate_canonical_line_payload_json(self.definition_json)
 
 
 # Kept cohesive so the revision, canonical definition, and fingerprint cannot drift.
@@ -66,7 +75,11 @@ def build_configuration_candidate(
         raise LineConfigurationRevisionConflict(
             "LINE configuration revision is stale"
         )
-    definition_json = canonical_line_payload_json(definition)
+    if kind is LineConfigurationKind.FAQ_CHAT_LAYOUT:
+        # The stored FAQ layout contains two snapshots. LINE messages render one card or menu page.
+        definition_json = canonical_line_payload_json_without_validation(definition)
+    else:
+        definition_json = canonical_line_payload_json(definition)
     resulting_revision = LineConfigurationRevision(current_revision.value + 1)
     return LineConfigurationCandidate(
         kind,

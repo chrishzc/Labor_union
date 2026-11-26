@@ -31,12 +31,14 @@ class ChromaKnowledgeGateway:
         llm: Callable[[str], str] | None = None,
         embedder: GeminiKnowledgeEmbedder | None = None,
         min_confidence: float = 0.60,
+        published_source_versions: Callable[[tuple[str, ...]], set[tuple[str, int]]] | None = None,
     ) -> None:
         self._persistence_path = persistence_path
         self._collection_prefix = collection_prefix
         self._llm = llm
         self._embedder = embedder or GeminiKnowledgeEmbedder()
         self._min_confidence = min_confidence
+        self._published_source_versions = published_source_versions
 
     def rebuild(
         self, index_version: int, published_items: tuple[dict, ...]
@@ -106,10 +108,12 @@ class ChromaKnowledgeGateway:
         if not documents or not metadatas or len(documents) != len(metadatas):
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
+        published = self._current_sources(metadatas)
         candidates = tuple(
             metadata
             for document, metadata in zip(documents, metadatas, strict=True)
-            if _subsidy_scope_compatible(question, metadata)
+            if _source_version(metadata) in published
+            and _subsidy_scope_compatible(question, metadata)
             and self._candidate_confidence(question, document, metadata)
             >= self._min_confidence
         )
@@ -140,7 +144,7 @@ class ChromaKnowledgeGateway:
                 ),
                 None,
             )
-        if selected is None:
+        if selected is None or _source_version(selected) not in self._current_sources((selected,)):
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
         answer = str(selected["answer"]).strip()
@@ -152,6 +156,12 @@ class ChromaKnowledgeGateway:
             answer[:500],
         )
         return KnowledgeAnswer(answer[:5000], (citation,), index_version)
+
+    def _current_sources(self, candidates: tuple[dict, ...]) -> set[tuple[str, int]]:
+        sources = {_source_version(candidate) for candidate in candidates}
+        if self._published_source_versions is None:
+            return sources
+        return self._published_source_versions(tuple(sorted({identity for identity, _ in sources})))
 
     def list_index_versions(self) -> tuple[int, ...]:
         """Return only collections owned by this gateway."""
@@ -361,6 +371,10 @@ class ChromaKnowledgeGateway:
 
     def _collection_name(self, index_version: int) -> str:
         return f"{self._collection_prefix}_v{index_version}"
+
+
+def _source_version(metadata: dict) -> tuple[str, int]:
+    return str(metadata["source_identity"]), int(metadata["source_version"])
 
 
 def _normalize(value: str) -> str:

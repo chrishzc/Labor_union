@@ -5,14 +5,18 @@ Description: 提供客服問答專屬 LIFF API 與頁面路由，支援常見問
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.dependencies.knowledge_retrieval import (
+    get_published_faq_catalog,
+    published_index_source_versions,
+)
+from api.dependencies.line_faq_layout import get_faq_chat_layout_application
 from api.dependencies.line_identity import get_liff_token_verifier
 from api.dependencies.llm_configuration import (
     LlmConfigurationApplication,
@@ -22,8 +26,11 @@ from api.dependencies.llm_configuration import (
 )
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
-from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
-from domains.knowledge_retrieval.qa_catalog import decode_governed_qa
+from domains.knowledge_retrieval.knowledge import (
+    KnowledgeAnswer,
+    KnowledgeAnswerUnsupported,
+    KnowledgeCitation,
+)
 from infrastructure.line.liff_token_verifier import (
     InvalidLiffTokenError,
     LiffVerificationUnavailableError,
@@ -33,6 +40,12 @@ from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
 )
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.knowledge_retrieval.contracts import AskKnowledgeQuestionCommand
+from subsystems.knowledge_retrieval.faq_catalog import (
+    KnowledgeCatalogUnavailable,
+    PublishedFaqCatalog,
+    is_faq_id,
+)
+from subsystems.line.faq_chat_layout import FaqChatLayoutApplication, FaqLayoutUnavailable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SERVICE_HELP_PAGE = PROJECT_ROOT / "line" / "static" / "service_help.html"
@@ -45,15 +58,18 @@ page_router = APIRouter(tags=["LINE Service Help"])
 class FaqItem(BaseModel):
     qa_id: str
     category: str
+    category_id: str | None = None
     tag: str
     question: str
     answer: str
     source_ref: str
+    version: int
 
 
 class FaqListResponse(BaseModel):
     items: list[FaqItem]
     categories: list[str]
+    next_cursor: str | None = None
 
 
 class ServiceHelpAskRequest(BaseModel):
@@ -86,49 +102,61 @@ def service_help_page():
 
 
 @public_router.get("/faq", response_model=BaseResponse[FaqListResponse])
-def get_published_faqs() -> BaseResponse[FaqListResponse]:
-    items: list[FaqItem] = []
-    seen_ids: set[str] = set()
-
+def get_published_faqs(
+    catalog: Annotated[PublishedFaqCatalog, Depends(get_published_faq_catalog)],
+    layout: Annotated[FaqChatLayoutApplication, Depends(get_faq_chat_layout_application)],
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    qa_id: str | None = None,
+) -> BaseResponse[FaqListResponse]:
+    if qa_id is not None and (not is_faq_id(qa_id) or cursor is not None):
+        raise _faq_validation_error("faq_query_invalid", "題目識別或查詢條件無效。")
     try:
-        with open_knowledge_retrieval_unit_of_work() as unit_of_work:
-            raw_items = unit_of_work.knowledge.list_items(100, "published")
-    except Exception as error:
+        if qa_id is None:
+            page = catalog.page(cursor, limit)
+            questions, next_cursor = page.items, page.next_cursor
+        else:
+            question = catalog.get(qa_id)
+            questions, next_cursor = ((question,) if question else ()), None
+        category_names = layout.category_names() if questions else {}
+    except ValueError as error:
+        if str(error) != "faq_cursor_invalid":
+            raise
+        raise _faq_validation_error("faq_cursor_invalid", "常見問答的頁面游標無效。") from error
+    except (KnowledgeCatalogUnavailable, FaqLayoutUnavailable) as error:
+        code = (
+            "faq_layout_unavailable"
+            if isinstance(error, FaqLayoutUnavailable)
+            else "knowledge_catalog_unavailable"
+        )
         raise typed_http_error(
             503,
             "unavailable",
-            "knowledge_catalog_unavailable",
+            code,
             "常見問答暫時無法讀取，請稍後再試。",
             "line-service-help:faq",
             retryable=True,
         ) from error
 
-    for raw in raw_items:
-        try:
-            decoded = decode_governed_qa(raw.get("content", ""))
-        except Exception as error:
-            raise typed_http_error(
-                503,
-                "internal",
-                "knowledge_catalog_invalid",
-                "常見問答資料目前無法使用，請稍後再試。",
-                "line-service-help:faq",
-            ) from error
-        if decoded and decoded.qa_id not in seen_ids:
-            items.append(
-                FaqItem(
-                    qa_id=decoded.qa_id,
-                    category=decoded.category,
-                    tag=decoded.tag,
-                    question=decoded.question,
-                    answer=decoded.answer,
-                    source_ref=decoded.source_ref,
-                )
-            )
-            seen_ids.add(decoded.qa_id)
-
+    items = [
+        FaqItem(
+            qa_id=item.qa_id,
+            category=category_names.get(item.category_id, item.category),
+            category_id=item.category_id,
+            tag=item.tag,
+            question=item.question,
+            answer=item.answer,
+            source_ref=item.source_ref,
+            version=item.source_version,
+        )
+        for item in questions
+    ]
     categories = list(dict.fromkeys(item.category for item in items))
-    return BaseResponse(data=FaqListResponse(items=items, categories=categories))
+    return BaseResponse(data=FaqListResponse(items=items, categories=categories, next_cursor=next_cursor))
+
+
+def _faq_validation_error(code: str, message: str) -> HTTPException:
+    return typed_http_error(422, "validation", code, message, "line-service-help:faq")
 
 
 @public_router.post("/ask", response_model=BaseResponse[ServiceHelpAskResponse])
@@ -152,12 +180,15 @@ def ask_service_question(
     if semantic_result.outcome == "answered" and semantic_result.answer_text:
         answer_receipt_id = None
         if interaction_id is not None and actor_id is not None:
-            answer_receipt_id = _persist_liff_answer(
-                clean_question,
-                interaction_id,
-                actor_id,
-                semantic_result,
-            )
+            try:
+                answer_receipt_id = _persist_liff_answer(
+                    clean_question,
+                    interaction_id,
+                    actor_id,
+                    semantic_result,
+                )
+            except KnowledgeAnswerUnsupported:
+                return _unsupported_answer(clean_question, interaction_id, actor_id)
         return BaseResponse(
             data=ServiceHelpAskResponse(
                 outcome="answered",
@@ -174,30 +205,37 @@ def ask_service_question(
         )
 
     if semantic_result.outcome == "unsupported":
-        feedback_request_id = None
-        if interaction_id is not None and actor_id is not None:
-            feedback_request_id = _persist_liff_outcome(
-                clean_question,
-                interaction_id,
-                actor_id,
-                "unsupported",
-            )
-        return BaseResponse(
-            data=ServiceHelpAskResponse(
-                outcome="unsupported",
-                answer_text=None,
-                index_version=semantic_result.index_version,
-                suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
-                interaction_id=interaction_id,
-                feedback_request_id=feedback_request_id,
-            ),
-            message="未找到相符解答，已引導真人客服",
+        return _unsupported_answer(
+            clean_question, interaction_id, actor_id, semantic_result.index_version,
         )
 
     code = "knowledge_query_unavailable"
     if semantic_result.outcome in {"index_unavailable", "provider_error"} and semantic_result.code:
         code = semantic_result.code
     raise _liff_query_failed(clean_question, interaction_id, actor_id, code)
+
+
+def _unsupported_answer(
+    question: str,
+    interaction_id: str | None,
+    actor_id: str | None,
+    index_version: int | None = None,
+) -> BaseResponse[ServiceHelpAskResponse]:
+    feedback_request_id = (
+        _persist_liff_outcome(question, interaction_id, actor_id, "unsupported")
+        if interaction_id is not None and actor_id is not None
+        else None
+    )
+    return BaseResponse(
+        data=ServiceHelpAskResponse(
+            outcome="unsupported",
+            index_version=index_version,
+            suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
+            interaction_id=interaction_id,
+            feedback_request_id=feedback_request_id,
+        ),
+        message="未找到相符解答，已引導真人客服",
+    )
 
 
 def _verified_liff_interaction(
@@ -264,7 +302,6 @@ def _replay_liff_response(
         raise _knowledge_query_unavailable("knowledge_answer_observation_unavailable") from error
     if previous is None:
         return None
-    # A replay reads the recorded outcome, not a fresh answer from today's index.
     if previous["request_status"] == "unsupported":
         return BaseResponse(
             data=ServiceHelpAskResponse(
@@ -286,6 +323,20 @@ def _replay_liff_response(
         or not previous["citations"]
     ):
         raise _knowledge_query_unavailable("knowledge_answer_provenance_incomplete")
+    faq_sources = {
+        (citation["source_identity"], citation["source_version"])
+        for citation in previous["citations"]
+        if _qa_id_from_source(citation["source_identity"]) is not None
+    }
+    if faq_sources:
+        try:
+            current_sources = published_index_source_versions(
+                tuple(sorted({source for source, _ in faq_sources}))
+            )
+        except Exception as error:
+            raise _knowledge_query_unavailable("knowledge_catalog_unavailable") from error
+        if not faq_sources <= current_sources:
+            raise _knowledge_query_unavailable("knowledge_answer_source_changed")
     citation = previous["citations"][0]
     return BaseResponse(
         data=ServiceHelpAskResponse(
@@ -338,7 +389,7 @@ def _persist_liff_answer(
         with open_knowledge_retrieval_unit_of_work() as unit_of_work:
             receipt_id = unit_of_work.knowledge.record_inline_answer(command, answer)
             unit_of_work.commit()
-    except HTTPException:
+    except (HTTPException, KnowledgeAnswerUnsupported):
         raise
     except Exception as error:
         raise _knowledge_query_unavailable("knowledge_answer_receipt_unavailable") from error

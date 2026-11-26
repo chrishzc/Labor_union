@@ -45,8 +45,10 @@ router = APIRouter(prefix="/api/v1/line/configurations", tags=["LINE Configurati
 @router.get("/{kind}/safe", response_model=LineConfigurationSafeResponse)
 def get_safe_configuration(
     kind: LineConfigurationKind,
+    request: Request,
     principal: AdminPrincipal = Depends(require_line_configuration_reader),
 ) -> LineConfigurationSafeResponse:
+    _require_generic_faq_kind(kind, request)
     try:
         result = get_line_configuration_application().get_safe(
             GetLineConfigurationSafeQuery(kind),
@@ -154,6 +156,7 @@ def _require_dedicated_rich_menu_draft(
     kind: LineConfigurationKind,
     request: Request,
 ) -> None:
+    _require_generic_faq_kind(kind, request)
     if kind is not LineConfigurationKind.RICH_MENUS:
         return
     correlation_id = getattr(
@@ -169,6 +172,17 @@ def _require_dedicated_rich_menu_draft(
         "/api/v1/line/rich-menus/draft 契約。",
         correlation_id,
     )
+
+
+def _require_generic_faq_kind(kind: LineConfigurationKind, request: Request) -> None:
+    if kind is LineConfigurationKind.FAQ_CHAT_LAYOUT:
+        raise typed_http_error(
+            404,
+            "not_found",
+            "faq_layout_dedicated_endpoint_required",
+            "聊天室版面請使用專用 /api/v1/line/faq-layout。",
+            getattr(request.state, "correlation_id", "line-faq-layout"),
+        )
 
 
 def _safe_query_error(code: str, *, retryable: bool) -> HTTPException:

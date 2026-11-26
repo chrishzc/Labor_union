@@ -1,3 +1,6 @@
+import pytest
+
+from domains.knowledge_retrieval.knowledge import KnowledgeReviewRequired
 from domains.knowledge_retrieval.publication import KnowledgeState, next_knowledge_state
 from infrastructure.mysql.knowledge_retrieval_repository import (
     MySqlKnowledgeRetrievalRepository,
@@ -6,7 +9,7 @@ from infrastructure.mysql.knowledge_retrieval_repository import (
 )
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.knowledge_retrieval.answer_query import _format_cited_answer
-from subsystems.knowledge_retrieval.contracts import PublishKnowledgeItemCommand
+from subsystems.knowledge_retrieval.contracts import PublishKnowledgeItemCommand, RetireKnowledgeItemCommand
 
 
 def test_knowledge_draft_publishes_without_review():
@@ -16,10 +19,15 @@ def test_knowledge_draft_publishes_without_review():
 
 
 class _TransitionCursor:
-    def __init__(self) -> None:
+    def __init__(self, published_version=None, *, is_qa=True) -> None:
+        qa = '{"schema":"line.common_qa.v1","id":"QA-001","category":"FAQ","tag":"FAQ","question":"Q","aliases":[],"answer":"A","source_ref":"builtin","notes":null,"migration_status":"ready"}'
         self.fetches = iter((
-            {"id": 41, "state": "draft", "version": 1},
-            {"content": '{"schema":"line.common_qa.v1","id":"QA-001","category":"FAQ","tag":"FAQ","question":"Q","aliases":[],"answer":"A","source_ref":"builtin","notes":null,"migration_status":"ready"}', "source_digest": "d" * 64},
+            {
+                "id": 41, "state": "draft", "version": 1 if published_version is None else 3,
+                "published_version": published_version, "content": qa if is_qa else "policy",
+                "title": "Q", "source_digest": "d" * 64, "source_uri": "builtin",
+                "source_trust_tier": "internal_policy",
+            },
         ))
         self.executions = []
         self.lastrowid = 1
@@ -31,7 +39,8 @@ class _TransitionCursor:
 
 
 class _TransitionConnection:
-    def __init__(self) -> None: self.cursor_instance = _TransitionCursor()
+    def __init__(self, published_version=None, *, is_qa=True) -> None:
+        self.cursor_instance = _TransitionCursor(published_version, is_qa=is_qa)
     def cursor(self): return self.cursor_instance
 
 
@@ -74,7 +83,36 @@ def test_content_creator_may_publish_their_own_qa_with_audited_actor() -> None:
     projection_updates = [entry for entry in connection.cursor_instance.executions if "UPDATE knowledge_items SET" in entry[0]]
     assert len(projection_updates) == 1
     assert "published_by_admin_user_id=%s" in projection_updates[0][0]
-    assert projection_updates[0][1][2] == 7
+    assert projection_updates[0][1][2:4] == (2, 7)
+
+
+@pytest.mark.parametrize(
+    ("published_version", "is_qa", "allowed"),
+    [(2, True, True), (None, True, False), (None, False, False)],
+    ids=["published-faq-with-draft", "unpublished-faq", "non-faq-draft"],
+)
+def test_faq_02_only_active_faq_can_retire_with_a_draft_editing_head(
+    published_version, is_qa, allowed
+) -> None:
+    connection = _TransitionConnection(published_version, is_qa=is_qa)
+    repository = MySqlKnowledgeRetrievalRepository(connection)
+    command = RetireKnowledgeItemCommand(
+        41, ExpectedVersion(3 if published_version else 1), ActorContext("7"),
+        "retire official FAQ", IdempotencyKey("retire-41"), CorrelationId("retire-41"),
+    )
+
+    if not allowed:
+        with pytest.raises(KnowledgeReviewRequired):
+            repository.retire(command)
+        assert not any("UPDATE knowledge_items" in sql for sql, _ in connection.cursor_instance.executions)
+        return
+
+    assert repository.retire(command) == 4
+    update = next(
+        parameters for sql, parameters in connection.cursor_instance.executions
+        if "UPDATE knowledge_items" in sql
+    )
+    assert update[:3] == ("retired", 4, None)
 
 
 def test_question_observation_exposes_gap_without_line_identity() -> None:

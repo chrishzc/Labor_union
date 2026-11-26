@@ -24,7 +24,8 @@ from domains.customer_service.ticket import (
     CustomerServiceTransitionError,
     transition_ticket,
 )
-from domains.line.identities import LineUserId
+from domains.line.faq_chat_layout import FaqButton, FaqCardView, FaqLayout, FaqPreview
+from domains.line.identities import LineSourceType, LineUserId
 from shared_kernel.migration_release import load_migration_release_manifest
 from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
@@ -74,6 +75,9 @@ def _inbox(event_id="event-1"):
     return SimpleNamespace(
         event=SimpleNamespace(
             event_id=SimpleNamespace(value=event_id),
+            source=SimpleNamespace(
+                source_type=LineSourceType.USER, user_id=LineUserId("U123456789"),
+            ),
             payload_json=json.dumps({"replyToken": f"reply-{event_id}"}),
         )
     )
@@ -97,7 +101,10 @@ def test_customer_service_ticket_state_machine_rejects_backwards_transition():
 
 def test_service_help_menu_is_a_canonical_flex_delivery():
     unit_of_work = _unit_of_work()
-    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
+        faq_layout=SimpleNamespace(published_layout=FaqLayout),
+    )
 
     handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "服務說明")
 
@@ -107,7 +114,7 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     assert request.message_kind.value == "flex"
     assert request.idempotency_key.value == "service-help:menu:event-1"
     assert "customer-service:handoff:confirm" not in request.payload_json
-    assert "其他問題" in request.payload_json
+    assert "target=ai_assistant" in request.payload_json
     assert "月嫂身分認證" not in request.payload_json
 
 
@@ -115,7 +122,10 @@ def test_service_help_never_uses_reply_token_before_durable_delivery():
     unit_of_work = _unit_of_work()
     provider = ReplyProvider()
     assert "reply_provider" not in inspect.signature(LineServiceHelpApplication).parameters
-    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
+        faq_layout=SimpleNamespace(published_layout=FaqLayout),
+    )
 
     handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "服務說明")
 
@@ -147,10 +157,18 @@ def test_old_handoff_postback_background_path_is_inert():
 
 
 def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
-    from subsystems.line.service_help_application import _category_faq_payload, CustomerServiceCategory
+    def preview(category_id):
+        assert category_id == "payment_subsidy"
+        return FaqPreview(FaqCardView(
+            category_id, "費用與補助", "", "詢問 AI 客服",
+            (FaqButton("qa-fee", "費用說明", "正式問題", "正式答案"),),
+        ), ())
 
     unit_of_work = _unit_of_work()
-    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
+        faq_layout=SimpleNamespace(preview_published=preview),
+    )
 
     handled = application.handle(_inbox("event-4"), unit_of_work, LineUserId("U123456789"), "訂單進度")
 
@@ -160,11 +178,8 @@ def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
     application.handle(_inbox("event-5"), unit_of_work, LineUserId("U123456789"), "收費與補助")
 
     fee_payload = json.loads(unit_of_work.delivery_tasks.requests[1].payload_json)
-    expected_payload = _category_faq_payload(
-        CustomerServiceCategory.PAYMENT_SUBSIDY,
-        application._get_category_qa_items(CustomerServiceCategory.PAYMENT_SUBSIDY),
-    )
-    assert fee_payload == expected_payload
+    [button] = fee_payload["contents"]["body"]["contents"]
+    assert button["action"] == {"type": "postback", "data": "faq:v1:question:qa-fee", "label": "費用說明"}
 
 
 def test_service_registration_text_returns_the_non_expiring_liff_entrypoint(monkeypatch):

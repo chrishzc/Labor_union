@@ -225,7 +225,9 @@ class LineWebhookIdentityHandlers:
         if self._handle_knowledge_feedback_postback(inbox, unit_of_work):
             return True
         data = _postback_data(inbox)
-        if data.startswith("customer-service:handoff:") and data != "customer-service:handoff:confirm":
+        if data.startswith("faq:") or (
+            data.startswith("customer-service:handoff:") and data != "customer-service:handoff:confirm"
+        ):
             return self._service_help_application is not None and self._service_help_application.handle_postback(
                 inbox, unit_of_work, _optional_user_id(inbox), data,
             )

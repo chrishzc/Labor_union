@@ -35,6 +35,20 @@ class LineConfigurationCommandOutcome(StrEnum):
     EXISTING = "existing"
 
 
+class LineConfigurationKeyConflict(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("line_configuration_idempotency_conflict")
+
+
+class LineConfigurationCurrentConflict(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("line_configuration_revision_conflict")
+
+
+class LineConfigurationWriteRace(RuntimeError):
+    """Concurrent initial inserts may compete for the revision or operation key."""
+
+
 class LineConfigurationSafeState(StrEnum):
     EMPTY = "empty"
     CONFIGURED = "configured"

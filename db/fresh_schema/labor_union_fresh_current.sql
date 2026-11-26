@@ -4395,6 +4395,9 @@ CREATE TABLE `knowledge_item_versions` (
   `reason` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `recorded_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `title` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_uri` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_trust_tier` enum('internal_policy','government_source','approved_partner') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_knowledge_item_version` (`item_id`,`item_version`),
   UNIQUE KEY `uq_knowledge_version_key` (`idempotency_key`),
@@ -4424,6 +4427,10 @@ CREATE TABLE `knowledge_items` (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `published_at` datetime DEFAULT NULL,
   `retired_at` datetime DEFAULT NULL,
+  `published_version` bigint unsigned DEFAULT NULL,
+  `faq_legacy_aliases` json,
+  `faq_legacy_category_id` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `faq_legacy_category_version` bigint unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_knowledge_source_digest` (`source_uri`,`content_digest`),
   UNIQUE KEY `uq_knowledge_source_identity` (`source_identity`),
@@ -4517,7 +4524,7 @@ CREATE TABLE `line_command_receipts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `line_configuration_current` (
-  `configuration_kind` enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `configuration_kind` enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules','faq_chat_layout') COLLATE utf8mb4_unicode_ci NOT NULL,
   `revision` bigint unsigned NOT NULL,
   `revision_id` bigint unsigned NOT NULL,
   `updated_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
@@ -4528,7 +4535,7 @@ CREATE TABLE `line_configuration_current` (
 
 CREATE TABLE `line_configuration_revisions` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `configuration_kind` enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `configuration_kind` enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules','faq_chat_layout') COLLATE utf8mb4_unicode_ci NOT NULL,
   `revision` bigint unsigned NOT NULL,
   `definition_snapshot` json NOT NULL,
   `definition_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
