@@ -9,6 +9,7 @@ from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.navigation_catalog import route_aliases
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import os
 import re
@@ -18,6 +19,7 @@ from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.faq_chat_layout import FAQ_ID_PATTERN, FaqCardView, FaqCategory, faq_short_label
+from domains.line.legacy_faq import LEGACY_FAQ_CATEGORIES, LEGACY_FAQ_POLICY_LABELS
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.identities import LineSourceType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
@@ -44,12 +46,12 @@ from subsystems.line.ai_router_contracts import (
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter
 from subsystems.line.notification_policy import NotificationSourceEvent
 from shared_kernel.identities import IdempotencyReceipt
+from subsystems.line.predecessor_line_faq import PredecessorLineFaq
 from subsystems.line.runtime_human_escalation_source import normalize_complaint_text
 
 
 _FAQ_PREFIX = "faq:v1:"
 _FAQ_PAGE_SIZE = 6
-_LEGACY_POLICY_LABELS = {"一般市民（最高40小時）", "補助市民（最高120小時）"}
 _FAQ_NOT_FOUND = "這個問答目前無法讀取。請返回常見問題，或直接在此聊天室留言。"
 _FAQ_UNAVAILABLE = "常見問答暫時無法使用。請稍後再試，或直接在此聊天室留言。"
 
@@ -75,6 +77,13 @@ def _normalized_resume_command(text: str) -> str:
     return "".join(text.split()).casefold()
 
 
+@dataclass(frozen=True, slots=True)
+class ServiceHelpFaqReaders:
+    catalog: PublishedFaqCatalog | None
+    layout: FaqChatLayoutApplication | None
+    predecessor: PredecessorLineFaq | None = None
+
+
 class LineServiceHelpApplication:
     def __init__(
         self,
@@ -83,11 +92,11 @@ class LineServiceHelpApplication:
         *,
         faq_catalog: PublishedFaqCatalog | None = None,
         faq_layout: FaqChatLayoutApplication | None = None,
+        faq_reader: Callable[[], ServiceHelpFaqReaders] | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
-        self._faq_catalog = faq_catalog
-        self._faq_layout = faq_layout
+        self._faq_reader = faq_reader or (lambda: ServiceHelpFaqReaders(faq_catalog, faq_layout))
         self._router = DeterministicLineRouter()
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str, *, reply_only: bool = False) -> bool:
@@ -101,7 +110,7 @@ class LineServiceHelpApplication:
             return True
         if normalize_complaint_text(normalized) is not None:
             return False
-        if normalized in _LEGACY_POLICY_LABELS:
+        if normalized in LEGACY_FAQ_POLICY_LABELS:
             return self._handle_faq_text(inbox, unit_of_work, line_user_id, normalized)
         event_id = inbox.event.event_id.value
         outcome = self._router.route(normalized, source_event_id=event_id)
@@ -207,26 +216,38 @@ class LineServiceHelpApplication:
     def _handle_faq_text(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         if not text or not _same_private_chat(inbox, line_user_id):
             return False
-        if self._faq_catalog is None:
-            return False
+        predecessor = None
         try:
-            matches = self._faq_catalog.match_legacy_text(text)
-            if matches is None:
-                matches = self._faq_catalog.match_alias(text)
-                if not matches and text not in _LEGACY_POLICY_LABELS:
+            readers = self._faq_reader()
+            catalog, predecessor = readers.catalog, readers.predecessor
+            if catalog is None:
+                return False
+            if predecessor is not None:
+                matches = predecessor.match_text(text)
+                if matches is None:
+                    if text in LEGACY_FAQ_POLICY_LABELS:
+                        payload = _predecessor_category_payload(predecessor, "payment_subsidy")
+                        self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, "category_faq")
+                        return True
                     return False
-            elif len(matches) == 1 and any(
-                item.qa_id != matches[0].qa_id for item in self._faq_catalog.match_alias(text)
-            ):
-                matches = ()
+            else:
+                matches = catalog.match_legacy_text(text)
+                if matches is None:
+                    matches = catalog.match_alias(text)
+                    if not matches and text not in LEGACY_FAQ_POLICY_LABELS:
+                        return False
+                elif len(matches) == 1 and any(
+                    item.qa_id != matches[0].qa_id for item in catalog.match_alias(text)
+                ):
+                    matches = ()
         except KnowledgeCatalogUnavailable:
-            self._faq_guidance(inbox, unit_of_work, line_user_id, unavailable=True)
+            self._faq_guidance(inbox, unit_of_work, line_user_id, unavailable=True, predecessor=predecessor is not None)
             return True
         if len(matches) != 1:
-            self._faq_guidance(inbox, unit_of_work, line_user_id)
+            self._faq_guidance(inbox, unit_of_work, line_user_id, predecessor=predecessor is not None)
             return True
         self._reply_or_enqueue(
-            inbox, unit_of_work, line_user_id, _qa_answer_payload(matches[0]),
+            inbox, unit_of_work, line_user_id, _qa_answer_payload(matches[0], predecessor=predecessor is not None),
             "knowledge", reason_code="catalog_match",
         )
         return True
@@ -234,44 +255,52 @@ class LineServiceHelpApplication:
     def _handle_faq_action(self, inbox, unit_of_work, line_user_id, action: str, value: str) -> bool:
         if not _same_private_chat(inbox, line_user_id):
             return False
+        predecessor = None
         try:
-            if action == "menu":
-                if self._faq_layout is None:
+            readers = self._faq_reader()
+            catalog, layout, predecessor = readers.catalog, readers.layout, readers.predecessor
+            if predecessor is not None:
+                if action == "menu":
+                    payload, suffix = _service_menu_payload(), "menu"
+                elif action == "category" and value in LEGACY_FAQ_CATEGORIES:
+                    payload, suffix = _predecessor_category_payload(predecessor, value), "category_faq"
+                else:
+                    raise FaqCategoryNotPublished()
+            elif action == "menu":
+                if layout is None:
                     raise FaqLayoutUnavailable()
-                layout = self._faq_layout.published_layout()
-                categories = layout.categories if layout else ()
+                published = layout.published_layout()
+                categories = published.categories if published else ()
                 page = int(value) if re.fullmatch(r"[0-9]{1,9}", value) else 0
                 payload, suffix = _published_menu_payload(unit_of_work, categories, page), "menu"
             elif action == "category" and re.fullmatch(FAQ_ID_PATTERN, value):
-                if self._faq_layout is None:
+                if layout is None:
                     raise FaqLayoutUnavailable()
-                preview = self._faq_layout.preview_published(value)
+                preview = layout.preview_published(value)
                 payload, suffix = _category_card_payload(preview.view), "category_faq"
             elif action == "question" and is_faq_id(value):
-                if self._faq_catalog is None:
+                if catalog is None:
                     raise KnowledgeCatalogUnavailable()
-                question = self._faq_catalog.get(value)
+                question = catalog.get(value)
                 if question is None:
-                    self._faq_guidance(inbox, unit_of_work, line_user_id)
-                    return True
+                    raise FaqCategoryNotPublished()
                 payload, suffix = _qa_answer_payload(question), "knowledge"
             else:
-                self._faq_guidance(inbox, unit_of_work, line_user_id)
-                return True
+                raise FaqCategoryNotPublished()
         except FaqCategoryNotPublished:
-            self._faq_guidance(inbox, unit_of_work, line_user_id)
+            self._faq_guidance(inbox, unit_of_work, line_user_id, predecessor=predecessor is not None)
             return True
         except (FaqLayoutUnavailable, KnowledgeCatalogUnavailable):
-            self._faq_guidance(inbox, unit_of_work, line_user_id, unavailable=True)
+            self._faq_guidance(inbox, unit_of_work, line_user_id, unavailable=True, predecessor=predecessor is not None)
             return True
         self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, suffix)
         return True
 
-    def _faq_guidance(self, inbox, unit_of_work, line_user_id, *, unavailable: bool = False) -> None:
+    def _faq_guidance(self, inbox, unit_of_work, line_user_id, *, unavailable: bool = False, predecessor: bool = False) -> None:
         payload = _text_payload(_FAQ_UNAVAILABLE if unavailable else _FAQ_NOT_FOUND)
         payload["quickReply"] = {
             "items": [
-                *_faq_back_quick_reply()["items"],
+                *_faq_back_quick_reply(predecessor=predecessor)["items"],
                 *_fixed_service_quick_actions(),
             ],
         }
@@ -451,7 +480,11 @@ def _quick_faq_action(action):
     return {"type": "action", "action": {**action, "label": faq_short_label(action["label"], 20)}}
 
 
-def _faq_back_quick_reply():
+def _faq_back_quick_reply(*, predecessor=False):
+    if predecessor:
+        return {"items": [
+            {"type": "action", "action": {"type": "message", "label": "返回常見問題", "text": "常見問題"}}
+        ]}
     return {"items": [_quick_faq_action(_faq_action("menu", 0, "返回常見問題"))]}
 
 
@@ -476,6 +509,29 @@ def _published_menu_payload(unit_of_work, categories: tuple[FaqCategory, ...], p
     if not categories:
         payload["contents"]["header"]["contents"][2]["text"] = "目前尚無已發布的常見問答分類。您可使用下方入口或直接留言。"
     return payload
+
+
+
+def _predecessor_category_payload(reader: PredecessorLineFaq, category_id: str):
+    name, title, description, _ = LEGACY_FAQ_CATEGORIES[category_id]
+    actions = [
+        (faq_short_label(question, 18), question, "secondary")
+        for question in reader.card_questions(category_id)
+    ]
+    actions.append(("🤖 找不到答案？試試 AI 智慧問答", "ai_assistant", "primary"))
+    return _navigation_card_payload(
+        alt_text=f"新竹市月子工會：{title}",
+        eyebrow="新竹市月子工會 · 常見問題",
+        title=title,
+        description=description,
+        actions=actions,
+        hint="點選問題即可在對話中查看解答。點選「問 AI 客服」可開啟 LIFF。",
+        quick_reply={"items": [
+            *_faq_back_quick_reply(predecessor=True)["items"],
+            *(item for item in _common_category_quick_replies()["items"]
+              if name not in item["action"]["text"]),
+        ]},
+    )
 
 
 def _category_card_payload(view: FaqCardView):
@@ -525,7 +581,7 @@ def _ai_assistant_payload():
     )
 
 
-def _qa_answer_payload(item: PublishedFaq):
+def _qa_answer_payload(item: PublishedFaq, *, predecessor=False):
     sources = f"資料來源：{item.source_ref}\n" if item.source_ref else ""
     text = (
         f"{item.answer}\n\n"
@@ -537,7 +593,7 @@ def _qa_answer_payload(item: PublishedFaq):
         "text": text,
         "quickReply": {
             "items": [
-                *_faq_back_quick_reply()["items"],
+                *_faq_back_quick_reply(predecessor=predecessor)["items"],
                 {"type": "action", "action": {"type": "message", "label": "🤖 詢問 AI 客服", "text": "AI客服"}},
                 {"type": "action", "action": {"type": "message", "label": "👍 有幫助", "text": "有幫助"}},
                 {"type": "action", "action": {"type": "message", "label": "👎 未解決", "text": "未解決"}},

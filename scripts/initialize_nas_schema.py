@@ -450,6 +450,14 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None,
         # Use the same descriptor/current gate as the NAS runtime launcher.
         phase = "current_schema"
         _verify_current(config)
+        if any("faq_legacy_category_version" in step["sql"] for step in plan["steps"]):
+            from scripts.backfill_shared_line_faq import assert_cutover_ready, initialize_empty_faq_reader
+
+            phase = "fresh_faq_reader"
+            fingerprint = initialize_empty_faq_reader(connection)
+            with pymysql.connect(**{**settings, "database": config["database"]}) as readback:
+                assert_cutover_ready(readback, dataset_fingerprint=fingerprint)
+            result["faq_reader"] = "ready"
         result.update(status="passed", schema="current", journal=str(journal_path))
         _journal(journal_path, {"event": "passed", **result})
         return result

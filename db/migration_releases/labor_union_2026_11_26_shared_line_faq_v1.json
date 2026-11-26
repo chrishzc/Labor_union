@@ -33,7 +33,25 @@
       "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
     }
   ],
-  "backfills": [],
+  "backfills": [
+    {
+      "backfill_id": "shared-line-faq-cutover-v1",
+      "artifact": {
+        "name": "backfill_shared_line_faq.py",
+        "relative_path": "scripts/backfill_shared_line_faq.py",
+        "sha256": "16a94c54916ed352d3b216e8ac3773bcabdc0c888d401df015d962a3b52d750c",
+        "dependencies": [
+          "1087_shared_line_faq.sql"
+        ]
+      },
+      "dry_run_arguments": [],
+      "apply_arguments": [],
+      "verify_arguments": [],
+      "transaction_boundary": "preserve-runner-owned-candidate-only",
+      "receipt_contract": "shared-line-faq-cutover-backfill/v1",
+      "archive_policy": "operation-receipt-sibling-artifacts"
+    }
+  ],
   "verification_contracts": [
     {
       "verification_id": "shared-line-faq-schema-exact",

@@ -4,17 +4,29 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from dataclasses import dataclass
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
 import re
+from types import SimpleNamespace
+
+from pymysql.err import IntegrityError
 
 from domains.knowledge_retrieval.qa_catalog import QA_SOURCE_PREFIX, decode_governed_qa
-from domains.line.faq_chat_layout import FaqCategory, FaqLayout, FaqQuestionLink
+from domains.line.faq_chat_layout import FaqCategory, FaqLayout, FaqQuestionLink, decode_layout
+from domains.line.legacy_faq import (
+    LEGACY_FAQ_CATEGORIES as LAYOUT_META,
+    LEGACY_FAQ_GROUPS as LEGACY_GROUPS,
+    LEGACY_FAQ_POLICY_LABELS as POLICY_LABELS,
+)
+from infrastructure.mysql.knowledge_retrieval_repository import MySqlKnowledgeRetrievalRepository
 from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork
+from infrastructure.mysql.shared_line_faq_cutover import READY_CONTRACT, READY_KEY, shared_faq_ready_fingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.knowledge_retrieval.contracts import IngestKnowledgeSourceCommand
+from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.configuration_contracts import LineConfigurationCommandOutcome
 from subsystems.line.faq_chat_layout import (
@@ -24,25 +36,6 @@ from subsystems.line.faq_chat_layout import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = ROOT / "document/line/AI客服QA題庫.jsonl"
-LAYOUT_META = {
-    "service_flow": (
-        "服務流程", "📋 服務流程 常見問題",
-        "整理月嫂媒合、申請流程與服務預約相關問題，點選題目即可查看說明：",
-        ("服務流程如何進行？", "如果和月嫂合作不適合，可以更換月嫂嗎？",
-         "服務天數或每日時數可以延長嗎？", "實際生產日期和預產期不同時可以改期嗎？"),
-    ),
-    "payment_subsidy": (
-        "收費與補助", "💰 費用與補助 常見問題",
-        "整理到宅月子費用收費、補助申請與退費相關問題，點選題目即可查看說明：",
-        ("一般市民（最高40小時）", "補助市民（最高120小時）",
-         "符合補助退還條件後，大約什麼時候會收到款項？", "如果提前取消服務，退費或補收如何處理？"),
-    ),
-}
-LEGACY_GROUPS = {
-    **dict.fromkeys(("服務流程", "服務登記", "月嫂媒合", "服務排程", "請假代班", "餐飲服務"), "service_flow"),
-    **dict.fromkeys(("費用", "收費與補助", "補助", "社福補助"), "payment_subsidy"),
-}
-POLICY_LABELS = LAYOUT_META["payment_subsidy"][3][:2]
 
 
 @dataclass(frozen=True)
@@ -63,11 +56,15 @@ def _publication(root, revisions, events):
     pointer = root["published_version"]
     state, version = root["state"], root["version"]
     by_version = {row["item_version"]: row for row in revisions}
-    if pointer is not None:
-        publication = by_version.get(pointer)
-        if state == "retired" or publication is None or publication["event_type"] != "published":
-            raise ValueError("invalid_existing_publication_pointer")
-        return publication
+    transitions = [row for row in revisions if row["event_type"] in {"published", "retired"}]
+    if pointer is not None and (
+        state == "retired"
+        or not transitions
+        or transitions[-1]["event_type"] != "published"
+        or transitions[-1]["item_version"] != pointer
+        or (state == "published" and pointer != version)
+    ):
+        raise ValueError("invalid_existing_publication_pointer")
     if state == "retired":
         return None
     if state == "published":
@@ -75,7 +72,6 @@ def _publication(root, revisions, events):
         if snapshot is None or snapshot["event_type"] != "published":
             raise ValueError("published_revision_missing")
         return snapshot
-    transitions = [row for row in revisions if row["event_type"] in {"published", "retired"}]
     if not transitions or transitions[-1]["event_type"] == "retired":
         return None
     publication = transitions[-1]
@@ -263,7 +259,14 @@ def build_plan(rows, legacy, reviewed, known_categories):
     return resolved, FaqLayout(tuple(cards)), issues
 
 
-def backfill(connection, legacy, reviewed, *, actor, correlation_id, apply=False):
+def _fingerprint(payload):
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def backfill(
+    connection, legacy, reviewed, *, actor, correlation_id, apply=False, expected_plan_fingerprint=None,
+):
     with LineMySqlUnitOfWork(connection) as unit:
         with connection.cursor() as cursor:
             if not apply:
@@ -274,7 +277,8 @@ def backfill(connection, legacy, reviewed, *, actor, correlation_id, apply=False
             if snapshot.revision.value:
                 current = json.loads(snapshot.definition_json)
                 current_categories.update(row["category_id"] for row in current["draft_layout"]["categories"])
-            resolved, layout, issues = build_plan(_read_rows(cursor, apply), legacy, reviewed, current_categories)
+            rows = _read_rows(cursor, apply)
+            resolved, layout, issues = build_plan(rows, legacy, reviewed, current_categories)
             report = {
                 "mode": "apply" if apply else "audit",
                 "issues": issues,
@@ -282,8 +286,15 @@ def backfill(connection, legacy, reviewed, *, actor, correlation_id, apply=False
                                 for row in resolved if row.changes],
                 "legacy_cards": [{"category_id": card.category_id, "qa_ids": [link.qa_id for link in card.questions]} for card in layout.categories],
                 "layout_revision": snapshot.revision.value,
+                "plan_fingerprint": _fingerprint({
+                    "reviewed": reviewed, "revisions": [row["version"] for row in rows[0]],
+                    "items": [asdict(row) for row in resolved], "layout": asdict(layout),
+                    "layout_revision": snapshot.revision.value, "issues": issues,
+                }),
                 "updated_items": 0,
             }
+            if expected_plan_fingerprint is not None and report["plan_fingerprint"] != expected_plan_fingerprint:
+                raise ValueError("faq_cutover_reviewed_plan_changed")
             if not apply or issues:
                 return report
             for row in resolved:
@@ -293,7 +304,8 @@ def backfill(connection, legacy, reviewed, *, actor, correlation_id, apply=False
                     "UPDATE knowledge_items SET published_version=COALESCE(published_version,%s), "
                     "faq_legacy_aliases=COALESCE(faq_legacy_aliases,%s), "
                     "faq_legacy_category_id=COALESCE(faq_legacy_category_id,%s), "
-                    "faq_legacy_category_version=COALESCE(faq_legacy_category_version,%s) "
+                    "faq_legacy_category_version=COALESCE(faq_legacy_category_version,%s), "
+                    "updated_at=updated_at "
                     "WHERE id=%s AND ((published_version IS NULL AND %s IS NOT NULL) "
                     "OR (faq_legacy_aliases IS NULL AND %s IS NOT NULL) "
                     "OR (faq_legacy_category_id IS NULL AND %s IS NOT NULL))",
@@ -312,6 +324,121 @@ def backfill(connection, legacy, reviewed, *, actor, correlation_id, apply=False
                 report["layout_revision"] = 1
             unit.commit()
         return report
+
+
+def verify_cutover(connection, legacy, reviewed):
+    """Verify the committed backfill through the actual published projection."""
+    with LineMySqlUnitOfWork(connection) as unit:
+        connection.rollback()
+        with connection.cursor() as cursor:
+            cursor.execute("START TRANSACTION READ ONLY")
+            snapshot = unit.configurations.get(FAQ_CHAT_LAYOUT_KIND)
+            if not snapshot.revision.value:
+                raise ValueError("faq_cutover_published_layout_missing")
+            definition = json.loads(snapshot.definition_json)
+            published_revision = definition.get("published_revision")
+            if (
+                definition.get("schema_version") != 1
+                or type(published_revision) is not int
+                or not 0 < published_revision <= snapshot.revision.value
+                or definition.get("published_layout") is None
+            ):
+                raise ValueError("faq_cutover_published_layout_missing")
+            published_layout = decode_layout(definition["published_layout"])
+            category_ids = set(LAYOUT_META) | {
+                card.category_id for card in decode_layout(definition["draft_layout"]).categories
+            }
+            rows = _read_rows(cursor, False)
+            resolved, expected_layout, issues = build_plan(rows, legacy, reviewed, category_ids)
+            if issues:
+                raise ValueError(f"faq_cutover_readback:{issues[0]['code']}")
+            if any(row.changes for row in resolved):
+                raise ValueError("faq_cutover_readback_missing_values")
+
+            current = {card.category_id: card for card in published_layout.categories}
+            for expected in expected_layout.categories:
+                card = current.get(expected.category_id)
+                expected_ids = {link.qa_id for link in expected.questions}
+                if not card or not expected_ids or not expected_ids <= {link.qa_id for link in card.questions}:
+                    raise ValueError("faq_cutover_required_card_mismatch")
+
+            knowledge = MySqlKnowledgeRetrievalRepository(connection)
+            catalog = PublishedFaqCatalog(lambda: nullcontext(SimpleNamespace(knowledge=knowledge)))
+            published = {}
+            for row in resolved:
+                observed = catalog.get(row.qa_id)
+                if observed is None:
+                    if row.version is not None:
+                        raise ValueError("faq_cutover_official_version_missing")
+                    continue
+                if observed.source_version != row.version or (row.category_id and observed.category_id != row.category_id):
+                    raise ValueError("faq_cutover_official_version_mismatch")
+                published[row.qa_id] = observed
+
+            legacy_targets = {
+                text.strip(): row["id"]
+                for row in legacy if row.get("enabled") is True and row.get("answer", "").strip()
+                for text in (row["question"], *row.get("aliases", []))
+            }
+            legacy_targets.update({text.strip(): qa_id for text, qa_id in reviewed.get("legacy_questions", {}).items()})
+            for text, qa_id in legacy_targets.items():
+                expected = (published[qa_id],) if qa_id in published else ()
+                if catalog.match_legacy_text(text) != expected:
+                    raise ValueError("faq_cutover_legacy_alias_mismatch")
+            for card in published_layout.categories:
+                if any(link.qa_id not in published for link in card.questions):
+                    raise ValueError("faq_cutover_card_reference_unavailable")
+
+            dataset = {
+                "official": [asdict(published[qa_id]) for qa_id in sorted(published)],
+                "legacy_targets": legacy_targets,
+                "published_revision": published_revision,
+                "layout": asdict(published_layout),
+            }
+            return {
+                "dataset_fingerprint": _fingerprint(dataset),
+                "official_count": len(published),
+                "legacy_alias_count": len(legacy_targets),
+                "published_revision": published_revision,
+                "published_category_count": len(published_layout.categories),
+            }
+
+
+def assert_cutover_ready(connection, *, dataset_fingerprint):
+    if not dataset_fingerprint or shared_faq_ready_fingerprint(connection) != dataset_fingerprint:
+        raise ValueError("faq_cutover_ready_receipt_mismatch")
+
+
+def record_cutover_ready(connection, *, dataset_fingerprint):
+    """Append a gate receipt after the controlled owner has verified the candidate."""
+    if not isinstance(dataset_fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", dataset_fingerprint):
+        raise ValueError("faq_cutover_dataset_fingerprint_invalid")
+    payload = json.dumps({"contract": READY_CONTRACT, "dataset_fingerprint": dataset_fingerprint})
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO knowledge_apply_receipts (idempotency_key,command_fingerprint,receipt_json) "
+                "VALUES (%s,%s,%s)",
+                (READY_KEY, dataset_fingerprint, payload),
+            )
+    except IntegrityError as error:
+        if error.args[0] != 1062:
+            raise
+    assert_cutover_ready(connection, dataset_fingerprint=dataset_fingerprint)
+
+
+def initialize_empty_faq_reader(connection):
+    """The fresh initializer calls this only after verifying the empty target schema."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT id FROM knowledge_items LIMIT 1")
+        if cursor.fetchone() is not None:
+            raise ValueError("faq_cutover_fresh_knowledge_not_empty")
+        cursor.execute("SELECT revision FROM line_configuration_current WHERE configuration_kind='faq_chat_layout'")
+        if cursor.fetchone() is not None:
+            raise ValueError("faq_cutover_fresh_layout_not_empty")
+    fingerprint = _fingerprint({"fresh": True, "official": [], "published_revision": None})
+    record_cutover_ready(connection, dataset_fingerprint=fingerprint)
+    return fingerprint
 
 
 def main():

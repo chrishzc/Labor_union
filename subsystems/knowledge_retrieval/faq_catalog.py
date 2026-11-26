@@ -71,10 +71,26 @@ class PublishedFaqCatalog:
         except Exception as error:
             raise KnowledgeCatalogUnavailable("knowledge_catalog_unavailable") from error
 
-    def _read(self, method: str, *args) -> tuple[PublishedFaq, ...]:
+    def _read(self, method: str, *args, **kwargs) -> tuple[PublishedFaq, ...]:
         try:
             with self._unit_of_work() as unit:
-                return tuple(_project(row) for row in getattr(unit.knowledge, method)(*args))
+                rows = getattr(unit.knowledge, method)(*args, **kwargs)
+                return tuple(_project(row) for row in rows)
+        except Exception as error:
+            raise KnowledgeCatalogUnavailable("knowledge_catalog_unavailable") from error
+
+
+
+class PredecessorPublishedFaqCatalog(PublishedFaqCatalog):
+    """Read the publication history available before the schema upgrade."""
+
+    def _read(self, method: str, *args, **kwargs) -> tuple[PublishedFaq, ...]:
+        return super()._read(method, *args, predecessor=True, **kwargs)
+
+    def has_identity(self, qa_id: str) -> bool:
+        try:
+            with self._unit_of_work() as unit:
+                return unit.knowledge.predecessor_faq_identity_exists(qa_id)
         except Exception as error:
             raise KnowledgeCatalogUnavailable("knowledge_catalog_unavailable") from error
 

@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from api.routes import line_service_help
 from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
+from subsystems.line.service_help_application import ServiceHelpFaqReaders
 
 
 PAGE_PATH = Path(__file__).resolve().parents[6] / "line" / "static" / "service_help.html"
@@ -102,7 +103,7 @@ def test_faq_repository_failure_is_not_a_successful_empty_catalog() -> None:
     layout = SimpleNamespace(category_names=lambda: {})
 
     with pytest.raises(HTTPException) as caught:
-        line_service_help.get_published_faqs(catalog, layout)
+        line_service_help.get_published_faqs(lambda: ServiceHelpFaqReaders(catalog, layout))
 
     error = caught.value
     assert error.status_code == 503

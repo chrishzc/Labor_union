@@ -132,6 +132,13 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 完成後重新啟動工會系統，使用原帳號及 MFA 確認登入、資料查詢與操作。升級切換後已產生新資料時，不能直接切回舊庫而忽略新資料。
 失敗時不要清空或重複執行，保留畫面與備份紀錄交給維護人員；備份版本不符會停止切換。
 
+#### 共用 FAQ 的保留資料升級
+
+1. 在候選庫套用相容 schema 後，受控升級會先進行唯讀盤點。若缺少審核對照或遇到歧義，升級保留原庫指向，並留下候選的 `operation.json` 和盤點回執。資料維護者以正式問答的歷史發布紀錄核對分類、舊按鈕文字及必要卡片。
+2. 將確認後的 UTF-8 JSON 對照保存於維護人員可讀的位置，在 `.env.nas-maintenance` 設 `NAS_FAQ_REVIEWED_MAPPING_FILE`。JSON 應含審核者 `reviewed_by`、舊分類到穩定 ID 的 `categories`、舊文字到穩定題號的 `legacy_questions`。資料維護者解決歧義，維護操作人員執行升級。獨立回填 CLI 的寫入只用於本機隔離測試庫。
+3. 維護入口在候選庫回填後用新連線讀回正式題目、舊文字及版面，通過保留資料檢查後留下就緒憑證。只有就緒憑證和候選指紋再次核對通過，才更新 `.env` 的 `DB_DATABASE`。重新啟動 API 和 LINE worker 後，兩者依同一憑證讀共用題庫。
+4. 失敗時保留備份、候選及操作回執。維護人員可沿 canonical preserve CLI 的 `--apply` 續接原候選，使用原授權、`--plan-receipt`、`--operation-receipt` 與 `--faq-reviewed-mapping`，再走原有 `--verify` 與 `--switch`。Windows 重新執行安全升級會建立隔離候選。若已嘗試寫入而對照需修正，先保留該候選再用原庫快照建立乾淨候選。未切換時可按既有維護流程啟動原服務。切換後保留現行庫與已發布資料，依備份與新寫入狀況處理服務復原。 [FAQ 切換契約](../../.arch-map/domains/external-integration/subsystems/line/modules/faq-chat-contract.md#db-交接與切換)
+
 #### 技術人員：正式機的一次設定
 
 1. 準備 MySQL 8 的 `mysql.exe` 與 `mysqldump.exe`，加入正式機 PATH。保留原 `.env`，勿複製開發機設定覆蓋正式環境。

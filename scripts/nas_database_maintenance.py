@@ -853,8 +853,16 @@ def upgrade(settings):
     for executable in ("mysql", "mysqldump"):
         write.client_prefix(executable)
     # Unknown backfills stop before source backup or candidate writes.
-    require(all(item.backfill_id == "twins-payroll-rate-snapshots-v1" for item in migration.RELEASE_MANIFEST.backfills),
+    supported_backfills = {"twins-payroll-rate-snapshots-v1", migration.SHARED_LINE_FAQ_BACKFILL_ID}
+    require(all(item.backfill_id in supported_backfills for item in migration.RELEASE_MANIFEST.backfills),
             "新版包含尚未支援的資料轉換，請交由維護人員處理。")
+    reviewed_mapping = settings["values"].get("NAS_FAQ_REVIEWED_MAPPING_FILE", "").strip()
+    faq_arguments = {}
+    if reviewed_mapping:
+        mapping_path = Path(reviewed_mapping)
+        if not mapping_path.is_absolute():
+            mapping_path = settings["settings_file"].parent / mapping_path
+        faq_arguments["faq_reviewed_mapping"] = mapping_path
     original_env_digest = digest(settings["environment_file"])
     config = migration.SeparateDatabaseConfig(migration.DatabaseDescriptor("source-read", source, read),
               migration.DatabaseDescriptor("candidate-write", candidate, write))
@@ -863,7 +871,11 @@ def upgrade(settings):
     require(plan["status"] == "ready" and not plan["candidate_exists"], "升級預檢未通過，原資料庫不變。")
     if is_local_nas_test:
         source_objects = plan["source_objects"]
-        if migration._candidate_schema_is_exact(source_objects):
+        faq_gate_required = (source_objects.get(migration._SHARED_LINE_FAQ_ARTIFACT) == "exact"
+                             and migration._shared_faq_selected())
+        if migration._candidate_schema_is_exact(source_objects) and (
+            not faq_gate_required or migration._read_shared_faq_gate(config, source)
+        ):
             updater.require_current_database(updater.build_additive_preview(read, source, updater.DEFAULT_RECEIPT_ROOT))
             print("資料庫結構已是最新版本，無需升級。", flush=True)
             return None
@@ -890,7 +902,7 @@ def upgrade(settings):
     schema_inventory(write, candidate, (source,), reject_source_references=True)
     print("備份已完成，正在升級副本並核對資料；請勿關閉視窗。", flush=True)
     migration.apply_schema(config, source, candidate, directory / "plan.json", operation,
-                           source_recovery_root=updater.DEFAULT_RECEIPT_ROOT)
+                           source_recovery_root=updater.DEFAULT_RECEIPT_ROOT, **faq_arguments)
     print("正在進行最後的完整資料驗證。", flush=True)
     result = migration.verify_candidate(config, source, candidate, operation)
     require(result.get("status") == "verified", "副本驗證未通過，未切換資料庫。")

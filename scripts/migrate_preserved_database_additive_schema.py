@@ -401,6 +401,9 @@ DEFAULT_RELEASE_MANIFESTS = (
 _STAFF_WEB_PROFILE_ARTIFACT = "1083_staff_web_profile.sql"
 _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT = "1085_staff_web_file_management.sql"
 _SHARED_LINE_FAQ_ARTIFACT = "1087_shared_line_faq.sql"
+_SHARED_LINE_FAQ_RELEASE = "labor-union-shared-line-faq-2026-11-26-v1"
+SHARED_LINE_FAQ_BACKFILL_ID = "shared-line-faq-cutover-v1"
+SHARED_LINE_FAQ_BACKFILL_CONTRACT = "shared-line-faq-cutover-backfill/v1"
 _STAFF_WEB_FEEDBACK_ARTIFACT = "1086_staff_web_feedback.sql"
 _STAFF_WEB_ENTRY_TABLE = "staff_web_entries"
 _STAFF_WEB_TEMPLATE_TABLE = "staff_web_template_items"
@@ -718,7 +721,7 @@ def _configure_default_release_manifests() -> None:
         (release_directory / name for name in DEFAULT_RELEASE_MANIFESTS),
         include_backfills=True,
         backfill_release_ids=frozenset(
-            {"labor-union-twins-payroll-policy-2026-09-12-v2"}
+            {"labor-union-twins-payroll-policy-2026-09-12-v2", _SHARED_LINE_FAQ_RELEASE}
         ),
     )
 
@@ -2339,6 +2342,38 @@ def local_additive_descriptor_state(
     )
 
 
+def _shared_faq_ddl_prefix(snapshot, descriptor) -> int | None:
+    """Return the exact executed 1087 prefix, or reject an unrecognized shape."""
+    tables = ("knowledge_items", "knowledge_item_versions", "line_configuration_revisions", "line_configuration_current")
+    states = []
+    for table in tables:
+        expected = descriptor["parent_columns"][table]
+        group = {**descriptor, "parent_columns": {table: expected}}
+        state = _artifact_metadata_state(snapshot, group, _SHARED_LINE_FAQ_ARTIFACT)
+        if state == "drift" and table in tables[2:]:
+            kind = expected["configuration_kind"]
+            predecessor_type = kind["column_type"].replace(",'faq_chat_layout'", "")
+            for enum in (predecessor_type, predecessor_type.replace(",'notification_rules'", "")):
+                old = {**group, "parent_columns": {table: {"configuration_kind": {**kind, "column_type": enum}}}}
+                if _artifact_metadata_state(snapshot, old, _SHARED_LINE_FAQ_ARTIFACT) == "exact":
+                    state = "absent"
+                    break
+        if state not in {"absent", "exact"}:
+            return None
+        states.append(state)
+    completed = states.count("exact")
+    return completed if states == ["exact"] * completed + ["absent"] * (4 - completed) else None
+
+
+def _shared_faq_ddl_state(snapshot, descriptor) -> str:
+    completed = _shared_faq_ddl_prefix(snapshot, descriptor)
+    if completed is None:
+        return "drift"
+    if completed == 4:
+        return "exact"
+    return "partial" if completed else "absent"
+
+
 def _modified_parent_predecessor_absent_state(
     snapshot: Mapping[str, Any],
     descriptor: dict[str, Any],
@@ -2347,15 +2382,7 @@ def _modified_parent_predecessor_absent_state(
     defer_missing_triggers: bool,
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
-    old_line_configuration_kind = _column_contract(
-        "enum('message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules')",
-        "NO",
-    )
     predecessor_columns = {
-        _SHARED_LINE_FAQ_ARTIFACT: {
-            table: {"configuration_kind": old_line_configuration_kind}
-            for table in ("line_configuration_current", "line_configuration_revisions")
-        },
         _STAFF_WEB_FEEDBACK_ARTIFACT: {
             _STAFF_WEB_TEMPLATE_TABLE: {
                 "category": _column_contract("enum('photo','certificate','other')", "NO"),
@@ -2809,6 +2836,8 @@ def _metadata_state_for_artifact(
     *,
     defer_missing_triggers: bool,
 ) -> str:
+    if artifact == _SHARED_LINE_FAQ_ARTIFACT:
+        return _shared_faq_ddl_state(snapshot, descriptor)
     if artifact == "1081_order_established_unserved_status.sql":
         return _established_unserved_schema_state(snapshot, descriptor)
     if artifact == "1073_client_beclass_query_case_uniqueness.sql":
@@ -7395,6 +7424,10 @@ def _release_descriptor_metadata_state(
 ) -> str:
     """Fail closed unless released metadata equals the canonical SQL contract."""
     canonical = _canonical_artifact_descriptor(part_name)
+    if part_name == _SHARED_LINE_FAQ_ARTIFACT:
+        if released.get("parent_columns") != canonical["parent_columns"]:
+            raise UpgradeBlocked("FAQ release descriptor differs from canonical parent columns")
+        return _shared_faq_ddl_state(snapshot, canonical)
     parent_tables = set(canonical.get("parent_columns", {}))
 
     def released_projection(kind: str) -> dict[Any, Any]:
@@ -8992,6 +9025,11 @@ def schema_statements_for_state(
     snapshot: Mapping[str, Any],
 ) -> list[str]:
     statements = split_sql(part.read_text(encoding="utf-8"))
+    if part.name == _SHARED_LINE_FAQ_ARTIFACT and state == "partial":
+        completed = _shared_faq_ddl_prefix(snapshot, _canonical_artifact_descriptor(part.name))
+        if completed is None:
+            raise UpgradeBlocked("faq_cutover_schema_prefix_unrecognized")
+        return statements[completed:]
     if (
         part.name == "1005_contract_external_signing_successor.sql"
         and state == "partial"
@@ -9209,9 +9247,15 @@ def apply_schema(
     mysql_container: str | None = None,
     allowed_partial_artifacts: frozenset[str] = frozenset(),
     source_recovery_root: Path | None = None,
+    faq_reviewed_mapping: Path | None = None,
+    faq_legacy_catalog: Path | None = None,
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
     operation_receipt = read_receipt(operation_receipt_path)
+    if _shared_faq_selected() and operation_receipt.get("status") in {"backfilled", "verified"}:
+        _require_shared_faq_operation_identity(config, source, candidate, operation_receipt)
+        _verify_shared_faq_operation(config, candidate, operation_receipt, faq_reviewed_mapping, faq_legacy_catalog)
+        return operation_receipt
     if operation_receipt.get("status") == "schema_applied":
         if operation_receipt.get("candidate_database") != candidate:
             raise UpgradeBlocked("operation receipt targets another candidate")
@@ -9221,6 +9265,8 @@ def apply_schema(
             candidate,
             operation_receipt_path,
             mysql_container=mysql_container,
+            faq_reviewed_mapping=faq_reviewed_mapping,
+            faq_legacy_catalog=faq_legacy_catalog,
         )
     plan = read_receipt(plan_path)
     if plan.get("status") != "ready":
@@ -9254,6 +9300,8 @@ def apply_schema(
         return run_candidate_post_schema(
             config, source, candidate, operation_receipt_path,
             mysql_container=mysql_container,
+            faq_reviewed_mapping=faq_reviewed_mapping,
+            faq_legacy_catalog=faq_legacy_catalog,
         )
     fresh = (
         build_plan(config, source, candidate, allowed_partial_artifacts,
@@ -9361,7 +9409,10 @@ def apply_schema(
                     part, before_state, part_before
                 )
                 part_steps: list[dict[str, Any]] = []
-                for index, statement in enumerate(statements, start=1):
+                first_index = 1
+                if part.name == _SHARED_LINE_FAQ_ARTIFACT and before_state == "partial":
+                    first_index += len(split_sql(part.read_text(encoding="utf-8"))) - len(statements)
+                for index, statement in enumerate(statements, start=first_index):
                     step = {
                         "part": part.name,
                         "index": index,
@@ -9441,6 +9492,8 @@ def apply_schema(
     return run_candidate_post_schema(
         config, source, candidate, operation_receipt_path,
         mysql_container=mysql_container,
+        faq_reviewed_mapping=faq_reviewed_mapping,
+        faq_legacy_catalog=faq_legacy_catalog,
     )
 
 
@@ -9744,6 +9797,8 @@ def run_candidate_post_schema(
     operation_receipt_path: Path,
     *,
     mysql_container: str | None = None,
+    faq_reviewed_mapping: Path | None = None,
+    faq_legacy_catalog: Path | None = None,
 ) -> dict[str, Any]:
     receipt = read_receipt(operation_receipt_path)
     if receipt.get("status") != "schema_applied":
@@ -9757,7 +9812,11 @@ def run_candidate_post_schema(
             operation_receipt_path,
             mysql_container=mysql_container,
             source_objects=_upgrade_admission_states(_schema_snapshot(config, source)),
+            source=source,
+            faq_reviewed_mapping=faq_reviewed_mapping,
+            faq_legacy_catalog=faq_legacy_catalog,
         )
+        receipt = read_receipt(operation_receipt_path)
         owned_objects = receipt.get("owned_objects")
         verification_receipts = ()
         if isinstance(owned_objects, Mapping):
@@ -9934,8 +9993,21 @@ def _run_manifest_backfills(
     *,
     mysql_container: str | None,
     source_objects: Mapping[str, str],
+    source: str | None = None,
+    faq_reviewed_mapping: Path | None = None,
+    faq_legacy_catalog: Path | None = None,
 ) -> tuple[dict[str, Any], ...]:
     backfills = _required_manifest_backfills(source_objects)
+    if _shared_faq_selected() and source is not None and source_objects.get(_SHARED_LINE_FAQ_ARTIFACT) == "exact":
+        inherited = _read_shared_faq_gate(config, source)
+        if inherited:
+            operation = read_receipt(operation_receipt_path)
+            _require_shared_faq_operation_identity(config, source, candidate, operation)
+            if _read_shared_faq_gate(config, candidate) != inherited:
+                raise UpgradeBlocked("faq_cutover_inherited_readback_mismatch")
+            operation["faq_cutover"] = {"status": "inherited", "dataset_fingerprint": inherited}
+            write_receipt(operation_receipt_path, operation)
+            backfills = tuple(item for item in backfills if item.backfill_id != SHARED_LINE_FAQ_BACKFILL_ID)
     if not backfills:
         return ()
     artifact_dir = operation_receipt_path.expanduser().resolve().parent
@@ -9960,6 +10032,14 @@ def _run_manifest_backfills(
     environment.update(getattr(candidate_config, "backfill_environment", {}))
     receipts: list[dict[str, Any]] = []
     for backfill in backfills:
+        if backfill.backfill_id == SHARED_LINE_FAQ_BACKFILL_ID:
+            if source is None:
+                raise UpgradeBlocked("faq_cutover_source_required")
+            receipts.append(_run_shared_faq_candidate_backfill(
+                config, source, candidate, operation_receipt_path, backup,
+                reviewed_mapping=faq_reviewed_mapping, legacy_catalog=faq_legacy_catalog,
+            ))
+            continue
         safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", backfill.backfill_id)
         plan_path = artifact_dir / f"{candidate}.{safe_id}.plan.json"
         apply_path = artifact_dir / f"{candidate}.{safe_id}.apply.json"
@@ -10031,6 +10111,226 @@ def _run_manifest_backfills(
             }
         )
     return tuple(receipts)
+
+
+def _shared_faq_selected() -> bool:
+    return any(item.backfill_id == SHARED_LINE_FAQ_BACKFILL_ID
+               for item in getattr(RELEASE_MANIFEST, "backfills", ()))
+
+
+def _read_shared_faq_gate(config, database: str) -> str | None:
+    from infrastructure.mysql.shared_line_faq_cutover import shared_faq_ready_fingerprint
+
+    connection = config.connect(database)
+    try:
+        return shared_faq_ready_fingerprint(connection)
+    finally:
+        connection.close()
+
+
+def _require_shared_faq_operation_identity(config, source, candidate, receipt) -> None:
+    validate_database_names(source, candidate)
+    if (
+        receipt.get("candidate_database") != candidate
+        or receipt.get("source") != server_identity(config, source)
+        or receipt.get("candidate") != server_identity(config, candidate)
+        or not receipt.get("restored_data")
+        or not isinstance(receipt.get("source_dump"), Mapping)
+    ):
+        raise UpgradeBlocked("faq_cutover_operation_identity_mismatch")
+
+
+def _shared_faq_inputs(candidate, reviewed_mapping, legacy_catalog=None):
+    from scripts.backfill_shared_line_faq import DEFAULT_INPUT
+
+    if legacy_catalog is not None and not candidate.startswith("lu_test_"):
+        raise UpgradeBlocked("faq_cutover_synthetic_catalog_requires_isolation")
+
+    catalog_path = Path(legacy_catalog or DEFAULT_INPUT).resolve()
+    mapping_path = Path(reviewed_mapping).resolve() if reviewed_mapping is not None else None
+    try:
+        catalog_bytes = catalog_path.read_bytes()
+        legacy = [json.loads(line) for line in catalog_bytes.decode("utf-8").splitlines() if line.strip()]
+        reviewed_bytes = mapping_path.read_bytes() if mapping_path is not None else None
+        reviewed = json.loads(reviewed_bytes.decode("utf-8")) if reviewed_bytes is not None else {}
+    except (OSError, UnicodeError, ValueError) as error:
+        raise UpgradeBlocked("faq_cutover_review_input_unavailable") from error
+    if not isinstance(reviewed, dict):
+        raise UpgradeBlocked("faq_cutover_review_input_invalid")
+    for field in ("categories", "legacy_questions"):
+        values = reviewed.get(field, {})
+        if not isinstance(values, dict) or not all(
+            isinstance(key, str) and key.strip() and isinstance(value, str) and value.strip()
+            for key, value in values.items()
+        ):
+            raise UpgradeBlocked("faq_cutover_review_input_invalid")
+    reviewer = reviewed.get("reviewed_by")
+    if mapping_path is not None and (
+        not isinstance(reviewer, str) or not reviewer.strip() or reviewer != reviewer.strip()
+        or len(reviewer) > 100 or any(ord(character) < 32 for character in reviewer)
+    ):
+        raise UpgradeBlocked("faq_cutover_reviewer_required")
+    references = {
+        "catalog_sha256": _sha256_bytes(catalog_bytes),
+        "reviewed_mapping_sha256": _sha256_bytes(reviewed_bytes) if reviewed_bytes is not None else None,
+        "synthetic_catalog": legacy_catalog is not None,
+    }
+    if legacy_catalog is not None:
+        references["synthetic_catalog_path"] = str(catalog_path)
+    if mapping_path is not None:
+        references["reviewed_mapping_path"] = str(mapping_path)
+    return legacy, reviewed, references
+
+
+def _shared_faq_input_ref_matches(old, current):
+    return all(old.get(key) == current.get(key) for key in (
+        "catalog_sha256", "reviewed_mapping_sha256", "synthetic_catalog",
+    ))
+
+
+def _run_shared_faq_candidate_backfill(
+    config, source, candidate, operation_path, backup, *, reviewed_mapping, legacy_catalog,
+):
+    from scripts import backfill_shared_line_faq as faq
+    from shared_kernel.identities import ActorContext, CorrelationId
+    from subsystems.line.capabilities import LineCapability
+
+    operation = read_receipt(operation_path)
+    phase = "dry-run"
+    phases = {}
+    diagnostics = []
+    inputs = None
+    attempt = f"{candidate}.{SHARED_LINE_FAQ_BACKFILL_ID}.{time_module.time_ns()}"
+
+    def record(mode, status, result):
+        path = operation_path.resolve().with_name(f"{attempt}.{mode}.json")
+        payload = {
+            "contract": SHARED_LINE_FAQ_BACKFILL_CONTRACT, "mode": mode,
+            "database": candidate, "receipt_status": status,
+            "inputs": inputs, "result": result,
+        }
+        write_receipt(path, payload)
+        phases[mode] = {"path": str(path), "sha256": _sha256_file(path), "receipt_status": status}
+
+    try:
+        _require_shared_faq_operation_identity(config, source, candidate, operation)
+        legacy, reviewed, inputs = _shared_faq_inputs(candidate, reviewed_mapping, legacy_catalog)
+        previous = operation.get("faq_cutover") or {}
+        if previous.get("apply_attempted") and not _shared_faq_input_ref_matches(previous["inputs"], inputs):
+            raise UpgradeBlocked("faq_cutover_review_input_changed_after_apply")
+        if _read_shared_faq_gate(config, candidate) is not None:
+            raise UpgradeBlocked("faq_cutover_unexpected_readiness_marker")
+        reviewer = reviewed.get("reviewed_by") or "faq-legacy-audit"
+        actor = ActorContext(reviewer, (LineCapability.CONFIG_MANAGE.value,))
+        correlation = CorrelationId(f"faq-cutover:{candidate}")
+
+        connection = config.connect(candidate)
+        try:
+            audit = faq.backfill(connection, legacy, reviewed, actor=actor, correlation_id=correlation)
+        finally:
+            connection.close()
+        diagnostics = sorted({issue["code"] for issue in audit["issues"]})
+        record(phase, "planned" if not diagnostics else "blocked", audit)
+        if reviewed_mapping is None:
+            raise UpgradeBlocked("faq_cutover_reviewed_mapping_required")
+        if diagnostics:
+            raise UpgradeBlocked("faq_cutover_audit_unresolved: " + ", ".join(diagnostics))
+
+        phase = "apply"
+        operation["faq_cutover"] = {
+            "status": "apply_started", "inputs": inputs, "apply_attempted": True, "phases": phases,
+        }
+        write_receipt(operation_path, operation)
+        connection = config.connect(candidate)
+        try:
+            applied = faq.backfill(
+                connection, legacy, reviewed, actor=actor, correlation_id=correlation,
+                apply=True, expected_plan_fingerprint=audit["plan_fingerprint"],
+            )
+        finally:
+            connection.close()
+        diagnostics = sorted({issue["code"] for issue in applied["issues"]})
+        record(phase, "committed" if not diagnostics else "blocked", applied)
+        if diagnostics:
+            raise UpgradeBlocked("faq_cutover_apply_unresolved: " + ", ".join(diagnostics))
+
+        phase = "verify"
+        connection = config.connect(candidate)
+        try:
+            observed = faq.verify_cutover(connection, legacy, reviewed)
+        finally:
+            connection.close()
+        fingerprint = observed.get("dataset_fingerprint")
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise UpgradeBlocked("faq_cutover_readback_fingerprint_missing")
+        record(phase, "verified", observed)
+        operation["faq_cutover"] = {
+            "status": "read_back", "inputs": inputs, "apply_attempted": True,
+            "phases": phases, "dataset_fingerprint": fingerprint,
+        }
+        write_receipt(operation_path, operation)
+    except Exception as error:
+        code = (str(error) if isinstance(error, (UpgradeBlocked, ValueError)) and str(error).startswith("faq_cutover_")
+                else f"faq_cutover_{phase}_failed")
+        operation["faq_cutover"] = {
+            **(operation.get("faq_cutover") or {}), "status": "blocked",
+            "phase": phase, "reason": code, "issue_codes": diagnostics,
+            "error_type": type(error).__name__, "phases": phases,
+        }
+        write_receipt(operation_path, operation)
+        raise UpgradeBlocked(code) from error
+    return {
+        "backfill_id": SHARED_LINE_FAQ_BACKFILL_ID,
+        "receipt_contract": SHARED_LINE_FAQ_BACKFILL_CONTRACT,
+        "candidate_pre_backfill_dump": backup, "phases": phases,
+    }
+
+
+def _verify_shared_faq_operation(config, candidate, receipt, reviewed_mapping=None, legacy_catalog=None):
+    from scripts.backfill_shared_line_faq import verify_cutover
+
+    gate = receipt.get("faq_cutover") or {}
+    fingerprint = gate.get("dataset_fingerprint")
+    if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise UpgradeBlocked("faq_cutover_readback_required")
+    if gate.get("status") == "inherited":
+        if _read_shared_faq_gate(config, candidate) != fingerprint:
+            raise UpgradeBlocked("faq_cutover_inherited_readback_mismatch")
+        return gate
+    if gate.get("status") not in {"read_back", "ready"}:
+        raise UpgradeBlocked("faq_cutover_readback_required")
+    verify = (gate.get("phases") or {}).get("verify") or {}
+    receipt_path = Path(verify.get("path") or "")
+    if not receipt_path.is_file() or _sha256_file(receipt_path) != verify.get("sha256"):
+        raise UpgradeBlocked("faq_cutover_readback_receipt_changed")
+    result = read_receipt(receipt_path)
+    if (
+        result.get("contract") != SHARED_LINE_FAQ_BACKFILL_CONTRACT
+        or result.get("receipt_status") != "verified"
+        or result.get("database") != candidate
+        or (result.get("result") or {}).get("dataset_fingerprint") != fingerprint
+    ):
+        raise UpgradeBlocked("faq_cutover_readback_receipt_mismatch")
+    inputs = gate["inputs"]
+    legacy, reviewed, actual = _shared_faq_inputs(
+        candidate, reviewed_mapping or inputs.get("reviewed_mapping_path"),
+        legacy_catalog or inputs.get("synthetic_catalog_path"),
+    )
+    if not _shared_faq_input_ref_matches(inputs, actual):
+        raise UpgradeBlocked("faq_cutover_review_input_changed_after_apply")
+    connection = config.connect(candidate)
+    try:
+        observed = verify_cutover(connection, legacy, reviewed)
+    except (ValueError, pymysql.MySQLError) as error:
+        code = str(error) if str(error).startswith("faq_cutover_") else "faq_cutover_readback_failed"
+        raise UpgradeBlocked(code) from error
+    finally:
+        connection.close()
+    if observed.get("dataset_fingerprint") != fingerprint:
+        raise UpgradeBlocked("faq_cutover_readback_changed")
+    if gate.get("status") == "ready" and _read_shared_faq_gate(config, candidate) != fingerprint:
+        raise UpgradeBlocked("faq_cutover_gate_mismatch")
+    return gate
 
 
 def _uses_catalog_post_schema_contract() -> bool:
@@ -10124,6 +10424,10 @@ def switch_environment(
         raise UpgradeBlocked("verified source data fingerprint is stale")
     if _table_evidence(connection_config, candidate) != verified.get("candidate_data"):
         raise UpgradeBlocked("verified candidate data fingerprint is stale")
+    if _shared_faq_selected():
+        gate = _verify_shared_faq_operation(connection_config, candidate, verified)
+        if gate["status"] not in {"ready", "inherited"}:
+            raise UpgradeBlocked("faq_cutover_readiness_not_recorded")
     updated = _replace_database_setting(raw, source, candidate)
     receipt = {
         "kind": "database_switch",
@@ -10242,6 +10546,7 @@ def _table_projection_evidence(
     columns: list[str],
     *,
     column_sources: Mapping[str, str] | None = None,
+    exclude_shared_faq_append: bool = False,
 ) -> dict[str, Any]:
     sources = dict(column_sources or {})
     if (
@@ -10293,10 +10598,11 @@ def _table_projection_evidence(
                 if primary
                 else projection
             )
-            cursor.execute(
-                f"SELECT {projection} FROM `{table}` "
-                f"ORDER BY {ordering}"
-            )
+            where, args = "", ()
+            if exclude_shared_faq_append:
+                predicate, args = _shared_faq_append_predicate(table)
+                where = f" WHERE NOT ({predicate})"
+            cursor.execute(f"SELECT {projection} FROM `{table}`{where} ORDER BY {ordering}", args)
             rows = cursor.fetchall()
     finally:
         connection.close()
@@ -10316,6 +10622,73 @@ def _table_columns(
         for row in snapshot["columns"]
         if row["table_name"] == table
     ]
+
+
+_SHARED_FAQ_APPEND_TABLES = frozenset({
+    "line_configuration_current", "line_configuration_revisions",
+    "line_domain_audit_events", "knowledge_apply_receipts",
+})
+_SHARED_FAQ_FILL_COLUMNS = (
+    "published_version", "faq_legacy_aliases", "faq_legacy_category_id", "faq_legacy_category_version",
+)
+
+
+def _shared_faq_append_predicate(table: str) -> tuple[str, tuple[str, ...]]:
+    from infrastructure.mysql.shared_line_faq_cutover import READY_KEY
+
+    if table == "line_configuration_current":
+        return "configuration_kind=%s AND revision=1", ("faq_chat_layout",)
+    if table == "line_configuration_revisions":
+        return "configuration_kind=%s AND revision=1 AND idempotency_key=%s", (
+            "faq_chat_layout", "line-config-bootstrap:faq_chat_layout:v1",
+        )
+    if table == "line_domain_audit_events":
+        return "action=%s AND aggregate_type=%s AND aggregate_identity=%s", (
+            "line.faq_layout.bootstrap", "line_configuration", "faq_chat_layout:1",
+        )
+    if table == "knowledge_apply_receipts":
+        return "idempotency_key=%s", (READY_KEY,)
+    raise UpgradeBlocked("faq_cutover_unexpected_append_table")
+
+
+def _verify_shared_faq_append(config, source, candidate, table, source_snapshot, before, after):
+    if after["count"] != before["count"] + 1:
+        raise UpgradeBlocked(f"faq_cutover_unexpected_append_count: {table}")
+    columns = _table_columns(source_snapshot, table)
+    original = _table_projection_evidence(config, source, table, columns)
+    preserved = _table_projection_evidence(
+        config, candidate, table, columns, exclude_shared_faq_append=True,
+    )
+    if preserved != original:
+        raise UpgradeBlocked(f"faq_cutover_preserved_rows_changed: {table}")
+    return {"mode": "verified_single_faq_append", "row_count": original["row_count"]}
+
+
+def _verify_shared_faq_knowledge_preservation(config, source, candidate, source_snapshot):
+    from domains.knowledge_retrieval.qa_catalog import QA_SOURCE_PREFIX
+
+    columns = _table_columns(source_snapshot, "knowledge_items")
+    original_columns = [name for name in columns if name not in _SHARED_FAQ_FILL_COLUMNS]
+    before = _table_projection_evidence(config, source, "knowledge_items", original_columns)
+    after = _table_projection_evidence(config, candidate, "knowledge_items", original_columns)
+    if before != after:
+        raise UpgradeBlocked("faq_cutover_preserved_rows_changed: knowledge_items")
+    source_columns = [name for name in _SHARED_FAQ_FILL_COLUMNS if name in columns]
+    rows = []
+    for database, read_columns in ((source, source_columns), (candidate, _SHARED_FAQ_FILL_COLUMNS)):
+        projection = ",".join(("id", "source_identity", *read_columns))
+        with config.connect(database) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(f"SELECT {projection} FROM knowledge_items ORDER BY id")
+                rows.append(cursor.fetchall())
+    for old, new in zip(*rows, strict=True):
+        is_faq = (old["source_identity"] or "").startswith(QA_SOURCE_PREFIX)
+        if any(
+            (not is_faq or old.get(name) is not None) and old.get(name) != new[name]
+            for name in _SHARED_FAQ_FILL_COLUMNS
+        ):
+            raise UpgradeBlocked("faq_cutover_existing_knowledge_metadata_changed")
+    return {"mode": "verified_faq_fill_only", **before}
 
 
 def _verify_source_column_projection_preserved(
@@ -10599,6 +10972,11 @@ def verify_candidate(
         raise UpgradeBlocked(
             "subsidy_identity_backfill_retired: restore a new candidate from the source"
         )
+    faq_gate = None
+    if _shared_faq_selected():
+        _require_shared_faq_operation_identity(config, source, candidate, receipt)
+        faq_gate = _verify_shared_faq_operation(config, candidate, receipt)
+    faq_candidate_backfilled = faq_gate is not None and faq_gate["status"] != "inherited"
     source_snapshot = _schema_snapshot(config, source)
     source_objects = _owned_classification(
         source_snapshot, defer_missing_triggers=True
@@ -10667,6 +11045,12 @@ def verify_candidate(
                     ),
                 }
                 continue
+            if faq_candidate_backfilled and table in _SHARED_FAQ_APPEND_TABLES:
+                state = _verify_shared_faq_append(
+                    config, source, candidate, table, source_snapshot, evidence, actual,
+                )
+                additive_projection_preservation[table] = state
+                continue
             if table == "payroll_rate_policies":
                 additive_projection_preservation[table] = (
                     _verify_twins_payroll_policy_seed_preserves_source(
@@ -10717,6 +11101,11 @@ def verify_candidate(
             raise UpgradeBlocked(
                 f"preserved Knowledge request/job data changed: {table}"
             )
+        if faq_candidate_backfilled and table == "knowledge_items":
+            additive_projection_preservation[table] = _verify_shared_faq_knowledge_preservation(
+                config, source, candidate, source_snapshot,
+            )
+            continue
         source_columns = _table_columns(source_snapshot, table)
         candidate_columns = _table_columns(candidate_snapshot, table)
         has_additive_columns = source_columns != candidate_columns
@@ -10817,6 +11206,24 @@ def verify_candidate(
         connection.close()
     if view_mismatches:
         raise UpgradeBlocked("v_order_details lifecycle_version mismatch")
+    if faq_candidate_backfilled:
+        from scripts.backfill_shared_line_faq import record_cutover_ready
+
+        fingerprint = faq_gate["dataset_fingerprint"]
+        connection = config.connect(candidate)
+        try:
+            connection.begin()
+            record_cutover_ready(connection, dataset_fingerprint=fingerprint)
+            connection.commit()
+        except (ValueError, pymysql.MySQLError) as error:
+            connection.rollback()
+            raise UpgradeBlocked("faq_cutover_gate_write_failed") from error
+        finally:
+            connection.close()
+        if _read_shared_faq_gate(config, candidate) != fingerprint:
+            raise UpgradeBlocked("faq_cutover_gate_readback_mismatch")
+        receipt["faq_cutover"] = {**faq_gate, "status": "ready"}
+        candidate_data = _table_evidence(config, candidate)
     receipt.update(
         status="verified", verified_at=_now(), source_data=source_data,
         candidate_data=candidate_data, owned_objects=states,
@@ -10962,6 +11369,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--source-dump")
     parser.add_argument("--source-backup-receipt")
+    parser.add_argument("--faq-reviewed-mapping", type=Path,
+                        help="Reviewed FAQ mapping for the managed candidate backfill")
     parser.add_argument("--switch-receipt")
     parser.add_argument("--mysqldump", default="mysqldump")
     parser.add_argument("--mysql", default="mysql")
@@ -11056,7 +11465,7 @@ def main(argv: list[str] | None = None) -> int:
             not args.rehearsal
             and mode in {
                 "check", "dry-run", "backup", "switch", "complete-restart"
-            }
+            } | ({"apply"} if _shared_faq_selected() else set())
         ):
             run_source_safety_preflight(
                 config,
@@ -11110,6 +11519,7 @@ def main(argv: list[str] | None = None) -> int:
                 config, source, candidate, Path(args.plan_receipt),
                 Path(args.operation_receipt),
                 mysql_container=args.mysql_container,
+                faq_reviewed_mapping=args.faq_reviewed_mapping,
             )
             if (
                 result.get("status") not in VERIFYABLE_CANDIDATE_STATUSES

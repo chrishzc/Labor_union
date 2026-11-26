@@ -15,8 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
-from api.dependencies.knowledge_retrieval import get_published_faq_catalog
-from api.dependencies.line_faq_layout import get_faq_chat_layout_application
+from api.dependencies.line_faq_layout import get_service_help_faq_readers
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
 from api.dependencies.line_identity import get_liff_token_verifier
 from api.dependencies.llm_configuration import LlmSemanticTestResult, get_llm_configuration_application
@@ -27,7 +26,7 @@ from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
 from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.faq_chat_layout import FaqCategoryNotPublished, FaqLayoutUnavailable
-from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.service_help_application import LineServiceHelpApplication, ServiceHelpFaqReaders
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
 
@@ -128,8 +127,7 @@ def client(semantic_application, faq_repository, faq_layout):
     catalog = PublishedFaqCatalog(faq_repository.unit)
     faq_layout.catalog = catalog
     original = dict(app.dependency_overrides)
-    app.dependency_overrides[get_published_faq_catalog] = lambda: catalog
-    app.dependency_overrides[get_faq_chat_layout_application] = lambda: faq_layout
+    app.dependency_overrides[get_service_help_faq_readers] = lambda: lambda: ServiceHelpFaqReaders(catalog, faq_layout)
     app.dependency_overrides[get_llm_configuration_application] = lambda: semantic_application
     app.dependency_overrides[get_liff_token_verifier] = lambda: Mock(spec=["verify"])
     try:

@@ -39,9 +39,10 @@
 
 - 建議在兩張 `line_configuration_*` 既有 ENUM 增加 `faq_chat_layout`；一個 typed JSON 快照（`schema_version=1`）存分類 ID／名稱、draft_layout、published_layout 和 published_revision。沿用唯一的 kind+revision、idempotency、current→revision FK；compare-and-set、快照、current 與稽核同一交易。公開只取 current 指向的快照內已發布部分。非 FAQ 種類、舊 Rich Menu 版本和記錄不改。新分類建立於同一事務，以快照為名稱／ID 對照來源，不另建分類表或重複名稱清單。題目版本存 category_id；無 category_id 的已發布老資料以明確映射解析，不以字串模糊猜。
 - Knowledge root 正式指標是 nullable BIGINT UNSIGNED（與 item_version 一致）；讀時以同一 item_id+version join；歷史快照不可改寫。新的不可變版本要保存可供發布回讀的來源與標題；候選實作讓後端組成完整版本快照，不混讀草稿 root。版本、指標、憑證及發布索引工作遵守同一 owner 交易，以新連線查出沒留下半套。重放用原鍵及 fingerprint 回讀，不能因目前狀態已變而新增事件。
-- 上線步驟：① additive schema 與向後相容程式 → ② dry-run 產出分類、已發布指標、別名與舊入口的差異；未知或衝突由資料維護者核對 → ③ 只補缺值的冪等回填，隔離環境重跑不得改既有正式內容 → ④ CI／隔離宿主核對舊入口和兩版本可見性 → ⑤ 切共用 reader，再移除舊 runtime JSONL。切換前保留舊相容讀取；切換後故障不回退到 JSONL，否則會重現舊答案。版面可回復上一份正式快照，不回滾已發布題庫；應用需要回退時保留 additive 欄位，關閉新入口並保留已發布讀模型，不能刪除新紀錄或恢復舊答案當正式。
-- 升級結構後使用 `python -m scripts.backfill_shared_line_faq` 唯讀盤點。資料維護者核對過的分類及舊文字對照由 `--reviewed-mapping` 提供。合成資料可在明確指名的本機 `lu_test_*` 使用 `--apply --confirm-database <db> --actor <id>`。正式切換前由部署負責人依盤點及回填結果確認發布先決條件。
-- 真實舊資料有多少衝突仍未知。這是**切換門檻**，不阻擋 API、前端、遷移腳本依合成資料開工；不授權正式 DB 查詢、回填或部署。
+- 保留資料升級先在與原服務分離的候選庫套用 1087。正式資料維護者核對唯讀盤點，提交有 `reviewed_by`、`categories` 和 `legacy_questions` 的對照。保留升級的 release manifest 呼叫共用回填邏輯，留存對照檔雜湊及盤點、回填、讀回的回執。以唯讀盤點的 fingerprint 核對鎖定後的回填計畫，只補有證據的缺值，保留不可變歷史、草稿與已停用狀態。
+- 回填提交後，受控升級另開連線，核對正式指標、實際相容文字解析及必要的正式版面。保留資料驗證通過才在候選庫寫入 `migration:shared-line-faq:reader-ready:v1`。切換前再以新連線核對就緒憑證與候選資料指紋，才可切換 `DB_DATABASE`。API 與 LINE worker 讀取同一憑證。沒有憑證時維持相容讀取，資料來源或憑證讀取失敗時回暫不可用。已啟用共用 reader 時，JSONL 僅供播種與遷移。
+- 歧義、來源證明不足、回填或讀回失敗會記在候選操作回執，原服務的資料庫保持原指向。已嘗試回填的候選以相同審核檔案及原操作回執續接。對照需要修正且已嘗試回填時，保留該候選供稽核，再從原庫快照建立新候選。重跑在同一候選補缺值與讀回，不產生第二份初始正式版面。切換後若應用有故障，保留候選與已發布的 Knowledge 版本及版面，停用新入口或修復程式後向前恢復。已有新寫入時，不直接把環境指回升級前原庫。
+- `python -m scripts.backfill_shared_line_faq` 可作唯讀盤點，獨立 CLI 的 `--apply` 限明確指名的本機 `lu_test_*`。正式保留資料回填只由受控候選升級執行。真實舊資料的歧義由資料維護者確認，這項工作是正式切換門檻。
 
 ## 最少的驗收與歸因
 

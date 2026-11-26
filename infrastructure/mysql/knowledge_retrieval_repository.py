@@ -365,26 +365,26 @@ class MySqlKnowledgeRetrievalRepository:
             rows = cursor.fetchall() or ()
         return tuple(dict(row) for row in rows)
 
-    def published_faq_by_id(self, qa_id: str):
-        self._require_faq_backfill()
+    def published_faq_by_id(self, qa_id: str, *, predecessor=False):
+        query = self._faq_publication_query(predecessor)
         return self._rows(
-            f"{_PUBLISHED_FAQ} AND {_FAQ_ID_ORDER}=%s",
+            f"{query} AND {_FAQ_ID_ORDER}=%s",
             (QA_SOURCE_PREFIX + qa_id,),
         )
 
-    def published_faq_page(self, cursor: str | None, limit: int):
-        self._require_faq_backfill()
+    def published_faq_page(self, cursor: str | None, limit: int, *, predecessor=False):
+        query = self._faq_publication_query(predecessor)
         after = "" if cursor is None else f" AND {_FAQ_ID_ORDER}>%s"
         args = () if cursor is None else (QA_SOURCE_PREFIX + cursor,)
         return self._rows(
-            f"{_PUBLISHED_FAQ}{after} ORDER BY {_FAQ_ID_ORDER} LIMIT %s",
+            f"{query}{after} ORDER BY {_FAQ_ID_ORDER} LIMIT %s",
             (*args, limit),
         )
 
-    def published_faq_by_alias(self, text: str):
-        self._require_faq_backfill()
+    def published_faq_by_alias(self, text: str, *, predecessor=False):
+        query = self._faq_publication_query(predecessor)
         return self._rows(
-            f"{_PUBLISHED_FAQ} AND ("
+            f"{query} AND ("
             f"BINARY TRIM(JSON_UNQUOTE(JSON_EXTRACT({_FAQ_PAYLOAD},'$.question')))=BINARY %s "
             f"OR JSON_CONTAINS({_FAQ_PAYLOAD},JSON_QUOTE(%s),'$.aliases'))",
             (text, text),
@@ -397,6 +397,19 @@ class MySqlKnowledgeRetrievalRepository:
             "AND JSON_CONTAINS(i.faq_legacy_aliases,JSON_QUOTE(%s))",
             (text,),
         )
+
+    def predecessor_faq_identity_exists(self, qa_id: str) -> bool:
+        rows = self._rows(
+            f"SELECT i.id FROM knowledge_items i WHERE {_FAQ_ID_ORDER}=%s",
+            (QA_SOURCE_PREFIX + qa_id,),
+        )
+        return bool(rows)
+
+    def _faq_publication_query(self, predecessor: bool) -> str:
+        if predecessor:
+            return _PREDECESSOR_PUBLISHED_FAQ
+        self._require_faq_backfill()
+        return _PUBLISHED_FAQ
 
     def _require_faq_backfill(self) -> None:
         with self._connection.cursor() as cursor:
@@ -1090,6 +1103,17 @@ FROM knowledge_items i LEFT JOIN knowledge_item_versions v
 ON v.item_id=i.id AND v.item_version=i.published_version AND v.event_type='published'"""
 _PUBLISHED_FAQ = f"{_FAQ_SNAPSHOT} WHERE {_IS_FAQ} AND i.published_version IS NOT NULL"
 _FAQ_ID_ORDER = "i.source_identity COLLATE utf8mb4_bin"
+_PREDECESSOR_PUBLISHED_FAQ = f"""
+SELECT i.source_identity,v.item_version AS source_version,v.content,
+    CASE WHEN i.version=v.item_version THEN i.source_uri END AS source_uri
+FROM knowledge_items i
+JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=(
+    SELECT previous.item_version FROM knowledge_item_versions previous
+    WHERE previous.item_id=i.id AND previous.event_type IN ('published','retired')
+    ORDER BY previous.item_version DESC LIMIT 1
+)
+WHERE {_IS_FAQ} AND i.state<>'retired' AND v.event_type='published'
+"""
 _LIST_ITEMS = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
 state AS lifecycle_status,version AS current_version,i.published_version,
 content_digest AS source_digest,source_uri,updated_at AS updated_at_utc,

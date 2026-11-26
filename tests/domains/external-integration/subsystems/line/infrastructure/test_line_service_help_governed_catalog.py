@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from api.routes import line_service_help
 from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
 from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
+from subsystems.line.service_help_application import ServiceHelpFaqReaders
 
 
 class _KnowledgeRepository:
@@ -52,7 +53,7 @@ def test_faq_returns_only_governed_published_items() -> None:
     catalog = PublishedFaqCatalog(lambda: unit_of_work)
     layout = SimpleNamespace(category_names=lambda: {})
 
-    response = line_service_help.get_published_faqs(catalog, layout)
+    response = line_service_help.get_published_faqs(lambda: ServiceHelpFaqReaders(catalog, layout))
     assert unit_of_work.knowledge.calls == [(None, 51)]
     assert response.data is not None
     assert [item.qa_id for item in response.data.items] == ["published-only"]

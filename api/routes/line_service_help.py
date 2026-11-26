@@ -5,6 +5,7 @@ Description: 提供客服問答專屬 LIFF API 與頁面路由，支援常見問
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -12,11 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.dependencies.knowledge_retrieval import (
-    get_published_faq_catalog,
-    published_index_source_versions,
-)
-from api.dependencies.line_faq_layout import get_faq_chat_layout_application
+from api.dependencies.knowledge_retrieval import published_index_source_versions
+from api.dependencies.line_faq_layout import get_service_help_faq_readers
 from api.dependencies.line_identity import get_liff_token_verifier
 from api.dependencies.llm_configuration import (
     LlmConfigurationApplication,
@@ -42,10 +40,10 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.knowledge_retrieval.contracts import AskKnowledgeQuestionCommand
 from subsystems.knowledge_retrieval.faq_catalog import (
     KnowledgeCatalogUnavailable,
-    PublishedFaqCatalog,
     is_faq_id,
 )
-from subsystems.line.faq_chat_layout import FaqChatLayoutApplication, FaqLayoutUnavailable
+from subsystems.line.faq_chat_layout import FaqLayoutUnavailable
+from subsystems.line.service_help_application import ServiceHelpFaqReaders
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SERVICE_HELP_PAGE = PROJECT_ROOT / "line" / "static" / "service_help.html"
@@ -103,8 +101,7 @@ def service_help_page():
 
 @public_router.get("/faq", response_model=BaseResponse[FaqListResponse])
 def get_published_faqs(
-    catalog: Annotated[PublishedFaqCatalog, Depends(get_published_faq_catalog)],
-    layout: Annotated[FaqChatLayoutApplication, Depends(get_faq_chat_layout_application)],
+    select_readers: Annotated[Callable[[], ServiceHelpFaqReaders], Depends(get_service_help_faq_readers)],
     cursor: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     qa_id: str | None = None,
@@ -112,13 +109,17 @@ def get_published_faqs(
     if qa_id is not None and (not is_faq_id(qa_id) or cursor is not None):
         raise _faq_validation_error("faq_query_invalid", "題目識別或查詢條件無效。")
     try:
+        readers = select_readers()
+        catalog, layout = readers.catalog, readers.layout
+        if catalog is None:
+            raise KnowledgeCatalogUnavailable("knowledge_catalog_unavailable")
         if qa_id is None:
             page = catalog.page(cursor, limit)
             questions, next_cursor = page.items, page.next_cursor
         else:
             question = catalog.get(qa_id)
             questions, next_cursor = ((question,) if question else ()), None
-        category_names = layout.category_names() if questions else {}
+        category_names = layout.category_names() if layout is not None and questions else {}
     except ValueError as error:
         if str(error) != "faq_cursor_invalid":
             raise
