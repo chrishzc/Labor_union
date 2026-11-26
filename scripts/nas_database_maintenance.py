@@ -834,11 +834,23 @@ def upgrade(settings):
     )
     if not (is_nas_target or is_local_nas_test):
         print("執行直連結構升級（Additive Migration）...", flush=True)
-        result = updater.update_local_database(
-            environment_file=settings["environment_file"],
-            apply=True,
-            confirm_configured_database=True,
-        )
+        try:
+            result = updater.update_local_database(
+                environment_file=settings["environment_file"],
+                apply=True,
+                confirm_configured_database=True,
+            )
+        except updater.LocalDatabaseUpdateError as error:
+            if error.code != "replacement_required" and "replacement_required" not in str(error):
+                raise
+            print("此版本包含資料回填，改採安全副本驗證置換（Preserve-Data Replacement）升級...", flush=True)
+            result = updater.update_local_database(
+                environment_file=settings["environment_file"],
+                apply=True,
+                confirm_configured_database=True,
+                strategy="replacement",
+                allow_long_run=True,
+            )
         if result.get("status") == "current":
             print("資料庫結構已是最新版本，無需升級。")
         else:
@@ -858,11 +870,14 @@ def upgrade(settings):
             "新版包含尚未支援的資料轉換，請交由維護人員處理。")
     reviewed_mapping = settings["values"].get("NAS_FAQ_REVIEWED_MAPPING_FILE", "").strip()
     faq_arguments = {}
+    default_faq_mapping = migration.ROOT / "db/migration_releases/labor_union_2026_11_26_shared_line_faq_reviewed_mapping.json"
     if reviewed_mapping:
         mapping_path = Path(reviewed_mapping)
         if not mapping_path.is_absolute():
             mapping_path = settings["settings_file"].parent / mapping_path
         faq_arguments["faq_reviewed_mapping"] = mapping_path
+    elif migration._shared_faq_selected() and default_faq_mapping.is_file():
+        faq_arguments["faq_reviewed_mapping"] = default_faq_mapping
     original_env_digest = digest(settings["environment_file"])
     config = migration.SeparateDatabaseConfig(migration.DatabaseDescriptor("source-read", source, read),
               migration.DatabaseDescriptor("candidate-write", candidate, write))
