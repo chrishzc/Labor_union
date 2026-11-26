@@ -1,0 +1,16 @@
+{
+  "reviewed_by": "chrishou",
+  "categories": {
+    "服務期間": "service_flow",
+    "案件查詢": "service_flow",
+    "資料修改": "service_flow",
+    "合約": "service_flow",
+    "取消服務": "service_flow",
+    "客服互動": "service_flow",
+    "LINE身分": "service_flow"
+  },
+  "legacy_questions": {
+    "一般市民（最高40小時）": "QA-044",
+    "補助市民（最高120小時）": "QA-025"
+  }
+}

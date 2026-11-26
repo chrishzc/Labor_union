@@ -39,6 +39,7 @@ else:
 
 DEFAULT_ENVIRONMENT_FILE = ROOT / ".env"
 DEFAULT_RECEIPT_ROOT = ROOT / "scratch/local_database_updates"
+DEFAULT_FAQ_REVIEWED_MAPPING = ROOT / "db/migration_releases/labor_union_2026_11_26_shared_line_faq_reviewed_mapping.json"
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 MYSQL_IDENTIFIER_MAX_LENGTH = 64
 DEFAULT_DOCKER_MYSQL_CONTAINER = "mysql_db"
@@ -57,6 +58,12 @@ NOTIFICATION_CATALOG_PARTS = frozenset({
     "207_scheduling_service_day_log_outbox_retry.sql",
     "208_scheduling_rebuild_notification_invalidation.sql",
 })
+
+
+def _shared_faq_arguments() -> dict[str, Path]:
+    if migration._shared_faq_selected() and DEFAULT_FAQ_REVIEWED_MAPPING.is_file():
+        return {"faq_reviewed_mapping": DEFAULT_FAQ_REVIEWED_MAPPING}
+    return {}
 
 
 class LocalDatabaseUpdateError(RuntimeError):
@@ -790,6 +797,7 @@ def apply_update(
         paths["plan"],
         paths["operation"],
         **_container_argument(mysql_container),
+        **_shared_faq_arguments(),
         allowed_partial_artifacts=LOCAL_RESUMABLE_PARTIAL_ARTIFACTS,
     )
     migration.verify_candidate(config, source, candidate, paths["operation"])
@@ -895,6 +903,7 @@ def resume_update(
             paths["plan"],
             paths["operation"],
             **_container_argument(mysql_container),
+            **_shared_faq_arguments(),
             allowed_partial_artifacts=allowed_partial_artifacts,
         )
         status = "backfilled"
