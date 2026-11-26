@@ -29,7 +29,7 @@ export function CandidateAvailabilityNotice({ availability, staffId, showAdvisor
   if (!option && conflicts.length === 0) return <p className="order-case-review-note" role="status">
     此月嫂目前未列入可詢問人選，請先核對狀態。
   </p>;
-  const hasConflict = candidateDateAssessment(option, conflicts).status === 'conflict';
+  const hasConflict = candidateDateStatus(option, conflicts) === 'conflict';
   const datesByReason = new Map<string, Set<string>>();
   for (const { reason_code, work_date, case_no, service_start_at, service_end_at } of conflicts) {
     const dates = datesByReason.get(reason_code) ?? new Set<string>();
