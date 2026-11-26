@@ -5,6 +5,7 @@ layout_status: current
 test_root: tests/domains/contract-signing/subsystems/contract-signing/modules/template-management/
 
 # Owned verification
+- 業務契約見 [需求書 §3.1「模板版本管理」](../../../../../../requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#contract-template-versioning)。以下是驗證入口，不是本輪測試結果。
 - `test_template_management.py` — 零寫入、實際兩模板、合併格、必要欄位、不可變 bytes、CAS、重播及毀損拒絕。
 - `test_template_api.py` — authenticated multipart、保存／啟用／重播／核對、下載及來源版本重用。
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_template_version_lineage.py` — 新版啟用後舊來源 PDF 與內嵌圖完整性。

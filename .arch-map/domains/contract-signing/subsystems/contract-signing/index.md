@@ -19,6 +19,7 @@
 - `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — canonical Contract Signing contract
 
 ## Modules
+- [外部簽署與已簽 PDF 歸檔](modules/external-signing-presentation.md#交接紀錄與直接歸檔分開驗收) — 直接歸檔的 GET／POST、檔案與分段對應、正式讀回及交易驗收。記錄送交是另一個操作。
 - `template-management` — XLSX 上傳、typed 欄位映射、零寫入示範預覽、不可變版本與啟用；path: `modules/template-management.md`
 - `staff-contract-application` — staff-side contract send／signed-return／manual attestation application；path: `modules/staff-contract-application.md`
 

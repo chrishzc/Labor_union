@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：Accounting Workspace Application Layer（跨帳務差額展現與工作台 UI 互動契約）；各項金額計算、義務與帳本寫入權仍屬對應 owning Domain（Client Finance、Payroll、Staff Payables、Government Subsidy、Finance Import）。
-- 單一負責範圍：差額事實呈現與極簡化人工處置（`DIFF-CHOICE-01`、`DIFF-CORRECT-01`、`DIFF-RECOGNIZE-01`、`DIFF-LOSS-01`、`DIFF-REDUCE-01`、`DIFF-FEE-01`、`DIFF-ASSUME-01`、`DIFF-CLOSE-01`、`DIFF-RECALC-01`、`DIFF-FOLLOWUP-01`、`DIFF-CASE-TOTAL-01`）、永豐客戶入款三階段判定與全案結清標記邊界、帳務中心四大頂層工作區（`WF-01`～`WF-06`）、精簡案件抽屜（`FIN-UI-WF02`）、待核對標籤與下一步提示對齊，以及專屬通知設定頁契約。
+- 單一負責範圍：差額事實呈現與極簡化人工處置（`DIFF-CHOICE-01`、`DIFF-CORRECT-01`、`DIFF-RECOGNIZE-01`、`DIFF-RECEIVE-01`、`DIFF-REFUND-01`、`DIFF-HISTORY-01`、`DIFF-LOSS-01`、`DIFF-REDUCE-01`、`DIFF-FEE-01`、`DIFF-ASSUME-01`、`DIFF-CLOSE-01`、`DIFF-RECALC-01`、`DIFF-FOLLOWUP-01`、`DIFF-CASE-TOTAL-01`）、永豐客戶入款三階段判定與全案結清標記邊界、帳務中心四大頂層工作區（`WF-01`～`WF-06`）、精簡案件抽屜（`FIN-UI-WF02`）、待核對標籤與下一步提示對齊，以及專屬通知設定頁契約。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Staff Payables / Export Domain](05_Staff_Payables_Export_Domain.md)、[Finance Import Domain](09_Finance_Import_Domain.md)、[Government Subsidy Domain](14_Government_Subsidy_Domain.md)、[Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md)、[Accounts Payable Export 與現金需求清冊](16A_Accounts_Payable_Export與現金需求清冊規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[銀行流水對帳與手動補登](22_銀行流水匯入與帳務異常處理正式規格.md)、[案件帳務三方案與補助流向](22A_案件帳務三方案與補助流向正式規格.md)、[歷史訂單生命週期與服務天數帳務](27_歷史訂單生命週期與服務天數帳務正式規格.md)。
 
 ## 2. 帳務差額處置與更正模式
@@ -30,7 +30,7 @@
 | `DIFF-CLOSE-01` | **確認不用再補付／退款**（**僅限客戶退款少退與多付款不用退回**；月嫂少付與政府款嚴禁使用） | **已結清**（原資料維持原樣，**不另存同意證明、免退明細或該次操作紀錄**） |
 | `DIFF-HISTORY-01` | 歷史差額經確認無法查明之案件人工標記（排除實際金額統計，不改銀行原列或生命週期） | 案件標記保留原始差額與查核紀錄 |
 
-- **簡化分類映射（UI 二選一）**：在簡化互動檢視中，將上述適用非現金認列／結清封裝為「**直接銷帳**（`settle_direct`，平帳歸零結清）」與「**認列差額**（`recognize_diff`，保留收付並記入確認月認列紀錄）」並配合各 owner guard 驗證；原交易退匯僅限同案抽屜人工選取有效原退款走 `refund-return` Preview／Apply。
+- **簡化分類映射（`DIFF-RECOGNIZE-01`，UI 二選一）**：在簡化互動檢視中，將上述適用非現金認列／結清封裝為「**直接銷帳**（`settle_direct`，平帳歸零結清）」與「**認列差額**（`recognize_diff`，保留收付並記入確認月認列紀錄）」並配合各 owner guard 驗證；原交易退匯僅限同案抽屜人工選取有效原退款走 `refund-return` Preview／Apply。
 - **追收協調（`DIFF-FOLLOWUP-01`）**：支持記錄追收／後期合繳安排；合繳入款按確認歸屬分配各期，通知由人員確認發送且不代替付款事實。
 
 <a id="recalc-mode-and-case-total"></a>

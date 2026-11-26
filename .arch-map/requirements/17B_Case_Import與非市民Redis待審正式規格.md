@@ -46,13 +46,20 @@
 ### 3.1 非市民進件與配號（`NC-ENTRY`、`NC-FORM`、`NC-APPROVAL`、`NC-NUMBER`、`NC-STAT`）
 
 - **進件獨立性（`NC-ENTRY-01～03`）**：非市民可由 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 的「非新竹市民 → 尚未申請」進入專屬 LINE LIFF 合併表單，經工會審核取得新 `A` 案號；亦可由承辦人依 §3.1.1 從既有案件帶入資料，透過後台手動非市民建案取得新 `A` 案號。原 HCM 報名及其審核結果保留，禁止沿用原 HCM 案號或假借補件覆活已作廢之補助案件。
-- **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆於銀行帳號欄位固定備註「**請填入產婦本人銀行帳號**」，一般需求調查須必填上傳「**存摺封面**」圖片（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼並一併歸檔至 NAS `02_客戶存摺封面` 資料夾。非市民服務申請不提供「銀行存摺／存摺封面」圖片上傳控制項、預覽或上傳提示，管理端表單工作室的非市民唯讀預覽套用相同呈現規則；非市民送件不收集或上傳該圖片，Preview／Apply 不得因缺少該圖片而拒絕，核准建案亦不得要求補交。銀行帳號與分行代碼等文字欄位仍依既有規則填寫及驗證，既有圖片與 NAS 歸檔資料保留；皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
+- **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆於銀行帳號欄位固定備註「**請填入產婦本人銀行帳號**」，一般需求調查須必填上傳「**存摺封面**」圖片（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼並一併歸檔至 Windows 主機受控根目錄下的存摺封面專區（實體路徑見[受控檔案正式規格 §8.2](30_Controlled_File_Storage_NAS正式規格.md#82-本機受控儲存目錄架構與檔案命名規範)）。非市民服務申請不提供「銀行存摺／存摺封面」圖片上傳控制項、預覽或上傳提示，管理端表單工作室的非市民唯讀預覽套用相同呈現規則；非市民送件不收集或上傳該圖片，Preview／Apply 不得因缺少該圖片而拒絕，核准建案亦不得要求補交。銀行帳號與分行代碼等文字欄位仍依既有規則填寫及驗證，既有圖片與正式歸檔資料依 §3.1.2、§3.2 及受控檔案規格保留；皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
 - **後台手動新案必填**。客戶姓名、連絡電話、預計服務開始日、服務天數、服務時段、胎數、電子郵件、退款銀行代號（含分行共 7 碼）及退款銀行帳號均為必填。胎數只接受單胞胎或雙胞胎；同一建案交易寫入 BeClass「特殊計費:胎數」，並以此胎數初始化客戶帳務及月嫂薪資。後台表單與建案 API 均拒絕缺漏或只有空白的值。
 - **需求調查時薪**。市民與非市民 LIFF 在單胞胎及雙胞胎選項旁顯示 [Client Finance 計價政策](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 的服務時薪。市民以一般市民費率為參考，區分補助內及用盡後費率。非市民顯示自費費率。
 - **代購食材**。市民與非市民 LIFF 均必填，僅接受「需月嫂代購(實報實銷)」或「自行準備」，保存於 BeClass `survey_details` 的「代購食材」。後台 BeClass 可顯示及修正；歷史未填資料維持未登錄，不猜補答案。
 - **三節假日雙薪意願**。市民與非市民 LIFF 的「費用與同意條款」及後台手動非市民新案均提供選填欄位，記錄遇端午、中秋、除夕、初一或初二服務時的雙薪意願。可選「是」、「否」或未填。答案保存於需求調查，供名冊維護，業務語意依 [CRX-REGISTRATION-01](33_案件與月嫂整合名冊正式規格.md#52-client-profile-與-beclass-欄位及照護修正crx-account-01)。
 - **非市民表單服務時段**。LIFF 與後台手動新案提供相同的生產方式及居住型態選項；服務方式方面，非市民 LIFF 僅提供「週休 1 日」與「週休 2 日」（不顯示「連續服務」），後台手動新案仍維持支援「連續服務」、「週休 1 日」與「週休 2 日」。每日服務時段提供 08:30–12:30（4 小時）、08:30–16:30（8 小時）、09:00–17:00（8 小時）、13:00–17:00（4 小時）。LIFF 表單及 Preview／Apply 僅接受這四個時段。後台手動新案及原案資料帶入可調整每日開始與結束時間，同日起訖時間差須大於或等於所選的 4 或 8 小時；多出的時間可供客戶與月嫂協調休息，不自動增加每日服務時數或扣除固定午休。服務時數與起訖時間分別保存，例如 08:00–17:00 選 8 小時時，每日服務時數仍為 8 小時。前端與手動建案 API 使用相同驗證。LIFF 依預計服務開始日、天數及休假規則推算結束日。退款帳號正規化後須有數字。
 - **年度流水配號與後續對齊（`NC-NUMBER-01～02`、`NC-FLOW-01`、`NC-PAYMENT-01`）**：案號採 `A＋民國年度＋3碼流水號`，依正式建案日的臺灣時間年度自 `001` 起算。虛擬帳號依 [Client Finance 帳號規則](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 解析。LINE 申請在核准時正式配號。手動新案先唯讀顯示預估案號與帳號，送出時與 LINE 核准共用年度流水號，在同一建案交易內鎖定取號並跳過已使用的案號或帳號，成功後顯示實際配號。可表示的流水號用完時回報衝突。正式建案後的統計、推薦媒合、契約簽署、5 天訂金與分期計價及排班結算沿用既有 owner 流程（見 [營運報表與統計口徑 §5](34_營運報表與統計口徑正式規格.md#noncitizen-statistics-20261029)、[Client Finance §2.3](04_Client_Finance_Domain.md#23-非市民付款與案件類別篩選nc-fin-0106) 與 [Contract Signing](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)）。
+
+#### 送件欄位與原申請查詢
+
+- 非市民正式頁與表單工作室預覽依 `NC-FORM-01～02` 呈現。新非市民送件明確傳入 `registration_kind="non_citizen"`，省略 `passbook_image_id`，不選圖、不呼叫共用存摺上傳入口，也不以空字串或虛構圖片識別代替缺席欄位。銀行代號、分行代碼、帳號及其他必填資料仍須合法。
+- 共用 `POST /api/v1/line/identity/registration/preview` 與 `POST /api/v1/line/identity/registration/apply` 的 request schema 及收件檢核依申請類型分流。`non_citizen` 可省略圖片欄位，兩入口均不得要求對應暫存圖；一般市民的 `subsidy` 類型維持圖片識別必填及同一已驗證 LINE 主體的暫存圖檢查。未指定類型維持既有 `subsidy` 語意，不因共用欄位可省略而放寬市民規則。非法銀行文字資料仍經原領域驗證拒絕，圖片移除不改身分、版本及同鍵重送契約。切換前已開啟舊頁而送入圖片識別的相容性見 §3.1.2。
+- Preview 的 `status=ready` 僅證明輸入可供送件，不表示已保存申請。Apply 沿既有 `Idempotency-Key` 保存待審申請；以 `registration_id` 與 `status=pending`／`identity_status=pending_approval` 表示收件，`client_id`、`beclass_record_id`、`case_no` 此時均為 null，不表示正式建案或完成綁定。
+- 送件回應逾時或結果不明時，以原 LINE token 及原 `submission_id` 呼叫 `POST /api/v1/line/identity/registration/status` 唯讀查詢原申請。`not_received` 不等於已收件；取得原申請狀態後才依既有同鍵規則接續，不另換識別製造新申請。正式建案及核准收尾的判定依 §3.2。
 
 ### 3.1.1 原案資料帶入與獨立操作（`NC-MANUAL-01～04`、`NC-SEPARATE-01`）
 
@@ -73,6 +80,14 @@
 | NC-MANUAL-05 | 後台手動新案或原案資料帶入，選定每日 8 小時且其餘必填完整 | 設定含休息空間的時段 | 依次填 08:00–17:00、08:00–16:00、08:00–15:59；另以手動 API 提交相同內容 | 前兩者可建案，起訖分別保存且每日服務時數仍為 8；第三者前後端均拒絕且零建案。同日起訖、合法時間及 4／8 小時選項限制保持。 |
 | NC-SEPARATE-01 | 原案已取消 | 確認建案失敗結果 | 觸發既有建案失敗並回讀 | 原案仍取消；新案依既有交易回滾，不自動重開原案。 |
 
+### 3.1.2 存摺圖片規則切換前的資料
+
+| 資料情境 | 權威與處理規則 | 可觀察結果或待決責任 |
+| --- | --- | --- |
+| 切換前已送件、待審申請已有暫存圖 | 依 §3.2 的既有有圖核准流程，由 Controlled File 納管，不因新表單移除圖片而刪除既有附件或要求重填。 | 核准以原申請／操作取得正式案號；圖片歸檔確認後才完成待審終態及暫存清理。若歸檔失敗，原申請可回讀已有的 SQL 回執，但不顯示核准完成。 |
+| 切換前已開啟舊非市民頁面、尚未送件 | `NC-PASSBOOK-COMPAT-01` 待決。舊頁可能先呼叫共用 `/registration/passbook`，再帶 `passbook_image_id` 呼叫 Preview／Apply。現有正式規格未定義切換後這組舊請求應接受、拒絕或忽略圖片；現行程式行為只作證據，不能代替決策。 | Case Import owner 負責收斂接受條件及既有暫存圖的處置，LINE／External Integration owner 負責可辨識的請求條件、錯誤提示與接續操作，Controlled File owner 確認被接受圖片的納管。需定案舊頁是否須重載、上傳及送件的回應與讀回結果、已上傳但未成件圖片的清理責任。此項影響切換相容性與其驗收，定案前不得宣稱舊頁可無縫送件，也不得以「沿用現況」當作政策。 |
+| 已正式歸檔的存摺圖片 | 依[受控檔案規格 §3](30_Controlled_File_Storage_NAS正式規格.md#3-file_purpose_registry-與排除範圍)及 §8.2 保存既有 identity、版本與讀取位置；移除新非市民收集不觸發刪除、搬移或重寫。 | 具權限者仍可經受控 Query／Download 讀取原正式檔案；正式歸檔不受 Redis 問卷及暫存圖清理影響。 |
+
 <a id="registration-storage-refund-projection"></a>
 
 ### 3.2 核准前問卷不得進 MySQL 與獨立 Redis 7 架構（`REG-BOUNDARY`、`REG-REDIS`、`REG-EXPIRY`）
@@ -80,13 +95,16 @@
 - **`REG-BOUNDARY-01～06`（儲存與邊界隔離）**：
   - 查到待審申請只表示收件，不表示已建正式案件。核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
   - 對外收件容器 `registration-intake` 僅持 LIFF token 驗證與專用 `registration-redis` 受限 ACL（僅可讀寫待審內容與計數器命名空間，完全不配置 MySQL 憑證、網路路徑或審核決策權限）；瀏覽器僅呼叫 bounded API。
-  - 管理員審核核准於 MySQL 唯一 outer UoW 透過各 owning Domain writer 原子建立正式 Client／BeClass（含同步保存 `beclass_records.refund_bank_code` 與 `refund_account_no`，依 `REG-REFUND-01～03`）／Orders（含非市民建檔）與 LINE binding，並透過 Controlled File Storage boundary 將暫存的存摺封面歸檔至 NAS `02_客戶存摺封面` 資料夾，確認完成後方清除 Redis 問卷原文與暫存圖檔。
+  - 管理員以 `POST /api/v1/admin/registration-applications/{registration_id}/approve` 及目前 `expected_version` 核准原申請。MySQL 唯一 outer UoW 透過各 owning Domain writer 原子建立正式 Client／BeClass（含同步保存 `beclass_records.refund_bank_code` 與 `refund_account_no`，依 `REG-REFUND-01～03`）／Orders（含非市民建檔）與 LINE binding，並在同次交易保存原申請／操作的核准回執。SQL commit 與圖片歸檔、Redis 收尾是不同完成點，不以歸檔失敗宣稱 SQL 已回滾。
+  - **有圖適用條件**：已合法收件且原待審申請含暫存圖，包含切換前已附圖的申請。SQL 提交後，透過 [Controlled File §5](30_Controlled_File_Storage_NAS正式規格.md#5-previewapplyidempotency-與-querydownload) 確認受控歸檔完成，實體定位依該規格 §8.2；僅有檔案登錄或 finalize intent 不足以清理原圖。歸檔確認後才完成 Redis `approved` 終態並清除問卷原文，再刪除暫存圖；正式歸檔仍保留。
+  - **無圖適用條件**：依 §3.1 合法送件、沒有存摺圖片識別的新非市民申請。SQL 提交及原核准回執確認後，直接完成 Redis `approved` 終態與問卷清理，不建立或等待圖片歸檔結果，也沒有暫存圖刪除工作。無圖不得妨礙原申請收尾，其他儲存失敗仍依既有故障恢復處理。
+  - **原申請與正式建案讀回**：承辦在非市民申請明細使用「查詢原申請處理結果」，經唯讀 `GET /api/v1/admin/registration-applications/{registration_id}` 查同一申請。SQL 已提交而收尾未完成時可回 `status=approving`、`approved=false`、原 `case_no` 與 `approved_at_utc`，不回問卷欄位；案號與核准時間只證明正式交易回執存在，不證明歸檔或 Redis 已完成。僅在該申請適用的有圖／無圖收尾條件完成後，原申請讀回 `status=approved`、`approved=true`，並保留同一正式案號。正式案件可再從案件／客戶名冊依該案號查詢，與原申請回執核對，不以待審申請編號冒充正式案號；LINE 通知投遞另依其 owner 契約判定。
 - **`REG-REDIS-01～04`（持久化設定與編號）**：專用 `registration-redis`（Redis 7 獨立實例＋持久化卷，禁與 cache 共用；僅綁定 `127.0.0.1` loopback 供本機 Windows 管理端連線，禁止對外公開；設定 `appendonly yes`、`appendfsync always`、`noeviction`、`maxmemory 256mb`、`auto-aof-rewrite-percentage 100`、`auto-aof-rewrite-min-size 64mb`）。容量滿或 AOF 錯誤一律拒收而不退回 MySQL。專用 Redis 持久化計數器須於還原後與 MySQL 核對最大已用編號（禁擅自以空庫或已核准值重設）。
 - **`REG-REDIS-05` & `REG-EXPIRY-01～04`（14 天自動清除與拒絕終態）**：
   - 待審申請自伺服器提交時起算固定 **14 × 24 小時（14 天）**，設定不可延長之絕對 `expires_at` 與 Redis TTL（重開／查詢不延長；到期立即清除問卷並釋放主體占用，保留最小「已到期」狀態供查「申請已到期，請重新申請」；轉入核准處理中立即解除 TTL 改受恢復索引保護以防 MySQL 交易中途遺失）。
   - 明確拒絕立終態並立即清除問卷原文（僅留申請號、拒絕時間與操作人供授權回讀）；拒絕或到期後可重新提出新申請（原號重送僅回原終態）。
 - **`REG-REDIS-06～08`（兩儲存故障恢復、維護與 AOF 實體整理）**：
-  - 核准中斷後先分清 MySQL 是否已提交。若未提交，恢復作業讀取處理中索引，以原操作識別續走冪等 MySQL writer；若已提交但 Redis 未清除，核對已 commit 回執後只補做 Redis 終態與刪除，絕不重建案號或 Client。
+  - 核准中斷後先分清 MySQL 是否已提交。若未提交，恢復作業讀取處理中索引，以原操作識別續走冪等 MySQL writer；若已提交但 Redis 未清除，沿用同一申請／操作的 MySQL 回執，依上述有圖／無圖條件收尾。有圖先補做或確認受控歸檔，再完成 Redis 終態與問卷／暫存圖清理；無圖直接完成 Redis 終態與問卷清理。均不得重新配號或重建 Client、BeClass 或 Orders；唯讀查詢不觸發復原寫入。
   - 內部維運排程除設定原生 AOF rewrite 外，每小時偵測自上次整理後如有問卷清除則執行一次 `BGREWRITEAOF`，實體抹除舊 AOF 內容（禁止腳本手動刪 AOF）；獨立容器拓樸統一編排於根目錄 `docker-compose.yml`（`registration` profile，搭配 `REGISTRATION_REDIS_ADMIN_PASSWORD_FILE` 與 `REGISTRATION_REDIS_INTAKE_PASSWORD_FILE`，`registration-intake` 保持 `internal` 容器網路且不掛 `.env` 或 MySQL 憑證，由無憑證唯讀 `registration-loopback` 僅綁定 `127.0.0.1` loopback 轉送進入 `registration-ingress`），首次全新空實例以 `scripts.registration_maintenance --initialize-new-instance --once` 初始化並於一般啟動／還原核對既有 SQL 最大編號。
 
 ## 4. HCM 進件規範、欄位警示與 `BECLASS-001／IMPORT-003`
@@ -134,6 +152,8 @@
    | ID | S 情境與前提 | T 使用者任務 | A 可重現操作 | R 可判定結果 |
    | --- | --- | --- | --- | --- |
    | NC-PASSBOOK-01 | 非市民服務申請正式頁與表單工作室唯讀預覽 | 填寫或預覽需求調查 | 開啟 `/line-non-citizen-registration` 及表單工作室的非市民預覽，檢視銀行資料區 | 均無銀行存摺／存摺封面圖片的選檔、上傳、圖片預覽及必填提示；銀行帳號與分行代碼文字欄位保留。 |
-   | NC-PASSBOOK-02 | 非市民其他必填資料均合法，未提供存摺圖片 | 完成送件與工會核准 | 填妥表單送出，並以未含圖片的相同資料呼叫既有 Preview／Apply，再由工會核准 | 不因缺少存摺圖片而阻擋送件或核准，不觸發該圖片上傳；送件回覆待審申請編號，核准沿用正式建案流程。 |
-   | NC-PASSBOOK-03 | 一般需求調查其他必填資料均合法 | 維持市民存摺圖片規則 | 開啟 `/line-registration`，分別以未附圖片、合法 JPG／PNG／WebP 圖片送件 | 存摺封面上傳欄位仍為必填，未附圖片遭拒；合法圖片依既有審核與 NAS 歸檔流程處理。 |
-   | NC-PASSBOOK-04 | 非市民缺少銀行帳號或分行代碼等既有必填文字資料 | 防止圖片移除放寬其他必填規則 | 不提供存摺圖片，並逐項留空既有必填銀行文字欄位後送出 | 仍依原欄位規則拒絕，不以取消圖片上傳為由略過銀行資料驗證。 |
+   | NC-PASSBOOK-02 | 非市民其他必填資料均合法，未提供存摺圖片 | 完成送件與工會核准並查回原結果 | 依 §3.1 傳 `registration_kind="non_citizen"` 並省略圖片欄位，經正式頁及直接 API 分別走 Preview／Apply；以原送件識別查狀態，再核准並讀回原申請及正式案號 | Preview 可通過但不保存申請；Apply 回待審申請編號且正式 IDs／案號為 null；不觸發圖片上傳。核准 SQL 提交後不等待不存在的歸檔，原申請讀回 `approved`、正式案號且問卷已清理；正式名冊可查同案號。結果未明或收尾中斷時依 §3.2 查原回執並以同一操作恢復，不重複建案。 |
+   | NC-PASSBOOK-03 | 一般需求調查其他必填資料均合法 | 維持市民存摺圖片規則 | 開啟 `/line-registration`，以 `subsidy` 及未指定類型分別省略圖片欄位、帶無效暫存圖識別呼叫 Preview／Apply；再以合法 JPG／PNG／WebP 圖片完成送件核准並讀回歸檔 | 頁面圖片仍必填；兩 API 均拒絕缺圖或未通過原暫存圖檢查的請求。合法圖片依 §3.2 與受控檔案規格納管，歸檔可讀後才完成對應待審收尾。 |
+   | NC-PASSBOOK-04 | 非市民缺少、空白或格式不合法的銀行帳號／分行代碼等既有必填文字資料 | 防止圖片移除放寬銀行驗證 | 省略圖片欄位，逐項以缺值、空白及非法格式經正式頁與 Preview／Apply 送出 | 仍依原欄位規則拒絕且不建立待審申請，不以取消圖片上傳為由略過銀行資料驗證。 |
+
+   切換前資料另依 §3.1.2 逐類驗收。有圖舊待審須覆蓋 SQL 已提交、歸檔失敗時讀回 `approving` 及原正式案號，再以原操作恢復歸檔和清理，最終讀回 `approved` 且不重複建案。已正式歸檔者須能由受控 Query／Download 依原 identity 讀取。舊頁尚未送件者須先能定位 `NC-PASSBOOK-COMPAT-01` 的待決問題與責任人；其接受／拒絕 oracle 在決策前不視為已定案。

@@ -47,6 +47,12 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `.arch-map/requirements/04_Client_Finance_Domain.md` §0 PRICE-01..09.
 - 同節 IDENTITY-FIX-01..03：正式身分修正與歷史綁定相容；舊版讀取只供仍綁定舊政策的案件，不供新政策發布，待無舊版綁定使用者後才可另評估退役。
 
+### 個案重新計價與帳務讀回
+
+- `CasePricingAdjustmentPanel` 的「儲存本案調整」直接呼叫 `POST /api/v1/accounting-pricing/cases/{case_no}/apply`，帶本案版本及同次操作鍵。另有零寫入的 `/preview`；使用該路徑取得的 fingerprint 若隨 Apply 傳入，由伺服器按鎖定後的最新來源重驗。Preview 舊了或本案版本不符，不提交價格或帳務變更。
+- Client Finance 承接客戶應收與適用的差額；Payroll 承接月嫂義務。個案計價、相關帳務與操作收據在同一外層交易。歷史完工採原款項及差額計畫，不建立一般三期、不覆蓋已核銷現金；人工更正的有效金額不被自動值取代，依需求 #22B §2.2 回讀。
+- 驗收以既有 `test_accounting_pricing_mysql.py` 與前端模組測試區分兩條路：自動計算的未結清款依成功提交回讀新值；版本衝突不寫入，已核銷金額及人工更正值不被靜默覆蓋。此處只標示驗收位置，不代表實跑結果。
+
 ## Verification
 - layout_status: `custom_current`
 - layout_basis: Backend module tests use the canonical owner root; React tests mirror that root under ui_react/src/tests for the existing Vitest runtime.

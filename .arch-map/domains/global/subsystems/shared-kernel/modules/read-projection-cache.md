@@ -16,12 +16,12 @@
   - `infrastructure/cache/redis_projection_cache.py`
 
 ## Contracts
-- `.arch-map/requirements/12_Global_效能與UX體感架構.md` §3（G15）— 快取僅能加速唯讀 Query／ViewModel 投影，嚴禁參與正式 Command／Preview／Apply fresh-fact 驗證；提交成功後以明確鍵或命名前綴同步失效 L1 與 L2，Redis 不可用時無副作用退回 L1／DB。
+- [需求書 §5「受控快取」](../../../../../requirements/12_Global_效能與UX體感架構.md#controlled-query-cache) — 快取僅能加速唯讀 Query／ViewModel 投影，嚴禁參與正式 Command／Preview／Apply fresh-fact 驗證；提交成功後以明確鍵或命名前綴同步失效 L1 與 L2，Redis 不可用時無副作用退回 L1／DB。
 
 ## Verification
 - default_boundary: Module
 - test_root: `tests/domains/global/subsystems/shared-kernel/modules/read-projection-cache/`
-- higher_boundary: `tests/test_g15_cache_boundary_contract.py`
+- higher_boundary: `tests/test_g15_cache_boundary_contract.py` — 靜態檢查正式 workflow 不依賴指定快取型別，並核對目前唯讀假日投影快取入口；不代替 Redis 斷線、L1／L2 失效或正式交易的行為驗收。
 
 ## Provenance
 - G15 read-only projection cache boundary — `architecture_declared` — `12_Global_效能與UX體感架構.md`。

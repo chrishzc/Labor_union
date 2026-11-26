@@ -179,6 +179,12 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 
 `import_fields` 依 `data_browser.read` 唯讀查詢 Case Import 目前的 HCM／BeClass 欄位問題。每案一筆，詳情聚合該案問題及其正式修正入口，只列案號、問題說明與欄位定位。客戶名冊與訂單進件欄位的正式修正入口在桌面後台，因此手機目錄排除這個來源。修正後由原 Query 重新判定，各問題都解除時移除該案事項。此來源沒有通用已讀或完成狀態，也沒有 LINE 寄送作業。
 
+<a id="line-todo-import-fields"></a>
+
+**驗收：待辦來源與 HCM／BeClass 欄位修正**
+
+本表 `LINE-TODO-04` 指 `import_fields`：由名冊／進件完成正式欄位修正，不是下方的[客戶綁定提醒誤報消除](#line-todo-binding-reminder-dismiss)。引用此案例時附上情境名稱，避免混用同號案例。
+
 | ID | S：情境與前提 | T：人員任務 | A：操作 | R：可判定結果 |
 |---|---|---|---|---|
 | LINE-TODO-01 | 有權限查看各來源且各有目前事項 | 接續原正式作業 | 逐來源開啟事項與處理入口，另以手機讀取共用來源 | 正確攜帶案號、申請、task 或 issue identity；手機目錄只有共用來源；缺件及無權限不誤執行寫入 |
@@ -192,6 +198,12 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 - 頂部通知事項顯示目前權限可讀的待辦筆數。完整讀取所有來源分頁並去重同筆事項，原通知異常已涵蓋的寄送工作不重複計數。查詢中及任一來源失敗須顯示未確認狀態，不當成零；進出通知頁、重新聚焦及處理後刷新。
 - 寄送紀錄完整內容及嘗試明細依 [六個月保存契約](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#44-寄送紀錄六個月滾動保存) 滾動整理，已清理者不列清單或總數，舊連結明示到期；待處理及結果不明工作保留，防重送與停送憑證不隨正文移除。
 - 帳務列表保留單一「查看案件」，各期提供「查看通知」。無法寄送或已繳齊仍可查閱原因與歷史；真正寄送沿 owner 的 `can_send` 判定。
+
+<a id="line-todo-binding-reminder-dismiss"></a>
+
+**驗收：提醒消除、總數與通知歷史**
+
+本表 `LINE-TODO-04` 指 `customer_binding`：只消除同案的提醒，不執行[正式欄位修正](#line-todo-import-fields)。兩個既有 ID 均保留。
 
 | ID | S | T | A | R |
 |---|---|---|---|---|
