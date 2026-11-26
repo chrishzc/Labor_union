@@ -16,7 +16,7 @@ from subsystems.client_profile.registry_filters import (
     FIELD_KINDS, RegistryColumnFilter, RegistryFilterField, RegistryFilterOptions,
 )
 
-from domains.case_import.order_information import project_order_information
+from domains.case_import.order_information import ORDER_INFORMATION_KEYS, project_order_information
 from domains.clients.profile import can_reclassify_client
 from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
 from subsystems.case_import.beclass_correction_workflow import (
@@ -382,10 +382,11 @@ class MySqlClientRegistryQueryRepository:
             order_information = project_order_information(
                 beclass_rows[0].get("survey_details") if beclass_rows else None
             )
-            order_information_values = dict(order_information.values)
+            order_information_values = {field: order_information.values[field] for field in ORDER_INFORMATION_KEYS}
             order_information_issues = (
                 {} if beclass_source_kind == "admin_manual"
-                else dict(order_information.issues)
+                else {field: order_information.issues[field] for field in ORDER_INFORMATION_KEYS
+                      if field in order_information.issues}
             )
             for field in order_information_values:
                 if field in effective_values:
@@ -729,7 +730,7 @@ def _finance_values(connection, case_no):
             historical_completed = status in ("歷史訂單－服務完成", "歷史訂單－帳務完成")
             if historical_completed:
                 facts = load_contract_client_finance_facts(cursor, order_row, lock=False, historical_registry=True)
-            elif status.startswith("歷史") or status in ("訂單取消", "訂單完成"):
+            elif status.startswith("歷史") or status in ("訂單取消", "訂單完成", "成立後未服務"):
                 facts = load_contract_client_finance_facts(cursor, order_row, lock=False)
             else:
                 facts, _ = load_calculable_client_finance_facts(cursor, order_row, lock=False)

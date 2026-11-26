@@ -27,7 +27,11 @@ from infrastructure.runtime.react_admin_artifact import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-PREFIX = os.environ.get('WINDOWS_REMOTE_PREFIX', '/test')
+LEGACY_PREFIX = '/test'
+ADMIN_PREFIX = '/admin'
+PREFIX = os.environ.get('WINDOWS_REMOTE_PREFIX') or LEGACY_PREFIX
+if PREFIX not in {LEGACY_PREFIX, ADMIN_PREFIX}:
+    raise ValueError('WINDOWS_REMOTE_PREFIX must be /test or /admin')
 _STAFF_WEB_PROFILE_PATH = '/line-staff-web-profile'
 _HOP_HEADERS = frozenset({
     'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -102,10 +106,12 @@ def _forward_headers(headers):
     }
 
 
-def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlette:
+def create_gateway(artifact, *, api_port: int = 8000, transport=None, prefix: str = PREFIX) -> Starlette:
     """Compose transport only; the canonical API retains authentication and writers."""
     if not 1 <= api_port <= 65535:
         raise ValueError('Invalid loopback API port')
+    if prefix not in {LEGACY_PREFIX, ADMIN_PREFIX}:
+        raise ValueError('Windows management path must be /test or /admin')
     api_origin = f'http://127.0.0.1:{api_port}'
 
     @asynccontextmanager
@@ -121,7 +127,8 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
             yield
 
     async def proxy(request: Request) -> PlainTextResponse | StreamingResponse:
-        path = request.url.path.removeprefix(PREFIX)
+        incoming_prefix = '/' + request.url.path.split('/', 2)[1]
+        path = request.url.path.removeprefix(incoming_prefix)
         if path == '/api/v1/admin/auth/development-session':
             return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         query = request.scope.get('query_string', b'').decode('ascii')
@@ -146,7 +153,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         headers = _forward_headers(response.headers)
         location = headers.get('location', '')
         if location.startswith('/api/'):
-            headers['location'] = PREFIX + location
+            headers['location'] = incoming_prefix + location
         headers['cache-control'] = 'no-store'
         return StreamingResponse(
             iter(()) if profile_head else response.aiter_raw(),
@@ -155,7 +162,10 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         )
 
     async def redirect(request):
-        return RedirectResponse(PREFIX + '/', status_code=307, headers={'Cache-Control': 'no-store'})
+        target = prefix + '/'
+        if request.url.query:
+            target += '?' + request.url.query
+        return RedirectResponse(target, status_code=307, headers={'Cache-Control': 'no-store'})
 
     async def root_redirect(request: Request):
         if request.url.hostname in {'127.0.0.1', 'localhost', 'chrishzc.com'}:
@@ -163,7 +173,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         return RedirectResponse('/admin/', status_code=307, headers={'Cache-Control': 'no-store'})
 
     async def local_staff_web_profile_redirect(request: Request) -> RedirectResponse:
-        target = PREFIX + _STAFF_WEB_PROFILE_PATH
+        target = prefix + _STAFF_WEB_PROFILE_PATH
         if request.url.query:
             target += '?' + request.url.query
         return RedirectResponse(target, status_code=307, headers={'Cache-Control': 'no-store'})
@@ -174,30 +184,42 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
     routes = [
         Route('/', root_redirect, methods=['GET', 'HEAD']),
         Route(_STAFF_WEB_PROFILE_PATH, local_staff_web_profile_redirect, methods=['GET', 'HEAD']),
-        Route(PREFIX, redirect, methods=['GET', 'HEAD']),
-        Route(PREFIX + _STAFF_WEB_PROFILE_PATH, proxy, methods=['GET', 'HEAD']),
-        Route(PREFIX + '/static/staff_web_profile.js', proxy, methods=['GET', 'HEAD']),
-        Route(PREFIX + '/api/{path:path}', proxy,
-              methods=['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']),
-        Mount(PREFIX, app=static_app),
-        # The same immutable /test build is available locally at the familiar
-        # /admin URL. Its absolute /test assets/API still use this same gateway.
-        Route('/admin', lambda _: RedirectResponse('/admin/', status_code=307, headers={'Cache-Control': 'no-store'})),
-        Mount('/admin', app=static_app),
     ]
+    api_methods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+    if prefix == ADMIN_PREFIX:
+        routes.extend([
+            Route(LEGACY_PREFIX, redirect, methods=['GET', 'HEAD']),
+            Route(LEGACY_PREFIX + '/', redirect, methods=['GET', 'HEAD']),
+            Route(LEGACY_PREFIX + _STAFF_WEB_PROFILE_PATH, proxy, methods=['GET', 'HEAD']),
+            Route(LEGACY_PREFIX + '/static/staff_web_profile.js', proxy, methods=['GET', 'HEAD']),
+            Route(LEGACY_PREFIX + '/api/{path:path}', proxy, methods=api_methods),
+        ])
+    routes.extend([
+        Route(prefix, redirect, methods=['GET', 'HEAD']),
+        Route(prefix + _STAFF_WEB_PROFILE_PATH, proxy, methods=['GET', 'HEAD']),
+        Route(prefix + '/static/staff_web_profile.js', proxy, methods=['GET', 'HEAD']),
+        Route(prefix + '/api/{path:path}', proxy, methods=api_methods),
+        Mount(prefix, app=static_app),
+    ])
+    if prefix == LEGACY_PREFIX:
+        # Preserve the local shortcut while the legacy artifact is active.
+        routes.extend([
+            Route(ADMIN_PREFIX, lambda _: RedirectResponse(ADMIN_PREFIX + '/', status_code=307,
+                  headers={'Cache-Control': 'no-store'}), methods=['GET', 'HEAD']),
+            Mount(ADMIN_PREFIX, app=static_app),
+        ])
     app = Starlette(lifespan=lifespan, routes=routes)
 
     async def boundary(request: Request, call_next):
         allowed_hosts = _configured_allowed_hostnames()
         if request.url.hostname not in allowed_hosts:
             return PlainTextResponse('Forbidden', status_code=403, headers={'Cache-Control': 'no-store'})
-        if request.url.hostname == 'chrishzc.com' and not request.url.path.startswith(PREFIX):
-            return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
+        if request.url.hostname == 'chrishzc.com':
+            public_prefixes = (ADMIN_PREFIX, LEGACY_PREFIX) if prefix == ADMIN_PREFIX else (LEGACY_PREFIX,)
+            if not any(request.url.path == item or request.url.path.startswith(item + '/')
+                       for item in public_prefixes):
+                return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         if request.url.path == _STAFF_WEB_PROFILE_PATH and request.url.hostname not in {'127.0.0.1', 'localhost'}:
-            return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
-        if (request.url.path == '/admin' or request.url.path.startswith('/admin/')) and (
-            request.url.hostname == 'chrishzc.com'
-        ):
             return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         origin = request.headers.get('origin')
         if origin:

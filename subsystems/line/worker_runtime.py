@@ -46,8 +46,10 @@ class CanonicalLineWorkerRuntime:
             # due task can cross the provider boundary in this cycle.
             self._run_additional_workers(counts, before_delivery=True)
             counts["delivery_tasks"] = self._delivery_worker.run_once()
-            self._run_additional_workers(counts, before_delivery=False)
-            self._record_heartbeat(counts)
+            isolated_errors = self._run_additional_workers(
+                counts, before_delivery=False, isolate_errors=True
+            )
+            self._record_heartbeat(counts, isolated_errors=isolated_errors)
             return counts
         except Exception as error:
             self._record_failure_safely(error)
@@ -58,11 +60,21 @@ class CanonicalLineWorkerRuntime:
         counts: dict[str, int],
         *,
         before_delivery: bool,
-    ) -> None:
+        isolate_errors: bool = False,
+    ) -> list[tuple[str, Exception]]:
+        errors: list[tuple[str, Exception]] = []
         for name, worker in self._additional_workers.items():
             is_pre_delivery = bool(getattr(worker, "run_before_delivery", False))
             if is_pre_delivery is before_delivery:
-                counts[name] = worker.run_once()
+                if not isolate_errors:
+                    counts[name] = worker.run_once()
+                    continue
+                try:
+                    counts[name] = worker.run_once()
+                except Exception as error:
+                    counts[name] = 0
+                    errors.append((name, error))
+        return errors
 
     def run_forever(self, stop_event: threading.Event | None = None) -> None:
         stop_event = stop_event or threading.Event()
@@ -92,9 +104,31 @@ class CanonicalLineWorkerRuntime:
         due_in = max(0.0, (normalized_due_at - now).total_seconds())
         return min(self._fallback_scan_seconds, due_in)
 
-    def _record_heartbeat(self, counts: dict[str, int]) -> None:
+    def _record_heartbeat(
+        self,
+        counts: dict[str, int],
+        *,
+        isolated_errors: list[tuple[str, Exception]] | None = None,
+    ) -> None:
         now = datetime.now(timezone.utc)
-        heartbeat = _heartbeat(self._worker_identity, now, counts)
+        if isolated_errors:
+            first_error = isolated_errors[0][1]
+            summary = "; ".join(
+                f"{name}: {error}" for name, error in isolated_errors
+            )[:1000]
+            heartbeat = LineWorkerHeartbeat(
+                self._worker_identity,
+                os.getpid(),
+                socket.gethostname(),
+                LineRuntimeMode.CANONICAL,
+                json.dumps(counts, sort_keys=True, separators=(",", ":")),
+                now,
+                last_cycle_at=now,
+                last_error_code=type(first_error).__name__,
+                last_error_message=summary,
+            )
+        else:
+            heartbeat = _heartbeat(self._worker_identity, now, counts)
         self._heartbeat_writer(heartbeat)
 
     def _record_failure(self, error: Exception) -> None:

@@ -11,22 +11,46 @@ from scripts.build_react_admin_artifact import build_artifact
 from infrastructure.runtime.react_admin_artifact import (
     ASSET_ELIGIBILITY_HEADER,
     PRIVATE_IMMUTABLE_CACHE_CONTROL,
+    ReactAdminArtifactError,
+    load_react_admin_runtime_from_environment,
     validate_react_admin_artifact,
 )
 from scripts import windows_remote_runtime as remote
 
 
 @pytest.fixture
-def artifact(tmp_path):
+def artifact(tmp_path, request):
+    prefix = getattr(request, 'param', '/test')
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'index.html').write_text(
-        '<div id="root"></div><script src="/test/app.js"></script>', encoding='utf-8',
+        f'<div id="root"></div><script src="{prefix}/app.js"></script>', encoding='utf-8',
     )
     (source / 'app.js').write_text('console.log("remote")', encoding='utf-8')
     output = tmp_path / 'artifact'
     build_artifact(output, source=source)
     return validate_react_admin_artifact(output, workspace_root=remote.ROOT)
+
+
+def test_production_api_defers_static_serving_to_a_validated_windows_gateway(artifact):
+    environment = {
+        "APP_ENV": "production",
+        "ACCESS_CONTROL_PROFILE": "production",
+        "ENABLE_ADMIN_AUTH": "true",
+        "WINDOWS_REMOTE_ARTIFACT_DIR": str(artifact.root),
+    }
+    with pytest.raises(ReactAdminArtifactError, match="artifact bindings"):
+        load_react_admin_runtime_from_environment(environment)
+
+    environment["REACT_ADMIN_RUNTIME_PROFILE"] = "windows-remote-gateway"
+    assert load_react_admin_runtime_from_environment(environment) is None
+    with pytest.raises(ReactAdminArtifactError, match="gateway bindings"):
+        load_react_admin_runtime_from_environment({**environment, "ENABLE_ADMIN_AUTH": "false"})
+    with pytest.raises(ReactAdminArtifactError, match="gateway bindings"):
+        load_react_admin_runtime_from_environment({**environment, "REACT_ADMIN_ACTIVE_SELECTOR": "current"})
+    (artifact.root / "index.html").write_text("tampered", encoding="utf-8")
+    with pytest.raises(ReactAdminArtifactError):
+        load_react_admin_runtime_from_environment(environment)
 
 
 def test_prefix_static_and_private_paths_never_reach_api(artifact):
@@ -329,3 +353,33 @@ def test_root_setup_preserves_validated_origin_and_replaces_forwarded_input(arti
     assert calls[0].headers['origin'] == 'https://chrishzc.com'
     assert calls[0].headers['x-forwarded-proto'] == 'https'
     assert 'x-forwarded-host' not in calls[0].headers
+
+
+@pytest.mark.parametrize('artifact', ['/admin'], indirect=True)
+def test_admin_cutover_redirects_old_page_but_keeps_api_methods_and_body(artifact):
+    requests: list[tuple[str, str, bytes, bytes]] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v1/admin/auth/me':
+            return httpx.Response(401, stream=httpx.ByteStream(b''))
+        requests.append((request.method, request.url.path, request.url.query, request.read()))
+        return httpx.Response(202, stream=httpx.ByteStream(b''))
+
+    app = remote.create_gateway(artifact, prefix='/admin', transport=httpx.MockTransport(api))
+    with TestClient(app, base_url='https://chrishzc.com') as client:
+        assert '<script src="/admin/app.js"></script>' in client.get('/admin/').text
+        assert client.get('/admin/app.js').status_code == 200
+        prior_page = client.get('/test/?tab=orders', follow_redirects=False)
+        assert prior_page.status_code == 307
+        assert prior_page.headers['location'] == '/admin/?tab=orders'
+        assert prior_page.headers['cache-control'] == 'no-store'
+        for prefix in ('/admin', '/test'):
+            result = client.post(f'{prefix}/api/v1/orders?mode=preview', content=b'payload',
+                                 follow_redirects=False)
+            assert result.status_code == 202
+            assert result.headers['cache-control'] == 'no-store'
+            assert client.get(prefix + '/api/v1/admin/auth/me').status_code == 401
+            assert client.post(prefix + '/api/v1/admin/auth/development-session').status_code == 404
+        for path in ('/', '/administration/', '/testing/', '/webhook/line', '/internal', '/api/v1/orders'):
+            assert client.get(path).status_code == 404
+    assert requests == [('POST', '/api/v1/orders', b'mode=preview', b'payload')] * 2

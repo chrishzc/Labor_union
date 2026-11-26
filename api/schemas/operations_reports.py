@@ -4,6 +4,7 @@ Description: 定義實際週界營運報表 operations-report.v3／v4／v5 的�
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -81,10 +82,23 @@ class CaseStatisticsView(_StrictModel):
 
 
 class WeeklyOperationsSubsidyRowView(GovernmentSubsidyReportRowView):
+    subsidy_hours: Decimal = Field(ge=0)
+    subsidy_days: Decimal = Field(ge=0)
+    service_days: int = Field(ge=0)
     application_roc_year: int | None = Field(default=None, ge=1)
     claim_period_label: str
     reconciliation_status: str
     notes: str
+
+    @model_validator(mode="after")
+    def validate_subsidy_volume(self) -> "WeeklyOperationsSubsidyRowView":
+        volume = (self.subsidy_hours, self.subsidy_days, self.service_days)
+        if self.reconciliation_status == OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+            if any(value != 0 for value in (*volume, self.subsidy_amount_ntd, self.unit_price_ntd)):
+                raise ValueError("established unserved requires zero subsidy and service days")
+        elif any(value <= 0 for value in volume):
+            raise ValueError("other subsidy rows require positive service volume")
+        return self
 
 
 class WeeklyOperationsSubsidyPartitionView(_StrictModel):

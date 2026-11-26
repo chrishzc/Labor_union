@@ -928,7 +928,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                        o.actual_start_date, o.service_days, c.name AS client_name
                 FROM orders o
                 JOIN clients c ON o.client_id = c.id
-                WHERE o.staff_id = %s AND o.status != '訂單取消'
+                WHERE o.staff_id = %s AND o.status NOT IN ('訂單取消', '成立後未服務')
             """, (staff_id,))
             orders = cursor.fetchall()
             
@@ -995,7 +995,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                 day = w_date.day
                 
                 # 判斷是否為排定休假 (is_work_day == False 標示為綠底 🟢)
-                if r['order_status'] == '訂單取消':
+                if r['order_status'] in ('訂單取消', '成立後未服務'):
                     status = 'white'
                 elif not r['is_work_day']:
                     status = 'green'  # 🟢 綠底休假/請假
@@ -1239,7 +1239,7 @@ def get_recommended_staff_for_order(
             cursor.execute("""
                 SELECT case_no, staff_id, start_date, end_date, actual_start_date
                 FROM orders 
-                WHERE staff_id IS NOT NULL AND status NOT IN ('訂單取消') AND case_no != %s
+                WHERE staff_id IS NOT NULL AND status NOT IN ('訂單取消', '成立後未服務') AND case_no != %s
             """, (case_no,))
             existing_orders = cursor.fetchall()
 

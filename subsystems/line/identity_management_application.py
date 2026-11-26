@@ -238,7 +238,7 @@ class LineIdentityManagementApplication:
             client_id = int(order["client_id"])
             if order.get("client_line_user_id"):
                 raise RuntimeError("line_order_client_already_bound")
-            if order.get("status") == "訂單取消":
+            if order.get("status") in {"訂單取消", "成立後未服務"}:
                 raise RuntimeError("line_order_already_cancelled")
 
             provisional = unit_of_work.identity_management.get_provisional_registration(command.provisional_registration_id)

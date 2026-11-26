@@ -22,6 +22,7 @@ $tokenPath = Join-Path $runtimeDirectory 'cloudflare-state\tunnel-token'
 Set-Location -LiteralPath $ProjectRoot
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
+$appEnvironmentOverride = $env:APP_ENV
 $toolsMysqlDir = Join-Path $ProjectRoot 'tools\mysql'
 if (Test-Path -LiteralPath $toolsMysqlDir) {
     if ($env:PATH -notlike "*$toolsMysqlDir*") {
@@ -140,10 +141,22 @@ function Assert-ProgramEnvironment {
 }
 
 function Set-RuntimeEnvironment {
-    $env:APP_ENV = 'development'
+    $appEnvironment = $appEnvironmentOverride
+    $envPath = Join-Path $ProjectRoot '.env'
+    if ([string]::IsNullOrWhiteSpace($appEnvironment) -and (Test-Path -LiteralPath $envPath -PathType Leaf)) {
+        Assert-ProgramEnvironment
+        $appEnvironment = & $PythonPath -c "import sys; from dotenv import dotenv_values; print(dotenv_values(sys.argv[1]).get('APP_ENV') or 'development')" $envPath
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read APP_ENV from .env.' }
+    }
+    if ([string]::IsNullOrWhiteSpace($appEnvironment)) { $appEnvironment = 'development' }
+    $appEnvironment = $appEnvironment.Trim().ToLowerInvariant()
+    if ($appEnvironment -notin @('development', 'production')) {
+        throw 'Windows management APP_ENV must be development or production.'
+    }
+    $env:APP_ENV = $appEnvironment
     $env:ACCESS_CONTROL_PROFILE = 'production'
     $env:ENABLE_ADMIN_AUTH = 'true'
-    $env:REACT_ADMIN_RUNTIME_PROFILE = 'source'
+    $env:REACT_ADMIN_RUNTIME_PROFILE = if ($appEnvironment -eq 'production') { 'windows-remote-gateway' } else { 'source' }
     $env:REACT_ADMIN_CURRENT_ARTIFACT_DIR = ''
     $env:REACT_ADMIN_PREVIOUS_ARTIFACT_DIR = ''
     $env:REACT_ADMIN_ACTIVE_SELECTOR = ''
@@ -179,7 +192,7 @@ function Start-ManagedRuntime {
     param([string]$Artifact)
     if (Get-ManagedState) { throw 'This installation is already running. Use update or stop.' }
     Assert-ProgramEnvironment
-    Set-RuntimeEnvironment
+    if (-not $Artifact) { Set-RuntimeEnvironment }
     $cfService = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
     $isServiceRunning = ($null -ne $cfService -and $cfService.Status -eq 'Running')
     if (-not $LocalOnly -and -not $isServiceRunning) {
@@ -200,7 +213,9 @@ function Start-ManagedRuntime {
     }
     if ($LASTEXITCODE -ne 0) { throw 'Database/Redis container startup failed; no runtime was started.' }
     # Database maintenance is a separate explicit action.
-    & $PythonPath -m scripts.check_runtime_database
+    $readinessArguments = @('-m', 'scripts.check_runtime_database')
+    if ($env:APP_ENV -eq 'production') { $readinessArguments += '--windows-production' }
+    & $PythonPath @readinessArguments
     if ($LASTEXITCODE -ne 0) { throw 'Database readiness failed; no runtime was started.' }
     $env:WINDOWS_REMOTE_ARTIFACT_DIR = $Artifact
     $runLabel = [guid]::NewGuid().ToString('N')
@@ -233,6 +248,7 @@ function Start-ManagedRuntime {
 }
 
 function Get-RemoteDisplayUrl {
+    if ($env:WINDOWS_REMOTE_PREFIX -eq '/admin') { return 'https://chrishzc.com/admin/' }
     $envPath = Join-Path $ProjectRoot '.env'
     if (Test-Path -LiteralPath $envPath) {
         $lines = Get-Content -LiteralPath $envPath -Encoding UTF8 -ErrorAction SilentlyContinue
@@ -377,7 +393,6 @@ function Invoke-ManagerAction {
                 Start-ManagedRuntime $artifact
             }
             'frontend' {
-                Set-RuntimeEnvironment
                 $artifact = New-ManagedArtifact
                 [void](Get-ManagedState)
                 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $supervisorPath `

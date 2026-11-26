@@ -1,0 +1,58 @@
+name: LINE worker, publish and push contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/line-worker-and-delivery.yml'
+      - 'api/dependencies/line_worker_operation.py'
+      - 'api/routes/line_*.py'
+      - 'domains/line/**'
+      - 'subsystems/line/**'
+      - 'infrastructure/line/**'
+      - 'infrastructure/mysql/line_*'
+      - 'infrastructure/mysql/orders_terminal_closure_source.py'
+      - 'infrastructure/mysql/service_day_log_notification_stop*'
+      - 'infrastructure/mysql/scheduling_rebuild_notification_invalidation*'
+      - 'tests/domains/external-integration/subsystems/line/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  line-worker-publish-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Verify LINE worker orchestration, isolation and monitoring
+        run: >-
+          python -m pytest -q
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_service_day_log_stop_ordering.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_runtime_stage3.py
+          tests/domains/external-integration/subsystems/line/modules/worker-runtime-monitoring/contract/test_line_worker_runtime_monitoring.py
+          tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/test_terminal_closure_restore.py
+          tests/domains/external-integration/subsystems/line/infrastructure/test_line_order_reminder_worker_wiring.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_scheduling_rebuild_notification_invalidation.py
+      - name: Verify LINE rich menu publication and binding contracts
+        run: >-
+          python -m pytest -q
+          tests/domains/external-integration/subsystems/line/infrastructure/test_line_rich_menu_provider_saga.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_binding.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_publication_public_contract.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_publication_snapshot.py
+      - name: Verify LINE push and delivery contracts
+        run: >-
+          python -m pytest -q
+          tests/domains/external-integration/subsystems/line/domain/test_line_delivery_domain.py
+          tests/domains/external-integration/subsystems/line/infrastructure/test_line_provider_adapters.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_delivery_friend_regressions.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_delivery_notification_intent_state.py
+          tests/domains/external-integration/subsystems/line/subsystems/test_line_notification_reconciliation.py

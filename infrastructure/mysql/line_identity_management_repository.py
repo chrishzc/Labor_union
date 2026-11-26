@@ -93,7 +93,7 @@ class MySqlLineIdentityManagementRepository:
                 "SELECT o.case_no, o.client_id, c.name AS client_name, c.phone AS client_phone, "
                 "DATE_FORMAT(o.start_date, '%Y-%m-%d') AS start_date, o.status "
                 "FROM orders o JOIN clients c ON o.client_id = c.id "
-                "WHERE (c.line_user_id IS NULL OR c.line_user_id = '') AND o.status NOT IN ('訂單取消') "
+                "WHERE (c.line_user_id IS NULL OR c.line_user_id = '') AND o.status NOT IN ('訂單取消', '成立後未服務') "
                 "ORDER BY o.created_at DESC LIMIT 50"
             )
             order_rows = cursor.fetchall() or ()
@@ -808,7 +808,7 @@ _TERMINAL_CLOSURE_CASE_SQL = (
 _ACTIVE_CLIENT_CASES_SQL = (
     "SELECT o.case_no,o.status,o.lifecycle_version,1 AS owner_readback_verified "
     "FROM orders o JOIN clients c ON c.id=o.client_id "
-    "WHERE c.line_user_id=%s AND o.status NOT IN ('訂單完成','訂單取消') "
+    "WHERE c.line_user_id=%s AND o.status NOT IN ('訂單完成','訂單取消','成立後未服務') "
     "ORDER BY o.case_no"
 )
 _REQUEST_SELECT_SQL = (
