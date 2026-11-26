@@ -9,6 +9,7 @@
 
 ## Implementation
 - finance estimate: `subsystems/government_subsidy/reconciliation_register_query.py::project_receivable_estimate` — 共用既有公式供 Orders 政府補助 projection／Finance 清單；缺值或已存在的目前排班關聯失效時保持未知，不寫 claim。報表不略過失效關聯湊成可核銷總額。
+- weekly operations statistics: `build_operations_report_annual_subsidy_rows` 在營運年度讀取時才納入 `成立後未服務`，以有效日期分組並在零服務分支略過計薪與排班門檻。同案只計一次，統計列以零時數、零天數、零金額及不適用單價 0 呈現。正式季度／年度核銷查詢保留原篩選與正數欄位契約。
 - schedule-rule: `domains/government_subsidy/claim_schedule.py`
 - pricing-rule: `domains/government_subsidy/pricing.py` — bound/manual case subsidy cap and covered caregiver rate; no excess-rate or blended-rate claim calculation.
 - primary:

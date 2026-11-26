@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operations_report_export_client';
 import { weeklyReportMetricsClient } from '../api/reports/weekly_report_metrics_client';
+import { WeeklyOperationsSubsidyRowSchema } from '../api/reports/weekly_operations_report_schemas';
+import { SubsidyReportRowSchema } from '../api/reports/subsidy_report_query_schemas';
 import {
   weeklyOperationsReportQueryClient,
   validateOperationsReportDateRange,
@@ -15,6 +17,18 @@ import {
   WEEKLY_OPERATIONS_REPORT,
   WEEKLY_OPERATIONS_RESPONSE,
 } from './fixtures/reports/weekly_operations_report_contract_fixtures';
+
+it('accepts terminal unserved zero subsidy in weekly statistics only', () => {
+  const baseline = WEEKLY_OPERATIONS_REPORT.subsidy_partitions[0].rows[0];
+  const row = {
+    ...baseline, reconciliation_status: '成立後未服務',
+    subsidy_hours: '0', subsidy_days: '0.00', service_days: 0, subsidy_amount_ntd: 0, unit_price_ntd: 0,
+  };
+  expect(WeeklyOperationsSubsidyRowSchema.safeParse(row).success).toBe(true);
+  expect(WeeklyOperationsSubsidyRowSchema.safeParse({ ...row, reconciliation_status: '結案' }).success).toBe(false);
+  expect(WeeklyOperationsSubsidyRowSchema.safeParse({ ...row, subsidy_amount_ntd: 300 }).success).toBe(false);
+  expect(SubsidyReportRowSchema.shape.subsidy_hours.safeParse(row.subsidy_hours).success).toBe(false);
+});
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });

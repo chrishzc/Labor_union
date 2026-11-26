@@ -684,6 +684,39 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert styled_service_sheet.page_setup.fitToWidth == 1
 
 
+def test_weekly_subsidy_established_unserved_increases_count_not_amount_in_json_and_xlsx():
+    class EstablishedUnservedFacts(_Facts):
+        def list_subsidy_facts(self, start_date, end_date):
+            facts = super().list_subsidy_facts(start_date, end_date)
+            old = facts.general[0]
+            unserved = replace(
+                old, serial_number=2, case_no="115000099", application_roc_year=115,
+                subsidy_hours=Decimal(0), subsidy_days=Decimal(0), service_days=0,
+                subsidy_amount_ntd=0, unit_price_ntd=0, reconciliation_status="成立後未服務",
+            )
+            return replace(facts, general=(*facts.general, unserved))
+
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(
+        EstablishedUnservedFacts(), lambda: datetime(2026, 8, 23, 12, tzinfo=TAIPEI_TIME_ZONE),
+    )
+    client = TestClient(app)
+    params = {"start_date": "2026-08-20", "end_date": "2026-08-26"}
+    response = client.get("/api/v1/operations-reports/weekly", params=params)
+    assert response.status_code == 200
+    general = response.json()["data"]["subsidy_partitions"][0]
+    assert (general["row_count"], general["total_amount_ntd"]) == (2, 12000)
+    row = next(row for row in general["rows"] if row["case_no"] == "115000099")
+    assert (Decimal(row["subsidy_hours"]), Decimal(row["subsidy_days"]), row["subsidy_amount_ntd"]) == (0, 0, 0)
+
+    export = client.get("/api/v1/operations-reports/weekly/export", params=params)
+    assert export.status_code == 200
+    sheet = load_workbook(BytesIO(export.content), data_only=True)["補助案件統計表"]
+    rows = [row for row in sheet.values if row[1] == "115000099"]
+    assert len(rows) == 1
+    assert (rows[0][7], rows[0][8], rows[0][10], rows[0][12]) == (0, 0, 0, "成立後未服務")
+
+
 def test_weekly_export_appends_current_application_year_quarter_amount_summary():
     app = _app()
     app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(

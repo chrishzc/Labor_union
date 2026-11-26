@@ -255,6 +255,35 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
     )
 
 
+def test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim():
+    unserved = _order_row(
+        case_no="115000010", order_status="成立後未服務", identity_status="補助市民",
+        service_days=30, official_service_days=10, historical_actual_service_hours=240,
+        payroll_hourly_rate_ntd=None, pricing_active=1, pricing_rule="social",
+        pricing_subsidy_hours=None, scheduling_source_invalid=True,
+    )
+    prior_year = {**unserved, "case_no": "114000011", "actual_end_date": date(2026, 10, 1)}
+    excluded = [
+        {**unserved, "case_no": "115000012", "order_status": "訂單取消"},
+        {**unserved, "case_no": "115000013", "identity_status": "非市民", "pricing_rule": "non_citizen"},
+        {**unserved, "case_no": "114000014", "actual_end_date": date(2025, 12, 31)},
+    ]
+    completed = _order_row(case_no="115000015")
+    conn = FakeConnection([unserved, unserved.copy(), prior_year, completed, *excluded])
+    result = register.build_operations_report_annual_subsidy_rows(2026, lambda: conn)
+    rows = result["subsidized_citizen_rows"]
+    assert [row["市府訂單號碼"] for row in rows] == ["114000011", "115000010"]
+    assert [row["核銷月份"] for row in rows] == ["2026年第四季", "2026年第一季"]
+    assert all(row["核銷狀態"] == "成立後未服務" for row in rows)
+    assert all(row[key] == 0 for row in rows for key in (
+        "補助時數", "補助天數", "服務天數", "補助款金額", "單價",
+    ))
+    assert result["general_citizen_rows"][0]["補助款金額"] == Decimal(12000)
+    assert "成立後未服務" in conn.cursor_instance.executed[0][1]
+    assert register._to_register_row(unserved) is None
+    assert "成立後未服務" not in register.ESTABLISHED_ORDER_STATUSES
+
+
 def test_operations_report_annual_rows_exclude_cancelled_orders_before_subsidy_calculation():
     connection = FakeConnection([
         _order_row(case_no="115000001", order_status="訂單成立"),

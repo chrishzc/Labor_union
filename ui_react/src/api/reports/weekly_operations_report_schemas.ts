@@ -102,13 +102,24 @@ export const WeeklyOperationsDataQualityIssueSchema = z.strictObject({
   message: z.string().min(1),
 });
 
+const ZeroDecimalTextSchema = z.string().regex(/^0+(?:\.0+)?$/);
+const EstablishedUnservedSubsidyStatus = '成立後未服務';
+
 export const WeeklyOperationsSubsidyRowSchema = z.strictObject({
   ...SubsidyReportRowSchema.shape,
+  subsidy_hours: z.union([SubsidyReportRowSchema.shape.subsidy_hours, ZeroDecimalTextSchema]),
+  subsidy_days: z.union([SubsidyReportRowSchema.shape.subsidy_days, ZeroDecimalTextSchema]),
+  service_days: z.number().int().nonnegative(),
   application_roc_year: z.number().int().positive().nullable(),
   claim_period_label: z.string(),
   reconciliation_status: z.string(),
   notes: z.string(),
-});
+}).refine((row) => {
+  const volume = [Number(row.subsidy_hours), Number(row.subsidy_days), row.service_days];
+  return row.reconciliation_status === EstablishedUnservedSubsidyStatus
+    ? [...volume, row.subsidy_amount_ntd, row.unit_price_ntd].every((value) => value === 0)
+    : volume.every((value) => value > 0);
+}, '補助時數、補助天數與服務天數必須符合報表狀態');
 
 export const WeeklyOperationsSubsidyPartitionSchema = z.strictObject({
   citizen_kind: z.enum(['general', 'subsidized', 'indigenous']),

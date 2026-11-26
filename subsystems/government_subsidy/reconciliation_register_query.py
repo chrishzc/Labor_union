@@ -45,7 +45,7 @@ ESTABLISHED_ORDER_STATUSES = (
     "歷史訂單－服務完成",
     "歷史訂單－帳務完成",
 )
-OPERATIONS_REPORT_ORDER_STATUSES = ESTABLISHED_ORDER_STATUSES
+OPERATIONS_REPORT_ORDER_STATUSES = (*ESTABLISHED_ORDER_STATUSES, OrderLifecycleStatus.ESTABLISHED_UNSERVED)
 COMPLETED_ORDER_STATUSES = (
     "訂單完成",
     "歷史訂單－服務完成",
@@ -569,16 +569,25 @@ def _to_register_row(source: dict) -> dict | None:
     ):
         return None
 
+    return _register_row(
+        source, actual_start, actual_end, subsidy_hours,
+        (subsidy_hours / daily_hours).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        displayed_service_days, unit_price,
+    )
+
+
+def _register_row(
+    source: dict, service_start: date, service_end: date, subsidy_hours: Decimal,
+    subsidy_days: Decimal, service_days: object, unit_price: Decimal,
+) -> dict:
     return {
         "市府訂單號碼": str(source["case_no"]),
         "補助資格": _register_eligibility(source),
-        "服務開始": actual_start,
-        "服務結束": actual_end,
+        "服務開始": service_start,
+        "服務結束": service_end,
         "補助時數": subsidy_hours,
-        "補助天數": (subsidy_hours / daily_hours).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        ),
-        "服務天數": displayed_service_days,
+        "補助天數": subsidy_days,
+        "服務天數": service_days,
         "補助款金額": subsidy_hours * unit_price,
         "單價": unit_price,
         "雇主": source.get("employer_name") or "",
@@ -844,6 +853,23 @@ def build_operations_report_annual_subsidy_rows(
     }
 
 
+def _operations_report_register_row(source: dict) -> dict | None:
+    if source.get("order_status") != OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+        return _to_register_row(source)
+    if _register_eligibility(source) not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN, INDIGENOUS_CITIZEN}:
+        return None
+    if source.get("pricing_active") and source.get("pricing_rule") == "non_citizen":
+        return None
+    service_start = _as_date(source.get("actual_start_date"))
+    service_end = _as_date(source.get("actual_end_date"))
+    if service_start is None or service_end is None:
+        return None
+    # Reporting only: effective (planned if no actual) dates attribute the row;
+    # the terminal zero-service outcome needs neither a schedule nor a rate.
+    zero = Decimal(0)
+    return _register_row(source, service_start, service_end, zero, zero, 0, zero)
+
+
 def _operations_report_order_rows(
     report_year: int,
     connection_factory: Callable[[], Any],
@@ -851,6 +877,7 @@ def _operations_report_order_rows(
     """Select the operations-report's annual cases by application and reconciliation year."""
     report_roc_year = report_year - 1911
     rows = []
+    unserved_seen: set[str] = set()
     for source in _fetch_established_cases(
         None,
         None,
@@ -868,7 +895,7 @@ def _operations_report_order_rows(
             and source_end.year == report_year
         ):
             continue
-        row = _to_register_row(source)
+        row = _operations_report_register_row(source)
         if row is None:
             continue
         reconciliation_year, reconciliation_period = _operations_reconciliation_period(
@@ -880,9 +907,15 @@ def _operations_report_order_rows(
         ):
             continue
         row["核銷月份"] = reconciliation_period
-        row["核銷狀態"] = (
-            "結案" if row.get("訂單狀態") in COMPLETED_ORDER_STATUSES else ""
-        )
+        if row["訂單狀態"] == OrderLifecycleStatus.ESTABLISHED_UNSERVED:
+            if source_case_no in unserved_seen:
+                continue
+            unserved_seen.add(source_case_no)
+            row["核銷狀態"] = OrderLifecycleStatus.ESTABLISHED_UNSERVED.value
+        else:
+            row["核銷狀態"] = (
+                "結案" if row["訂單狀態"] in COMPLETED_ORDER_STATUSES else ""
+            )
         rows.append(row)
     rows.sort(key=lambda row: row["市府訂單號碼"])
     general, subsidized, indigenous = _partition_operations_report_rows(rows)
