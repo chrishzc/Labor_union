@@ -84,16 +84,27 @@ jobs:
       - name: Verify historical completion writes payroll with unknown funding
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
+          password="$(python -c 'import secrets; print(secrets.token_hex(24))')"
+          echo "::add-mask::$password"
           export LABOR_UNION_TEST_MYSQL_DATABASE="$DB_DATABASE"
+          export LABOR_UNION_TEST_MYSQL_HOST="$DB_HOST" LABOR_UNION_TEST_MYSQL_PORT="$DB_PORT"
+          export LABOR_UNION_TEST_MYSQL_USER=lu_historical_fixture LABOR_UNION_TEST_MYSQL_PASSWORD="$password"
           python - <<'PY'
           import os
           from argparse import Namespace
+          import pymysql
           from scripts.bootstrap_disposable_mysql_schema import bootstrap
           database = os.environ['LABOR_UNION_TEST_MYSQL_DATABASE']
           assert database.startswith('lu_test_historical_')
           bootstrap(Namespace(host='127.0.0.1', port=3307, user='root', password='',
                               database=database, confirm_database=database))
+          with pymysql.connect(host='127.0.0.1', port=3307, user='root', password='', autocommit=True) as connection:
+              with connection.cursor() as cursor:
+                  cursor.execute("CREATE USER 'lu_historical_fixture'@'%%' IDENTIFIED BY %s",
+                                 (os.environ['LABOR_UNION_TEST_MYSQL_PASSWORD'],))
+                  cursor.execute(f"GRANT ALL PRIVILEGES ON `{database}`.* TO 'lu_historical_fixture'@'%'")
           PY
+          export DB_USER="$LABOR_UNION_TEST_MYSQL_USER" DB_PASSWORD="$LABOR_UNION_TEST_MYSQL_PASSWORD"
           python -m pytest -vv tests/domains/orders/subsystems/orders/modules/historical-adoption/integration/test_wp80_disposable_mysql_e2e.py::test_rollover_creates_undated_payroll_and_preserves_unknown_funding_reason
       - name: Verify refunds from confirmed service shortening
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}

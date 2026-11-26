@@ -98,7 +98,7 @@ class MySqlStaffPayableExportSource:
             from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
 
             outcome = synchronize_historical_payroll(self._connection, case_no, dry_run=True)
-            item_outcomes = tuple(outcome.get("items") or ())
+            item_outcomes: list[Mapping[str, Any]] | None = outcome.get("items")
             if item_outcomes:
                 outcomes_by_obligation = {entry["obligation_identity"]: entry for entry in item_outcomes
                                           if entry.get("obligation_identity") is not None}
