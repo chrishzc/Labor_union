@@ -2201,7 +2201,7 @@ def test_historical_accounting_completed_service_fact_after_pricing_shares_one_c
     assert historical_completed_immutable_snapshot(case_no) == immutable
 
 
-def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_case_apply(client):
+def test_historical_accounting_legacy_mixed_rates_birth_repricing_and_explicit_case_apply(client):
     from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
     from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
     from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -2268,32 +2268,43 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
         changes = {'multi_birth_count': '雙胞胎'}
         birth = birth_workflow.preview(case_no, changes, ExpectedVersion(0))
         blocker = 'historical_pricing_birth_bound_policy_required'
-        assert blocker in birth.historical_pricing.impact.pending
-        assert all(person.after_amount is None for person in birth.historical_pricing.impact.persons)
-        birth_workflow.apply(case_no, changes, ExpectedVersion(0), birth.preview_fingerprint,
+        assert blocker not in birth.historical_pricing.impact.pending
+        assert [(person.hours, person.snapshot_hourly_rate, person.effective_hourly_rate, person.after_amount, person.delta)
+            for person in birth.historical_pricing.impact.persons] == [
+                (Decimal(30), 300, 450, 13650, 4500), (Decimal(16), 350, 450, 7400, 1600)]
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+        command = (case_no, changes, ExpectedVersion(0), birth.preview_fingerprint,
             IdempotencyKey(case_no + ':birth'), ActorContext('synthetic'), 'confirmed historical twins',
             CorrelationId(case_no + ':birth'))
+        receipt = birth_workflow.apply(*command)
+        replay = birth_workflow.apply(*command)
+        assert replay.replayed and replay.resulting_version == receipt.resulting_version
         assert birth_repository.load(case_no, for_update=False)['corrections']['multi_birth_count'] == '雙胞胎'
         connection.rollback()
         current = client.get(pricing_path).json()['data']
         assert current['source'] == 'legacy'
-        assert current['impact']['staff_total_amount'] == 14950
-        assert blocker in current['accounting_pending']
+        assert current['impact']['staff_total_amount'] == 21050
+        assert blocker not in current['accounting_pending']
+        assert [person['delta'] for person in current['historical_payroll']] == [4500, 1600]
         with connection.cursor() as cursor:
             cursor.execute(f'SELECT * FROM ({CASE_PRICING_FACTS_SQL}) pricing WHERE case_no=%s', (case_no,))
             assert cursor.fetchone() is None
             cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.amount_due_ntd,c.computed_ntd,c.effective_ntd '
                 'FROM staff_obligations o LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
-                'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
+                'WHERE o.case_no=%s AND o.source_obligation_identity IS NULL ORDER BY o.assignment_id', (case_no,))
             rows = cursor.fetchall()
             assert [(row['obligation_identity'], row['assignment_id'], row['amount_due_ntd'])
                 for row in rows] == original_amounts
             assert [(row['obligation_identity'], row['computed_ntd'], row['effective_ntd']) for row in rows] == [
-                (first_identity, 9150, 9150), (second_identity, 5800, 5800)]
+                (first_identity, 13650, 13650), (second_identity, 7400, 7400)]
+            cursor.execute('SELECT source_obligation_identity,direction,amount_due_ntd FROM staff_obligations '
+                'WHERE case_no=%s AND source_obligation_identity IS NOT NULL ORDER BY current_event_id', (case_no,))
+            assert tuple(cursor.fetchall()) == ({
+                'source_obligation_identity': second_identity, 'direction': 'payable_to_staff', 'amount_due_ntd': 1600},)
         connection.rollback()
         candidate = historical_completed_pricing_body(client, case_no, payroll={'covered': 350, 'excess': 350})
         explicit = post(client, pricing_path + '/preview', candidate, case_no + ':price-preview')
-        assert explicit['before']['staff_total_amount'] == 14950
+        assert explicit['before']['staff_total_amount'] == 21050
         assert explicit['after']['staff_total_amount'] == 16450
         assert [person['after_amount'] for person in explicit['historical_plan']['persons']] == [10650, 5800]
         assert blocker not in explicit['historical_plan']['pending']
@@ -2302,17 +2313,170 @@ def test_historical_accounting_legacy_mixed_rates_birth_pending_and_explicit_cas
         with connection.cursor() as cursor:
             cursor.execute('SELECT o.obligation_identity,o.assignment_id,o.amount_due_ntd,c.computed_ntd,c.effective_ntd '
                 'FROM staff_obligations o LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
-                'WHERE o.case_no=%s ORDER BY o.assignment_id', (case_no,))
+                'WHERE o.case_no=%s AND o.source_obligation_identity IS NULL ORDER BY o.assignment_id', (case_no,))
             rows = cursor.fetchall()
             assert [(row['obligation_identity'], row['assignment_id'], row['amount_due_ntd'])
                 for row in rows] == original_amounts
             assert [(row['obligation_identity'], row['computed_ntd'], row['effective_ntd']) for row in rows] == [
                 (first_identity, 10650, 10650), (second_identity, 5800, 5800)]
+            cursor.execute('SELECT source_obligation_identity,direction,amount_due_ntd FROM staff_obligations '
+                'WHERE case_no=%s AND source_obligation_identity IS NOT NULL ORDER BY current_event_id', (case_no,))
+            assert tuple(cursor.fetchall()) == (
+                {'source_obligation_identity': second_identity, 'direction': 'payable_to_staff', 'amount_due_ntd': 1600},
+                {'source_obligation_identity': second_identity, 'direction': 'receivable_from_staff', 'amount_due_ntd': 1600})
         connection.rollback()
         current = client.get(pricing_path).json()['data']
         assert current['impact']['staff_total_amount'] == 16450
         assert blocker not in current['accounting_pending']
         assert historical_completed_immutable_snapshot(case_no) == immutable
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(('already_twins', 'has_original', 'paid'), [
+    (False, True, False), (True, True, False), (False, False, False), (False, True, True)],
+    ids=['320-hours', 'same-twins-repair', 'missing-original', 'paid-original'])
+def test_historical_accounting_standard_twins_payroll_readback(client, already_twins, has_original, paid):
+    from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+    from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
+    from infrastructure.mysql.payroll_rebuild_repository import _EVENT_INSERT_SQL, _PROJECTION_INSERT_SQL
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionWorkflow
+
+    case_no = 'hist-standard-twins-' + uuid4().hex[:12]
+    staff, assignment = seed_historical_accounting_case(case_no, '一般市民', 320, None, with_staff=True)
+    source = case_no + ':original'
+    twins = '雙胞胎'
+    prior_version = int(already_twins)
+    due_on = date(2026, 12, 15)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE orders SET actual_end_date='2026-11-09',end_date='2026-11-09',"
+                           "staff_payment_due_date=%s WHERE case_no=%s", (due_on, case_no))
+            cursor.execute("UPDATE case_staff_assignments SET assigned_end_date='2026-11-09' WHERE id=%s", (assignment,))
+            cursor.execute('INSERT INTO payroll_case_accounts(case_no) VALUES(%s)', (case_no,))
+            cursor.execute('INSERT INTO staff_payable_accounts(staff_id) VALUES(%s)', (staff,))
+            cursor.execute("INSERT INTO assignment_payroll_rate_snapshots(assignment_id,policy_version,policy_kind,"
+                           "hourly_rate_ntd,source_identity_status) VALUES(%s,'approved-rates-v1','citizen',300,%s)",
+                           (assignment, '一般市民'))
+            terms_key = case_no + ':terms'
+            cursor.execute(
+                "INSERT INTO client_payment_terms_events(case_no,policy_version,client_hourly_rate_ntd,"
+                "deposit_service_days,deposit_due_date,first_payment_due_date,expected_account_version,"
+                "source_event_identity,idempotency_key,actor,reason) "
+                "VALUES(%s,'historical-fixture-v1',300,0,'2026-09-29','2026-09-30',0,%s,%s,"
+                "'synthetic','original client payment terms')", (case_no, terms_key, terms_key))
+            cursor.execute(
+                "INSERT INTO client_payment_terms(case_no,policy_version,client_hourly_rate_ntd,"
+                "deposit_service_days,deposit_due_date,first_payment_due_date,current_event_id) "
+                "VALUES(%s,'historical-fixture-v1',300,0,'2026-09-29','2026-09-30',%s)", (case_no, cursor.lastrowid))
+            if already_twins:
+                cursor.execute("INSERT INTO beclass_record_correction_states"
+                    "(beclass_record_id,aggregate_version,effective_values_json,updated_by) "
+                    "SELECT id,1,%s,'synthetic' FROM beclass_records WHERE bound_case_no=%s",
+                    (json.dumps({'multi_birth_count': twins}), case_no))
+                identity_key = f'assignment:{assignment}'
+                blocker = 'historical_pricing_birth_bound_policy_required'
+                legacy_event = {
+                    'historical_accounting': {
+                        'rate_authority': 'legacy', 'pending': [blocker],
+                        'carry': [{'component': 'payroll', 'identity': identity_key, 'basis_amount': None,
+                                   'pending': [blocker], 'financial_sources_digest': 'old-pricing'}],
+                    },
+                }
+                cursor.execute("INSERT INTO case_pricing_events(case_no,resulting_revision,pricing_json,actor,reason,"
+                    "created_at_utc) VALUES(%s,1,%s,'synthetic','old birth correction',UTC_TIMESTAMP(6))",
+                    (case_no, json.dumps(legacy_event)))
+                cursor.execute('UPDATE orders SET pricing_override_event_id=%s,pricing_revision=1 WHERE case_no=%s',
+                    (cursor.lastrowid, case_no))
+            if has_original:
+                cursor.execute(_EVENT_INSERT_SQL, (source, assignment, case_no, staff, 'service_pay', 'payable_to_staff',
+                    None, 'established', 0, 96000, due_on, 'd' * 64, 0, 1, source, 'synthetic', 'original payable'))
+                cursor.execute(_PROJECTION_INSERT_SQL, (source, assignment, case_no, staff, 'service_pay', 'payable_to_staff',
+                    None, 96000, due_on, cursor.lastrowid, 1))
+                cursor.execute('UPDATE payroll_case_accounts SET aggregate_version=1 WHERE case_no=%s', (case_no,))
+            if paid:
+                from infrastructure.mysql.staff_payout_repository import _projection_rows, _upsert_projection
+
+                cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,debit,"
+                    "direction,currency,classification_type,bank_references,warnings,raw_payload) "
+                    "VALUES(%s,'taishin','2026-12-15',96000,'outgoing','TWD','staff_payout','{}','[]','{}')",
+                    (uuid4().hex * 2,))
+                bank_id = cursor.lastrowid
+                cursor.execute("INSERT INTO staff_payout_events(staff_id,finance_import_row_id,event_type,amount_ntd,"
+                    "occurred_on,bank_account_identity_hash,reconciliation_reference,idempotency_key,actor,reason) "
+                    "VALUES(%s,%s,'payout',96000,%s,%s,%s,%s,'synthetic','original payout')",
+                    (staff, bank_id, due_on, 'a' * 64, case_no + ':paid', case_no + ':paid'))
+                cursor.execute('INSERT INTO staff_payout_obligation_links(payout_event_id,obligation_identity,'
+                    'allocated_amount_ntd,allocation_ordinal) VALUES(%s,%s,96000,1)', (cursor.lastrowid, source))
+                _upsert_projection(cursor, _projection_rows(cursor, (source,))[0], 1)
+                cursor.execute('UPDATE staff_payable_accounts SET aggregate_version=1 WHERE staff_id=%s', (staff,))
+                cursor.execute('UPDATE staff_obligations SET payout_history_exists=1 WHERE obligation_identity=%s', (source,))
+        connection.commit()
+        repository = MySqlBeClassCorrectionRepository(connection)
+        workflow = BeClassCorrectionWorkflow(repository, lambda: MySqlUnitOfWork(connection),
+            MySqlBeClassFinancialSync(connection))
+        pricing_path = f'/api/v1/accounting-pricing/cases/{case_no}'
+        if already_twins:
+            before = client.get(pricing_path).json()['data']['historical_payroll'][0]
+            assert (before['after_amount'], before['delta']) == (96000, None)
+
+        changes = {'multi_birth_count': twins}
+        immutable = historical_completed_immutable_snapshot(case_no)
+        prior = repository.load(case_no, for_update=False)
+        original_payroll = query_case_staff_accounting(connection, case_no)
+        preview = workflow.preview(case_no, changes, ExpectedVersion(prior_version))
+        person, = preview.historical_pricing.impact.persons
+        assert (person.hours, person.snapshot_hourly_rate, person.effective_hourly_rate, person.calculated_amount) == (
+            Decimal(320), 300, 450, 144000)
+        assert (person.before_amount, person.after_amount, person.delta) == (
+            (96000, 144000, 48000) if has_original else (None, None, None))
+        missing = f'historical_pricing_original_payable_required:assignment:{assignment}'
+        assert (missing in preview.historical_pricing.impact.pending) is (not has_original)
+        connection.rollback()
+        assert repository.load(case_no, for_update=False) == prior
+        assert query_case_staff_accounting(connection, case_no) == original_payroll
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+        connection.rollback()
+
+        key = IdempotencyKey(case_no + ':birth')
+        command = (case_no, changes, ExpectedVersion(prior_version), preview.preview_fingerprint,
+            key, ActorContext('synthetic'), 'confirmed historical twins', CorrelationId(key.value))
+        receipt = workflow.apply(*command)
+        replay = workflow.apply(*command)
+        assert replay.replayed and replay.resulting_version == receipt.resulting_version == prior_version + 1
+        assert (missing in receipt.accounting_pending) is (not has_original)
+
+        reopened = client.get(pricing_path).json()['data']
+        person, = reopened['historical_payroll']
+        assert reopened['source'] == 'legacy'
+        assert (person['hours'], person['snapshot_hourly_rate'], person['effective_hourly_rate'],
+                person['calculated_amount']) == (320, 300, 450, 144000)
+        assert (person['after_amount'], person['delta']) == ((144000, 48000) if has_original else (None, None))
+        assert reopened['impact']['staff_total_amount'] == (144000 if has_original else None)
+        assert (missing in reopened['accounting_pending']) is (not has_original)
+        assert historical_completed_immutable_snapshot(case_no) == immutable
+        connection.rollback()
+        assert repository.load(case_no, for_update=False)['corrections']['multi_birth_count'] == twins
+        items, transactions = query_case_staff_accounting(connection, case_no)
+        assert sum(item.expected_ntd for item in items) == (144000 if has_original else 0)
+        assert transactions == original_payroll[1]
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT a.action,a.before_ntd,a.after_ntd FROM payroll_amount_changes a '
+                'JOIN staff_obligations o ON o.obligation_identity=a.obligation_identity WHERE o.case_no=%s', (case_no,))
+            assert tuple(cursor.fetchall()) == (
+                ({'action': 'source_update', 'before_ntd': 96000, 'after_ntd': 144000},) if has_original else ())
+            if paid:
+                cursor.execute('SELECT obligation_amount_ntd,net_paid_ntd,balance_ntd FROM staff_payable_projections '
+                    'WHERE obligation_identity=%s', (source,))
+                assert cursor.fetchone() == {'obligation_amount_ntd': 96000, 'net_paid_ntd': 96000, 'balance_ntd': 0}
+                cursor.execute('SELECT source_obligation_identity,amount_due_ntd,due_date FROM staff_obligations '
+                    'WHERE source_obligation_identity=%s', (source,))
+                assert tuple(cursor.fetchall()) == ({
+                    'source_obligation_identity': source, 'amount_due_ntd': 48000, 'due_date': due_on},)
     finally:
         connection.close()
 

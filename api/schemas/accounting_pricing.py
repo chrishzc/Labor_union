@@ -82,6 +82,19 @@ class PricingImpactView(PricingModel):
     union_income_amount: int | None
 
 
+class HistoricalPersonPricingView(PricingModel):
+    assignment_identity: str
+    staff_id: int
+    staff_name: str
+    hours: float | None
+    before_amount: int | None
+    after_amount: int | None
+    delta: int | None
+    snapshot_hourly_rate: int | None = None
+    effective_hourly_rate: int | None = None
+    calculated_amount: int | None = None
+
+
 class CasePricingView(PricingModel):
     case_no: str
     revision: int
@@ -90,6 +103,7 @@ class CasePricingView(PricingModel):
     impact: PricingImpactView
     historical: bool = False
     accounting_pending: list[str] = Field(default_factory=list)
+    historical_payroll: list[HistoricalPersonPricingView] = Field(default_factory=list)
 
 
 class CasePricingPreviewBody(PricingModel):
@@ -109,16 +123,6 @@ class HistoricalAmountUpdateView(PricingModel):
     before_computed: int
     before_effective: int
     mode: Literal['automatic', 'manual']
-
-
-class HistoricalPersonPricingView(PricingModel):
-    assignment_identity: str
-    staff_id: int
-    staff_name: str
-    hours: float | None
-    before_amount: int | None
-    after_amount: int | None
-    delta: int | None
 
 
 class HistoricalRepricingPlanView(PricingModel):

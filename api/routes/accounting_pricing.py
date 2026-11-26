@@ -19,11 +19,11 @@ from api.error_contracts import typed_http_error
 from api.schemas.accounting_pricing import (
     CasePricingApplyBody, CasePricingPreviewBody, CasePricingPreviewView, CasePricingView,
     PricingCatalogView, PricingImpactView, PricingReceiptView, CasePricingTermsBody, SavePricingPolicyBody,
-    HistoricalRepricingPlanView,
+    HistoricalPersonPricingView, HistoricalRepricingPlanView,
 )
 from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.client_finance.pricing_configuration import PricingConfigurationApplication, PricingConflict
+from subsystems.client_finance.pricing_configuration import CasePricingFacts, PricingConfigurationApplication, PricingConflict
 
 
 LOGGER = logging.getLogger("labor_union.api.routes.accounting_pricing")
@@ -51,9 +51,11 @@ def _error(error):
 
 
 def _case_view(facts, impact):
+    people = facts.historical_payroll if isinstance(facts, CasePricingFacts) else ()
     return CasePricingView(case_no=facts.case_no, revision=facts.revision, source=facts.source,
         terms=CasePricingTermsBody.model_validate(facts.terms), impact=PricingImpactView.model_validate(impact),
-        historical=facts.historical, accounting_pending=list(facts.accounting_pending))
+        historical=facts.historical, accounting_pending=list(facts.accounting_pending),
+        historical_payroll=[HistoricalPersonPricingView.model_validate(person) for person in people])
 
 
 @router.get("", response_model=BaseResponse[PricingCatalogView])

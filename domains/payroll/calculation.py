@@ -40,6 +40,10 @@ _HOURLY_RATE_BY_POLICY = {
 }
 
 
+def standard_hourly_rate(policy_kind: PayrollPolicyKind) -> MoneyNTD:
+    return _HOURLY_RATE_BY_POLICY[policy_kind]
+
+
 @dataclass(frozen=True, slots=True)
 class OfficialAssignmentServiceFacts:
     assignment_identity: str
@@ -190,7 +194,7 @@ def rate_snapshot(
         assignment_identity,
         policy_version,
         policy_kind,
-        _HOURLY_RATE_BY_POLICY[policy_kind],
+        standard_hourly_rate(policy_kind),
     )
 
 

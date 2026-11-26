@@ -23,15 +23,20 @@ const impact = z.strictObject({ covered_hours: z.number().nonnegative().nullable
   subsidy_amount: amount.nullable(), subsidy_return_amount: amount.nullable() });
 const historicalAmountUpdate = z.strictObject({ identity: z.string(), computed: amount, effective: amount,
   before_computed: amount, before_effective: amount, mode: z.enum(['automatic', 'manual']) });
+const historicalPersonPricing = z.strictObject({ assignment_identity: z.string(), staff_id: z.number().int().positive(),
+  staff_name: z.string(), hours: z.number().nonnegative().nullable(), before_amount: amount.nullable(),
+  after_amount: amount.nullable(), delta: z.number().int().nullable(),
+  snapshot_hourly_rate: amount.nullable().optional(), effective_hourly_rate: amount.nullable().optional(),
+  calculated_amount: amount.nullable().optional() });
 export const HistoricalRepricingPlanSchema = z.strictObject({
   client_updates: z.array(historicalAmountUpdate), staff_updates: z.array(historicalAmountUpdate),
-  persons: z.array(z.strictObject({ assignment_identity: z.string(), staff_id: z.number().int().positive(),
-    staff_name: z.string(), hours: z.number().nonnegative().nullable(), before_amount: amount.nullable(), after_amount: amount.nullable(), delta: z.number().int().nullable() })),
+  persons: z.array(historicalPersonPricing),
   pending: z.array(z.string()), client_exempt: z.boolean(), client_delta: z.number().int().nullable(), subsidy_delta: z.number().int().nullable(),
 });
 const caseView = z.strictObject({ case_no: z.string(), revision: z.number().int().nonnegative(),
   source: z.enum(['legacy', 'policy', 'manual']), terms: PricingTermsSchema, impact,
-  historical: z.boolean().optional(), accounting_pending: z.array(z.string()).optional() });
+  historical: z.boolean().optional(), accounting_pending: z.array(z.string()).optional(),
+  historical_payroll: z.array(historicalPersonPricing).optional() });
 const preview = z.strictObject({ current: caseView, candidate: PricingTermsSchema, before: impact, after: impact,
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/), historical_plan: HistoricalRepricingPlanSchema.nullable().optional() });
 const receipt = z.strictObject({ revision: z.number().int().positive(), accounting_pending: z.array(z.string()).optional() });
@@ -116,6 +121,7 @@ export function historicalPendingLabel(code: string): string {
     historical_pricing_payroll_amount_unresolved: '此指派的薪資差額與原應付不相容，請核對原帳。',
     historical_pricing_assignments_required: '缺少可確認的歷史指派，月嫂差額待核對。',
     historical_pricing_birth_bound_policy_required: '缺少本案綁定的正式胎數費率，請核對原計價來源。',
+    historical_pricing_standard_twins_difference_pending: '已確認雙胞胎有效時薪。請預覽並確認尚未入帳的月嫂應付差額。',
     historical_pricing_total_service_hours_required: '整案服務時數尚未確認，客戶與補助差額待核對。',
     historical_pricing_original_calculation_basis_required: '更正前服務量尚未確認，無法判定歷史差額；請先核對原計算基準。',
     historical_completed_service_volume_unresolved: '此指派的歷史服務量尚未確認，請補齊各人服務證據。',
