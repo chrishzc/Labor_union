@@ -110,6 +110,7 @@ flowchart LR
 
 ### API：本人送審、管理員發布與客戶讀取 ^staff-feedback-api
 - **負責／正式約定**：Staff；本人沿 `POST /api/v1/line/staff-self-service/profile-change/submit` 送審，管理員以 `POST /api/v1/admin/staff-profile-change-requests/{application_id}/decision` 審核。客戶經授權讀取 `POST /api/v1/line/staff-web-profiles/{staff_id}/query`。本人送審的審核入口與辦公室代傳的 `/{staff_id}/publications` 不混用。
+- **暫存來源不可用**：本人查詢異動表單時，專用 Redis 設定缺漏或暫存讀寫不可用回 503 `staff_profile_change_unavailable`（可重試），不能顯示空表單、申請已送出或當作已發布。現有 `test_staff_profile_change_intake.py::test_query_form_translates_missing_redis_configuration_to_typed_503` 以替身驗查詢的錯誤契約，不等同真實 Redis 或 LINE 驗收。
 - **去哪驗**：現行路由 `api/routes/staff_profile_change.py` 與 `api/routes/staff_web_profile.py`；規格 #35 §3.2–3.3 及 §4，測試定位見下方 Verification。受理不等於已發布，不能以回應成功代替正式讀回。
 
 ### DB：類別與保留資料升級 ^staff-feedback-db

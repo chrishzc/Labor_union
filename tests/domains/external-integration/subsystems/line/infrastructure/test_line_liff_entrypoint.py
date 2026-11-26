@@ -896,3 +896,73 @@ async function check(search, retired = false) {
 })().catch((e) => { console.error(e); process.exit(1); });
 """.replace("SOURCE", json.dumps(gateway_script))
     subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
+
+
+def test_all_active_liff_pages_reference_existing_routes_and_static_assets() -> None:
+    import re
+    from api.main import app as main_app
+    from api.registration_intake import app as intake_app
+
+    def _collect_routes(routes, prefix: str = "") -> set[str]:
+        found: set[str] = set()
+        for route in routes:
+            ctx = getattr(route, "include_context", None)
+            if ctx is not None:
+                found |= _collect_routes(route.original_router.routes, prefix + (ctx.prefix or ""))
+                continue
+            path = getattr(route, "path", None)
+            if isinstance(path, str) and path:
+                found.add(prefix + path)
+        return found
+
+    main_routes = _collect_routes(main_app.routes)
+    intake_routes = _collect_routes(intake_app.routes)
+    all_routes = main_routes | intake_routes
+    route_patterns = [
+        (
+            route,
+            re.compile("^" + re.escape(re.sub(r"\{[^}]+\}", "__PARAM__", route)).replace("__PARAM__", r"[^/]+") + "$"),
+        )
+        for route in all_routes if route.startswith("/")
+    ]
+    static_dir = ROOT / "line" / "static"
+    static_files = {p.name for p in static_dir.iterdir() if p.is_file()}
+
+    def _route_exists(raw_ref: str, *, allow_prefix: bool = False) -> bool:
+        path = re.sub(r"\$\{[^}]+\}", "__PARAM__", raw_ref).split("?", 1)[0].split("#", 1)[0]
+        if path.startswith("/static/"):
+            rel = path.removeprefix("/static/")
+            return rel in static_files or (static_dir / rel).is_file()
+        if path.endswith("/"):
+            return any(r.startswith(path) for r in all_routes)
+        if path in all_routes or any(pattern.match(path) for _, pattern in route_patterns):
+            return True
+        if "__PARAM__" in path or allow_prefix:
+            suffix = "/[^/]+" if allow_prefix else "$"
+            ref_pattern = re.compile("^" + re.escape(path).replace("__PARAM__", r"[^/]+") + suffix)
+            return any(ref_pattern.match(route) for route in all_routes if route.startswith("/"))
+        return False
+
+    literal_re = re.compile(r"""(['"`])(/(?:api|line-|static)/[^'"`\s<>\\]*)\1""")
+    base_var_re = re.compile(r"""(?:const|let|var)\s+[A-Za-z_]\w*\s*=\s*(['"`])(/(?:api|line-|static)/[^'"`\s<>\\]*)\1""")
+    missing: list[str] = []
+    for asset in sorted(static_dir.iterdir()):
+        if asset.suffix not in {".html", ".js"} or not asset.is_file():
+            continue
+        text = asset.read_text(encoding="utf-8")
+        base_prefixes = {ref for _, ref in base_var_re.findall(text)}
+        for _, ref in literal_re.findall(text):
+            if ref.endswith("/static/") or ref.endswith("/api/"):
+                continue
+            if not _route_exists(ref, allow_prefix=(ref in base_prefixes)):
+                missing.append(f"{asset.name}: {ref}")
+
+    assert missing == []
+    for registration_path in (
+        "/api/v1/line/identity/registration/passbook",
+        "/api/v1/line/identity/registration/preview",
+        "/api/v1/line/identity/registration/apply",
+        "/api/v1/line/identity/registration/status",
+    ):
+        assert registration_path in intake_routes
+        assert registration_path not in main_routes
