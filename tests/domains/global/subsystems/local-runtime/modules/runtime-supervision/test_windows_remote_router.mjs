@@ -315,3 +315,36 @@ test('non-assets, forged proofs, wrong MIME, cookies, redirects, APIs and errors
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test('admin cutover keeps the protected legacy route and leaves adjacent paths alone', async () => {
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  globalThis.fetch = async request => {
+    forwarded.push({ path: new URL(request.url).pathname, method: request.method, body: await request.text() });
+    return new Response('accepted', { status: 202 });
+  };
+  try {
+    for (const path of ['/admin/api/v1/orders', '/test/api/v1/orders']) {
+      const url = `https://chrishzc.com${path}`;
+      assert.equal((await router.fetch(new Request(url))).status, 401);
+      const response = await router.fetch(new Request(url, {
+        method: 'POST', body: 'candidate', headers: { 'Cf-Access-Jwt-Assertion': 'synthetic' },
+      }));
+      assert.equal(response.status, 202);
+      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+    }
+    for (const path of ['/', '/administration/', '/testing/', '/webhook/line']) {
+      const response = await router.fetch(new Request(`https://chrishzc.com${path}`, {
+        headers: { 'Cf-Access-Jwt-Assertion': 'synthetic' },
+      }));
+      assert.equal(response.status, 404);
+    }
+    assert.deepEqual(forwarded, [
+      { path: '/admin/api/v1/orders', method: 'POST', body: 'candidate' },
+      { path: '/test/api/v1/orders', method: 'POST', body: 'candidate' },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

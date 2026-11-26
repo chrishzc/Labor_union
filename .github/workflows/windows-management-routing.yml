@@ -1,0 +1,43 @@
+name: Windows management route contracts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows_remote_runtime.py'
+      - 'scripts/launchers/manage_windows.ps1'
+      - 'scripts/launchers/windows_frontend_control.ps1'
+      - 'scripts/launchers/supervise_local_runtime.ps1'
+      - 'deployment/windows-remote/path-router.mjs'
+      - 'tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/test_windows_remote_*'
+      - '.github/workflows/windows-management-routing.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt pytest
+      - name: Verify gateway on both management paths
+        run: python -m pytest -v tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/test_windows_remote_runtime.py
+      - name: Parse Windows management scripts
+        shell: pwsh
+        run: |
+          $paths = @('scripts/launchers/manage_windows.ps1', 'scripts/launchers/supervise_local_runtime.ps1', 'scripts/launchers/windows_frontend_control.ps1')
+          foreach ($path in $paths) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { throw ($errors -join "`n") }
+          }
+      - name: Verify protected Edge forwarding
+        run: node --test tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/test_windows_remote_router.mjs

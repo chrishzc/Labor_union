@@ -68,6 +68,7 @@ Windows 開發環境可使用主機 npm 或 Docker Vite；無主機 npm 時，`s
 ### 5.3 統一管理與多機切換
 
 - `Windows管理.bat` → `scripts/launchers/manage_windows.ps1` 提供整組啟停／更新、前端更新、狀態查詢、來源部署包與依賴安裝；停止時採 run-bound 控制通道與 native PID／start-time 核對後清理，關閉選單不停止背景服務。
+- 完整啟動接受 `APP_ENV=development|production`，依序採用呼叫端程序設定、`.env`、預設 `development`。兩種模式均強制正式管理員驗證。Windows 正式模式的唯讀 schema 檢查只接受 loopback MySQL；FastAPI 驗證交付給 Windows Gateway 的前端產物，由該閘道提供 UI 與獨立換版。
 - 完整更新先建置成功再停啟，保留既有設定啟用的所有背景 worker；部署包排除 `.env*`、credential、runtime data 及 ignored 檔案（managed Vite build 關閉 envDir discovery）。
 - 共用網址且多台主機資料獨立時，人工確認舊機整組停止且 connector 離線後才啟新機，不同步業務資料。
 
