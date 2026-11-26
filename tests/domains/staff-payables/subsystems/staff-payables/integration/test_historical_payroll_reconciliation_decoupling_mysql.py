@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from argparse import Namespace
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, timedelta
 import hashlib
 import json
 import os
+from pathlib import Path
+import secrets
+import socket
+import subprocess
+from threading import Thread
+from time import monotonic, sleep
+from urllib.error import URLError
+from urllib.request import urlopen
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -42,7 +51,7 @@ from shared_kernel.identities import (
     ExpectedVersion,
     IdempotencyKey,
 )
-from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.access.authentication_session import AdminPrincipal, hash_admin_password
 from subsystems.finance_import.query import FinanceImportQueryService
 from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
 from subsystems.staff_payables.historical_payment_settlement import HistoricalStaffPayoutWorkflow
@@ -561,6 +570,207 @@ def test_historical_baseline_sync_admin_entry_requires_proven_sources(
         cursor.execute("SELECT COUNT(*) AS count FROM staff_obligation_events WHERE case_no=%s", (case_no,))
         assert cursor.fetchone()["count"] == 0
     mysql_connection.commit()
+
+
+@contextmanager
+def _browser_payroll_app(tmp_path):
+    import uvicorn
+
+    with socket.socket() as api_socket, socket.socket() as vite_probe:
+        api_socket.bind(("127.0.0.1", 0))
+        vite_probe.bind(("127.0.0.1", 0))
+        api_port = api_socket.getsockname()[1]
+        vite_port = vite_probe.getsockname()[1]
+        vite_probe.close()
+        api_url = f"http://127.0.0.1:{api_port}"
+        app_url = f"http://127.0.0.1:{vite_port}"
+        server = uvicorn.Server(uvicorn.Config(
+            "api.main:app", host="127.0.0.1", port=api_port, lifespan="off", access_log=False,
+        ))
+        backend = Thread(target=server.run, kwargs={"sockets": [api_socket]}, daemon=True)
+        backend.start()
+        log_path = tmp_path / "vite.log"
+        try:
+            _wait_for_http(f"{api_url}/health")
+            with log_path.open("w", encoding="utf-8") as log, subprocess.Popen(
+                ["node", "node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", str(vite_port), "--strictPort"],
+                cwd=Path.cwd() / "ui_react",
+                env={**os.environ, "VITE_DEV_API_TARGET": api_url, "VITE_PUBLIC_PATH_PREFIX": "/admin"},
+                stdout=log, stderr=subprocess.STDOUT,
+            ) as vite:
+                try:
+                    try:
+                        _wait_for_http(f"{app_url}/admin/")
+                    except RuntimeError as error:
+                        raise RuntimeError(f"{error}\n{log_path.read_text(encoding='utf-8')}") from error
+                    yield app_url
+                finally:
+                    if vite.poll() is None:
+                        vite.terminate()
+                        try:
+                            vite.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            vite.kill()
+                            vite.wait(timeout=10)
+        finally:
+            server.should_exit = True
+            backend.join(timeout=10)
+
+
+def _wait_for_http(url):
+    deadline = monotonic() + 45
+    while monotonic() < deadline:
+        try:
+            with urlopen(url, timeout=2) as response:
+                if response.status == 200:
+                    return
+        except (URLError, TimeoutError):
+            sleep(0.2)
+    raise RuntimeError(f"Loopback service did not become ready: {url}")
+
+
+@pytest.mark.skipif(os.getenv("PAYROLL_BROWSER_E2E") != "1", reason="requires the dedicated CI Chromium step")
+def test_historical_payroll_via_real_browser(mysql_connection, monkeypatch, tmp_path):
+    from playwright.sync_api import expect, sync_playwright
+
+    password = secrets.token_urlsafe(32)
+    for name, value in {
+        "PYTHON_DOTENV_DISABLED": "1",
+        "APP_ENV": "development",
+        "ACCESS_CONTROL_PROFILE": "local_developer_session",
+        "ENABLE_ADMIN_AUTH": "true",
+        "DEV_ROOT_USERNAME": "payroll-browser-fixture",
+        "DEV_ROOT_PASSWORD": password,
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    single, missing, partial = "115994301", "115994302", "115994303"
+    names = ("Browser payroll employee", "Browser missing rate", "Browser partial employee", "Browser missing service")
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO admin_users(username,password_hash,display_name,role) "
+            "VALUES(%s,%s,'Browser Payroll Verifier','system_admin')",
+            ("payroll-browser-fixture", hash_admin_password(password)),
+        )
+        cursor.execute("INSERT INTO admin_root_account(singleton_key,admin_user_id) VALUES(1,%s)", (cursor.lastrowid,))
+        _, single_staff = _seed_historical_case(
+            cursor, case_no=single, client_name="Browser single case",
+            staff_specs=({"name": names[0], "identity_card": "F223456091"},),
+        )
+        _, missing_staff = _seed_historical_case(
+            cursor, case_no=missing, client_name="Browser missing rate case",
+            staff_specs=({"name": names[1], "identity_card": "F223456092", "with_rate_snapshot": False},),
+        )
+        _, partial_staff = _seed_historical_case(
+            cursor, case_no=partial, client_name="Browser partial case",
+            staff_specs=(
+                {"name": names[2], "identity_card": "F223456093", "schedule_days": 12},
+                {"name": names[3], "identity_card": "F223456094", "start_date": date(2026, 8, 13)},
+            ),
+        )
+    mysql_connection.commit()
+
+    def snapshot(case_no, staff):
+        result = _snapshot_tables(
+            mysql_connection, case_nos=(case_no,), staff_ids=tuple(row["staff_id"] for row in staff),
+        )
+        mysql_connection.commit()
+        return result
+
+    with _browser_payroll_app(tmp_path) as base, sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        try:
+            page.goto(f"{base}/admin/", wait_until="domcontentloaded")
+            session_status = page.evaluate("""async () => {
+                const response = await fetch('/api/v1/admin/auth/development-session', {method: 'POST'});
+                if (response.ok) {
+                    const {data} = await response.json();
+                    sessionStorage.setItem('union_admin_session_token', data.access_token);
+                    sessionStorage.setItem('union_admin_session_user', JSON.stringify(data.admin));
+                }
+                return response.status;
+            }""")
+            assert session_status == 200
+
+            def open_review(case_no, recipient, before_ready):
+                page.goto(f"{base}/admin/?payroll_e2e_case={case_no}#finance?case_no={case_no}", wait_until="domcontentloaded")
+                drawer = page.get_by_role("dialog", name=f"案件帳務 · {case_no}")
+                expect(drawer.get_by_text(before_ready, exact=False)).to_be_visible(timeout=20000)
+                drawer.get_by_text("查未列入原因", exact=True).click()
+                drawer.get_by_role("button", name="查核歷史月嫂款").click()
+                entry = drawer.locator("strong", has_text=f"{case_no} · {recipient}").locator("..")
+                entry.get_by_role("button", name="處理這筆款項").click()
+                return drawer.get_by_role("region", name="歷史月嫂款查核")
+
+            def synchronize(case_no, review):
+                path = f"/api/v1/orders/{case_no}/payroll/sync-historical-baseline-obligations"
+                with page.expect_response(lambda response: response.url.endswith(path) and response.request.method == "POST") as request:
+                    review.get_by_role("button", name="同步月嫂應付").click()
+                response = request.value
+                assert response.status == 200
+                return response.json()["data"]
+
+            def accounting(case_no):
+                return page.evaluate("""async (caseNo) => {
+                    const token = sessionStorage.getItem('union_admin_session_token');
+                    const response = await fetch('/api/v1/finance-import/cases/' + caseNo + '/accounting', {
+                        headers: {Authorization: 'Bearer ' + token}
+                    });
+                    if (!response.ok) throw new Error('Accounting GET status ' + response.status);
+                    return (await response.json()).data;
+                }""", case_no)
+
+            before = snapshot(single, single_staff)
+            review = open_review(single, names[0], "薪資試算 NT$ 48,000，尚未建帳。")
+            estimate = accounting(single)
+            assert estimate["staff_items"] == []
+            assert estimate["staff_accounting_availability"][0]["estimated_amount_ntd"] == 48000
+            assert before == snapshot(single, single_staff)
+            result = synchronize(single, review)
+            assert result["created_count"] == 1
+            detail = result["details"][0]
+            identity = detail["obligation_identity"]
+            assert detail["staff_id"] == single_staff[0]["staff_id"]
+            assert detail["assignment_id"] == single_staff[0]["assignment_id"]
+            expect(review.get_by_text(f"{names[0]} · 正式應付 NT$ 48,000 · 付款安排待確認")).to_be_visible()
+            readback = accounting(single)
+            assert len(readback["staff_items"]) == 1
+            payable = readback["staff_items"][0]
+            assert payable["identity"] == identity and payable["expected_ntd"] == 48000
+            assert payable["due_date"] is None and not payable.get("funding_portions")
+            assert payable["actual_ntd"] == 0 and payable["has_payment"] is False
+            assert not any(tx["item_identity"] == identity for tx in readback["transactions"])
+            after = snapshot(single, single_staff)
+            repeat = synchronize(single, review)
+            assert repeat["created_count"] == repeat["updated_count"] == 0
+            assert repeat["details"][0]["obligation_identity"] == identity
+            expect(review.get_by_text(f"{names[0]} · 正式應付 NT$ 48,000 · 付款安排待確認")).to_be_visible()
+            assert after == snapshot(single, single_staff)
+
+            before = snapshot(missing, missing_staff)
+            review = open_review(missing, names[1], "應付來源待核對")
+            result = synchronize(missing, review)
+            assert result["created_count"] == 0
+            assert result["details"][0]["reason"] == "payroll_rate_policy_not_found"
+            expect(review.get_by_role("status")).to_contain_text("月嫂費率")
+            assert accounting(missing)["staff_items"] == []
+            assert before == snapshot(missing, missing_staff)
+
+            review = open_review(partial, names[2], "薪資試算 NT$ 28,800，尚未建帳。")
+            result = synchronize(partial, review)
+            items = {item["staff_id"]: item for item in result["details"][0]["items"]}
+            assert items[partial_staff[0]["staff_id"]]["action"] == "created"
+            assert items[partial_staff[1]["staff_id"]]["reason"] == "historical_payroll_service_basis_missing"
+            expect(review.get_by_text(f"{names[2]} · 正式應付 NT$ 28,800 · 付款安排待確認")).to_be_visible()
+            expect(review.get_by_text(f"{names[3]} · 請查核可證實之月嫂服務天數及每日服務時數。")).to_be_visible()
+            readback = accounting(partial)
+            assert [item["expected_ntd"] for item in readback["staff_items"]] == [28800]
+            assert {item["staff_id"]: item["status"] for item in readback["staff_accounting_availability"]} == {
+                partial_staff[0]["staff_id"]: "formal", partial_staff[1]["staff_id"]: "needs_review",
+            }
+        finally:
+            browser.close()
 
 
 def test_star_case1_sync_bank_candidate_api_reconcile_and_readback_mysql(mysql_connection):

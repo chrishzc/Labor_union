@@ -178,6 +178,13 @@ jobs:
       - name: Install strict drawer test dependencies
         working-directory: ui_react
         run: npm ci --ignore-scripts
+      - name: Exercise historical payroll through the browser and real accounting API
+        env:
+          PAYROLL_BROWSER_E2E: "1"
+        run: |
+          python -m pip install 'playwright>=1.60.0'
+          python -m playwright install --with-deps chromium
+          python -m pytest -vv tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py::test_historical_payroll_via_real_browser
       - name: Render actual synthetic MySQL API responses through the strict client
         working-directory: ui_react
         env:
