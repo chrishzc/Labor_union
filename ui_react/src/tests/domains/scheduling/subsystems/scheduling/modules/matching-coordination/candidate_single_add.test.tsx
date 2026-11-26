@@ -42,7 +42,7 @@ async function search(onPoolReadback = vi.fn(), presentation: 'workbench' | 'leg
   return onPoolReadback;
 }
 
-it.each(['workbench', 'legacy'] as const)('shows a waiting-deposit reminder and keeps all candidate days available in %s', async presentation => {
+it.each(['workbench', 'legacy'] as const)('shows the waiting-deposit state and keeps all candidate days available in %s', async presentation => {
   mocks.query.mockResolvedValue(pool([]));
   mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
     candidate_options: [option(11, '月嫂甲')], conflicts: [
@@ -50,14 +50,17 @@ it.each(['workbench', 'legacy'] as const)('shows a waiting-deposit reminder and 
         service_start_at: '2026-09-01T20:00:00+08:00', service_end_at: '2026-09-02T04:00:00+08:00' },
     ] });
   await search(vi.fn(), presentation);
-  expect(screen.getByText('其他案件等待訂金保留，僅提醒。')).toBeVisible();
   expect(screen.getByText(/空閒 5\/5 天/)).toBeVisible();
   expect(screen.queryByText('有檔期衝突，待公會協調')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByText('查看檔期日期與原因'));
-  expect(screen.getByText(/案件 CASE-DEPOSIT，2026-09-01 20:00 至 2026-09-02 04:00/)).toBeVisible();
   if (presentation === 'workbench') {
+    const warningGroup = screen.getByRole('region', { name: '有日期警示' });
+    expect(warningGroup).toBeVisible();
+    expect(warningGroup).not.toHaveTextContent(/等待訂金|CASE-DEPOSIT|查看檔期日期與原因|影響日期/);
     expect(screen.getByRole('button', { name: '加入候選池（月嫂甲）' })).toBeEnabled();
   } else {
+    expect(screen.getByText('其他案件等待訂金保留，僅提醒。')).toBeVisible();
+    fireEvent.click(screen.getByText('查看檔期日期與原因'));
+    expect(screen.getByText(/案件 CASE-DEPOSIT，2026-09-01 20:00 至 2026-09-02 04:00/)).toBeVisible();
     const selection = screen.getByRole('checkbox', { name: '選擇正式候選 月嫂甲' });
     expect(selection).not.toBeChecked();
     fireEvent.click(selection);
@@ -65,24 +68,35 @@ it.each(['workbench', 'legacy'] as const)('shows a waiting-deposit reminder and 
   }
 });
 
-it('keeps a confirmed scheduling conflict visible alongside the waiting-deposit reminder', async () => {
+it('shows only the formal assignment case and date in a conflict card', async () => {
   mocks.query.mockResolvedValue(pool([]));
   mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
     candidate_options: [{ ...option(11, '月嫂甲'), supported_day_count: 4, coverage_day_count: 4,
+      available_ranges: [
+        { start_date: '2026-09-01', end_date: '2026-09-01' },
+        { start_date: '2026-09-03', end_date: '2026-09-05' },
+      ],
       supported_service_dates: requestedDates.filter(date => date !== '2026-09-02'),
+      supported_ranges: [
+        { start_date: '2026-09-01', end_date: '2026-09-01', service_day_count: 1 },
+        { start_date: '2026-09-03', end_date: '2026-09-05', service_day_count: 3 },
+      ],
       full_case_coverage: false, full_selected_segment_coverage: false, uncovered_segment_dates: ['2026-09-02'] }], conflicts: [
       { staff_id: 11, segment_index: 0, work_date: '2026-09-01', reason_code: 'active_lock', case_no: 'CASE-DEPOSIT' },
-      { staff_id: 11, segment_index: 0, work_date: '2026-09-02', reason_code: 'schedule', case_no: 'CASE-SCHEDULE' },
+      { staff_id: 11, segment_index: 0, work_date: '2026-09-02', reason_code: 'assignment', case_no: '115000205',
+        service_start_at: '2026-09-02T09:00:00+08:00', service_end_at: '2026-09-02T17:00:00+08:00' },
+      { staff_id: 11, segment_index: 0, work_date: '2026-09-02', reason_code: 'schedule', case_no: '115000205' },
     ] });
   await search();
-  expect(screen.getByText('其他案件等待訂金保留，僅提醒。')).toBeVisible();
-  expect(screen.getByText('有檔期衝突，待公會協調')).toBeVisible();
-  fireEvent.click(screen.getByText('查看衝突日期與原因'));
-  expect(screen.getByText(/案件 CASE-DEPOSIT，2026-09-01（服務時段待確認）/)).toBeVisible();
-  expect(screen.getByText(/^已有服務排程：案件 CASE-SCHEDULE/)).toBeVisible();
+  const conflictGroup = screen.getByRole('region', { name: '有日期衝突' });
+  expect(conflictGroup).toBeVisible();
+  expect(screen.getByText('已有正式排班：案件 115000205、2026-09-02')).toBeVisible();
+  expect(screen.getAllByText(/^已有正式排班：/)).toHaveLength(1);
+  expect(conflictGroup).not.toHaveTextContent(/等待訂金|CASE-DEPOSIT|已有服務排程|查看衝突日期與原因|影響日期|待公會協調|09:00|17:00/);
+  expect(screen.getByRole('button', { name: '加入候選池（月嫂甲）' })).toBeEnabled();
 });
 
-it('shows a historical reservation and its case without blocking candidate selection', async () => {
+it('groups a historical reservation as a date advisory without blocking candidate selection', async () => {
   mocks.query.mockResolvedValue(pool([]));
   mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
     candidate_options: [option(11, '月嫂甲')], conflicts: [
@@ -90,10 +104,10 @@ it('shows a historical reservation and its case without blocking candidate selec
         case_no: 'CASE-HISTORY', actual_start_date: null, service_start_at: null, service_end_at: null },
     ] });
   await search();
-  expect(screen.getByText('其他案件歷史／暫定檔期，僅供參考')).toBeVisible();
-  expect(screen.queryByText('有檔期衝突，待公會協調')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByText('查看檔期日期與原因'));
-  expect(screen.getByText(/案件 CASE-HISTORY，2026-09-01（服務時段待確認）/)).toBeVisible();
+  const warningGroup = screen.getByRole('region', { name: '有日期警示' });
+  expect(warningGroup).toBeVisible();
+  expect(warningGroup).not.toHaveTextContent(/歷史／暫定檔期|CASE-HISTORY|查看檔期日期與原因|影響日期/);
+  expect(screen.queryByRole('region', { name: '有日期衝突' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '加入候選池（月嫂甲）' })).toBeEnabled();
 });
 

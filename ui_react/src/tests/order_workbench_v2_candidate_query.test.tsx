@@ -237,12 +237,24 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
         region: mismatch, preferred_service_days: pending,
       } },
       { ...eligible, staff_id: 4, staff_name: '等待訂金警示', staff_union_no: 'A4' },
-      { ...eligible, staff_id: 5, staff_name: '有正式排班', staff_union_no: 'A5' },
+      { ...eligible, staff_id: 5, staff_name: '有正式排班', staff_union_no: 'A5',
+        available_ranges: [
+          { start_date: '2026-09-01', end_date: '2026-09-02' },
+          { start_date: '2026-09-04', end_date: '2026-09-05' },
+        ],
+        coverage_day_count: 4, supported_day_count: 4,
+        supported_service_dates: eligible.required_service_dates.filter(day => day !== '2026-09-03'),
+        supported_ranges: [
+          { start_date: '2026-09-01', end_date: '2026-09-02', service_day_count: 2 },
+          { start_date: '2026-09-04', end_date: '2026-09-05', service_day_count: 2 },
+        ],
+        full_case_coverage: false, full_selected_segment_coverage: false, uncovered_segment_dates: ['2026-09-03'],
+      },
       { ...partial, staff_id: 6, staff_name: '未覆蓋服務日', staff_union_no: 'A6' },
     ], conflicts: [
       { segment_index: 0, staff_id: 4, work_date: '2026-09-01', reason_code: 'active_lock' },
       { segment_index: 0, staff_id: 5, work_date: '2026-09-02', reason_code: 'buffer' },
-      { segment_index: 0, staff_id: 5, work_date: '2026-09-03', reason_code: 'assignment' },
+      { segment_index: 0, staff_id: 5, work_date: '2026-09-03', reason_code: 'schedule', case_no: '115000205' },
       { segment_index: 1, staff_id: 3, work_date: '2026-09-04', reason_code: 'assignment' },
     ] }));
 
@@ -256,10 +268,10 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
       '加入候選池（兩項符合乙）', '加入候選池（兩項符合甲）', '加入候選池（只有週間）', '加入候選池（只有地區）',
       '加入候選池（兩項未符合）', '加入候選池（等待訂金警示）', '加入候選池（有正式排班）', '加入候選池（未覆蓋服務日）',
     ]);
-    expect(within(groups[1]).getByText('影響日期：2026-09-01')).toBeVisible();
-    expect(within(groups[2]).getByText('影響日期：2026-09-03')).toBeVisible();
-    expect(within(groups[2]).getAllByText('查看衝突日期與原因')).toHaveLength(2);
-    expect(within(groups[0]).queryByText('查看衝突日期與原因')).not.toBeInTheDocument();
+    expect(within(groups[2]).getByText('空閒 4/5 天')).toBeVisible();
+    expect(within(groups[2]).getByText('已有正式排班：案件 115000205、2026-09-03')).toBeVisible();
+    expect(within(list).getAllByText(/^已有正式排班：/)).toHaveLength(1);
+    expect(list).not.toHaveTextContent(/影響日期|查看(?:衝突|檔期)日期與原因|待公會協調|尚缺可用人選|僅提醒|2026-09-0[1245]/);
     for (const button of buttons) expect(button).toBeEnabled();
   });
 

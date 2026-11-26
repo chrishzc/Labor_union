@@ -1,5 +1,5 @@
 import type { MatchingAvailability } from '../api/scheduling/matching_candidate_workflow_client';
-import { candidateDateStatus, missingCandidateServiceDates } from '../adapters/scheduling/candidate_date_status';
+import { candidateDateStatus } from '../adapters/scheduling/candidate_date_status';
 import { calendarServicePeriod } from '../../../line/static/service-date-calendar.js';
 
 const reasonLabels: Record<string, string> = {
@@ -15,17 +15,13 @@ const reasonLabels: Record<string, string> = {
   buffer: '七天緩衝期重疊，僅提醒',
 };
 
-export function CandidateAvailabilityNotice({ availability, staffId, showAdvisories = true, segmentIndex, showCoverageGaps = false }: {
+export function CandidateAvailabilityNotice({ availability, staffId, showAdvisories = true }: {
   availability: MatchingAvailability;
   staffId: number;
   showAdvisories?: boolean;
-  segmentIndex?: number;
-  showCoverageGaps?: boolean;
 }) {
-  const conflicts = availability.conflicts.filter(conflict => conflict.staff_id === staffId
-    && (segmentIndex === undefined || conflict.segment_index === segmentIndex));
-  const option = availability.candidate_options.find(candidate => candidate.staff_id === staffId
-    && (segmentIndex === undefined || candidate.segment_index === segmentIndex));
+  const conflicts = availability.conflicts.filter(conflict => conflict.staff_id === staffId);
+  const option = availability.candidate_options.find(candidate => candidate.staff_id === staffId);
   if (!option && conflicts.length === 0) return <p className="order-case-review-note" role="status">
     此月嫂目前未列入可詢問人選，請先核對狀態。
   </p>;
@@ -38,11 +34,6 @@ export function CandidateAvailabilityNotice({ availability, staffId, showAdvisor
     const servicePeriod = period?.full ?? dateWithUnknownTime;
     dates.add(case_no ? `案件 ${case_no}，${servicePeriod}` : servicePeriod);
     datesByReason.set(reason_code, dates);
-  }
-
-  const missingDates = showCoverageGaps ? missingCandidateServiceDates(option) : [];
-  if (missingDates.length > 0) {
-    datesByReason.set('coverage_gap', new Set([...(datesByReason.get('coverage_gap') ?? []), ...missingDates]));
   }
 
   return <>

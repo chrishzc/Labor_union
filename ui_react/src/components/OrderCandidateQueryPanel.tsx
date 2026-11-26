@@ -17,7 +17,7 @@ import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/ty
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { CaregiverCommuteQuery, CommuteUsagePanel } from './CaregiverCommute';
-import { candidateDateAssessment, type CandidateDateStatus } from '../adapters/scheduling/candidate_date_status';
+import { candidateDateStatus, type CandidateDateStatus } from '../adapters/scheduling/candidate_date_status';
 import { CandidateAvailabilityNotice } from './CandidateAvailabilityNotice';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
@@ -132,10 +132,17 @@ function groupWorkbenchCandidates(
     evidence.push(conflict);
     evidenceByStaff.set(conflict.staff_id, evidence);
   }
-  const observed = candidates.map(candidate => ({
-    candidate,
-    ...candidateDateAssessment(candidate, evidenceByStaff.get(candidate.staff_id) ?? []),
-  })).sort((left, right) => preferencePriority(right.candidate) - preferencePriority(left.candidate));
+  const observed = candidates.map(candidate => {
+    const evidence = evidenceByStaff.get(candidate.staff_id) ?? [];
+    const assignmentConflicts = evidence
+      .filter(conflict => conflict.reason_code === 'assignment' || conflict.reason_code === 'schedule')
+      .map(({ case_no, work_date }) => case_no ? '案件 ' + case_no + '、' + work_date : work_date);
+    return {
+      candidate,
+      status: candidateDateStatus(candidate, evidence),
+      assignmentConflicts: [...new Set(assignmentConflicts)].sort(),
+    };
+  }).sort((left, right) => preferencePriority(right.candidate) - preferencePriority(left.candidate));
 
   return CANDIDATE_DATE_GROUPS.map(group => ({
     ...group,
@@ -430,7 +437,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                 {presentation === 'workbench' ? groupWorkbenchCandidates(candidates, queryState.data.conflicts).map(group => (
                   <section key={group.status} className="candidate-date-group" aria-label={group.label}>
                     <h3>{group.label}（{group.entries.length}）</h3>
-                    {group.entries.map(({ candidate, dates }) => <div key={candidate.staff_id} className="candidate-add-row">
+                    {group.entries.map(({ candidate, assignmentConflicts }) => <div key={candidate.staff_id} className="candidate-add-row">
                         <div className="candidate-add-details">
                           <div className="candidate-name-and-preferences">
                             <strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong>
@@ -438,8 +445,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                           </div>
                           <CandidateServicePreferences candidate={candidate} />
                           <div>空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天</div>
-                          {dates.length > 0 && <p className="candidate-date-summary">影響日期：{dates.slice(0, 3).join('、')}{dates.length > 3 && `，另有 ${dates.length - 3} 天`}</p>}
-                          <CandidateAvailabilityNotice availability={queryState.data} staffId={candidate.staff_id} segmentIndex={candidate.segment_index} showCoverageGaps />
+                          {assignmentConflicts.map(conflict => (
+                            <p key={conflict} className="candidate-date-summary">已有正式排班：{conflict}</p>
+                          ))}
                           <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} />
                         </div>
                         {outdatedStaffIds.has(candidate.staff_id) && <p role="status">原詢問期間與本次不同；更新後須重新記錄接案意願。</p>}
