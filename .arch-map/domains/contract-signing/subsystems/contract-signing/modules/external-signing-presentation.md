@@ -110,3 +110,13 @@
 
 ## Change triggers
 Reconcile when external signing presentation、recovery confirmation、unknown-outcome handling、final PDF readback、technical-detail disclosure or focused test location changes.
+
+### 已簽 PDF 歸檔：資料庫查核落點
+
+| 查核哪一筆 | 寫入或查詢位置 | 成功應讀到什麼 |
+| --- | --- | --- |
+| 每份客戶／月嫂 PDF | `controlled_file_objects`、`controlled_file_apply_receipts`（`db/schema_parts/1004_controlled_file_storage_foundation.sql`） | 用 API 回傳的 `file_id` 對 `opaque_object_id`，每個已提交目標有一個正式物件及其 Apply 回執。用 `source_staging_id` 連回暫存來源，不把暫存列當成歸檔成功。 |
+| 案件的完約事實 | `orders.contract_identity`、`order_contract_flow_events`、`order_lifecycle_state_events`、`orders_domain_outbox`（`infrastructure/mysql/order_contract_completion_repository.py::record_archived_completion`） | 尚未完約的案件寫入 `contract_completed` 完約與生命週期事件、更新案件版本並寫入投影 outbox。已有完約事件時保留原完約事實，不再寫一次；不能只用狀態文字推定有無完約。 |
+| 整次歸檔操作 | `contract_signing_command_receipts`（`db/schema_parts/166_contract_signing_workflow.sql`） | 以 `case_no`、`command_kind='archive_signed_contract'` 與 `idempotency_key` 查到一筆；`result_snapshot.files` 的各目標、檔名及識別與 API 讀回一致。資料表的唯一鍵是完整 `idempotency_key`，不是「案件＋鍵」。 |
+
+隔離 DB 驗收先記錄同案例的案件版本及各類正式紀錄數。成功組用至少兩份 PDF 走正式歸檔；在新連線驗上述寫入。負向組用同樣的前置情境，讓外層交易在三類寫入後、提交前失敗；在另一個新連線按同一操作與目標比對，案件狀態和版本無變更，正式物件及回執、完約事件及 outbox、歸檔回執均沒有新增。此處只驗持久化與交易邊界，不把模擬失敗當成正式環境事故，也不要求已先提交的暫存消失。
