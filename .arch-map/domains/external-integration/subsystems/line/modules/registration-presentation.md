@@ -27,6 +27,7 @@
 ## Contracts
 - `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §5.2 — LIFF 設定與非市民登記入口。
 - `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` §2 — Gateway 與非市民登記入口；Preview 不建立正式資料，Apply 送待審申請，由需求 #17B §§3.1–3.2 定義正式核准與復原。
+- 非市民 LIFF 的服務方式只顯示「週休 1 日／週休 2 日」；後台手動新案保留「連續服務」。生產方式、居住型態及固定每日服務時段仍與後台對齊。多選問卷欄標示「可複選」，不改 Preview／Apply 的送件與正式核准責任。業務規則以 `.arch-map/requirements/17B_Case_Import與非市民Redis待審正式規格.md` §3.1 為準。
 - Apply 成功呈現待工會核准及申請編號；未核准時 client／beclass IDs 為 null，不宣稱完成綁定或已建立正式客戶。
 
 ## Verification

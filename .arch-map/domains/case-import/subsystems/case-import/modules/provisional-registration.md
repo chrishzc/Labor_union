@@ -13,6 +13,7 @@
 - `infrastructure/redis/registration_staging_repository.py`、`infrastructure/redis/registration_connection.py`、`infrastructure/redis/registration_maintenance.py` — 正式環境要求專用 Redis 與分角色憑證；明確的本機開發與測試可用共用 Redis。提供命名空間隔離、原子狀態及 AOF 維護。
 - `api/registration_intake.py`、`api/registration_contracts.py`、`api/registration_token_verification.py`、`infrastructure/line/registration_token_verifier.py` — 無 SQL 公開接收與固定 LINE 驗證 transport。
 - `api/dependencies/registration_applications.py`、`api/dependencies/registration_runtime.py`、`subsystems/case_import/registration_maintenance.py`、`scripts/registration_maintenance.py`、`docker-compose.yml`（`registration` profile）、`deploy/registration/` — 內部核准 composition、每分鐘 recovery／expiry 與每小時 AOF maintenance；部署仍需環境驗收。
+- `deploy/registration/loopback_relay.py` — Windows 公開收件的本機轉送入口，以 `docker-compose.yml` 的 `registration-loopback` 綁主機 `127.0.0.1`；不掛憑證，透過 `registration-ingress` 轉送到 `registration-intake`，不執行申請審核或寫 MySQL。配置靜態檢查見 `test_registration_intake.py::test_public_container_has_no_mysql_settings_or_network_egress`；這不證明 Windows 實際啟動或 LINE 現場收件。
 - primary:
   - `domains/case_import/non_citizen_registration.py` — 非市民 HCM＋BeClass 合併欄位與必填驗證；原補助規則保持。
   - `infrastructure/mysql/non_citizen_case_number_repository.py` — 唯讀預估配號，並在手動新案與 LINE 核准各自的 outer UoW 中共用年度列鎖與正式配號。
