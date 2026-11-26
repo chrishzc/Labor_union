@@ -579,7 +579,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
   </section>;
 }
 
-export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation,onPayableReview,reviewObligation,settlementFocus}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void;onViewCase?:()=>void;externalPurposeReview?:boolean;previewRefundOnMount?:boolean};onPayableReview?:(item:HistoricalPayableAuditItem)=>void;reviewObligation?:string;settlementFocus?:'client_settlement'|'staff_payout'}){
+export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation,onPayableReview,reviewObligation,settlementFocus,onOpenGovernmentList}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void;onViewCase?:()=>void;externalPurposeReview?:boolean;previewRefundOnMount?:boolean};onPayableReview?:(item:HistoricalPayableAuditItem)=>void;reviewObligation?:string;settlementFocus?:'client_settlement'|'staff_payout';onOpenGovernmentList?:()=>void}){
  const {requestLeave}=useUnsavedNavigation();
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;pricing?:CasePricing;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[recoveries,setRecoveries]=useState<StaffRecoveryView|null>(null);
@@ -670,7 +670,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 
  const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
  const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];
- const currentRefundItems = directArrangement
+ const subsidyRefundsAreHistorical = directArrangement || selected === 'split';
+ const currentRefundItems = subsidyRefundsAreHistorical
   ? refundClientItems.filter(item => item.obligation_type !== 'subsidy_return') : refundClientItems;
  const refundRemainingTotal=currentRefundItems.reduce((sum,item)=>{
   const remaining = item.remaining_ntd == null ? BigInt(item.expected_ntd) - BigInt(item.actual_ntd) : BigInt(item.remaining_ntd);
@@ -1118,16 +1119,16 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
             const isRefundSettled = row.settled ?? (row.remaining_ntd != null
               ? BigInt(row.remaining_ntd) === 0n
               : !isSubsidyReturn && row.actual_ntd >= row.expected_ntd && row.has_payment);
-            const readOnlySubsidyHistory = directArrangement && isSubsidyReturn;
+            const readOnlySubsidyHistory = subsidyRefundsAreHistorical && isSubsidyReturn;
             return (
               <tr key={row.identity}>
                 <td>
-                  <strong>{isSubsidyReturn ? '補助款退還客戶' : '客戶退款'}</strong>
+                  <strong>{readOnlySubsidyHistory ? '原補助退款紀錄' : isSubsidyReturn ? '補助款退還客戶' : '客戶退款'}</strong>
                   <small>{row.party || refundName} · {row.label}</small>
                 </td>
                 <td>
                   <span>{row.due_date ?? '日期待確認'}</span>
-                  <small>{readOnlySubsidyHistory ? '原補助退款紀錄' : isRefundSettled ? '已結算' : '案件結束結算'}</small>
+                  {!readOnlySubsidyHistory && <small>{isRefundSettled ? '已結算' : '案件結束結算'}</small>}
                 </td>
                 <td>{readOnlySubsidyHistory ? <span>原退款 {money(row.expected_ntd)}</span> : money(row.expected_ntd)}</td>
                 <td>
@@ -1147,7 +1148,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                         <details>
                           <summary>{isSubsidyReturn && selected === 'advance' ? '查看退款核銷紀錄' : `${itemTransactions.length} 筆退款`}</summary>
                           {itemTransactions.map(t => (
-                            <p key={t.identity}>{t.occurred_on} · {t.bank === 'manual' ? '人工補登' : '退款'} · 已核銷 {money(t.amount_ntd)}{t.bank_amount_ntd != null && <>；整筆銀行實付 {money(t.bank_amount_ntd)}；內扣手續費 {money(t.transfer_fee_ntd)}</>}</p>
+                            <p key={t.identity}>{t.occurred_on} · {t.amount_ntd < 0 ? '沖正' : t.bank === 'manual' ? '人工補登' : '退款'} · {t.amount_ntd < 0 ? '沖正金額' : '已核銷'} {money(t.amount_ntd)}{t.bank_amount_ntd != null && <>；整筆銀行實付 {money(t.bank_amount_ntd)}；內扣手續費 {money(t.transfer_fee_ntd)}</>}</p>
                           ))}
                         </details>
                       )}
@@ -1191,7 +1192,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     </table>
   </div>
 
-  <p><small>整期入款與核銷請至政府補助清單查閱。</small></p>
+  {onOpenGovernmentList && <button type="button" className="finance-btn-link" disabled={accountingBusy}
+    onClick={onOpenGovernmentList}>前往政府補助清單</button>}
  </div></details>
  </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} subsidyAmount={data.subsidy_ntd} bankMemos={data.bank_memos??[]} arrangement={data.arrangement} canConfirmDirect={data.can_confirm_direct === true} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
  {data && paramsDrawerOpen && (

@@ -79,6 +79,10 @@ it.each([
   staff_items:[{...base.staff_items[0], funding_portions:remaining===null ? [] : [
    {funding_kind:'subsidy',amount_ntd:12000,due_date:'2026-11-15',settled_ntd:12000-remaining,remaining_ntd:remaining},
   ]}],
+  client_items:remaining===0 ? [...base.client_items,{
+   ...base.client_items[0], identity:'old-subsidy-return', direction:'payable', obligation_type:'subsidy_return',
+   label:'原帳補助', expected_ntd:12000, actual_ntd:1000, remaining_ntd:11000,
+  }] : base.client_items,
   subsidy_payments:[
   {recipient:'staff',party:'合成月嫂',amount_ntd:12000,due_date:'2026-11-15',source},
  ]};
@@ -91,6 +95,11 @@ it.each([
  expect(section).toHaveTextContent(source==='estimate'?'預估補助給付 NT$ 12,000':'正式補助分期 NT$ 12,000');
  expect(section).not.toHaveTextContent(/補助款退還客戶|政府補助款|政府款待入/);
  expect(screen.getByLabelText('月嫂薪資匯總')).toHaveTextContent('NT$ 30,000');
+ if(remaining===0){
+  const history=screen.getByRole('row',{name:/原補助退款紀錄.*原帳補助/});
+  expect(history).toHaveTextContent('已退 NT$ 1,000');
+  expect(history).not.toHaveTextContent('待退');
+ }
 });
 it.each(['2027-02-15',null])('方案未定的補助預估唯讀（日期 %s），候選資料不變成正式款項',async(date)=>{
  vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'advance',
@@ -208,7 +217,7 @@ it('政府直接退給客戶經逐案確認，正式回執後重讀案件，保�
  expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
  expect(screen.getByRole('row',{name:/客戶退款.*一般退款/})).toHaveTextContent('待退 NT$ 800');
  expect(screen.getByText('政府直退／工會不經手')).toBeVisible();
- const history=screen.getByRole('row',{name:/補助款退還客戶.*原帳補助/});
+ const history=screen.getByRole('row',{name:/原補助退款紀錄.*原帳補助/});
  expect(history).toHaveTextContent('唯讀查閱');
  expect(history).toHaveTextContent('原退款 NT$ 12,000');
  expect(history).toHaveTextContent('已退 NT$ 1,000');
@@ -1301,13 +1310,15 @@ it('退款正式日期缺值保留待確認，不以市府核撥代替',async()=
 });
 
 it.each([false,true])('方案一已確認時，整期入款不列為單案實收（共享流水 %s）',async shared=>{
+ const openGovernmentList=vi.fn();
  vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'split',full_subsidy:true,
   cash_by_flow:{C:0,G:shared?0:5000,PS:0,PT:0,RS:0,RT:0},
   bank_facts:[{identity:'whole',occurred_on:'2026-11-10',direction:'in',amount_ntd:5000,cases:shared?[caseNo,'OTHER']:[caseNo],bank:'taishin',cash_flow:'G'}]});
- wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded onOpenGovernmentList={openGovernmentList}/>);
  const section=(await screen.findByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'})).closest('details');
- expect(section).toHaveTextContent('整期入款與核銷請至政府補助清單查閱');
  expect(section).not.toHaveTextContent(/政府補助款|政府款待入|逐案實收|NT\$ 5,000/);
+ fireEvent.click(screen.getByRole('button',{name:'前往政府補助清單'}));
+ expect(openGovernmentList).toHaveBeenCalledOnce();
  expect(subsidyPeriodClient.caseCoverage).not.toHaveBeenCalled();
 });
 it.each([false,true])('正式直付且衝突%s時，保留正確工會處理狀態',async conflict=>{

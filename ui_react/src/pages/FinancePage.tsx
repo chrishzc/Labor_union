@@ -158,6 +158,11 @@ export const FinancePage: React.FC = () => {
     clearScopedBankPreview();
   };
 
+  const openGovernmentList = () => requestLeave(() => {
+    closeCase();
+    setActiveTab('government-list');
+  });
+
   const bankReviewPosted = () => {
     const row = bankReviewCurrent.kind === 'ready' ? bankReviewCurrent.data : null;
     const target = row?.reconciliation_target;
@@ -613,6 +618,7 @@ export const FinancePage: React.FC = () => {
             key={payableReview ? `${caseDrawer}:${reload}` : caseDrawer}
             embedded
             initialCase={caseDrawer}
+            onOpenGovernmentList={openGovernmentList}
             initialNoticeStage={caseNotice}
             settlementFocus={caseDrawer === entry.caseNo &&
               (entry.settlementFocus === 'client_settlement' || entry.settlementFocus === 'staff_payout')
@@ -640,6 +646,7 @@ export const FinancePage: React.FC = () => {
               })}>返回核對交易</button>
             </div>
             <FinanceCaseAccounting key={bankCaseView} initialCase={bankCaseView} embedded
+              onOpenGovernmentList={openGovernmentList}
               onChanged={() => setReload(value => value + 1)} />
           </> : <>
             {reviewRoute?.kind !== 'case' && <BankTransactionFacts row={scopedBatchPosted ? {...bankReview, status:'posted'} : bankReview} />}
@@ -662,6 +669,7 @@ export const FinancePage: React.FC = () => {
               onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />}
             {reviewedRow && reviewRoute?.kind === 'case' && <FinanceCaseAccounting key={`case-review:${reviewedRow.row_identity}:${reviewRoute.caseNo}`}
               embedded initialCase={reviewRoute.caseNo}
+              onOpenGovernmentList={openGovernmentList}
               bankReconciliation={{ row: reviewedRow, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy,
                 onViewCase: () => setBankCaseView(reviewRoute.caseNo), externalPurposeReview: true, previewRefundOnMount: bankReviewReturning }}
               onChanged={() => setReload(value => value + 1)} />}
