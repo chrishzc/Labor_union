@@ -128,7 +128,7 @@ jobs:
           PY
       - name: Run weekly report contracts with real imports
         run: >-
-          python -m pytest -q
+          python -m pytest -v
           tests/test_weekly_operations_report_contract.py
           tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/test_subsidy_reconciliation_register.py
           tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py
@@ -173,7 +173,7 @@ jobs:
       - name: Run weekly report client and React tests
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: >-
-          npm test --
+          npm test -- --reporter=verbose
           src/tests/weekly_operations_report_client.test.ts
           src/tests/reports_query_page.test.tsx
           src/tests/reports_weekly_service_display.test.tsx

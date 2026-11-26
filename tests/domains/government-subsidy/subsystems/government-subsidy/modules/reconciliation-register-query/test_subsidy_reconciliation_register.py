@@ -240,7 +240,7 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
     sql, params = connection.cursor_instance.executed[0]
     assert "subsidy_claim_batches" not in sql
     assert "current_revision" not in sql
-    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s, %s)" in sql
+    assert "o.status IN (%s, %s, %s, %s, %s, %s, %s, %s, %s)" in sql
     assert params == (
         "訂單成立",
         "服務中",
@@ -250,6 +250,7 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
         "歷史訂單－服務中",
         "歷史訂單－服務完成",
         "歷史訂單－帳務完成",
+        "成立後未服務",
         "一般市民",
         "補助市民",
     )
@@ -258,19 +259,26 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
 def test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim():
     unserved = _order_row(
         case_no="115000010", order_status="成立後未服務", identity_status="補助市民",
-        service_days=30, official_service_days=10, historical_actual_service_hours=240,
+        service_days=30, official_service_days=0,
         payroll_hourly_rate_ntd=None, pricing_active=1, pricing_rule="social",
-        pricing_subsidy_hours=None, scheduling_source_invalid=True,
+        pricing_subsidy_hours=None,
     )
     prior_year = {**unserved, "case_no": "114000011", "actual_end_date": date(2026, 10, 1)}
     excluded = [
         {**unserved, "case_no": "115000012", "order_status": "訂單取消"},
-        {**unserved, "case_no": "115000013", "identity_status": "非市民", "pricing_rule": "non_citizen"},
+        {**unserved, "case_no": "115000013", "identity_status": "非市民"},
         {**unserved, "case_no": "114000014", "actual_end_date": date(2025, 12, 31)},
+        {**unserved, "case_no": "115000016", "actual_end_date": None},
+        _order_row(
+            case_no="115000017", order_status="歷史訂單－未服務",
+            historical_actual_service_hours=0, historical_actual_service_days=0,
+        ),
     ]
     completed = _order_row(case_no="115000015")
-    conn = FakeConnection([unserved, unserved.copy(), prior_year, completed, *excluded])
+    sources = [unserved, unserved.copy(), prior_year, completed, *excluded]
+    conn = FakeConnection(sources)
     result = register.build_operations_report_annual_subsidy_rows(2026, lambda: conn)
+    assert register.build_operations_report_annual_subsidy_rows(2026, lambda: FakeConnection(sources)) == result
     rows = result["subsidized_citizen_rows"]
     assert [row["市府訂單號碼"] for row in rows] == ["114000011", "115000010"]
     assert [row["核銷月份"] for row in rows] == ["2026年第四季", "2026年第一季"]
@@ -278,10 +286,25 @@ def test_operations_report_counts_established_unserved_once_with_zero_subsidy_wi
     assert all(row[key] == 0 for row in rows for key in (
         "補助時數", "補助天數", "服務天數", "補助款金額", "單價",
     ))
-    assert result["general_citizen_rows"][0]["補助款金額"] == Decimal(12000)
+    general, = result["general_citizen_rows"]
+    assert (general["市府訂單號碼"], general["補助款金額"]) == ("115000015", Decimal(12000))
+    assert result["indigenous_citizen_rows"] == []
     assert "成立後未服務" in conn.cursor_instance.executed[0][1]
-    assert register._to_register_row(unserved) is None
-    assert "成立後未服務" not in register.ESTABLISHED_ORDER_STATUSES
+
+    quarterly_conn = FakeConnection([unserved, completed])
+    annual_conn = FakeConnection([unserved, completed])
+    quarterly = register.build_quarterly_subsidy_register(2026, 1, lambda: quarterly_conn)
+    annual = register.build_annual_subsidy_summary(2026, lambda: annual_conn)
+    for formal_report, connection in ((quarterly, quarterly_conn), (annual, annual_conn)):
+        assert formal_report["subsidized_citizen_rows"] == []
+        assert [row["市府訂單號碼"] for row in formal_report["general_citizen_rows"]] == ["115000015"]
+        assert "成立後未服務" not in connection.cursor_instance.executed[0][1]
+
+    by_case = FakeConnection([unserved, completed])
+    assert tuple(register.build_operations_report_subsidy_rows_by_case(
+        ("115000010", "115000015"), by_case,
+    )) == ("115000015",)
+    assert "成立後未服務" not in by_case.cursor_instance.executed[0][1]
 
 
 def test_operations_report_annual_rows_exclude_cancelled_orders_before_subsidy_calculation():

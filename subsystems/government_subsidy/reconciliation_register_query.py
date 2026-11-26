@@ -289,7 +289,7 @@ def build_operations_report_subsidy_rows_by_case(
         connection,
         None,
         None,
-        OPERATIONS_REPORT_ORDER_STATUSES,
+        ESTABLISHED_ORDER_STATUSES,
     ):
         case_no = str(source.get("case_no") or "")
         if case_no not in selected_case_nos:
