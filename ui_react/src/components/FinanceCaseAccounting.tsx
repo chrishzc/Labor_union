@@ -1,6 +1,5 @@
 import {differenceResolutionClient,type StaffRecoveryView} from '../api/client_finance/difference_resolution_client';
 import {StaffOverpaymentRecoveryActions} from './StaffOverpaymentRecoveryActions';
-import {subsidyPeriodClient,type SubsidyCaseCoverage} from '../api/government_subsidy/period_reconciliation_client';
 /**
  * File: FinanceCaseAccounting.tsx
  * Description: 案件帳務精簡抽屜與警示清單，提供各期核銷、補助方案、銀行對帳虛擬帳號與退款帳戶核對。
@@ -583,7 +582,6 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
 export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation,onPayableReview,reviewObligation,settlementFocus}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void;onViewCase?:()=>void;externalPurposeReview?:boolean;previewRefundOnMount?:boolean};onPayableReview?:(item:HistoricalPayableAuditItem)=>void;reviewObligation?:string;settlementFocus?:'client_settlement'|'staff_payout'}){
  const {requestLeave}=useUnsavedNavigation();
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;pricing?:CasePricing;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
- const[coverage,setCoverage]=useState<SubsidyCaseCoverage|null>(null);
  const[recoveries,setRecoveries]=useState<StaffRecoveryView|null>(null);
  const[recoveryError,setRecoveryError]=useState(false);
  const[recoveryTarget,setRecoveryTarget]=useState<{staffId:number;identity:string}|null>(null);
@@ -593,7 +591,6 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const[paramsDrawerOpen,setParamsDrawerOpen]=useState(false);
  const[revision,setRevision]=useState(0),[view,setView]=useState<Stage|'plan'|null>(initialNoticeStage??null);
  useEffect(()=>{const controller=new AbortController();setRecoveries(null);setRecoveryError(false);setRecoveryTarget(null);if(initialCase&&!isSubsidyRefundReview)void differenceResolutionClient.staff(initialCase,controller.signal).then(value=>{if(!controller.signal.aborted&&value.case_no===initialCase)setRecoveries(value);}).catch(()=>{if(!controller.signal.aborted)setRecoveryError(true);});return()=>controller.abort();},[initialCase,isSubsidyRefundReview,revision]);
- useEffect(()=>{const controller=new AbortController();setCoverage(null);if(initialCase&&!isSubsidyRefundReview)void subsidyPeriodClient.caseCoverage(initialCase,controller.signal).then(value=>{if(!controller.signal.aborted&&value.case_no===initialCase)setCoverage(value);}).catch(()=>{});return()=>controller.abort();},[initialCase,isSubsidyRefundReview,revision]);
  const[showSupplement,setShowSupplement]=useState(false);
  const[reconciliationBusy,setReconciliationBusy]=useState(false);
  const[editingOpen,setEditingOpen]=useState(false);
@@ -680,23 +677,18 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   return sum + (remaining > 0n ? remaining : 0n);
  },0n);
 
- const subsidyKnown=data?.subsidy_ntd!=null;
- const standaloneSubsidyPayments = data?.subsidy_payments?.filter(
-  payment => payment.recipient === 'staff',
- ) ?? [];
- const subsidyTotal=data?.subsidy_ntd??0;
+ const staffSubsidyPortions = selected === 'split' ? staffItems.flatMap(item =>
+  (item.funding_portions ?? []).filter(portion => portion.funding_kind === 'subsidy')
+   .map(portion => ({item, portion})),
+ ) : [];
+ const hasFormalSubsidyRefund = refundClientItems.some(item => item.obligation_type === 'subsidy_return');
+ const subsidyEstimate = data?.subsidy_payments?.find(payment => payment.source === 'estimate' && payment.amount_ntd > 0
+  && ((selected === 'split' && staffSubsidyPortions.length === 0 && payment.recipient === 'staff')
+   || (selected === 'advance' && !hasFormalSubsidyRefund && payment.recipient === 'client')));
+ const hasPositiveSubsidy = data?.subsidy_ntd != null && data.subsidy_ntd > 0;
  const orderStatus=state.order?.order_status;
- const serviceInProgress=orderStatus==='服務中'||orderStatus==='歷史訂單－服務中';
- const serviceEnded=orderStatus==='訂單完成'||orderStatus==='歷史訂單－服務完成'||orderStatus==='歷史訂單－帳務完成';
- const unconfirmedPaymentStatus=serviceInProgress?'服務中，金額尚未確認'
-  :serviceEnded?'服務已結束，金額待核對':'金額待確認';
- const subsidyRefundPending=!directArrangement&&planConfirmed&&selected==='advance'&&subsidyTotal>0;
- const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
- const govReceivedNtd=data?.cash_by_flow?.G??null;
- const governmentConflict=data?.scheme_conflict===true;
- const governmentDirect=!governmentConflict&&selected==='direct';
- const governmentInapplicable=!governmentConflict&&(governmentDirect||data?.subsidy_ntd===0);
- const currentCoverage=coverage?.case_no===initialCase?coverage:null;
+ const subsidyRefundPending = selected === 'advance' && !hasFormalSubsidyRefund;
+ const showUnassignedSubsidyEstimate = !selected && hasPositiveSubsidy;
 
  const virtualAccount=state.registry?.finance?.values?.virtual_account??null;
  const isImportedVirtual=virtualAccount!==null && state.accountView?.imported_virtual_accounts?.length===1 && state.accountView.imported_virtual_accounts[0]===virtualAccount;
@@ -888,6 +880,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
         {selected && <p>{subsidyPlanTargets[selected]}</p>}
         {schemeSource && <p>{schemeSource}</p>}
         {data.scheme_pending_reason && <p role="status">{accountingReason(data.scheme_pending_reason)}</p>}
+        {data.scheme_conflict && !data.scheme_pending_reason && <p role="status">補助安排與收款來源衝突，待核對</p>}
+        {data.subsidy_pending_reason && <p>{accountingReason(data.subsidy_pending_reason)}</p>}
       </div>
       <button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan || !!state.loading}
         onClick={() => open('plan')}>
@@ -984,7 +978,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                 <td>
                   <strong>{item.party}</strong>
                   <small>{item.label || '月嫂服務費'}</small>
-                  {(selected ?? data.scheme) === 'split' && !item.funding_portions?.length && <small>自備款／補助款分配待確認，可由原永豐流水選擇「補助方案一：核銷自備款，補助款保留待付」預覽確認。</small>}
+                  {selected === 'split' && !item.funding_portions?.length && <small>自備款／補助款分配待確認，可由原永豐流水選擇「補助方案一：核銷自備款，補助款保留待付」預覽確認。</small>}
                   {item.funding_portions?.map(p => <small key={p.funding_kind}>
                     {p.funding_kind === 'client' ? '自備款（永豐）' : '補助款（台新）'}：應付 {money(p.amount_ntd)} · 待付 {money(p.remaining_ntd)} · {p.due_date ?? '日期待確認'}
                   </small>)}
@@ -1078,9 +1072,26 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  </div></details>
 
  <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
-  {subsidyRefundPending && !refundClientItems.some(item => item.obligation_type === 'subsidy_return') &&
+  {selected === 'direct' && <p>政府直退／工會不經手</p>}
+  {selected === 'split' && <section aria-label="補助款轉付月嫂">
+    <strong>補助款轉付月嫂</strong>
+    {staffSubsidyPortions.length > 0 ? <ul>
+      {staffSubsidyPortions.map(({item, portion}) => <li key={item.identity}>
+        {item.party || '月嫂待確認'} · {item.label || '月嫂服務費'} · 正式補助分期 {money(portion.amount_ntd)}
+        {' · '}{portion.due_date ?? '日期待確認'}
+        {' · '}{portion.remaining_ntd === 0 ? '已結清' : portion.remaining_ntd == null ? '待付金額待確認' : `待付 ${money(portion.remaining_ntd)}`}
+        {portion.settled_ntd != null && portion.settled_ntd > 0 && <> · 已核銷 {money(portion.settled_ntd)}</>}
+      </li>)}
+    </ul> : <p>尚無正式補助分期明細</p>}
+    {staffSubsidyPortions.length > 0 && <p>原出款與核銷明細見月嫂薪資。</p>}
+  </section>}
+  {subsidyRefundPending &&
     <p role="status">已確認先墊後退，正式補助退款尚未建立。可開啟補助退款方案查看給付預檢。</p>}
-  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : currentRefundItems.length ? '已結清' : subsidyRefundPending ? '尚無正式退款' : '目前無退款'}</strong></span><span>政府款待入：<strong>{governmentConflict?'衝突待核對':governmentInapplicable?'不適用':!subsidyKnown||govReceivedNtd===null?'金額待確認':money(Math.max(0,subsidyTotal-govReceivedNtd))}</strong></span></div>
+  {subsidyEstimate && <p>
+    預估補助給付 {money(subsidyEstimate.amount_ntd)} · {subsidyEstimate.party || '收款對象待確認'}
+    {' · '}{subsidyEstimate.due_date ?? '日期待確認'}
+  </p>}
+  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : subsidyRefundPending ? '尚無正式退款' : currentRefundItems.length ? '已結清' : '目前無退款'}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">
       <thead>
@@ -1095,20 +1106,18 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
         </tr>
       </thead>
       <tbody>
-        {standaloneSubsidyPayments.map((payment, index) => (
-          <tr key={index}>
-            <td><strong>{payment.recipient === 'staff' ? '補助款轉付月嫂' : '補助款退還客戶'}</strong>{payment.party && <small>{payment.party}</small>}</td>
-            <td>{payment.due_date ?? '日期待確認'}</td>
-            <td>{payment.source === 'estimate' && '預估 '}{money(payment.amount_ntd)}</td>
-            <td colSpan={2}>{payment.source === 'formal' ? '出款與核銷明細見月嫂薪資' : '—'}</td>
-            <td>{payment.source === 'formal' ? (serviceEnded ? '服務已結束，金額已確認' : '金額已確認') : unconfirmedPaymentStatus}</td>
-            <td>—</td>
-          </tr>
-        ))}
+        {showUnassignedSubsidyEstimate && <tr>
+          <td><strong>政府補助款預估</strong><small>補助歸屬待確認</small></td>
+          <td>{!orderStatus?.includes('取消') && data.estimated_subsidy_payment_date
+            ? `預估 ${data.estimated_subsidy_payment_date}` : '日期待確認'}</td>
+          <td colSpan={5}>{money(data.subsidy_ntd)}</td>
+        </tr>}
         {refundClientItems.map(row => {
             const isSubsidyReturn = row.obligation_type === 'subsidy_return';
             const itemTransactions = refundTransactions.filter(transaction => transaction.item_identity === row.identity);
-            const isRefundSettled = row.settled || row.remaining_ntd === 0 || (row.actual_ntd >= row.expected_ntd && row.has_payment);
+            const isRefundSettled = row.settled ?? (row.remaining_ntd != null
+              ? BigInt(row.remaining_ntd) === 0n
+              : !isSubsidyReturn && row.actual_ntd >= row.expected_ntd && row.has_payment);
             const readOnlySubsidyHistory = directArrangement && isSubsidyReturn;
             return (
               <tr key={row.identity}>
@@ -1120,7 +1129,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                   <span>{row.due_date ?? '日期待確認'}</span>
                   <small>{readOnlySubsidyHistory ? '原補助退款紀錄' : isRefundSettled ? '已結算' : '案件結束結算'}</small>
                 </td>
-                <td>{readOnlySubsidyHistory ? '—' : money(row.expected_ntd)}</td>
+                <td>{readOnlySubsidyHistory ? <span>原退款 {money(row.expected_ntd)}</span> : money(row.expected_ntd)}</td>
                 <td>
                   <span>已退 {money(row.actual_ntd)}</span>
                   {readOnlySubsidyHistory ? null : isRefundSettled ? (
@@ -1134,9 +1143,9 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                     <>
                       <span>{itemTransactions[0].occurred_on} · {itemTransactions[0].bank === 'manual' ? '人工補登' : itemTransactions[0].bank === 'taishin' ? '台新銀行' : itemTransactions[0].bank === 'sinopac' ? '永豐銀行' : (itemTransactions[0].bank ?? '銀行退款')}</span>
                       {itemTransactions[0].bank_amount_ntd != null && <small>整筆銀行實付 {money(itemTransactions[0].bank_amount_ntd)}；內扣手續費 {money(itemTransactions[0].transfer_fee_ntd)}</small>}
-                      {itemTransactions.length > 1 && (
+                      {(itemTransactions.length > 1 || (isSubsidyReturn && selected === 'advance')) && (
                         <details>
-                          <summary>{itemTransactions.length} 筆退款</summary>
+                          <summary>{isSubsidyReturn && selected === 'advance' ? '查看退款核銷紀錄' : `${itemTransactions.length} 筆退款`}</summary>
                           {itemTransactions.map(t => (
                             <p key={t.identity}>{t.occurred_on} · {t.bank === 'manual' ? '人工補登' : '退款'} · 已核銷 {money(t.amount_ntd)}{t.bank_amount_ntd != null && <>；整筆銀行實付 {money(t.bank_amount_ntd)}；內扣手續費 {money(t.transfer_fee_ntd)}</>}</p>
                           ))}
@@ -1178,33 +1187,11 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           </tr>
         )}
 
-        <tr>
-          <td><strong>政府補助款</strong><small>{selected?subsidyPlanLabels[selected]:'補助歸屬待確認'}</small>
-            {governmentConflict&&<small>補助安排與收款來源衝突，待核對</small>}
-            {(data.scheme==='waiting'||data.scheme==='unknown')&&data.estimated_subsidy_payment_date&&!orderStatus?.includes('取消')&&<small>補助給付預估：{data.estimated_subsidy_payment_date}</small>}
-          </td>
-          <td>{governmentInapplicable?'不適用':'依市府審查期程'}</td>
-          <td>{money(data.subsidy_ntd)}{data.subsidy_pending_reason&&<small>{accountingReason(data.subsidy_pending_reason)}</small>}</td>
-          <td>{governmentDirect?'工會不經手':governmentInapplicable?'不適用':!subsidyKnown?'補助金額待確認':govReceivedNtd===null?'逐案實收待確認':<span>逐案實收 {money(govReceivedNtd)}</span>}</td>
-          <td>{govBankFacts.length?govBankFacts.map(fact=><p key={fact.identity}>{fact.occurred_on} · {fact.bank==='taishin'?'台新':fact.bank==='sinopac'?'永豐':fact.bank??'銀行待確認'} · {fact.cases.length!==1||fact.cases[0]!==data.case_no?'整期流水，非逐案實收':'本案流水'} · {money(fact.amount_ntd)}</p>):governmentInapplicable?'不適用':'入款來源待確認'}</td>
-          <td>{governmentConflict?'衝突待核對':governmentInapplicable?'不適用':!subsidyKnown?'補助金額待確認':currentCoverage?currentCoverage.coverage.length?currentCoverage.coverage.map(receipt=><p key={receipt.receipt_id}>{receipt.label} · 整期 · {receipt.settled===true?'整期已核銷，非本案核銷':receipt.settled===false?'已納入本期，非本案核銷':'整期核銷狀態待確認'}</p>):'尚未納入整期':'核銷狀態待確認'}</td>
-          <td><button type="button" className="finance-btn-secondary" onClick={()=>open('plan')} title="修改補助款歸屬方案">{planConfirmed?'修改方案':'設定方案'}</button></td>
-        </tr>
       </tbody>
     </table>
   </div>
 
-  <div className="finance-subsidy-flow-note">
-    <small><strong>金流規則說明：</strong>
-      {selected === 'advance'
-        ? '客戶先墊後退（方案二）：依客戶合法先墊及正式退款來源，由工會自台新退還客戶；政府補助入款另依原期間核對。'
-        : selected === 'split'
-        ? '分拆撥付（方案一）：永豐支付自備款部分，政府補助入工會後由台新轉付月嫂；分別核銷，剩餘補助款保留待付。'
-        : selected === 'direct'
-        ? '政府直接退給客戶（方案三），工會不經手這筆補助。'
-        : '由人員設定補助款歸屬方案，結算時依方案進行金流沖正與核銷。'}
-    </small>
-  </div>
+  <p><small>整期入款與核銷請至政府補助清單查閱。</small></p>
  </div></details>
  </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} subsidyAmount={data.subsidy_ntd} bankMemos={data.bank_memos??[]} arrangement={data.arrangement} canConfirmDirect={data.can_confirm_direct === true} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
  {data && paramsDrawerOpen && (
