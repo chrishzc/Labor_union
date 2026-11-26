@@ -88,6 +88,8 @@
 
 - 規格 #21 §3.3 的「記錄已送交」只留下交接回執；不代表拿到已簽 PDF 或 Orders 完約。§3.4 的直接歸檔不要求交接回執或 session；操作人確認簽名及內容，系統檢查檔案、案件與當前目標，不以 PDF 格式驗證代替簽名查核。
 - 前端用案件的 `GET /api/v1/orders/{case_no}/contract-external-signing/signed-archive` 取得當前 `staff_segments` 與既有 `files`（未歸檔為 `null`）。同一路徑的 POST 接收客戶 PDF `client`，每份月嫂 PDF `staff` 必須對應同位置的 `staff_segment_ids`；後端以 segment ID 重核當前目標，不以月嫂姓名或檔名配對。若沒有可列出的月嫂分段，只需客戶 PDF；若有分段卻缺一份，拒絕整批。
+- **直接歸檔接線**：POST 使用 `multipart/form-data`；`client` 恰一份，每位月嫂各附一個 `staff_segment_ids` 整數與一個 `staff` 檔案，對齊重複欄位的順序。送 `Idempotency-Key` 和 `X-Correlation-ID` header。每份須為 `.pdf`、MIME `application/pdf`、`%PDF-` 檔頭且不超過 20 MiB；這不驗內容是否有簽名。GET 正式讀回 `data.staff_segments` 與 `data.files`；POST 成功回 `data.files`。每項檔案帶 `target`（`client` 或 `staff:{segment_id}`）、`filename`、`file_id`。
+- **錯誤與未知結果**：檔案／分段欄位數不符、檔案類型不符或超限是 422 `contract_external_signing_input_invalid`；缺漏、重複或非目前案件的必要目標在 owner 查驗回 409 `final_signed_contract_documents_incomplete`。同鍵異指紋回 409 `contract_signature_idempotency_conflict`。回應遺失優先查同案已歸檔結果；若要重送，沿用同一人、同案、原 key 和完全相同的檔案。未讀回、已選檔或本機試算不顯示完約。
 - Contract Signing 依 `subsystems/contract_signing/final_document_workflow.py` 交 Controlled File 納管，並在同一交易記錄 Orders 完約與歸檔回執。成功回執可讀各目標的檔名及檔案識別；同一請求重送回原結果，不再完約一次。歸檔失敗不能標完約；已有的完約事實不因重送而覆寫。排班、訂金與帳務仍由各自的規格判定。
 
 ## Verification
