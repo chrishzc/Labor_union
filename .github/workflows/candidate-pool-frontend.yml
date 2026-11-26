@@ -1,0 +1,44 @@
+name: Candidate pool frontend
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ui_react/**'
+      - 'line/static/service-date-calendar.js'
+      - '.github/workflows/candidate-pool-frontend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-pool-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ui_react
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install locked frontend dependencies without lifecycle hooks
+        id: dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify candidate query and addition
+        run: >-
+          npm test -- --reporter=verbose
+          src/tests/order_workbench_v2_candidate_query.test.tsx
+          src/tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/candidate_single_add.test.tsx
+      - name: Lint affected frontend files
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: >-
+          npm run lint --
+          src/adapters/scheduling/candidate_date_status.ts
+          src/components/CandidateAvailabilityNotice.tsx
+          src/components/OrderCandidateQueryPanel.tsx
+          src/tests/order_workbench_v2_candidate_query.test.tsx
+      - name: Typecheck and build frontend
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: npm run build
