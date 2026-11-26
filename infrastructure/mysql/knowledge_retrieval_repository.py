@@ -1119,13 +1119,13 @@ JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=(
 WHERE {_IS_FAQ} AND i.state<>'retired' AND v.event_type='published'
 """
 _LIST_ITEMS = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
-state AS lifecycle_status,version AS current_version,i.published_version,
-content_digest AS source_digest,source_uri,updated_at AS updated_at_utc,
+i.state AS lifecycle_status,i.version AS current_version,i.published_version,
+i.content_digest AS source_digest,i.source_uri,i.updated_at AS updated_at_utc,
 v.content
 FROM knowledge_items i
 JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
-WHERE (%s IS NULL OR state=%s)
-ORDER BY updated_at DESC,i.id DESC LIMIT %s"""
+WHERE (%s IS NULL OR i.state=%s)
+ORDER BY i.updated_at DESC,i.id DESC LIMIT %s"""
 _GET_ITEM = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
 i.state AS lifecycle_status,i.version AS current_version,i.published_version,
 i.content_digest AS source_digest,i.source_uri,i.updated_at AS updated_at_utc,
