@@ -963,7 +963,7 @@
 .candidate-willingness-form fieldset > label { margin: 8px 18px 8px 0; }
 .order-case-page .candidate-willingness-form .candidate-willingness-note { display: block; margin-right: 0; }
 .candidate-willingness-form textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
-.order-case-page .order-v2-business-summary > .candidate-add-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px; border-bottom: 1px solid #ead5c8; }
+.order-case-page .order-v2-business-summary .candidate-date-group > .candidate-add-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px; border-bottom: 1px solid #ead5c8; }
 .candidate-add-row:last-child { border-bottom: 0; }
 .candidate-add-row > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .order-case-page .candidate-inquiry-dialog .candidate-add-row > button { width: auto; min-width: 96px; flex: 0 0 auto; }
@@ -1267,3 +1267,13 @@
 .order-case-page .order-v2-danger:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; }
 .candidate-inquiry-dialog button:not(:where(.candidate-information-tabs button)) { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
 .candidate-inquiry-dialog button:not(:where(.candidate-information-tabs button)):hover:not(:disabled) { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); }
+
+.candidate-date-group { padding: 0 0 8px; }
+.candidate-date-group + .candidate-date-group { border-top: 1px solid #ead5c8; }
+.candidate-date-group > h3 { margin: 0; padding: 12px 12px 4px; font-size: .9rem; }
+.candidate-date-badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: .8rem; font-weight: 600; }
+.candidate-date-badge.clear { color: #205226; background: #e8f3e7; }
+.candidate-date-badge.advisory { color: #684500; background: #fff2ce; }
+.candidate-date-badge.conflict { color: #8d2525; background: #fce6e4; }
+.candidate-date-badge.unverified { color: #41484c; background: #eceff0; }
+.candidate-date-summary { margin: 4px 0; }

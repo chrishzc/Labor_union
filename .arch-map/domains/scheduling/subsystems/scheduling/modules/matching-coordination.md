@@ -135,3 +135,7 @@ Reconcile when coordination owner, case lifecycle eligibility, assignment occupa
 
 - test_root: `ui_react/src/tests/matching_coordination_workbench.test.tsx` — 既有獨立 typed 工作台的 17 種操作、內部核對與原鍵重試。
 - test_root: `ui_react/src/tests/matching_manual_communication_actions.test.tsx` — 既有人工資訊／履歷送達證據的 Preview／Apply 與 provider 狀態區分。
+
+### 工作台新增候選月嫂排序
+
+[需求 §3.1](../../../../../requirements/02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。`OrderCandidateQueryPanel` 使用既有候選查詢的 `candidate_options`、`conflicts` 和 `planned_start_date`／`planned_end_date`，只為工作台新增候選入口呈現單人段落 `segment_index=0`。日期分類與 `CandidateAvailabilityNotice` 共用 `candidate_date_status.ts` 的既有提醒語意及 `full_case_coverage`；依日期分組後，兩個 `matching_conditions` 只以 `matched` 計入優先順序，最後保留工會編號自然排序。此處不改 API、保存、正式推薦及分段排班。
