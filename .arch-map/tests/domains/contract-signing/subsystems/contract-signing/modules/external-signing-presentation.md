@@ -12,3 +12,14 @@ test_root: ui_react/src/tests/domains/contract-signing/subsystems/contract-signi
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py` — preparation／session Query closed union、零寫入文件準備投影、文件回讀及既有命令門檻。
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py` — authenticated API contract。
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_client_unsigned_preparation.py` — accepted-plan source gate、fresh lock and client source replay archive boundary。
+
+## 直接歸檔：從驗收情境找到測試
+
+來源：[需求 #21 §3.4](../../../../../../requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#34-分開文件回收手工證明與本機測試跳過)。本節只驗不依賴送交紀錄的已簽 PDF 歸檔，不用較早的準備／會話案例替代。
+
+| 層 | 直接入口 | 已有自動測試能確認的事 |
+| --- | --- | --- |
+| 前端 | `contract_external_signing_actions.test.tsx` 的 `archives directly with no session, handoff, unsigned version, or ready scheduling` 與 `retains the files and reuses the same archive command after a timeout` | 檔案齊備才送，收到正式檔案結果才顯示完約；逾時保留原檔及指令重送。未驗「先 GET 查原結果、若同筆已完成則不再 POST」。 |
+| API | `test_contract_external_signing_api.py::test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_session` | 直接 POST 使用 multipart，接線不要求未簽版本或簽署 session。 |
+| 應用 | `test_final_document_workflow.py::test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files`、`::test_archive_storage_failure_rolls_back_without_recording_completion` | 成功、必要檔案缺漏、同鍵重送與異指紋拒絕；失敗用假交易在首份檔案寫入時攔下，不證明三類 MySQL 寫入後一起回滾。 |
+| DB | [架構書的資料庫查核落點](../../../../../../domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation.md#已簽-pdf-歸檔資料庫查核落點) | 需另用隔離 DB 及新連線查正式檔案、完約與歸檔回執；這個範圍未實跑。 |
