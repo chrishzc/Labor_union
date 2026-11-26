@@ -279,7 +279,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
       setModalNotice('此題目編號已存在，請從清單開啟原題目編輯。'); return;
     }
     const category = categories.find((item) => item.category_id === formData.categoryId);
-    if (!category && !editingItem) {
+    if (!category && !editingItem?.qa.category_id) {
       setModalNotice('請選擇共用分類。');
       return;
     }

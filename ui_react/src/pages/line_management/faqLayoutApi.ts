@@ -42,7 +42,11 @@ export interface FaqReceipt {
 }
 
 export class FaqRequestError extends Error {
-  constructor(readonly status: number, readonly code?: string, readonly field?: string) {
+  readonly status: number;
+  readonly code?: string;
+  readonly field?: string;
+
+  constructor(status: number, code?: string, field?: string) {
     const messages: Record<string, string> = {
       faq_category_not_published: '尚未發布',
       faq_layout_revision_conflict: '版面已被其他人修改。請核對新版後再編輯。',
@@ -55,6 +59,9 @@ export class FaqRequestError extends Error {
           : status >= 500 ? '資料來源暫時無法使用，請稍後再試。'
             : `讀取或操作失敗（${status}）。`
     ));
+    this.status = status;
+    this.code = code;
+    this.field = field;
   }
 }
 

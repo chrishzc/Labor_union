@@ -112,6 +112,7 @@ jobs:
           python -m pytest -vv
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_compatible_upgrade_rerun
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_publication_and_receipt_rollback
+          tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_legacy_audit_and_backfill_rerun
 
   browser:
     runs-on: ubuntu-latest
@@ -136,7 +137,7 @@ jobs:
         working-directory: ui_react
       - run: npm run build
         working-directory: ui_react
-      - run: python -m pip install pytest playwright==1.55.0
+      - run: python -m pip install --constraint requirements.txt pytest playwright
       - run: python -m playwright install --with-deps chromium
       - name: Verify Studio journey with synthetic API
         run: |

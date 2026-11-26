@@ -219,18 +219,16 @@ def test_faq_04_mysql_publication_and_receipt_rollback(monkeypatch):
 
 
 def test_faq_04_mysql_compatible_upgrade_rerun():
-    import json
     from pathlib import Path
 
     from scripts.migrate_preserved_database_additive_schema import (
-        DatabaseConfig, _schema_snapshot, local_additive_descriptor_state,
+        DatabaseConfig, _canonical_artifact_descriptor, _schema_snapshot, local_additive_descriptor_state,
     )
     from scripts.reset_fake_database import split_sql
 
     root = Path(__file__).resolve().parents[1]
     sql = root / "db/schema_parts/1087_shared_line_faq.sql"
-    descriptor_path = root / "db/migration_releases/labor_union_2026_11_26_shared_line_faq_v1.descriptors.json"
-    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))["descriptors"][sql.name]
+    descriptor = _canonical_artifact_descriptor(sql.name)
     config = DatabaseConfig(
         os.environ["LABOR_UNION_TEST_MYSQL_HOST"], int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
         os.environ["LABOR_UNION_TEST_MYSQL_USER"], os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
@@ -254,3 +252,71 @@ def test_faq_04_mysql_compatible_upgrade_rerun():
 
     assert migrate() == "absent"
     assert migrate() == "exact"
+
+
+def test_faq_04_mysql_legacy_audit_and_backfill_rerun():
+    from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from scripts.backfill_shared_line_faq import POLICY_LABELS, backfill
+    from subsystems.knowledge_retrieval.faq_catalog import KnowledgeCatalogUnavailable, PublishedFaqCatalog
+    from subsystems.line.capabilities import LineCapability
+
+    actors = _seed_admin_users()
+    actor = ActorContext(str(actors["author"]), (LineCapability.CONFIG_MANAGE.value,))
+    reviewer = ActorContext(str(actors["reviewer"]))
+    run = uuid4().hex[:12].upper()
+    correlation = CorrelationId(f"legacy-faq-{run}")
+    app = KnowledgeApplication(open_knowledge_retrieval_unit_of_work)
+    catalog = PublishedFaqCatalog(open_knowledge_retrieval_unit_of_work)
+    legacy = []
+    item_ids = []
+
+    for index, category in enumerate(("服務流程", "收費與補助")):
+        qa_id = f"LEGACY-{run}-{index}"
+        question = f"舊題 {qa_id}？"
+        source_ref = f"original:{qa_id}"
+        content = GovernedQaContent(qa_id, category, "合成", question, (), "正式 A", source_ref)
+        legacy.append({"id": qa_id, "category": category, "question": question, "answer": "匯入來源內容", "enabled": True})
+        item_id = app.ingest(IngestKnowledgeSourceCommand(
+            content.source_identity, "internal_policy", question, encode_governed_qa(content),
+            source_ref, actor, IdempotencyKey(f"{qa_id}:initial"), correlation,
+        ))[0]
+        item_ids.append(item_id)
+        assert app.publish(PublishKnowledgeItemCommand(
+            item_id, ExpectedVersion(1), reviewer, "正式 A", IdempotencyKey(f"{qa_id}:publish"), correlation,
+        )) == 2
+        revised = GovernedQaContent(qa_id, category, "合成", "只在草稿的題目", (), "草稿 B", f"revised:{qa_id}")
+        app.ingest(IngestKnowledgeSourceCommand(
+            content.source_identity, "internal_policy", revised.question, encode_governed_qa(revised),
+            revised.source_ref, actor, IdempotencyKey(f"{qa_id}:revision"), correlation, ExpectedVersion(2),
+        ))
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.executemany("UPDATE knowledge_items SET published_version=NULL WHERE id=%s", [(item_id,) for item_id in item_ids])
+        connection.commit()
+
+    with pytest.raises(KnowledgeCatalogUnavailable):
+        catalog.page(None)
+
+    def migration(reviewed, *, apply):
+        with get_connection() as connection:
+            return backfill(connection, legacy, reviewed, actor=actor, correlation_id=correlation, apply=apply)
+
+    blocked = migration({}, apply=True)
+    assert blocked["updated_items"] == 0
+    assert {issue["code"] for issue in blocked["issues"]} == {"legacy_policy_unresolved"}
+    reviewed = {"legacy_questions": {text: legacy[1]["id"] for text in POLICY_LABELS}}
+    audit = migration(reviewed, apply=False)
+    assert audit["issues"] == [] and audit["updated_items"] == 0 and audit["layout_revision"] == 0
+    with pytest.raises(KnowledgeCatalogUnavailable):
+        catalog.page(None)
+    applied = migration(reviewed, apply=True)
+    assert applied["issues"] == [] and applied["updated_items"] >= 2 and applied["layout_revision"] == 1
+    for row in legacy:
+        official = catalog.get(row["id"])
+        assert official.answer == "正式 A" and official.source_version == 2
+        assert catalog.match_legacy_text(row["question"]) == (official,)
+    assert catalog.match_legacy_text(POLICY_LABELS[0])[0].qa_id == legacy[1]["id"]
+    repeated = migration(reviewed, apply=True)
+    assert repeated["issues"] == [] and repeated["updated_items"] == 0 and repeated["layout_revision"] == 1
