@@ -795,7 +795,7 @@ try {
         }
     }
     if ($remoteMode) {
-        $managementPrefix = if ($env:WINDOWS_REMOTE_PREFIX -eq '/admin') { '/admin' } else { '/test' }
+        $managementPrefix = Get-WindowsManagementPrefix
         Wait-HttpReady -Url "http://127.0.0.1:$ReactPort$managementPrefix/" -Label "Remote React" -RequireHtmlRoot -OwnedEntry $react
     }
     else {

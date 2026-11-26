@@ -1,3 +1,8 @@
+function Get-WindowsManagementPrefix {
+    if ($env:WINDOWS_REMOTE_PREFIX -eq '/admin') { return '/admin' }
+    return '/test'
+}
+
 # Frontend-only maintenance. Loaded by the owned runtime supervisor; no DB setup.
 $controllerHash = [Security.Cryptography.SHA256]::Create()
 try {
@@ -90,6 +95,7 @@ function Publish-FrontendControlState {
         supervisor_pid = $PID; supervisor_start_time = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
         project_root = $ProjectRoot; api_port = $ApiPort; react_port = $ReactPort
         artifact_path = $env:WINDOWS_REMOTE_ARTIFACT_DIR; roots = $roots
+        management_prefix = Get-WindowsManagementPrefix
         runtime_status = $RuntimeStatus
         cleanup_confirmed = ($script:CleanupSucceeded -eq $true)
     })
@@ -131,9 +137,10 @@ function Start-RemoteFrontendChild {
         '-m', 'uvicorn', 'scripts.windows_remote_runtime:create_app', '--factory',
         '--host', '127.0.0.1', '--port', "$ReactPort", '--no-proxy-headers'
     )
-    Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/test/" -Label 'Remote React' -RequireHtmlRoot -OwnedEntry $entry
+    $managementPrefix = Get-WindowsManagementPrefix
+    Wait-HttpReady -Url "http://127.0.0.1:$ReactPort$managementPrefix/" -Label 'Remote React' -RequireHtmlRoot -OwnedEntry $entry
     $expected = Get-Content -Raw -LiteralPath (Join-Path $ArtifactPath 'artifact-manifest.json') -Encoding UTF8 | ConvertFrom-Json
-    $actual = (Invoke-WebRequest -Uri "http://127.0.0.1:$ReactPort/test/artifact-manifest.json" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
+    $actual = (Invoke-WebRequest -Uri "http://127.0.0.1:$ReactPort$managementPrefix/artifact-manifest.json" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
     if ($actual.artifact_digest -ne $expected.artifact_digest) { throw 'Frontend readback did not match the requested artifact.' }
     return $entry
 }
@@ -258,6 +265,7 @@ function Initialize-AdoptedRemoteRuntime {
         [void](Add-Identity -ProcessId $entry.Pid -StartTime $entry.StartTime -Label $entry.Label -RootPid $entry.Pid -IsRoot $true -Process $entry.Process)
     }
     $env:WINDOWS_REMOTE_ARTIFACT_DIR = $state.artifact_path
+    $env:WINDOWS_REMOTE_PREFIX = '/test' # Legacy adoption is always from the existing /test host.
     $script:SkipRuntimeCleanup = $false
     Refresh-OwnedIdentityRegistry
     Write-RuntimeEvent -Event 'runtime_adopted' -Detail 'existing runtime children preserved; no DB or worker startup'
@@ -367,7 +375,13 @@ function Submit-FrontendUpdate {
     [void][IO.Directory]::CreateDirectory($directory)
     $lock = [IO.File]::Open((Join-Path $directory 'update.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     try {
+        $requestedPrefix = Get-WindowsManagementPrefix
+        if ($requestedPrefix -eq '/admin' -and -not (Test-Path -LiteralPath (Join-Path $directory 'state.json'))) {
+            throw 'Changing the Windows management path requires a full restart.'
+        }
         $state = Get-FrontendUpdateSupervisor
+        $activePrefix = if ($state.management_prefix -eq '/admin') { '/admin' } else { '/test' }
+        if ($requestedPrefix -ne $activePrefix) { throw 'Changing the Windows management path requires a full restart.' }
         $id = [guid]::NewGuid().ToString('N')
         Write-FrontendControlJson (Join-Path $directory 'request.json') @{id=$id;run_id=$state.run_id;operation='restart_frontend';artifact_path=$validated.Path}
         $responsePath = Join-Path $directory ($id + '.response.json')

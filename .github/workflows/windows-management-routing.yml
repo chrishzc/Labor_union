@@ -6,6 +6,7 @@ on:
     paths:
       - 'scripts/windows_remote_runtime.py'
       - 'scripts/launchers/manage_windows.ps1'
+      - 'scripts/launchers/windows_frontend_control.ps1'
       - 'scripts/launchers/supervise_local_runtime.ps1'
       - 'deployment/windows-remote/path-router.mjs'
       - 'tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/test_windows_remote_*'
