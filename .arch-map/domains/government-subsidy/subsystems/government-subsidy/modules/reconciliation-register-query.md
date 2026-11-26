@@ -32,6 +32,14 @@
 - Government Subsidy reconciliation formula — `.arch-map/requirements/14_Government_Subsidy_Domain.md`
 - 營運報表專用年度補助統計契約 — `.arch-map/requirements/15_正式規格索引與裁決總表.md` §15.1。
 
+<a id="weekly-subsidy-zero-source"></a>
+
+### 營運週報零服務列：來源及資料保證
+
+- 依 [#34 的業務規則](../../../../../requirements/34_營運報表與統計口徑正式規格.md#subsidy-established-unserved)；輸出契約見 [Reporting](../../../../global/subsystems/reporting/modules/weekly-operations-report.md#reporting-subsidy-established-unserved)。Orders 權威狀態與案號、正式 Client 身分及既有實際／約定日期是輸入。空排班、無費率、無核銷或「歷史」字首不構成零服務。
+- 營運年度 builder 獨立接受 ESTABLISHED_UNSERVED，再依既有申請年度候選與上一年度帶入規則、有效服務結束日分年季。只在確認未服務的營運列略過計薪、排班及 claim batch 門檻。按案號去重，來源 join 重複不重計。缺有效日期不造日期或假季度。
+- 政府季／年度核銷、按案共用查詢與其他狀態的公式維持原結果。無資料寫入、遷移、回填或新 counter；DB 只核對受影響的讀取欄位與來源，不另在 SQL 定義業務合計。
+
 ## Verification
 - test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/`
 - higher-boundary consumer verification is owned by the Global Reporting weekly-operations-report Module.
