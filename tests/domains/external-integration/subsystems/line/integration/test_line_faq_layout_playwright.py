@@ -34,6 +34,8 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         def problem(code, status):
             route.fulfill(status=status, json={"detail": {"error": {"code": code}}})
 
+        if path == "/admin/setup" and method == "GET":
+            return route.fulfill(json={"required": False})
         if path == "/line/service-help/faq":
             return ok({"items": [answer], "categories": [answer["category"]], "next_cursor": None})
         if path.startswith(("/knowledge/items", "/knowledge/indexes")):
@@ -96,9 +98,11 @@ def test_faq_01_playwright_add_preview_publish_reopen():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page()
+        page.on('pageerror', lambda error: print(f'Browser error: {error}'))
         page.add_init_script("sessionStorage.setItem('union_admin_session_token', 'synthetic-ci-session')")
         page.route(re.compile(r"^http://[^/]+/(?:trial/)?api/v1/"), dispatch)
         page.goto(os.environ["FAQ_E2E_URL"] + "/#line-ai-events")
+        expect(page.get_by_role("heading", name="AI 客服工作室")).to_be_visible()
         page.get_by_role("button", name="LINE 聊天室版面").click()
         page.get_by_role("button", name="＋ 新增分類").click()
         page.get_by_role("textbox", name="分類名稱").fill("服務異動")
