@@ -10,10 +10,12 @@ from subsystems.line.message_copy_catalog import configured_payload
 
 import hashlib
 import secrets
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta
-from typing import Callable
+from typing import Any, Callable
 
+from domains.case_import.registration_details import INGREDIENT_PURCHASE_SURVEY_FIELD
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
     LineDeliveryRequest,
@@ -626,11 +628,7 @@ class MatchingNotificationApplication:
                     snapshot = repository.customer_confirmation_snapshot(state.plan.plan_id, token_hash, line_user_id)
                     if snapshot is not None and "order_information_1" in snapshot:
                         current = repository.customer_confirmation_package(state.plan.case_no, state.plan.plan_id)
-                        content_keys = ("order_information_1", "order_information_2", "weekly_service_rows")
-                        # JSON normalization preserves the comparison across tuple/list serialization.
-                        sent_content = {key: snapshot[key] for key in content_keys}
-                        current_content = {key: current[key] for key in content_keys}
-                        if fingerprint_payload(sent_content) != fingerprint_payload(current_content):
+                        if not _customer_confirmation_content_matches(snapshot, current):
                             raise MatchingCommunicationStaleError("客戶確認內容已變更，請重新寄送後再請客戶確認。")
         return _append_line_response(
             unit_of_work,
@@ -642,6 +640,40 @@ class MatchingNotificationApplication:
             occurred_at,
             token_hash,
         )
+
+
+def _customer_confirmation_content_matches(
+    snapshot: Mapping[str, Any], current: Mapping[str, Any],
+) -> bool:
+    info_two = "order_information_2"
+    content_keys = ("order_information_1", info_two, "weekly_service_rows")
+    sent_content = {key: snapshot[key] for key in content_keys}
+    current_content = {key: current[key] for key in content_keys}
+    sent_info_two = sent_content[info_two]
+    if (
+        sent_info_two
+        and all(item.get("line_sections") for item in sent_info_two)
+        and not any(
+            label == INGREDIENT_PURCHASE_SURVEY_FIELD
+            for item in sent_info_two
+            for section in item["line_sections"]
+            for label, _ in section["rows"]
+        )
+    ):
+        # Older table images disclosed only the rows that existed when they were sent.
+        sent_content[info_two] = _legacy_information_two(sent_info_two)
+        current_content[info_two] = _legacy_information_two(current_content[info_two])
+    return fingerprint_payload(sent_content) == fingerprint_payload(current_content)
+
+
+def _legacy_information_two(items: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
+    return tuple({
+        **{key: value for key, value in item.items() if key != "text"},
+        "line_sections": tuple({
+            **section,
+            "rows": tuple(row for row in section["rows"] if row[0] != INGREDIENT_PURCHASE_SURVEY_FIELD),
+        } for section in item["line_sections"]),
+    } for item in items)
 
 
 def _customer_information_preview(items) -> tuple[CustomerConfirmationInformationPreview, ...]:

@@ -20,6 +20,7 @@ from domains.scheduling.matching_communication import (
     CaregiverWillingness,
     CustomerMatchingDecision,
     MatchingCommunicationConflictError,
+    MatchingCommunicationStaleError,
     MatchingNotificationKind,
     MatchingPlanReference,
 )
@@ -366,3 +367,66 @@ def test_record_line_response_accepted_only_acknowledges_customer_without_group_
     assert customer_confirmation.recipient.identity.value == "U-customer"
     assert customer_confirmation.message_kind == LineMessageKind.TEXT
     assert json.loads(customer_confirmation.payload_json)["text"] == "已收到您接受配對的回覆，後續由工會安排簽約。"
+
+
+@pytest.mark.parametrize(("sent_purchase", "saved_diet", "stale"), [
+    (None, "葷食", False),
+    (None, "素食", True),
+    ("自行準備", "葷食", False),
+    ("需月嫂代購(實報實銷)", "葷食", True),
+    ("待確認", "葷食", True),
+])
+def test_background_customer_acceptance_checks_the_sent_ingredient_purchase_row(
+    sent_purchase: str | None, saved_diet: str, stale: bool,
+) -> None:
+    state = _state()
+    state = replace(state, segments=(replace(state.segments[0], willingness=CaregiverWillingness.WILLING),))
+    unit_of_work = _UnitOfWork(state)
+    repository = unit_of_work.matching_notifications
+    repository._interaction_data = {
+        "case_no": "CASE-1",
+        "plan_id": 10,
+        "recipient_line_user_id": "U-customer",
+        "interaction_status": "active",
+        "expires_at_utc": datetime(2026, 8, 10, tzinfo=timezone.utc),
+        "action_scope": "customer_decision",
+        "segment_id": None,
+    }
+
+    def package(diet: str, purchase: str | None) -> dict[str, object]:
+        rows = [("飲食習慣", diet)]
+        if purchase is not None:
+            rows.append(("代購食材", purchase))
+        return {
+            "order_information_1": (),
+            "order_information_2": ({
+                "segment_id": 20,
+                "text": "\n".join(f"{label}：{value}" for label, value in rows),
+                "line_sections": ({"title": "飲食與照護需求", "rows": tuple(rows)},),
+            },),
+            "weekly_service_rows": (),
+        }
+
+    repository.customer_confirmation_snapshot = lambda *_: json.loads(json.dumps(package("葷食", sent_purchase)))
+    repository.customer_confirmation_package = lambda *_: package(saved_diet, "自行準備")
+    application = MatchingNotificationApplication(lambda: unit_of_work, lambda: NOW, availability_validator=lambda _: None)
+
+    def accept() -> MatchingResponseResult:
+        return application.record_line_response_in_unit_of_work(
+            unit_of_work,
+            token="token-12345678901234567890",
+            decision="accepted",
+            line_user_id=LineUserId("U-customer"),
+            idempotency_key=IdempotencyKey("matching-postback:event-1"),
+            correlation_id=CorrelationId("line-event:event-1"),
+            occurred_at=NOW,
+            send_reply=False,
+        )
+
+    if stale:
+        with pytest.raises(MatchingCommunicationStaleError):
+            accept()
+        assert not hasattr(repository, "response_arguments")
+    else:
+        assert accept().customer_decision is CustomerMatchingDecision.ACCEPTED
+    assert unit_of_work.delivery_tasks.requests == []

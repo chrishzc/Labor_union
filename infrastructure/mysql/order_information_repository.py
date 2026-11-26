@@ -530,6 +530,7 @@ _ASSIGNMENT_FACT_KEYS = (
 )
 _CASE_IMPORT_FACT_KEYS = (
     "dietary_habits",
+    "ingredient_purchase",
     "vegetarian_preference",
     "alcohol_ratio",
     "cooking_oil_type",

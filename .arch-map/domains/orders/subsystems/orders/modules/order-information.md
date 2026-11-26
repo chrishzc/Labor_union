@@ -14,6 +14,7 @@ Case Import 照護與服務約定的 named projection 疊加 current BeClass cor
 客戶付款查詢使用 current Orders confirmed／預計日期與 Finance stage plan；沒有執行指派時不採舊 commitment 的服務量，也不因舊媒合方案失效而清空付款欄位。正式契約與正式 plan／assignment 的來源及過期驗證保持各自 owner 契約。
 服務方式「無休」及未選休假星期沿用客戶契約投影的「連續服務」，讓資訊一畫面、寄送前預覽與付款金額一致。
 候選資訊一的管理端預覽與逐人寄送表格共用客戶名冊服務地址；資訊二省略重複地址。
+候選詢問與客戶推薦確認的預覽和寄送共用資訊二的「代購食材」欄位。Orders 借用 Case Import 的目前 BeClass 答案投影，依[媒合候選與客戶確認規格](../../../../../requirements/02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)顯示。
 
 ## Implementation
 - `subsystems/orders/order_information.py` — 共用 case-only 服務／照護內容與 saved-date 週說明 typed projection；逐人 Preview 保留 recipient-bound fingerprint，不建立假 assignment 或 candidate。
