@@ -190,9 +190,9 @@
     <div class="section">
       <fieldset id="profile-photos">
         <legend>履歷網頁照片與證照</legend>
-        <p class="help" id="photo-privacy-notice">上傳前請確認個資已經遮蔽，若無遮蔽則視為不介意讓客戶得知。</p>
+        <p class="help" id="photo-privacy-notice">這張照片審核後可能給客戶看。上傳前，請先蓋住身分證字號、地址和電話。</p>
         <div class="field-grid">
-          <label>模板項目<select id="photo-template"><option value="">請選擇項目</option></select></label>
+          <label>這是什麼照片？<select id="photo-template"><option value="">請選照片種類</option></select></label>
           <label>選擇照片<input id="photo-files" aria-describedby="photo-privacy-notice" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled></label>
         </div>
         <p class="help" id="photo-status" role="status"></p>
@@ -550,7 +550,7 @@ function showReceipt(receipt) {
   if (!Number.isSafeInteger(receipt?.id) || receipt.id <= 0
       || !Number.isSafeInteger(receipt.version) || receipt.version <= 0
       || !Object.hasOwn(applicationStatuses, receipt.status)) {
-    throw new Error("申請結果讀回不完整。");
+    throw new Error("還不知道工會有沒有收到這次申請。");
   }
   clearSubmission();
   form.reset();
@@ -563,11 +563,11 @@ function showReceipt(receipt) {
 function showRecovery(message) {
   enableForm(false);
   const queryOnly = submissionConflict || !pendingSubmission;
-  recovery.textContent = queryOnly ? "查詢原申請" : "重新送出";
+  recovery.textContent = queryOnly ? "查詢原申請" : "確認送出結果";
   recovery.hidden = false;
   const fallback = submissionConflict
-    ? "申請發生衝突，請查詢原申請或聯絡工會確認。"
-    : "尚未確認送件成功，請先確認原申請的結果。";
+    ? "這次沒有送出。請按「查詢原申請」，或聯絡工會。"
+    : "還不知道工會有沒有收到。請按「" + recovery.textContent + "」，不用再填一次。";
   show(message ?? fallback, "error");
 }
 
@@ -612,7 +612,7 @@ async function recoverSubmission() {
         show("正在重新送出原申請…");
         await sendSubmission(true);
       } else {
-        showRecovery("目前查無原申請，原填寫資料已無法復原。請查詢原申請或聯絡工會確認。");
+        showRecovery("目前查不到這份申請，這頁也沒有剛才填的資料。請聯絡工會確認後再填。");
       }
     } else {
       showReceipt(result);

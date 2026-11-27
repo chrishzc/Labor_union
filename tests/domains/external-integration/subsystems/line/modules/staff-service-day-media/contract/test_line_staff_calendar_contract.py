@@ -359,7 +359,7 @@ const settle = () => new Promise(setImmediate);
 
   responses.push(receipt, page([]));
   await nodes.get('submitUnavailBtn').click();
-  assert.match(status(nodes), /無法確認正式紀錄/);
+  assert.match(status(nodes), /已收到這次登記，但還沒在班表上查到/);
   assert.equal(nodes.get('submitUnavailBtn').textContent, '查詢登記結果');
   assert.equal(evaluate('refreshes'), 0);
   assert.deepEqual(requests.map(([path]) => path).slice(initialQueryCount), ['preview', 'apply', 'apply', 'query']);

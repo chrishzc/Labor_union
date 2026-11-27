@@ -559,7 +559,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             <div class="preview-summary" id="registrationPreviewSummary"></div>
             <div class="preview-actions">
                 <button type="button" class="btn-secondary" id="cancelRegistrationPreview">返回修改</button>
-                <button type="button" class="btn-submit" id="confirmRegistrationApply">確認套用這份登記預覽</button>
+                <button type="button" class="btn-submit" id="confirmRegistrationApply">確認並送出申請</button>
             </div>
         </div>
     </form>
@@ -1566,8 +1566,8 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
 
     function showRegistrationRetry() {
         const message = registrationConflict
-            ? '申請發生衝突，可能已有待審申請。請按「查詢原申請」或聯絡工會確認。'
-            : '尚未確認送件成功，請按「重新送出」。看到申請編號後即可關閉頁面。';
+            ? '這次沒有送出。你可能已經有一份申請在等工會審核。請先按「查詢原申請」，不用重填。'
+            : '還不知道工會有沒有收到。請按「確認送出結果」，不用重填。看到申請編號後就可以關掉這頁。';
         showRegistrationMessage(message, true);
     }
 
@@ -1577,7 +1577,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         const formLocked = registrationSubmissionPending || registrationResultUnknown || registrationConflict;
         form.inert = formLocked;
         document.getElementById('registrationPreviewButton').disabled = studioPreview || formLocked;
-        retry.textContent = registrationConflict ? '查詢原申請' : '重新送出';
+        retry.textContent = registrationConflict ? '查詢原申請' : '確認送出結果';
         retry.hidden = !registrationResultUnknown || studioPreview;
         retry.disabled = registrationSubmissionPending;
     }
@@ -1635,13 +1635,12 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         document.getElementById('statusMessage').style.display = 'none';
         const terminal = ['rejected', 'expired'].includes(receipt.identity_status);
         document.getElementById('reapplyButton').style.display = terminal ? 'block' : 'none';
-        const lifecycle = {pending_approval: '您可以關閉頁面，後續由工會審核。', approving: '工會正在處理這筆申請，您可以關閉頁面。', approved: '申請已核准，待審問卷內容已清除。', rejected: '申請已拒絕，問卷內容已清除。', expired: '申請已到期，問卷內容已清除。'};
+        const lifecycle = {pending_approval: '您可以關閉頁面，後續由工會審核。', approving: '工會正在處理這筆申請，您可以關閉頁面。', approved: '工會已核准你的申請。', rejected: '這次申請沒有通過。你可以聯絡工會，或重新申請。', expired: '這份申請已到期。請按「重新申請」。'};
         const successDescription = document.querySelector('.success-desc');
         successDescription.style.whiteSpace = 'pre-line';
         successDescription.textContent = [...new Set([
             lifecycle[receipt.identity_status],
             receipt.identity_status === 'pending_approval' ? runtimePage?.success_description : '',
-            receipt.expires_at_utc ? `待審到期：${new Date(receipt.expires_at_utc).toLocaleString('zh-TW', {timeZone:'Asia/Taipei'})}（台北時間）` : '',
             `申請編號：${receipt.registration_id}`,
         ])].filter(Boolean).join('\n');
         document.querySelector('.success-title').textContent = terminal ? (receipt.identity_status === 'expired' ? '申請已到期' : '申請已拒絕') : receipt.identity_status === 'approved' ? '申請已核准' : '申請已收到';
@@ -1711,7 +1710,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             || data.expected_binding_version < 0
             || !fingerprint.test(data.payload_fingerprint || '')
             || !fingerprint.test(data.preview_fingerprint || '')) {
-            throw new Error('預覽回應格式不完整，請勿送出並聯絡工會確認。');
+            throw new Error('這次沒有送出。請先聯絡工會，不用再填一次。');
         }
         return data;
     }
@@ -1723,12 +1722,11 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             return '登記連結已失效或已使用，請重新開啟客戶登記與綁定。';
         }
         const detail = result?.detail;
-        if (typeof detail === 'string') return detail;
-        const code = detail?.code || detail?.error?.code || result?.error?.code;
-        const message = detail?.message || detail?.error?.message || result?.error?.message;
-        if (code && message) return `${code}：${message}`;
-        if (message) return message;
-        return '發生未知錯誤，請重試。';
+        const message = typeof detail === 'string' ? detail : (detail?.message || detail?.error?.message || result?.error?.message);
+        if (typeof message === 'string' && message.trim() && !/^[a-z][a-z0-9_]+$/i.test(message.trim())) {
+            return message.trim();
+        }
+        return '這次沒有送出。請稍後再試；還是不行，請聯絡工會。';
     }
 </script>
 </body>

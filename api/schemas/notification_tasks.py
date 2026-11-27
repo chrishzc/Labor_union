@@ -70,6 +70,9 @@ class NotificationSource(StrEnum):
     RUNTIME = 'runtime'
 
 
+NotificationCategory = Literal['applications', 'identity', 'coordination', 'payments', 'groups']
+
+
 class ReceiptNotificationContext(BaseModel):
     model_config = ConfigDict(extra='forbid')
     payment_stage: Literal['deposit','first','second']
@@ -95,9 +98,9 @@ class NotificationItem(BaseModel):
     recipient: str | None = None
     message: str | None = None
     unavailable_reason: str | None = None
-    can_dismiss: bool = False
     expected_version: int | None = None
     delivery_status: str | None = None
+    can_dismiss: bool = False
     payment: PaymentSnapshot | None = None
     log: LogReminderContext | None = None
     failure: NotificationFailureContext | None = None
@@ -113,11 +116,11 @@ class NotificationPage(BaseModel):
 
 
 class NotificationSourceView(BaseModel):
-    category_id: str
-    category_label: str
     source: NotificationSource
     label: str
     group: Literal['review', 'reminder', 'support']
+    category_id: NotificationCategory
+    category_label: str
 
 
 class MobileNotificationQuery(BaseModel):

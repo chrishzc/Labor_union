@@ -61,8 +61,7 @@
 - 非市民正式頁與表單工作室預覽依 `NC-FORM-01～02` 呈現。新非市民送件明確傳入 `registration_kind="non_citizen"`，省略 `passbook_image_id`，不選圖、不呼叫共用存摺上傳入口，也不以空字串或虛構圖片識別代替缺席欄位。銀行代號、分行代碼、帳號及其他必填資料仍須合法。
 - 共用 `POST /api/v1/line/identity/registration/preview` 與 `POST /api/v1/line/identity/registration/apply` 的 request schema 及收件檢核依申請類型分流。`non_citizen` 可省略圖片欄位，兩入口均不得要求對應暫存圖；一般市民的 `subsidy` 類型維持圖片識別必填及同一已驗證 LINE 主體的暫存圖檢查。未指定類型維持既有 `subsidy` 語意，不因共用欄位可省略而放寬市民規則。非法銀行文字資料仍經原領域驗證拒絕，圖片移除不改身分、版本及同鍵重送契約。
 - Preview 的 `status=ready` 僅表示可供送件。Apply 使用既有 `Idempotency-Key`。專用 Redis 保存申請內容、申請編號及待審清單索引後，才回傳收件回執。待審回執的 `status=pending`／`identity_status=pending_approval` 與 `registration_id` 表示工會可讀回同一筆待審申請，此時 `client_id`、`beclass_record_id`、`case_no` 為 null。頁面取得有效收件回執即顯示「申請已收到」、申請編號及可關閉頁面。核准、正式建案及歸檔由 §3.2 接續處理。
-- 正式收件進入「通知事項 → 申請與資料」。桌面與手機重用本節同一份原申請待審 Query，只列原編號與收件時間；預覽、重送或已開始核准不建立第二筆。已處理或到期離開待審清單，服務不可用須明示。通知所有者不複製候選／問卷，不發送 LINE。
-- Apply 結果不明時，保留當次送件資料與原識別，顯示「尚未確認送件成功」並提供「重新送出」。同一時間只執行一次送件或查詢。按下後以同一 LINE 身分及原 `submission_id` 呼叫唯讀 `POST /api/v1/line/identity/registration/status`。有原回執即顯示該申請的實際狀態與編號。查詢成功且回 `not_received` 時，才以原識別與原內容重送 Apply。查詢故障維持未確認與重送入口，不視為未收件。若重新開頁且只剩原識別，先查原結果，確認目前未收件後才可重新填寫。問卷與憑證不寫入瀏覽器持久儲存。
+- Apply 結果不明時，保留當次送件資料與原識別，顯示「還不知道工會有沒有收到」並提供「確認送出結果」。同一時間只執行一次送件或查詢。按下後以同一 LINE 身分及原 `submission_id` 呼叫唯讀 `POST /api/v1/line/identity/registration/status`。有原回執即顯示該申請的實際狀態與編號。查詢成功且回 `not_received` 時，才以原識別與原內容重送 Apply。查詢故障維持未確認與重送入口，不視為未收件。若重新開頁且只剩原識別，先查原結果，確認目前未收件後才可重新填寫。問卷與憑證不寫入瀏覽器持久儲存。
 - Apply 回 `409 registration_conflict` 時，頁面顯示申請衝突，只提供「查詢原申請」。以同一 LINE 身分及原 `submission_id` 查到有效回執時，顯示原申請狀態與編號。查詢回 `not_received` 時，維持衝突提示並停止送件，不再呼叫 Apply、換新識別或建立新申請。查詢失敗時仍只允許查詢。已知衝突與原識別可在同一瀏覽器工作階段重新開頁後使用，仍依此處理。
 - Apply 仍須驗證 LINE 身分及請求內容。同一主體、同一識別及同內容回原申請，不覆寫或重複建件。原申請已存在時，回執可讀性不受暫存圖後續清理影響；需要首次收件才重驗圖片與目前送件條件。同鍵異內容回衝突；重新送出不使用修改後內容或另換識別。保留原收件操作，直到確認結果或由工會協助確認。
 
@@ -98,6 +97,9 @@
 
 ### 3.2 核准前問卷不得進 MySQL 與獨立 Redis 7 架構（`REG-BOUNDARY`、`REG-REDIS`、`REG-EXPIRY`）
 
+<a id="registration-review-readback"></a>
+
+- **待審清單及原申請讀回**。原審核清單以 Case Import 的 Redis 待審 Query 按 `registration_id` 分頁，只列正式收件且仍為 `pending` 的一般與非市民申請。Preview 不入列，同鍵重送只讀回原申請。`approving`、`approved`、`rejected`、`expired` 均不在待審清單內。申請轉入 `approving` 後，已開啟的原申請明細仍可憑同一 `registration_id` 查詢處理結果。明細以 `status` 區分處理中與可審核，只有 `pending` 且有原審核權限才提供核准操作。待審 Query 不可用時回傳查詢失敗，不能用空清單代替。
 - **`REG-BOUNDARY-01～06`（儲存與邊界隔離）**：
   - 查到待審申請只表示收件，不表示已建正式案件。核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
   - 對外收件容器 `registration-intake` 僅持 LIFF token 驗證與專用 `registration-redis` 受限 ACL（僅可讀寫待審內容與計數器命名空間，完全不配置 MySQL 憑證、網路路徑或審核決策權限）；瀏覽器僅呼叫 bounded API。
