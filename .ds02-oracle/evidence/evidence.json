@@ -117,7 +117,10 @@
   "checks": {
     "input_sha256": "passed",
     "whole_source_tree": "passed",
-    "git_diff_check": "passed",
+    "git_diff_check": {
+      "source_and_runner": "passed: original base through CI checkout 207daf6e5ea16b2a84671eafbf616bd9a2c603e5",
+      "final_evidence_diff": "warning: old.xml contains eight trailing-space lines in Vitest's captured DOM diagnostic; raw artifact bytes intentionally preserved, not normalized"
+    },
     "json_and_junit_four_each": "passed",
     "fixed_cases": "passed: 4/4",
     "old_sensitivity": "passed: 4/4 expected assertion failures; npm exit 1",
@@ -135,5 +138,11 @@
     "Structural architecture validation was not rerun here; prior fixed-patch closure evidence is separate from this behavioral CI result."
   ],
   "local_scope": "/tmp/lu-ds02-ci-oracle-20261127",
-  "remaining_blockers": []
+  "remaining_blockers": [],
+  "readback": {
+    "github_raw_files": "all five evidence files read back exactly",
+    "git_blob_bytes": "oracle-report.json, fixed.xml and old.xml match downloaded CI artifact bytes",
+    "artifact_sha256": "verified",
+    "post_evidence_runs": "Only the original CI run exists; evidence-only commit did not retrigger the branch-only workflow"
+  }
 }
