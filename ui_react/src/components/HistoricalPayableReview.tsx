@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { accountsPayableQueryClient, type HistoricalPayrollSyncItem, type HistoricalUnpaidPayableCommand } from '../api/accounts_payable/accounts_payable_query_client';
 import type { HistoricalPayableAuditItem } from '../api/accounts_payable/accounts_payable_query_schemas';
 import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
-import { ApiHttpError } from '../api/shared/typed_errors';
+import { ApiDecodeError, ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedChanges } from './UnsavedChanges';
 import { financeMoney } from './FinanceReceiptsWorkspace';
 
@@ -71,9 +71,15 @@ interface HistoricalPayableEditorProps {
 
 export function HistoricalPayableEditor(props: HistoricalPayableEditorProps) {
   const { item, onSaved, recheckRequired } = props;
-  if (recheckRequired || (item.disposition !== 'paid_or_settled' && (!item.obligation_identity || item.effective_due_date === null))) {
-    return <HistoricalPayableSync {...props} />;
-  }
+  const useSync = item.disposition !== 'paid_or_settled' && (!item.obligation_identity || item.effective_due_date === null);
+  if (useSync) return <HistoricalPayableSync {...props} />;
+  if (recheckRequired) return <>
+    <HistoricalPayableSync {...props} />
+    {item.disposition !== 'paid_or_settled' && <details className="case-accounting-card">
+      <summary>查看更正應付</summary>
+      <HistoricalPayableCorrection item={item} onSaved={onSaved} />
+    </details>}
+  </>;
   return <HistoricalPayableCorrection item={item} onSaved={onSaved} />;
 }
 
@@ -83,7 +89,7 @@ type HistoricalPayableSyncState =
   | { kind: 'recheck'; messages: string[] }
   | { kind: 'rechecking' };
 
-const historicalRecheckPending = '尚未查回所選月嫂的正式應付，結果待確認。';
+const historicalRecheckPending = '正式應付待確認。';
 
 function HistoricalPayableSync({ item, onSaved, recheckRequired, onRecheckRequired }: HistoricalPayableEditorProps) {
   const [localState, setState] = useState<HistoricalPayableSyncState>({ kind: 'sync', messages: [] });
@@ -135,8 +141,13 @@ function HistoricalPayableSync({ item, onSaved, recheckRequired, onRecheckRequir
     try {
       const accounting = await financeAccountingClient.query(item.case_no);
       setState({ kind: 'recheck', messages: [historicalRecheckMessage(item, accounting)] });
-    } catch {
-      setState({ kind: 'recheck', messages: [historicalRecheckPending] });
+    } catch (error) {
+      const reason = error instanceof ApiDecodeError
+        ? '回傳的案件或應付明細不一致，請在本案帳務核對。'
+        : error instanceof ApiHttpError && (error.status === 401 || error.status === 403)
+          ? '目前無法讀取本案帳務，請確認登入及查閱權限。'
+          : '本次帳務查詢失敗，請再按重新查核。';
+      setState({ kind: 'recheck', messages: [`${historicalRecheckPending} ${reason}`] });
     }
   }
 
@@ -159,22 +170,50 @@ function HistoricalPayableSync({ item, onSaved, recheckRequired, onRecheckRequir
 }
 
 function historicalRecheckMessage(item: HistoricalPayableAuditItem, accounting: CaseAccounting): string {
-  if (accounting.case_no !== item.case_no || item.staff_id === null) return historicalRecheckPending;
+  const pending = (detail: string) => `${historicalRecheckPending} ${detail}`;
+  if (accounting.case_no !== item.case_no) return pending('回傳的案號與所選案件不同，請從清冊重開本案。');
+  if (item.staff_id === null) return pending('清冊這一列沒有月嫂識別，請先在案件確認歷史服務歸屬。');
+
   const availability = accounting.staff_accounting_availability ?? [];
   const people = availability.filter(person => person.staff_id === item.staff_id);
   const [person] = people;
-  if (people.length !== 1 || !person || person.assignment_id === null || person.assignment_id <= 0 ||
-      person.status !== 'formal' || person.obligation_identities.length !== 1) return historicalRecheckPending;
+  if (people.length > 1) return pending('同一位月嫂有多筆歷史指派，請在案件核對服務歸屬。');
+  if (!person || person.assignment_id === null || person.assignment_id <= 0) {
+    return pending('本案帳務沒有回傳所選月嫂的有效歷史指派，請在案件核對服務歸屬。');
+  }
+  if (person.status !== 'formal') {
+    const reasons = [...new Set(person.pending_reasons)].flatMap(reason => {
+      const detail = historicalSyncMessages[reason] ?? historicalRecheckSourceMessages[reason];
+      return detail ? [detail] : [];
+    });
+    if (reasons.length > 0) return pending(`本案尚無該指派的正式應付。 ${reasons.join(' ')}`);
+    return pending('本案尚無該指派的正式應付，帳務未回傳原因。請在本案帳務核對服務量及計薪費率。');
+  }
   const [identity] = person.obligation_identities;
-  if (!identity?.trim() || availability.some(other => other !== person &&
+  if (person.obligation_identities.length !== 1 || !identity?.trim() || availability.some(other => other !== person &&
     (other.assignment_id === person.assignment_id || other.obligation_identities.includes(identity)))) {
-    return historicalRecheckPending;
+    return pending('本案已建帳，但無法唯一對上所選月嫂的指派與應付明細。請在本案帳務核對歸屬。');
   }
   const matches = accounting.staff_items.filter(row => row.identity === identity);
   const [payable] = matches;
-  if (matches.length !== 1 || payable?.direction !== 'payable') return historicalRecheckPending;
-  return `正式應付 ${financeMoney(payable.expected_ntd)} · 付款日 ${payable.due_date ?? '待確認'}`;
+  if (matches.length !== 1 || payable?.direction !== 'payable') {
+    return pending('本案已建帳，但帳務查詢找不到對應的正式應付明細。請在本案帳務核對。');
+  }
+  const amount = `正式應付 ${financeMoney(payable.expected_ntd)}`;
+  const portions = payable.funding_portions;
+  if (!portions?.length) return `${amount} · 付款日 ${payable.due_date ?? '待確認'}`;
+  const dates = portions.map(({ funding_kind, due_date }) =>
+    `${funding_kind === 'client' ? '自備款' : '補助款'}付款日${due_date ? ` ${due_date}` : '待確認'}`,
+  );
+  return [amount, ...dates].join(' · ');
 }
+
+const historicalRecheckSourceMessages: Record<string, string> = {
+  historical_payroll_assignment_source_missing: '請在案件核對歷史月嫂指派及服務歸屬。',
+  historical_payroll_assignment_source_ambiguous: '歷史指派來源不唯一，請在案件核對服務歸屬。',
+  historical_payroll_service_attribution_missing: '請先按月嫂確認各人的實際服務量。',
+  historical_service_not_completed: '歷史服務尚未完成，請在完工後查核正式應付。',
+};
 
 const historicalSyncMessages: Record<string, string> = {
   historical_payroll_unique_assignment_required: '請確認本案唯一的歷史月嫂指派。',

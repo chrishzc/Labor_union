@@ -158,6 +158,19 @@ const sameNameAccounting: CaseAccounting = {
   staff_accounting_availability: [sameNameUnconfirmed, selectedAssignment],
 };
 
+const bothFormalAccounting: CaseAccounting = {
+  ...sameNameAccounting,
+  payable_ntd: 80100,
+  staff_items: [...sameNameAccounting.staff_items, {
+    identity: 'original-43', direction: 'payable', label: '月嫂付款', party: selectedAssignment.party,
+    expected_ntd: 32100, actual_ntd: 0, has_payment: false, remaining_ntd: 32100,
+    version: '1', due_date: '2026-10-25',
+  }],
+  staff_accounting_availability: [selectedAssignment, {
+    ...sameNameUnconfirmed, status: 'formal', obligation_identities: ['original-43'], pending_reasons: [],
+  }],
+};
+
 async function recheckAfterSyncTimeout(item: HistoricalPayableAuditItem, accounting?: CaseAccounting) {
   vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-contract-token');
   const post = vi.spyOn(transport, 'post').mockRejectedValue(new ApiTimeoutError(10_000));
@@ -199,12 +212,73 @@ it('DS-02 同案同名依原選取月嫂查回正式金額，原付款日未定�
   expect(result).not.toHaveTextContent(/39,000|27,000|2026-10-20/);
 });
 
+it('DS-02 分筆付款尚有未定日期時，只顯示各筆的正式付款日', async () => {
+  const accounting: CaseAccounting = {
+    ...sameNameAccounting,
+    staff_items: sameNameAccounting.staff_items.map(item => ({
+      ...item,
+      due_date: '2026-10-30',
+      funding_portions: [{
+        funding_kind: 'client', amount_ntd: 30000, due_date: '2026-10-15',
+        settled_ntd: 0, remaining_ntd: 30000,
+      }, {
+        funding_kind: 'subsidy', amount_ntd: 18000, due_date: null,
+        settled_ntd: 0, remaining_ntd: 18000,
+      }],
+    })),
+  };
+  await recheckAfterSyncTimeout(pending, accounting);
+
+  const status = screen.getByRole('status');
+  expect(status).toHaveTextContent(/正式應付[^\d]*48,000/);
+  expect(status).toHaveTextContent(/自備款付款日.*2026-10-15/);
+  expect(status).toHaveTextContent(/補助款.*付款日待確認/);
+  expect(status).not.toHaveTextContent('2026-10-30');
+});
+
+it('DS-02 同名乙尚無正式應付時，顯示保存時薪待查核，而非旁人的金額或估算', async () => {
+  const result = await recheckAfterSyncTimeout({ ...pending, staff_id: 43 }, sameNameAccounting);
+
+  expect(screen.getByRole('status')).toHaveTextContent('請查核本案保存的月嫂時薪');
+  expect(result).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20/);
+});
+
+it('DS-02 正式關聯唯一但缺明細時，顯示已建帳並指出缺少正式應付明細', async () => {
+  const accounting: CaseAccounting = {
+    ...sameNameAccounting,
+    staff_accounting_availability: [selectedAssignment, {
+      ...sameNameUnconfirmed, status: 'formal', obligation_identities: ['missing-43'], pending_reasons: [],
+    }],
+  };
+  const result = await recheckAfterSyncTimeout({ ...pending, staff_id: 43 }, accounting);
+
+  const status = screen.getByRole('status');
+  expect(status).toHaveTextContent('已建帳');
+  expect(status).toHaveTextContent('找不到對應的正式應付明細');
+  expect(result).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20/);
+});
+
+it('DS-02 原有更正資格不因同步結果待確認而消失，保留獨立更正入口', async () => {
+  const post = vi.spyOn(transport, 'post');
+  render(<HistoricalPayableEditor item={{
+    ...pending, obligation_identity: 'original-42', current_event_id: 1,
+    source: 'formal_obligation', disposition: 'selected_month', amount_due_ntd: 48000,
+    balance_ntd: 48000, effective_due_date: '2026-10-15',
+  }} recheckRequired onSaved={vi.fn()} />);
+
+  expect(screen.getByRole('button', { name: '重新查核' })).toBeInTheDocument();
+  fireEvent.click(screen.getByText('查看更正應付', { selector: 'summary' }));
+
+  expect(screen.getByLabelText('原應付金額')).toHaveValue(48000);
+  expect(screen.getByLabelText('原付款日')).toHaveValue('2026-10-15');
+  expect(post).not.toHaveBeenCalled();
+});
+
 const inconclusiveCases: {
   name: string;
   staffId: HistoricalPayableAuditItem['staff_id'];
   accounting?: CaseAccounting;
 }[] = [
-  { name: '選到同名但無正式證據的另一位月嫂', staffId: 43, accounting: sameNameAccounting },
   { name: '原選取列無人員 ID', staffId: null, accounting: sameNameAccounting },
   {
     name: '同一人有多筆無法區分的指派',
@@ -241,7 +315,7 @@ it.each(inconclusiveCases)('DS-02 $name：仍待確認，不顯示旁人金額�
   expect(result).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20/);
 });
 
-it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只讀取乙的結果', async () => {
+it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且查回乙自己的正式金額', async () => {
   vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-contract-token');
   const secondRow: HistoricalPayableAuditItem = {
     ...pending, staff_id: 43, reason: '第二位同名月嫂的原列待確認。',
@@ -253,7 +327,7 @@ it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只�
   });
   const post = vi.spyOn(transport, 'post').mockRejectedValue(new ApiTimeoutError(10_000));
   const get = vi.spyOn(transport, 'get').mockResolvedValue({
-    success: true, message: '已查詢', data: sameNameAccounting,
+    success: true, message: '已查詢', data: bothFormalAccounting,
   });
   const previousUrl = window.location.href;
   window.history.replaceState(null, '', '#finance?tab=monthly');
@@ -278,7 +352,7 @@ it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只�
     const firstResult = firstReview.getByRole('status');
     expect(firstResult).toHaveTextContent(/正式應付[^\d]*48,000/);
     expect(firstResult).toHaveTextContent(/付款日[^\d]*待確認/);
-    expect(firstResult).not.toHaveTextContent(/同步成功|同步完成|39,000|27,000|2026-10-20/);
+    expect(firstResult).not.toHaveTextContent(/同步成功|同步完成|32,100|39,000|27,000|2026-10-20/);
     expect(firstReview.queryByText(pending.reason)).not.toBeInTheDocument();
     expect(get).toHaveBeenCalledTimes(1);
 
@@ -296,7 +370,9 @@ it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只�
     expect(post).toHaveBeenCalledTimes(1);
     await act(async () => { fireEvent.click(secondRecheck); });
 
-    expect(secondReview.getByRole('status')).toHaveTextContent('待確認');
+    const secondResult = secondReview.getByRole('status');
+    expect(secondResult).toHaveTextContent(/正式應付[^\d]*32,100/);
+    expect(secondResult).toHaveTextContent('2026-10-25');
     expect(secondRegion).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20|同步成功|同步完成/);
     expect(get.mock.calls).toEqual([
       ['/api/v1/finance-import/cases/CASE-OLD-1/accounting', expect.any(Object)],
