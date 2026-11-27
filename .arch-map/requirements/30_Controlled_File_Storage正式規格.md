@@ -72,7 +72,7 @@ POST /api/v1/system/storage-retention/apply
 
 <a id="registered-read-evidence"></a>
 
-- **已登錄檔案讀取證據**：受控儲存只有在確認 staging payload 缺失、metadata 指向的正式位置查無檔案，且仍可讀回同一儲存根目錄及相同 metadata 時，才回報正式檔案缺失。登錄資訊不足、讀取過程中檔案消失、儲存或權限故障時，缺失未獲確認。已讀檔案的大小或 SHA-256 不符時，回報完整性不符。讀取本身不執行對帳或修復。
+- **已登錄檔案讀取證據**：受控儲存只有在確認 staging payload 缺失、metadata 指向的正式位置查無檔案，且可確認讀取登錄資訊前與重讀相同 metadata 後的儲存根目錄身分一致時，才回報正式檔案缺失。相同儲存路徑與 metadata 內容不足以證明根目錄身分一致。根目錄身分無法確認、登錄資訊不足、讀取過程中檔案消失、儲存或權限故障時，缺失未獲確認。已讀檔案的大小或 SHA-256 不符時，回報完整性不符。讀取本身不執行對帳或修復。
 
 ## 6. Storage／Backup Readiness
 

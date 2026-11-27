@@ -9,10 +9,12 @@ import hashlib
 import os
 from datetime import timedelta
 from pathlib import Path
+from stat import ST_INO
 import uuid
 
 import pytest
 
+from infrastructure.file import controlled_file_storage
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
 from subsystems.controlled_files.contracts import (
     ControlledFileStorageError,
@@ -296,6 +298,88 @@ def test_registered_staging_read_remains_available_after_staging_ttl(tmp_path: P
 
     assert expired.value.code == "controlled_file_staging_expired"
     assert registered.content == content
+
+
+def test_registered_finalized_missing_requires_known_root_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"registered-content"
+    digest = hashlib.sha256(content).hexdigest()
+    storage = FileSystemControlledFileStorage(tmp_path)
+    staged = storage.put_staged(
+        idempotency_key="controlled-file:registered-identity",
+        filename="contract.pdf",
+        mime_type="application/pdf",
+        content=content,
+    )
+    reference = "orders/CASE-IDENTITY/contract.pdf"
+    storage.finalize_staged(staged.staging_id, expected_sha256=digest, object_reference=reference)
+    final_path = tmp_path / reference
+    original_stat = Path.stat
+
+    def stat_without_root_identity(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        result = original_stat(path, follow_symlinks=follow_symlinks)
+        if path != tmp_path:
+            return result
+        fields = list(result)
+        fields[ST_INO] = 0
+        return os.stat_result(fields)
+
+    with monkeypatch.context() as root_identity:
+        root_identity.setattr(Path, "stat", stat_without_root_identity)
+        assert storage.read_registered_staged(staged.staging_id, expected_sha256=digest).content == content
+        final_path.unlink()
+        with pytest.raises(ControlledFileStorageError) as unconfirmed:
+            storage.read_registered_staged(staged.staging_id, expected_sha256=digest)
+        assert unconfirmed.value.code == "controlled_file_staging_reconciliation_required"
+
+    with pytest.raises(ControlledFileStorageError) as missing:
+        storage.read_registered_staged(staged.staging_id, expected_sha256=digest)
+    assert missing.value.code == "controlled_file_not_found"
+
+
+def test_registered_finalized_missing_rechecks_root_after_metadata_reread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    content = b"registered-content"
+    digest = hashlib.sha256(content).hexdigest()
+    storage = FileSystemControlledFileStorage(root)
+    staged = storage.put_staged(
+        idempotency_key="controlled-file:registered-late-replacement",
+        filename="contract.pdf",
+        mime_type="application/pdf",
+        content=content,
+    )
+    reference = "orders/CASE-IDENTITY/contract.pdf"
+    storage.finalize_staged(staged.staging_id, expected_sha256=digest, object_reference=reference)
+    (root / reference).unlink()
+    metadata_suffix = Path("_staging", "objects", staged.staging_id[:2], staged.staging_id, "metadata.json")
+    replacement = tmp_path / "replacement"
+    replacement_metadata = replacement / metadata_suffix
+    replacement_metadata.parent.mkdir(parents=True)
+    replacement_metadata.write_bytes((root / metadata_suffix).read_bytes())
+    original_root = root.stat()
+    reads = 0
+    read_metadata = controlled_file_storage._read_json
+
+    def replace_root_on_reread(path: Path) -> dict[str, object]:
+        nonlocal reads
+        metadata = read_metadata(path)
+        assert path == root / metadata_suffix
+        reads += 1
+        if reads == 2:
+            root.rename(tmp_path / "original")
+            replacement.rename(root)
+        return metadata
+
+    monkeypatch.setattr(controlled_file_storage, "_read_json", replace_root_on_reread)
+    with pytest.raises(ControlledFileStorageError) as unconfirmed:
+        storage.read_registered_staged(staged.staging_id, expected_sha256=digest)
+    assert reads == 2
+    assert not os.path.samestat(original_root, root.stat())
+    assert unconfirmed.value.code == "controlled_file_staging_reconciliation_required"
 
 
 def test_staging_ttl_is_configurable_and_defaults_are_not_mutated(tmp_path: Path) -> None:

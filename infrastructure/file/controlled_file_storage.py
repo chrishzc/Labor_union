@@ -694,6 +694,10 @@ class FileSystemControlledFileStorage:
         *,
         missing_ok: bool = False,
     ) -> tuple[dict[str, object], bytes]:
+        try:
+            root_before = root.stat()
+        except OSError:
+            root_before = None
         object_directory = self._staging_object_directory(root, staging_id)
         metadata_path = object_directory / "metadata.json"
         payload_path = object_directory / "payload.bin"
@@ -762,7 +766,13 @@ class FileSystemControlledFileStorage:
                 if final_error.code != "controlled_file_not_found":
                     raise
                 try:
-                    same_record = self._require_ready_root() == root and _read_json(metadata_path) == metadata
+                    same_record = (
+                        root_before is not None
+                        and root_before.st_ino > 0
+                        and self._require_ready_root() == root
+                        and _read_json(metadata_path) == metadata
+                        and os.path.samestat(root_before, root.stat())
+                    )
                 except (OSError, ValueError):
                     same_record = False
                 if same_record:
