@@ -50,10 +50,10 @@
 - [Case Import §3.2](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#32-核准前問卷不得進-mysql-與獨立-redis-7-架構reg-boundaryreg-redisreg-expiry) 是正式建案、原申請回執與收尾條件的權威。`subsystems/line/identity_application.py` 同交易提交正式資料及原申請回執；提交後由 `subsystems/case_import/registration_staging.py` 依有圖／無圖條件完成歸檔或直接完成 Redis 收尾。歸檔失敗不等於 SQL 回滾；復原沿用原申請與操作，不另配案件編號。
 - 管理端在核准中使用「查詢原申請處理結果」；唯讀 detail 可回 `status=approving`、`approved=false`、原 `case_no` 和 `approved_at_utc`，但不回問卷欄位。案號和時間只證明已有 SQL 回執，不能據此認定歸檔、Redis 收尾或 LINE 投遞已完成。
 
-## Current evidence and planned change
+## Current implementation
 
-- 現況來源是 `api/schemas/line_identity.py`：共用 request 的 `passbook_image_id` 仍為非空字串必填，`registration_kind` 未指定時為 `subsidy`。`api/registration_intake.py::preview`／`submit` 均呼叫 `_require_passbook_staged`，查找同一已驗證 LINE 主體的暫存圖。這是來源走讀，不能當作已按申請類型分流的證據。
-- 目標分流以 [Case Import §3.1「送件欄位與原申請查詢」](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#送件欄位與原申請查詢) 為準。接手者須同時對齊共用 schema、Preview 與 Apply 的暫存圖檢核，保留 `subsidy` 的原檢查，不能只移除前端控制項或只把欄位改為全域選填。目標及 `NC-PASSBOOK-01～04` 尚待程式實作與行為驗證。
+- 候選版本 `9dd304bc70b1922058b9bb5d854ca37b3bec5365` 的 `api/schemas/line_identity.py` 以 `registration_kind` 區分圖片必填條件。`non_citizen` 可省略 `passbook_image_id`；`subsidy` 及未指定類型仍由 model validator 要求非空圖片識別。Domain builder 同步允許非市民無圖，且不將缺席圖片寫入 `_liff_meta`，銀行文字驗證保留。
+- `api/registration_intake.py::preview`／`submit` 均以後端建立的 candidate 呼叫 `_require_passbook_staged`。僅無圖的 `non_citizen` 略過圖片查詢；只要實際提供圖片識別，仍驗證同一已驗證 LINE 主體的暫存圖。兩入口已對齊 [Case Import §3.1「送件欄位與原申請查詢」](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#送件欄位與原申請查詢)，共用上傳入口及已送件舊案流程保留。
 
 ## Handoff boundaries
 
@@ -66,7 +66,8 @@
 由核准／歸檔端反向走讀時，先以原申請與操作核對 SQL 回執，再依 Case Import §3.2 判斷是否有圖；Controlled File 不反推收集資格。回到 §3.1.2 可區分舊待審與已歸檔資料，最後由 LINE presentation 找到原畫面與正式送件入口。此處是原文導航，不表示 Archmap 索引工具已成功正查或反查。
 
 ## Verification
-- 待驗情境：用附有合成存摺封面的非市民申請。令第一次核准在 SQL 提交後、受控歸檔時失敗；以管理端唯讀查原申請，再讓復原作業用同一操作完成。預期中斷時仍只有一筆正式案件，原案號可讀但未顯示核准完成；恢復後歸檔可讀、原問卷及暫存圖已清理，同案號進入已核准。再次查詢或重送同一核准不再建案。驗證不接正式 LINE。
+- 候選 `9dd304bc…` 的[專項 CI](https://github.com/chrishzc/Labor_union/actions/runs/45854012939/job/140027497325) 通過 41 個表單／API 案例及 1 個隔離 MySQL 案例。無圖非市民已覆蓋 Preview／Apply／原申請查詢，並以真實 MySQL writer、原操作回執、同案號重送及正式 Client Registry Query 驗證核准與建案讀回；市民圖片必填及銀行文字反例保留。真 Redis 跨儲存端到端、正式附件實體歸檔環境與真實 LINE provider 未在此專項執行。
+- 已覆蓋情境（替身 port）：非市民舊待審已附圖，模擬 SQL 已提交而受控歸檔失敗。原申請仍為 `approving` 且可回讀原案號；復原沿同一操作及回執，歸檔 port 確認成功後才完成待審終態、清除問卷及原暫存圖，不重複建案。終態替身會清除 candidate，覆蓋 recover 必須使用原 snapshot 刪圖的行為。
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/provisional-registration/` — 專用真 Redis／ACL／AOF 與無 SQL intake 驗收；不共用現有 cache instance。
 - integration_root: `tests/domains/case-import/subsystems/case-import/integration/test_registration_staged_approval_mysql.py` — 新核准最小 SQL parent、正式欄位及 receipt 同交易。
 - layout_status: `custom_current`

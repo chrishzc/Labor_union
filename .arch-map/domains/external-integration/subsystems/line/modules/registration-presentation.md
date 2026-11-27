@@ -24,8 +24,8 @@
 - outbound: `case-import` — 只經既有 typed registration Preview／Apply contract 建立或讀取 provisional registration。
 - outbound: `external LINE LIFF runtime` — 已驗證身分的瀏覽器 transport；不得以 query string user ID 作身分證明。
 
-## Planned change
-- 非市民銀行存摺圖片移除尚待實作及行為驗收。影響正式頁、表單工作室唯讀預覽、本地驗證與送件資料；一般需求調查維持原圖片規則。驗收以 Case Import `NC-PASSBOOK-01～04` 為準。後端共用 schema、Preview／Apply 與核准收尾的現況及目標差異，見 [Case Import provisional-registration](../../../../case-import/subsystems/case-import/modules/provisional-registration.md#current-evidence-and-planned-change)，不能把畫面移除視為後端已放行無圖。
+## Implementation status
+- 候選版本 `9dd304bc70b1922058b9bb5d854ca37b3bec5365` 已移除非市民正式頁與表單工作室唯讀預覽的存摺圖片控制項、本地圖片驗證及上傳動作。正式送件明傳 `registration_kind="non_citizen"` 並省略 `passbook_image_id`；銀行文字欄位與原驗證保留，一般市民維持圖片必填及原上傳流程。後端共用 schema、Preview／Apply 與核准收尾的實作見 [Case Import provisional-registration](../../../../case-import/subsystems/case-import/modules/provisional-registration.md#current-implementation)，驗收依 Case Import `NC-PASSBOOK-01～04`。
 
 ## Contracts
 - [LINE §5.2](../../../../../requirements/20_LINE客服與月嫂自助服務正式規格.md#52-手機審核中心db-版控-liff-設定與非市民入口契約) — LIFF 設定、非市民入口及正式頁／表單工作室預覽邊界。
@@ -35,7 +35,9 @@
 - Apply 成功呈現待工會核准及申請編號；未核准時 client／beclass IDs 為 null，不宣稱完成綁定或已建立正式客戶。
 
 ## Verification
-- test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py` — 既有靜態案例核對初始化失敗分支會顯示錯誤，並停用表單所有控制項。
+- test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py` — Chromium 驗證非市民正式頁、工作室預覽及市民表單的實際 DOM 與送件序列；既有靜態案例保留初始化失敗時停用控制項等檢查。
+
+- 候選 `9dd304bc…` 的[專項 CI](https://github.com/chrishzc/Labor_union/actions/runs/45854012939/job/140027497325) 已執行並通過 41 個表單／API 案例及 1 個隔離 MySQL 案例，包含正式頁與工作室無圖片入口、非市民零上傳、市民圖片規則及銀行文字驗證。Chromium 使用合成 LIFF／API 回應；不代表正式環境已部署或真實 LINE provider 已驗收。
 
 ## Change triggers
 Reconcile when registration page、local input validation、Preview／Apply entrypoint、LIFF identity boundary 或 focused static contract test changes。
