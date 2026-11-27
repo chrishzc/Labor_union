@@ -267,8 +267,14 @@ def test_caregiver_liff_pages_senior_friendly_contract() -> None:
 
     profile = (ROOT / "line" / "static" / "staff_profile_update.html").read_text(encoding="utf-8")
     assert "bank_branch_code" in profile
-    assert "8小時(08:30-17:00)" in profile
-    assert "4小時(08:30-12:30)" in profile
+    start = profile.index("function formatCanonicalPeriod(")
+    end = profile.index("function parseServicePeriods(", start)
+    runner = profile[start:end] + """
+const assert = require('node:assert/strict');
+assert.equal(formatCanonicalPeriod("8小時", "08:30"), "8小時(08:30-17:00)");
+assert.equal(formatCanonicalPeriod("4小時", "08:30"), "4小時(08:30-12:30)");
+"""
+    subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
 
 
 def test_staff_availability_ui_requires_original_receipt_and_formal_readback() -> None:
