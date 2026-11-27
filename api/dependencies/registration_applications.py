@@ -135,19 +135,29 @@ def get_registration_staging_repository():
     return RedisRegistrationStagingRepository(registration_redis_client(role="admin"))
 
 
-@lru_cache(maxsize=1)
-def get_registration_review_application():
+def _registration_review_application(*, initialize_staging: bool) -> RegistrationReviewApplication:
     try:
         staging = get_registration_staging_repository()
     except RegistrationRedisConfigurationError:
         raise typed_http_error(503, "unavailable", "registration_storage_not_configured",
                                "申請暫存服務尚未完成設定。", uuid4().hex) from None
     formal = get_line_identity_application()
-    try:
-        staging.ensure_initialized()
-    except Exception:
+    if initialize_staging:
         try:
-            staging.initialize(formal.registration_id_high_water(), shared_instance=True)
+            staging.ensure_initialized()
         except Exception:
-            pass
+            try:
+                staging.initialize(formal.registration_id_high_water(), shared_instance=True)
+            except Exception:
+                pass
     return RegistrationReviewApplication(staging, formal, passbook_archiver=_archive_client_passbook_cover)
+
+
+@lru_cache(maxsize=1)
+def get_registration_review_application() -> RegistrationReviewApplication:
+    return _registration_review_application(initialize_staging=True)
+
+
+@lru_cache(maxsize=1)
+def get_registration_review_query_application() -> RegistrationReviewApplication:
+    return _registration_review_application(initialize_staging=False)

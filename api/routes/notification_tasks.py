@@ -6,7 +6,8 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from api.dependencies.admin_auth import require_admin, admin_actor_context, has_required_capability
 from api.dependencies.import_field_issues import build_import_field_issues_query
-from api.dependencies.line_identity import get_line_identity_application, get_line_identity_review_application
+from api.dependencies.line_identity import get_line_identity_review_application
+from api.dependencies.registration_applications import get_registration_review_query_application
 from api.dependencies.staff_profile_change import staff_profile_change_staging
 from api.dependencies.line_runtime import get_line_order_group_query_application, get_line_delivery_task_admin_application
 from api.dependencies.service_start import get_service_start_application
@@ -15,7 +16,10 @@ from api.dependencies.payment_overdue_reminders import get_payment_overdue_remin
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
-from api.schemas.notification_tasks import NotificationSource as Source, NotificationItem as Item, NotificationPage, NotificationSourceView, MobileNotificationQuery, NotificationCursor
+from api.schemas.notification_tasks import (
+    MobileNotificationQuery, NotificationCategory, NotificationCursor, NotificationItem as Item,
+    NotificationPage, NotificationSource as Source, NotificationSourceView,
+)
 from subsystems.anomalies.current_issue_query import CurrentIssueCursorCodec, CurrentIssueListRequest
 from subsystems.line.notification_failure_current_fact import LineNotificationFailureCurrentFactQuery, LineNotificationFailureReason
 from domains.line.review import LineReviewStatus
@@ -66,20 +70,24 @@ def _allowed(principal, source):
     return capability is None or has_required_capability(principal, str(capability))
 
 
-_EXCLUDED_TODO_SOURCES = frozenset({
-    Source.RUNTIME,
-    Source.DELIVERY,
-    Source.NOTIFICATION_FAILURE,
-})
+_WORK_CATEGORIES: tuple[tuple[NotificationCategory, str, tuple[Source, ...]], ...] = (
+    ('applications', '申請與資料', (Source.REGISTRATION, Source.STAFF_PROFILE, Source.IMPORT_FIELDS)),
+    ('identity', 'LINE 身分', (Source.IDENTITY, Source.CUSTOMER_BINDING, Source.STAFF_BINDING)),
+    ('coordination', '媒合、簽約與交接', (Source.FOLLOWUP, Source.RECOMMENDATION, Source.SERVICE_START)),
+    ('payments', '款項', (Source.DEPOSIT, Source.RECEIPT, Source.OVERDUE)),
+    ('groups', '案件群組', (Source.GROUP,)),
+)
 _DESKTOP_ONLY_SOURCES = frozenset({Source.STAFF_PROFILE, Source.IMPORT_FIELDS})
 
 
 def _catalog(principal, *, mobile=False):
-    return [NotificationSourceView(source=key, label=value[0], group=value[1])
-            for key, value in SOURCES.items()
-            if key not in _EXCLUDED_TODO_SOURCES
-            and not (mobile and key in _DESKTOP_ONLY_SOURCES)
-            and _allowed(principal, key)]
+    return [
+        NotificationSourceView(source=source, label=SOURCES[source][0], group=SOURCES[source][1],
+                               category_id=category_id, category_label=category_label)
+        for category_id, category_label, sources in _WORK_CATEGORIES
+        for source in sources
+        if not (mobile and source in _DESKTOP_ONLY_SOURCES) and _allowed(principal, source)
+    ]
 
 
 def _item(source, identity, title, summary, reason, **kwargs):
@@ -123,10 +131,14 @@ def _read_source(source, cursor, principal):
     items = []
     total = None
     if source == Source.REGISTRATION:
-        rows = get_line_identity_application().pending_registrations(after_id=cursor, limit=SIZE)
-        items = [_item(source, r.registration_id, '服務登記待審核', '已提交需求表單，請核對申請內容。',
-                       '核准後沿原流程建立客戶資料與綁定。', reference_id=r.registration_id,
-                       person=str(r.candidate.client_payload['name'])) for r in rows]
+        rows = get_registration_review_query_application().pending_registrations(after_id=cursor, limit=SIZE)
+        items = [
+            _item(source, row.registration_id,
+                  '非市民申請待審核' if row.registration_kind == 'non_citizen' else '服務登記待審核',
+                  '已提交需求表單，請核對申請內容。', '請從原申請進入審核。',
+                  reference_id=row.registration_id, time=row.submitted_at_utc.isoformat())
+            for row in rows if row.status == 'pending'
+        ]
         return NotificationPage(items=items, next_cursor=rows[-1].registration_id if len(rows) == SIZE else None)
     if source == Source.IDENTITY:
         result = get_line_identity_review_application().list(LineReviewListQuery(
@@ -137,21 +149,30 @@ def _read_source(source, cursor, principal):
                        person={'customer':'客戶','staff':'月嫂','admin':'工會人員'}.get(r.subject_type.value if r.subject_type else '', '申請人')) for r in result.items]
     elif source in (Source.CUSTOMER_BINDING, Source.STAFF_BINDING):
         from api.routes.line_identity_management import _application
-        role = LineBindingSubjectType.CUSTOMER if source == Source.CUSTOMER_BINDING else LineBindingSubjectType.STAFF
-        label = '客戶' if role is LineBindingSubjectType.CUSTOMER else '月嫂'
+        is_customer = source == Source.CUSTOMER_BINDING
+        role = LineBindingSubjectType.CUSTOMER if is_customer else LineBindingSubjectType.STAFF
         result = _application().binding_reminders(LineIdentityCandidateQuery(role, page=page, page_size=SIZE))
         total = result.total
-        guidance = ('客戶請核對姓名與電話。' if role is LineBindingSubjectType.CUSTOMER
-                    else '月嫂請核對姓名、身分證字號與生日。')
-        exit_condition = ('完成綁定，或案件取消、完工後，此事項自動移除；不需提醒時可按「移除提醒」。'
-                          if role is LineBindingSubjectType.CUSTOMER else
-                          '完成綁定，或月嫂停用、暫停、退役後，此事項自動移除。')
-        items = [_item(source, r.subject_reference, f'人工提醒{label}綁定 LINE',
-                       '請透過電話等既有聯絡方式，提醒本人加入官方帳號並完成身分綁定。',
-                       '尚未綁定 LINE，需透過其他方式聯絡。' + exit_condition,
-                       reference_id=int(r.subject_reference), case_no=r.case_no, person=r.subject_name,
-                       tag='待人工提醒', recipient=r.phone,
-                       message=f'請加入工會 LINE 官方帳號並完成{label}身分綁定。{guidance}') for r in result.items]
+        if is_customer:
+            can_manage = has_required_capability(principal, str(Cap.IDENTITY_BINDING_MANAGE))
+            for row in result.items:
+                reference_id = int(row.subject_reference)
+                case_no = row.case_no or ''
+                items.append(_item(source, f'{reference_id}:{case_no}', '人工提醒客戶綁定 LINE',
+                                   '本案客戶尚未綁定 LINE。', '完成綁定，或案件取消、完工後，此事項自動移除。',
+                                   reference_id=reference_id, case_no=row.case_no, person=row.subject_name,
+                                   tag='待人工提醒',
+                                   can_dismiss=can_manage and reference_id > 0 and bool(case_no.strip())))
+        else:
+            items = [
+                _item(source, row.subject_reference, '人工提醒月嫂綁定 LINE',
+                      '請透過電話等既有聯絡方式，提醒本人加入官方帳號並完成身分綁定。',
+                      '尚未綁定 LINE，需透過其他方式聯絡。完成綁定，或月嫂停用、暫停、退役後，此事項自動移除。',
+                      reference_id=int(row.subject_reference), case_no=row.case_no, person=row.subject_name,
+                      tag='待人工提醒', recipient=row.phone,
+                      message='請加入工會 LINE 官方帳號並完成月嫂身分綁定。月嫂請核對姓名、身分證字號與生日。')
+                for row in result.items
+            ]
     elif source == Source.STAFF_PROFILE:
         rows, next_cursor = staff_profile_change_staging().pending(cursor, SIZE)
         items = [_item(source, row['id'], '月嫂資料異動待審核', '月嫂已提出資料異動。',

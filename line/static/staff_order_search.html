@@ -105,7 +105,7 @@ function renderResults(items) {
   const root = document.getElementById("results");
   root.replaceChildren();
   if (!items.length) {
-    showStatus("查無可檢視的訂單。請確認案件編號/姓名是否正確，且該案件已指派給您。", true);
+    showStatus("找不到你可以看的案件。請核對案件編號或客戶姓名；如果還是找不到，請問工會。", true);
     return;
   }
   showStatus(`共找到 ${items.length} 筆訂單。`);
@@ -197,7 +197,7 @@ async function loadOrders(keyword = "") {
     renderResults(requireStaffOrderPage(data.data).items);
   } catch (_) {
     document.getElementById("results").replaceChildren();
-    showStatus("訂單查詢結果格式錯誤，請聯絡工會人員。", true);
+    showStatus("目前查不到案件資料，請聯絡工會。", true);
   }
 }
 

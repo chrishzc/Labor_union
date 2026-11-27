@@ -41,7 +41,7 @@ Description: 提供已驗證月嫂依目標付款月份查詢本人逐案薪資�
 <body>
 <main>
   <h1>薪資請款明細</h1>
-  <p>按預計付款月份查看你的逐案薪資與付款紀錄。</p>
+  <p>選一個月份，就能看每個案件的薪資和付款紀錄。</p>
   <section class="panel" aria-labelledby="queryTitle">
     <h2 id="queryTitle">選擇付款月份</h2>
     <div class="controls">
@@ -101,12 +101,12 @@ function requirePayoutPage(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       typeof value.staff_name !== "string" || !Number.isInteger(value.year) ||
       !Number.isInteger(value.month) || !Array.isArray(value.items)) {
-    throw new Error("薪資明細格式錯誤");
+    throw new Error("目前查不到薪資，請聯絡工會。");
   }
   value.items.forEach(item => {
     if (!item || typeof item !== "object" || typeof item.case_no !== "string" ||
         typeof item.payment_status !== "string" || !Array.isArray(item.transactions)) {
-      throw new Error("薪資逐案明細格式錯誤");
+      throw new Error("目前查不到案件薪資，請聯絡工會。");
     }
   });
   return value;
@@ -118,7 +118,7 @@ function money(value) {
 }
 
 function statusLabel(status) {
-  return ({pending: "待付款", payable: "待付款", partially_paid: "部分付款", completed: "已完成", paid: "已付款", anomaly: "需工會確認"})[status] || status;
+  return ({pending: "待付款", payable: "待付款", partially_paid: "部分付款", completed: "已完成", paid: "已付款", anomaly: "需工會確認"})[status] || "需工會確認";
 }
 
 function detailRow(list, label, value) {
@@ -136,7 +136,7 @@ function renderPayouts(page) {
     showStatus(`${page.staff_name} 在 ${page.year} 年 ${page.month} 月沒有薪資請款明細。`);
     return;
   }
-  showStatus(`${page.staff_name}｜${page.year} 年 ${page.month} 月共 ${page.items.length} 筆逐案明細。`);
+  showStatus(`${page.staff_name}｜${page.year} 年 ${page.month} 月有 ${page.items.length} 筆案件薪資。`);
   page.items.forEach(item => {
     const article = document.createElement("article");
     article.className = "payment";
@@ -156,22 +156,22 @@ function renderPayouts(page) {
     const details = document.createElement("dl");
     detailRow(details, "應付金額", money(item.total_payable));
     detailRow(details, "已付金額", money(item.amount_paid));
-    detailRow(details, "剩餘待付金額", money(item.amount_remaining));
-    detailRow(details, "目標付款日", item.due_date || "尚未核定");
+    detailRow(details, "還沒付的金額", money(item.amount_remaining));
+    detailRow(details, "預計付款日", item.due_date || "還沒確定");
     detailRow(details, "實際付款日", item.paid_at || "尚未付款");
     const feeNotice = document.createElement("p");
     feeNotice.className = "hint";
     feeNotice.style.margin = "10px 0 0";
     feeNotice.style.fontSize = "15px";
     feeNotice.style.color = "#7c2d0e";
-    feeNotice.textContent = "※ 提醒：跨行轉帳由銀行扣收 15 元手續費；若屬政府補助方案一，款項依規定拆為自備款與補助款兩筆不同日期入帳，銷帳紀錄獨立保存。";
+    feeNotice.textContent = "跨行匯款，銀行會扣 15 元手續費。若是政府補助方案一，客戶付的部分和政府補助的部分會在不同日期匯款。";
     article.append(summary, details, feeNotice);
     if (item.transactions.length) {
       const transactions = document.createElement("ul");
       transactions.className = "transactions";
       item.transactions.forEach(transaction => {
         const row = document.createElement("li");
-        row.textContent = `${transaction.occurred_at || "日期未登錄"}｜${statusLabel(transaction.transaction_status)}｜${money(transaction.amount)}`;
+        row.textContent = `${transaction.occurred_at || "沒有付款日期"}｜${statusLabel(transaction.transaction_status)}｜${money(transaction.amount)}`;
         transactions.appendChild(row);
       });
       article.appendChild(transactions);
@@ -182,7 +182,7 @@ function renderPayouts(page) {
 
 async function loadPayouts() {
   const value = document.getElementById("monthInput").value;
-  if (!value) { showStatus("請先選擇目標付款月份。", true); return; }
+  if (!value) { showStatus("請先選要查的付款月份。", true); return; }
   const [year, month] = value.split("-").map(Number);
   const button = document.getElementById("loadPayouts");
   button.disabled = true;

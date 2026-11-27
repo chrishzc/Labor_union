@@ -6,7 +6,6 @@ MySQL repositories, SQL pools, delivery outboxes or internal approval routes.
 from __future__ import annotations
 
 from functools import lru_cache
-import os
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
@@ -20,6 +19,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.line_identity import ProvisionalRegistrationPreviewRequest, ProvisionalRegistrationRequest
 from domains.case_import.provisional_registration import (
     ProvisionalRegistrationCandidate, ProvisionalRegistrationDomainError, build_provisional_registration_candidate,
+    has_valid_liff_care_answers,
 )
 from infrastructure.line.liff_token_verifier import (
     InvalidLiffTokenError, LiffVerificationUnavailableError, LineLoginTokenVerifier,
@@ -94,7 +94,11 @@ def _candidate(
     try:
         return build_provisional_registration_candidate(registration_intent(payload, subject))
     except (ProvisionalRegistrationDomainError, ValueError):
-        raise typed_http_error(422, "validation", "registration_input_invalid", "申請資料未通過驗證。", uuid4().hex) from None
+        raise _invalid_registration_input() from None
+
+
+def _invalid_registration_input() -> HTTPException:
+    return typed_http_error(422, "validation", "registration_input_invalid", "申請資料未通過驗證。", uuid4().hex)
 
 
 def _translate(operation):
@@ -163,6 +167,8 @@ def _require_passbook_staged(
 @app.post("/api/v1/line/identity/registration/preview")
 def preview(payload: ProvisionalRegistrationPreviewRequest, staging=Depends(get_staging), verifier=Depends(get_verifier)):
     candidate = _candidate(payload, verifier)
+    if not has_valid_liff_care_answers(payload.survey_details):
+        raise _invalid_registration_input()
     _require_passbook_staged(staging, payload.passbook_image_id, candidate)
     return BaseResponse(data={"status": "ready", "expected_binding_version": 0,
         "payload_fingerprint": candidate.payload_fingerprint.value,
@@ -173,7 +179,15 @@ def preview(payload: ProvisionalRegistrationPreviewRequest, staging=Depends(get_
 def submit(payload: ProvisionalRegistrationRequest, submission_id: str = Header(alias="Idempotency-Key"),
            staging=Depends(get_staging), verifier=Depends(get_verifier)):
     candidate = _candidate(payload, verifier)
-    if payload.expected_binding_version != 0 or payload.preview_fingerprint != candidate.payload_fingerprint.value:
+    preview_matches = payload.expected_binding_version == 0 and payload.preview_fingerprint == candidate.payload_fingerprint.value
+    if not has_valid_liff_care_answers(payload.survey_details):
+        if preview_matches:
+            # An already accepted submission can still return its original receipt.
+            saved = _translate(lambda: staging.replay_submission(candidate, submission_id))
+            if saved is not None:
+                return BaseResponse(data=_result(saved))
+        raise _invalid_registration_input()
+    if not preview_matches:
         raise typed_http_error(409, "conflict", "registration_preview_stale", "申請內容已變更，請重新確認。", uuid4().hex)
     if payload.passbook_image_id is not None:
         saved = _translate(lambda: staging.replay_submission(candidate, submission_id))

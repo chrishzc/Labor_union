@@ -12,16 +12,16 @@
     "gateway": {
       "page_type": "navigation",
       "enabled": true,
-      "title": "服務確認與身分導流",
-      "subtitle": "請選擇您的身分與登記狀態。",
+      "title": "申請服務或連結 LINE",
+      "subtitle": "先選你的身分，再選你要做的事。",
       "submit_button": "繼續",
       "success_title": "",
       "success_description": "",
-      "loading_text": "正在準備您的專屬通道...",
+      "loading_text": "正在開啟服務頁面…",
       "content": {
         "logo": "新竹市月子工會",
         "navigation_layout": "two_step",
-        "redirect_loading_text": "正在為您跳轉...",
+        "redirect_loading_text": "正在開啟下一頁…",
         "load_error": "載入失敗，請嘗試重新整理。"
       },
       "actions": [
@@ -45,8 +45,8 @@
         },
         {
           "id": "non_citizen_binding",
-          "label": "工會已建案，綁定 LINE",
-          "description": "使用建案時的姓名與手機號碼核對。",
+          "label": "工會已幫我登記，我要連結 LINE",
+          "description": "請填你向工會登記時用的姓名和手機號碼。",
           "icon": "",
           "path": "/line-bind?entry=existing_case",
           "enabled": true,
@@ -55,7 +55,7 @@
         {
           "id": "non_citizen_registration",
           "label": "尚未申請",
-          "description": "填寫非市民服務需求申請表。",
+          "description": "填一份表，請工會幫你安排服務。",
           "icon": "",
           "path": "/line-non-citizen-registration",
           "enabled": true,

@@ -43,7 +43,7 @@ it('入帳待辦帶齊快照欄位時，可直接點選已於官方帳號發送�
 });
 it.each([
  ['registration','查看申請','#clients?tab=applications&registration=73'],
- ['service_start','處理日期與代班','#scheduling?tab=coordination&case_no=116000001&request=73'],
+ ['service_start','處理換人交接','#scheduling?tab=coordination&case_no=116000001&request=73'],
  ['delivery','查看寄送工作','#line-management?tab=delivery&task=73'],
  ['notification_failure','處理通知建立異常',`#line-management?tab=delivery&view=failures&issue=${key}`],
 ] as const)('%s 只跳轉指定事項，不在通知頁查詢或執行原操作',async(source,button,href)=>{
@@ -56,11 +56,32 @@ it.each([
  expect(document.querySelector('.notification-task-operation')).toBeNull();
  expect(get).not.toHaveBeenCalled();expect(post).not.toHaveBeenCalled();
 });
-it.each(['customer_binding','staff_binding','group'] as const)('%s 保留人工操作指引，開啟時不執行異動',async source=>{
- vi.mocked(client.catalog).mockResolvedValue([{source,label:'人工事項',group:'review'}]);
- vi.mocked(client.list).mockResolvedValue({items:[item(source)],total:1,next_cursor:null});
+it('客戶未綁定提醒只顯示單案移除操作，開啟時不執行異動',async()=>{
+ vi.mocked(client.catalog).mockResolvedValue([{source:'customer_binding',label:'客戶未綁定',group:'review'}]);
+ vi.mocked(client.list).mockResolvedValue({items:[{...item('customer_binding'),can_dismiss:true,recipient:'0900000000'}],total:1,next_cursor:null});
  const post=vi.spyOn(transport,'post');render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'指定事項'});
- fireEvent.click(screen.getByRole('button',{name:source==='group'?'查看建群指令':'查看人工提醒方式'}));
- expect(screen.getByRole('heading',{name:source==='group'?'建立與綁定案件群組':'聯絡 測試對象'})).toBeVisible();
+ expect(screen.getByRole('button',{name:'移除提醒'})).toBeVisible();
+ expect(screen.queryByRole('heading',{name:'聯絡 測試對象'})).not.toBeInTheDocument();
+ expect(screen.queryByText('0900000000')).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:/複製綁定提醒|查看人工提醒方式/})).not.toBeInTheDocument();
+ expect(screen.queryByRole('link',{name:/查看綁定狀態|查看本案資料/})).not.toBeInTheDocument();
+ expect(post).not.toHaveBeenCalled();
+});
+it('月嫂綁定提醒直接顯示人工聯絡與複製操作，開啟時不執行異動',async()=>{
+ vi.mocked(client.catalog).mockResolvedValue([{source:'staff_binding',label:'月嫂未綁定',group:'review'}]);
+ vi.mocked(client.list).mockResolvedValue({items:[{...item('staff_binding'),recipient:'0900000000'}],total:1,next_cursor:null});
+ const post=vi.spyOn(transport,'post');render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'指定事項'});
+ expect(screen.getByRole('heading',{name:'聯絡 測試對象'})).toBeVisible();
+ expect(screen.getByRole('link',{name:'電話聯絡 0900000000'})).toHaveAttribute('href','tel:0900000000');
+ expect(screen.getByRole('button',{name:'複製綁定提醒'})).toBeVisible();
+ expect(screen.queryByRole('button',{name:'移除提醒'})).not.toBeInTheDocument();
+ expect(post).not.toHaveBeenCalled();
+});
+it('開啟案件建群指令時不執行異動',async()=>{
+ vi.mocked(client.catalog).mockResolvedValue([{source:'group',label:'人工事項',group:'review'}]);
+ vi.mocked(client.list).mockResolvedValue({items:[item('group')],total:1,next_cursor:null});
+ const post=vi.spyOn(transport,'post');render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'指定事項'});
+ fireEvent.click(screen.getByRole('button',{name:'查看建群指令'}));
+ expect(screen.getByRole('heading',{name:'建立與綁定案件群組'})).toBeVisible();
  expect(post).not.toHaveBeenCalled();
 });
