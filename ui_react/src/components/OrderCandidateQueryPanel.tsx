@@ -17,7 +17,7 @@ import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/ty
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { CaregiverCommuteQuery, CommuteUsagePanel } from './CaregiverCommute';
-import { candidateDateStatus, type CandidateDateStatus } from '../adapters/scheduling/candidate_date_status';
+import { candidateAssignmentDateRange, candidateDateStatus, type CandidateDateStatus } from '../adapters/scheduling/candidate_date_status';
 import { CandidateAvailabilityNotice } from './CandidateAvailabilityNotice';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
@@ -136,7 +136,14 @@ function groupWorkbenchCandidates(
     const evidence = evidenceByStaff.get(candidate.staff_id) ?? [];
     const assignmentConflicts = evidence
       .filter(conflict => conflict.reason_code === 'assignment' || conflict.reason_code === 'schedule')
-      .map(({ case_no, work_date }) => case_no ? '案件 ' + case_no + '、' + work_date : work_date);
+      .map(conflict => {
+        const { case_no, work_date } = conflict;
+        const source = case_no ? `案件 ${case_no}、` : '';
+        const assignmentDates = candidateAssignmentDateRange(conflict);
+        return assignmentDates
+          ? `${source}重疊日 ${work_date}、排班期間 ${assignmentDates}`
+          : `${source}${work_date}`;
+      });
     return {
       candidate,
       status: candidateDateStatus(candidate, evidence),

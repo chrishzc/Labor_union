@@ -22,6 +22,7 @@ _HOP_HEADERS = frozenset({
 })
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _WEBHOOK_ALIASES = frozenset({"/webhook", "/webhook/", "/webhook/line", "/webhook/line/"})
+_UPSTREAM_TIMEOUT_SECONDS = 120
 
 
 class LocalReactGateway(ThreadingHTTPServer):
@@ -165,7 +166,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
                 if key.lower() not in _HOP_HEADERS | connection_headers
             }
             headers["Connection"] = "close"
-            with closing(http.client.HTTPConnection("127.0.0.1", port, timeout=60)) as upstream:
+            with closing(http.client.HTTPConnection("127.0.0.1", port, timeout=_UPSTREAM_TIMEOUT_SECONDS)) as upstream:
                 upstream.request(
                     self.command, self.path, body=self._body(), headers=headers,
                     encode_chunked=self.headers.get("Transfer-Encoding", "").lower() == "chunked",

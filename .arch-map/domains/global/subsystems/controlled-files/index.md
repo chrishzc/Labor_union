@@ -17,7 +17,7 @@ workflow／repository／storage port 保護。
   `infrastructure/mysql/controlled_file_finalize_worker.py`
 - repository: `infrastructure/db/controlled_file_repository.py`
 - storage port adapter: `infrastructure/file/controlled_file_storage.py`
-- Shared NAS root: runtime `CONTROLLED_FILE_STORAGE_ROOT`; `DATABASE_BACKUP_DIRECTORY` identifies the reserved `05_資料庫冷備份 (db_backups)` child used by Global migration. Business-file discovery and direct reads exclude that subtree, including case/trailing-dot/space aliases. SQL archives and maintenance metadata remain outside business attachment access.
+- Local controlled-file root: runtime `CONTROLLED_FILE_STORAGE_ROOT`; `DATABASE_BACKUP_DIRECTORY` identifies the reserved `05_資料庫冷備份 (db_backups)` child used by Global migration. Business-file discovery and direct reads exclude that subtree, including case/trailing-dot/space aliases. SQL archives and maintenance metadata remain outside business attachment access.
 
 ## Modules
 - `api-composition` — authenticated public route and typed projection composition；path:
@@ -30,7 +30,7 @@ workflow／repository／storage port 保護。
   `modules/file-storage.md`
 
 ## Contracts
-- `.arch-map/requirements/30_Controlled_File_Storage_NAS正式規格.md` §4–§13 — current formal
+- `.arch-map/requirements/30_Controlled_File_Storage正式規格.md` §4–§13 — current formal
   controlled-file routes, authenticated management boundary, opaque projection and
   Preview/Apply/receipt contract.
 - `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md` §9 —

@@ -509,20 +509,36 @@ class ControlledFileWorkflow:
         expires_at = _utc(facts.staging.expires_at)
         if now >= expires_at:
             raise ControlledFileWorkflowError("controlled_file_staging_expired", "staging 已過期")
-        content = self._storage.read_staged(
-            intent.staging_id, expected_sha256=facts.staging.sha256_digest
-        )
-        digest = hashlib.sha256(content.content).hexdigest()
-        if (
-            content.staging_id != intent.staging_id
-            or digest != facts.staging.sha256_digest
-            or content.sha256_digest != digest
-            or len(content.content) != facts.staging.size_bytes
-            or _utc(content.expires_at) != expires_at
-        ):
-            raise ControlledFileWorkflowError(
-                "controlled_file_staging_drift", "staging bytes 與 metadata 不一致"
+        verify_staged = getattr(self._storage, "verify_staged", None)
+        if callable(verify_staged):
+            verified = verify_staged(
+                intent.staging_id, expected_sha256=facts.staging.sha256_digest
             )
+            digest = verified.sha256_digest
+            if (
+                verified.staging_id != intent.staging_id
+                or digest != facts.staging.sha256_digest
+                or verified.size_bytes != facts.staging.size_bytes
+                or _utc(verified.expires_at) != expires_at
+            ):
+                raise ControlledFileWorkflowError(
+                    "controlled_file_staging_drift", "staging bytes 與 metadata 不一致"
+                )
+        else:
+            content = self._storage.read_staged(
+                intent.staging_id, expected_sha256=facts.staging.sha256_digest
+            )
+            digest = hashlib.sha256(content.content).hexdigest()
+            if (
+                content.staging_id != intent.staging_id
+                or digest != facts.staging.sha256_digest
+                or content.sha256_digest != digest
+                or len(content.content) != facts.staging.size_bytes
+                or _utc(content.expires_at) != expires_at
+            ):
+                raise ControlledFileWorkflowError(
+                    "controlled_file_staging_drift", "staging bytes 與 metadata 不一致"
+                )
 
         candidate = ControlledFileCandidate(
             staging_id=intent.staging_id,

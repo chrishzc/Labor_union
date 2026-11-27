@@ -5,7 +5,7 @@
 - 狀態：`current-spec`
 - Owner：LINE Integration Domain（`domains/line/`、`subsystems/line/`）
 - 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、開工當天群組問候、服務開始與換人結果日期表群組通知、Rich Menu 草稿編輯與發布 saga，以及通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`）。
-- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)、[Controlled File Storage 正式規格](30_Controlled_File_Storage正式規格.md)。
 
 ## 2. LINE Webhook Inbox 與 Delivery Task 骨架
 
@@ -49,7 +49,7 @@
 - **後台解除綁定**：具 `ORDER_GROUP_BIND` 的工會人員可在「LINE 營運 → 案件群組」的清單操作欄解除綁定。依該列的綁定版本核對目前群組，在同一交易清除目前群組與私人邀請網址、遞增綁定版本，並新增解除事件。保留原案件、綁定與成員歷程。舊群組失去本案小幫手權限，待送群組邀請沿既有機制重新驗證並取消失效工作。解除僅操作後台綁定。
 - **永久刪除案件群組歷程**：具 `ORDER_GROUP_BIND` 的工會人員可對已解除綁定的個別案件提交「永久刪除群組歷程」。畫面明示刪除範圍與不可復原。以目前綁定版本重新核對，且在同一交易永久刪除該案所有歷次綁定、解除、群組動態、邀請與成員加入／離開事件，以及舊成員投影。保留案件、LINE 對話、共用稽核與精簡的刪除操作收據。未綁定的版本列僅供阻擋過期操作及後續重新綁定，已清除歷程的案件不顯示在群組工作區。已重新綁定、版本不符或無權的操作不得刪除任何紀錄。
 - **LINE 群組解散**：群組解散、官方帳號離群或成員離群均不自動刪除後台歷史紀錄。收到成員離群事件時，沿用既有的成員狀態更新。
-- 受限 NAS 的永久刪除經 `lu_nas_delete_order_group_history_v1` 例程執行，僅管理端連線帳號可呼叫。例程與兩個事件刪除 trigger 均核對同案未完成命令及未綁定狀態。既有案件刪除仍由原例程處理。
+- 受限權限環境的永久刪除經 `lu_nas_delete_order_group_history_v1` 例程執行，僅管理端連線帳號可呼叫。例程與兩個事件刪除 trigger 均核對同案未完成命令及未綁定狀態。既有案件刪除仍由原例程處理。
 
 | 情境（S） | 任務（T） | 操作（A） | 可驗收結果（R） |
 | --- | --- | --- | --- |
@@ -107,7 +107,7 @@
 - 清理屬 LINE owner 維護工作，沿 canonical worker 的 additional worker 接線，每輪有界最多 25 筆候選，每筆 fresh lock task、attempt 與 intent，由一個 outer UoW 保存精確 task/cutoff 清理憑證、執行刪除與去內容化、提交；失敗 rollback 該筆，不產生 provider call。舊資料庫須先套正式 additive guard migration，禁止關閉既有 append-only trigger。
 - attempt DELETE 只接受精確 session command key 對應 durable `line_command_receipts` 的 `line-delivery-retention:<task_id>` result_reference，snapshot task_id/cutoff 一致，且 DB fresh task 仍為無租約的合法終態、最後更新及該 attempt 完成時間早於 cutoff；保留原 registry-delete 例外。session command key 於 finally 清除，不以無憑證旗標開放刪除。
 - 清理後列表及總數同時排除到期標記，直接開啟舊 detail 回 typed `410 line_delivery_history_expired`，顯示內容與明細已到期，而非假空白或泛用 500。既有工作鍵 enqueue 仍回同 task，不重建、不重新發送；原圖片下載不再提供已清除內容；原來源或其精確 replay 內容已到期時，Preview／Apply 拒絕以舊來源補送，回 `notification_source_history_expired`，新業務事件仍按目前資格判斷。尚未處理的異常不受六個月限制。
-- 重跑略過已整理 task，不新增重複憑證。DB 備份可能包含當時尚未到期的內容，依 [NAS 備份保存](10A_NAS_Fresh初始化與維護復原規格.md#52-每日排程備份滾動保存) 管理；本節不回寫或刪除既有備份，也不自動還原內容。
+- 重跑略過已整理 task，不新增重複憑證。DB 備份可能包含當時尚未到期的內容，依 [本機 SQL 備份保存](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#52-每日排程備份滾動保存) 管理；本節不回寫或刪除既有備份，也不自動還原內容。
 
 | ID | S | T | A | R |
 |---|---|---|---|---|
@@ -118,7 +118,7 @@
 
 ## 5. Rich Menu、通知文案編輯與表格圖片
 
-- **Rich Menu 草稿與發布 saga**：`QueryRichMenuDraft`／`PreviewRichMenuDraftChange`／`ApplyRichMenuDraftChange` 依 `(menu_definition_id, configuration_revision)` 區分 `editable | processing | published`（published 快照只讀可由此建立下一草稿）；管理台可改背景圖（含 `image_asset_id`／`sha256`／`image_asset_version` 檢查）、按鈕名稱與動作（`uri | message | postback | richmenuswitch` 互斥清空舊欄位），並以 NAS 唯讀預覽結合記憶體即時手機模擬。發布 saga 由 `line_rich_menu_publication_step_acknowledgements`、`attempt_events` 與 `cleanup_anomalies` 保存斷點與冪等重試，發布成功後依角色 fan-out 綁定既有合法身分（不阻擋身分審核原子提交）。Rich Menu API 不送 `X-Line-Retry-Key`。建立請求送出前保存 durable 記錄，已有成功回應時沿用其選單 ID，結果不明時停下來核對官方帳號，避免重複建立。 發布新版本及接續未完成的清理工作時均保留前一版 LINE 選單，清理收據只結束背景工作。前一版仍可能被尚未完成同步的使用者引用。
+- **Rich Menu 草稿與發布 saga**：`QueryRichMenuDraft`／`PreviewRichMenuDraftChange`／`ApplyRichMenuDraftChange` 依 `(menu_definition_id, configuration_revision)` 區分 `editable | processing | published`（published 快照只讀可由此建立下一草稿）；管理台可改背景圖（含 `image_asset_id`／`sha256`／`image_asset_version` 檢查）、按鈕名稱與動作（`uri | message | postback | richmenuswitch` 互斥清空舊欄位），並以本機受控儲存唯讀預覽結合記憶體即時手機模擬。發布 saga 由 `line_rich_menu_publication_step_acknowledgements`、`attempt_events` 與 `cleanup_anomalies` 保存斷點與冪等重試，發布成功後依角色 fan-out 綁定既有合法身分（不阻擋身分審核原子提交）。Rich Menu API 不送 `X-Line-Retry-Key`。建立請求送出前保存 durable 記錄，已有成功回應時沿用其選單 ID，結果不明時停下來核對官方帳號，避免重複建立。 發布新版本及接續未完成的清理工作時均保留前一版 LINE 選單，清理收據只結束背景工作。前一版仍可能被尚未完成同步的使用者引用。
 - **發布狀態回讀**：受理後依同一發布編號回讀，不把受理當成功。自動追蹤停止、單次查詢失敗、仍在排隊／執行、正式發布失敗、已發布分開呈現。按「重新整理」可重新查同一筆工作，不送第二筆發布；換頁或重開編輯器依同選單與草稿版本查工作；有發布鎖但查不到同版工作時明示結果未知，不重送。經辦可查看發布編號、最後已確認步驟及安全錯誤碼，不需到正式資料庫查。
 - **分頁按鈕與換版**：草稿允許保存的 `richmenuswitch` 必須能通過發布預檢，送 LINE 時帶分頁別名與非空白的動作資料 `data`。先建立新版並上圖，再依需要設定別名、預設或個人選單。別名未建立才建立；已指向本次新版就視為已完成；仍指向預期的前一個發布版本才允許換版。若讀回指向非預期版本或結果未知，保留既有選單，停在待核對，不覆蓋或刪除。
 - **生效判定**：系統確認新版選單已發布與已綁定使用者切換新版是兩件事。依適用的預設或個人選單回讀判定生效；個人選單可繼續優先於預設選單。個別同步未完成時保留前一版，不從發布成功推定全員都已更新。

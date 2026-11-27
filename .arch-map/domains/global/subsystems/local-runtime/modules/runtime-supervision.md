@@ -11,10 +11,10 @@
 - primary: `scripts/launchers/supervise_local_runtime.ps1`
 - Windows management entry: `Windows管理.bat`、`scripts/launchers/manage_windows.ps1` — single daily management surface using the existing supervisor and run-bound maintenance channel.
 - Root maintenance: option `11` dispatches `scripts/root_account_maintenance.py` under the Windows manager lock and checks that the managed runtime has stopped. Access owns verification and account changes ([authentication-session](../../../../external-integration/subsystems/access/modules/authentication-session.md)).
-- Explicit NAS maintenance: see [Windows 管理器的資料庫維護入口](#windows-管理器的資料庫維護入口). Normal startup does not stop or restart services for maintenance or invoke database maintenance. Packaging remains an advanced `-Action package` consumer, not a daily menu action.
+- Explicit local DB maintenance: see [Windows 管理器的資料庫維護入口](#windows-管理器的資料庫維護入口). Normal startup does not stop or restart services for maintenance or invoke database maintenance. Packaging remains an advanced `-Action package` consumer, not a daily menu action.
 - Windows source handoff: `scripts/package_windows_runtime.py` — secret-filtered current program ZIP with source hash manifest (`include_source` owned directly in this module); no configuration or runtime data.
 - private cycle composition: `api/dependencies/private_operations.py` — check-only handshake／heartbeat；正常 durable cycle 先 discover confirmed arrangements 與 due completion，再執行既有 canonical worker，不自行寫 Domain root。
-- A normal NAS/production durable cycle also runs the existing bounded controlled-file finalize runner for new shared-root 01–04 locators, including an explicit UNC root in source mode (APP_ENV=development). Local development/test, missing root configuration and check-only handshakes do not run it; no legacy file scan/migration. Root resolution and directory layout remain Global controlled-files owned.
+- A normal production durable cycle also runs the existing bounded controlled-file finalize runner for new shared-root 01–04 locators, including an explicit UNC root in source mode (APP_ENV=development). Local development/test, missing root configuration and check-only handshakes do not run it; no legacy file scan/migration. Root resolution and directory layout remain Global controlled-files owned.
 - entrypoint: `scripts/launchers/start_local_development.bat`
 - database readiness: `scripts/check_runtime_database.py` — 沿用 API 的 DB／TLS 設定，以唯讀 session 呼叫 migration canonical schema gate；不執行更新。同名復原由 [Migration 復原協調](../../migration/modules/preserved-database-upgrade.md#同名復原協調與接續) 提供 sanitized 狀態，readiness gate 於啟動前拒絕尚未完成目標驗證的復原。管理器的復原入口沿用既有管理鎖並核對殘留 runtime，獨立復原批次由 maintenance adapter 取得同一管理鎖；writer 仍由 Migration 擁有。
 - Unix entrypoint: `scripts/launchers/start_local_development.sh`
@@ -34,14 +34,14 @@
 
 ### Windows 管理器的資料庫維護入口
 
-[行為與驗收的權威條文：NAS 維護規格](../../../../../requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-管理器的安全升級契約)。Local Runtime 擁有管理器的參數、選單分派與受管服務狀態檢查；Migration 擁有維護操作、資料庫選路及結果。
+[行為與驗收的權威條文：單機 Docker MySQL 維護規格](../../../../../requirements/10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#windows-管理器的安全升級契約)。Local Runtime 擁有管理器的參數、選單分派與受管服務狀態檢查；Migration 擁有維護操作、資料庫選路及結果。
 
 | 啟動介面 | 互動升級 | 指定動作 |
 |---|---|---|
 | 根目錄 `Windows管理.bat` | 不帶參數進入管理器，選 `7`。 | 以 `-Action database-upgrade` 啟動；BAT 將參數轉交 PowerShell。 |
 | 直接啟動 `scripts/launchers/manage_windows.ps1` | 預設 `menu`，選 `7`。 | 直接指定 `-Action database-upgrade`。 |
 
-四種走法匯入 `Invoke-ManagerAction` 的 `database-upgrade`，再到 `Invoke-DatabaseMaintenance 'upgrade'`。Python 環境不存在或同一安裝仍有受管服務時，管理器回報錯誤而不呼叫維護模組；通過才委派 `scripts.nas_database_maintenance upgrade`。其 `backup` 和 `restore` 分別由選項 `6`、`8` 分派，不是升級別名。受管服務運作時仍允許備份，升級與復原則受上述檢查限制。獨立的 NAS 升級批次不經管理器，見 [Migration 架構](../../migration/modules/preserved-database-upgrade.md#windows-nas-維護交接)；不要把管理器前置檢查套用到所有入口。
+四種走法匯入 `Invoke-ManagerAction` 的 `database-upgrade`，再到 `Invoke-DatabaseMaintenance 'upgrade'`。Python 環境不存在或同一安裝仍有受管服務時，管理器回報錯誤而不呼叫維護模組；通過才委派 `scripts.nas_database_maintenance upgrade`。其 `backup` 和 `restore` 分別由選項 `6`、`8` 分派，不是升級別名。受管服務運作時仍允許備份，升級與復原則受上述檢查限制。獨立的升級批次不經管理器，見 [Migration 架構](../../migration/modules/preserved-database-upgrade.md#windows-資料庫維護交接)；不要把管理器前置檢查套用到所有入口。
 
 管理器針對受管服務狀態的前置檢查及委派可查 [既有管理器測試](../../../../../../tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/test_windows_manager.py#L358-L394) 的 `test_database_delegate_requires_stop_for_upgrade_restore_and_propagates_failure`。它以替身檢查服務運作時允許備份、拒絕升級與復原且不代停服務、停止後委派，以及備份子程序失敗時管理器會報錯；不驗證 MySQL 或實機維護結果。
 

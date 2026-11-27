@@ -135,7 +135,8 @@ it('shows current reservations before LINE inquiry or manual willingness and ref
   expect(client.sendInformation).not.toHaveBeenCalled();
 
   search.mockResolvedValueOnce({ ...inquiryAvailability, planned_start_date: '2026-10-02', planned_end_date: '2026-10-03', conflicts: [
-    { staff_id: 2, segment_index: 0, work_date: '2026-10-02', reason_code: 'schedule' },
+    { staff_id: 2, segment_index: 0, work_date: '2026-10-02', reason_code: 'schedule', case_no: 'CASE-2',
+      assignment_start_date: '2026-09-25', assignment_end_date: '2026-10-10' },
     { staff_id: 2, segment_index: 0, work_date: '2026-10-03', reason_code: 'buffer' },
   ] });
   publishStaffAvailabilityChange(2);
@@ -143,6 +144,7 @@ it('shows current reservations before LINE inquiry or manual willingness and ref
   expect(card.getByText('七天緩衝期重疊，僅提醒：2026-10-03')).toBeInTheDocument();
   expect(card.queryByText('七天緩衝期重疊，僅提醒', { exact: true })).not.toBeInTheDocument();
   expect(card.getByText('有檔期衝突，待公會協調')).toBeVisible();
+  expect(card.getByText(/案件 CASE-2，.*重疊日 2026-10-02，排班期間 2026-09-25 ～ 2026-10-10/)).toBeInTheDocument();
   expect(card.queryByText('其他案件等待訂金保留，僅提醒。')).not.toBeInTheDocument();
 });
 

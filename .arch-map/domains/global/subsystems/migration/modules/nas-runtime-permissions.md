@@ -5,7 +5,7 @@
 - subsystem: `migration`
 
 ## Responsibility
-對單一 NAS 隔離資料庫安裝固定用途程序、locked definer 與 management／line／access／maintenance 的物件及欄位權限。只提供 migration／部署 substrate，不擁有業務規則或 outer UoW。
+對單一隔離資料庫安裝固定用途程序、locked definer 與 management／line／access／maintenance 的物件及欄位權限。只提供 migration／部署 substrate，不擁有業務規則或 outer UoW。
 
 ## Implementation
 - primary: `infrastructure/mysql/nas_permissions.py`
@@ -16,7 +16,7 @@
 
 ## Contracts
 - REG-BOUNDARY／REDIS（2026-11-05）：公開LINE profile不再取得provisional申請／衝突表讀寫；內部management在核准交易才建立NULL payload最小parent及receipt。權限inventory變更需目標部署重新資格，不在程式實作階段套用既有NAS grants。
-- Spec 33 RD-1：案件永久刪除程序 `lu_nas_delete_unsigned_case_v2` 適用於未簽約與已簽約案件，只授予 management EXECUTE。Case-owned graph 的 DELETE 僅授予 locked definer，不授予 staff DELETE。Caller root gate、版本、同案 pending claim、receipt 與 outer UoW 由 Global registry-deletion 擁有，不允許 LINE 執行。安裝入口只受控替換精確匹配的前版程序，保留 definer 與程序權限，未知內容仍拒絕。NAS upgrade／restore 必須完成程序安裝才能切換。
+- Spec 33 RD-1：案件永久刪除程序 `lu_nas_delete_unsigned_case_v2` 適用於未簽約與已簽約案件，只授予 management EXECUTE。Case-owned graph 的 DELETE 僅授予 locked definer，不授予 staff DELETE。Caller root gate、版本、同案 pending claim、receipt 與 outer UoW 由 Global registry-deletion 擁有，不允許 LINE 執行。安裝入口只受控替換精確匹配的前版程序，保留 definer 與程序權限，未知內容仍拒絕。資料庫 upgrade／restore 必須完成程序安裝才能切換。
 - `lu_nas_delete_order_group_history_v1` 只授予 management EXECUTE。固定清除指定未綁定案件的兩類群組事件及成員投影，核對未完成同案 claim 與綁定版本。刪除收據及版本遞增由 LINE 群組管理交易完成。
 - `.arch-map/requirements/17_External_Integration_LINE_Access正式規格.md` NAS-DB-01/02/03。
 - schema 先由 canonical fresh／preserve-data upgrade 處理；plan 零寫入；未知／partial／foreign grants／procedure drift 拒絕，不 reset 業務資料。

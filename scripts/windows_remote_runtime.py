@@ -106,6 +106,15 @@ def _forward_headers(headers):
     }
 
 
+def _proxy_timeout() -> httpx.Timeout:
+    raw = os.environ.get('WINDOWS_REMOTE_PROXY_TIMEOUT_SECONDS', '').strip()
+    try:
+        seconds = max(10.0, float(raw)) if raw else 120.0
+    except ValueError:
+        seconds = 120.0
+    return httpx.Timeout(connect=10.0, read=seconds, write=seconds, pool=10.0)
+
+
 def create_gateway(artifact, *, api_port: int = 8000, transport=None, prefix: str = PREFIX) -> Starlette:
     """Compose transport only; the canonical API retains authentication and writers."""
     if not 1 <= api_port <= 65535:
@@ -117,7 +126,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None, prefix: st
     @asynccontextmanager
     async def lifespan(app):
         async with httpx.AsyncClient(
-            base_url=api_origin, transport=transport, trust_env=False, timeout=60,
+            base_url=api_origin, transport=transport, trust_env=False, timeout=_proxy_timeout(),
         ) as client:
             # No token means this must reject before accessing business data.
             response = await client.get('/api/v1/admin/auth/me')

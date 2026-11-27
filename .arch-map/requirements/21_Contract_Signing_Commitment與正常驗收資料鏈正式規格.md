@@ -5,7 +5,7 @@
 - 狀態：`current-spec`
 - Owner：Contract Signing Integration（`domains/contract_signing/`、`subsystems/contract_signing/`）
 - 單一負責範圍：契約 Excel 模板上傳與欄位映射版本管理（`CTM-01～06`）、兩類契約現行欄位投影與瀏覽器 A4 列印、送交外部平台交接記錄、分開文件簽回與完整集合完約、本機測試手動跳過門禁（`testing_skip_allowed`）、`precontract_service_commitment` 守恆與 execution conversion，以及簽約前 Scheduling 檔期衝突檢核（`signing_blockers`）。
-- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Global Migration 與 Cutover Subsystem](10_Global_保留資料Migration與Cutover_Subsystem.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Global Migration 與 Cutover Subsystem](10_Global_保留資料Migration與Cutover_Subsystem.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Controlled File Storage 正式規格](30_Controlled_File_Storage正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
 
 ## 2. 核心架構、SSOT 與狀態機
 
@@ -25,7 +25,7 @@
 
 | Owner | Root facts／責任 | 不擁有 |
 |---|---|---|
-| Contract Signing | `template-catalog/` 核准版本、不可變 `contract_document_version`（opaque NAS reference + digest）、`contract_signing_event`、外部交接 receipt、歷史契約寄送 access grant | Orders status、應收金額、execution schedule、LINE delivery 結果 |
+| Contract Signing | `template-catalog/` 核准版本、不可變 `contract_document_version`（opaque controlled-file reference + digest）、`contract_signing_event`、外部交接 receipt、歷史契約寄送 access grant | Orders status、應收金額、execution schedule、LINE delivery 結果 |
 | Scheduling Commitment | `precontract_service_commitment` 與服務日、`waiting-deposit` 自動鎖定與 exact conversion、正式排班／occupancy | 契約文件、應收、LINE |
 | Client Finance | 訂金／第一二期應付／到期日與專屬虛擬帳號（`CLIENT_DEPOSIT_BANK_CODE` + 本案虛擬帳號） | 簽署證據、Orders status |
 | Orders | `contract_completed` 事件、`contract_identity`、訂單生命週期 | 外部簽署檔案、assignment 日 |

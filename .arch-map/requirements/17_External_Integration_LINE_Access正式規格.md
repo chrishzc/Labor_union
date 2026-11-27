@@ -4,8 +4,8 @@
 
 - 狀態：`current-spec`
 - Owner：External Integration Boundary、Access Control Domain、Knowledge Retrieval Domain
-- 單一負責範圍：外部平台整合共同安全不變量（`SystemPrincipal`、去敏安全回條、durable inbox／outbox 與 Reply 5xx 不確認處理）、Access Control（統一業務授權、單一 enabled `root` 生命週期、兩段式登入／MFA、8 小時 session 上限、統一網頁建帳 bootstrap 與離線 root 維護、管理員密碼雜湊與帳號命令收據、NAS DB P01–P10 受限權限程序、`Security Audit` 兩年遮罩查詢與歸檔、`Data Browser` 六源相容唯讀契約），以及 Knowledge Retrieval 審查發布與來源 citation 契約。
-- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Migration 與 Cutover](10_Global_保留資料Migration與Cutover_Subsystem.md)、[LINE Gateway、Inbox 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[Case Import 與非市民 Redis 待審](17B_Case_Import與非市民Redis待審正式規格.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Access Control Production Cutover](25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
+- 單一負責範圍：外部平台整合共同安全不變量（`SystemPrincipal`、去敏安全回條、durable inbox／outbox 與 Reply 5xx 不確認處理）、Access Control（統一業務授權、單一 enabled `root` 生命週期、兩段式登入／MFA、8 小時 session 上限、統一網頁建帳 bootstrap 與離線 root 維護、管理員密碼雜湊與帳號命令收據、資料庫 P01–P10 受限權限程序、`Security Audit` 兩年遮罩查詢與歸檔、`Data Browser` 六源相容唯讀契約），以及 Knowledge Retrieval 審查發布與來源 citation 契約。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Migration 與 Cutover](10_Global_保留資料Migration與Cutover_Subsystem.md)、[LINE Gateway、Inbox 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[Case Import 與非市民 Redis 待審](17B_Case_Import與非市民Redis待審正式規格.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Access Control Production Cutover](25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md)、[Controlled File Storage 正式規格](30_Controlled_File_Storage正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
 
 ## 2. Global External Integration Boundary
 
@@ -24,11 +24,11 @@
 
 ## 3. Domain：Access Control
 
-### 3.1 統一業務授權與 NAS 分層隔離
+### 3.1 統一業務授權與資料庫權限分層隔離
 
 - **全體內部人員同等業務權限**：所有已登入且 `enabled` 的內部使用者擁有完整業務功能集合（包含刪除假日／資格／偏好、替換匯入／虛擬帳號／排班、異常重查、封存與知識清理）；不以職稱、部門或 role bundle 做業務功能差異授權。唯「帳號中心」僅供唯一 enabled `root` 使用（非業務權限差異）。
 - **人工操作極簡化互動**：依 [Global 共同契約 §2.4](00_Global_共同契約.md#24-管理端一次點擊送出與選填原因)，內部寫入操作改採一次點擊送出、原因選填。
-- **NAS 資料庫權限分離（`NAS-DB-01～03`）**：日常執行帳號無直接 `DELETE`／`DDL`／`GRANT OPTION`／`CREATE USER`；刪除一律透過專用不可登入 DEFINER 預存程序 `P01`–`P10` 執行（P01 日期、P02 資格／交通差、P03 六項關聯、P04 偏好集合、P05 歷史人員替換、P06 案號虛擬帳號 mapping、P07 被替換排班世代、P08 失效異常投影、P09 過期已封存 audit、P10 核准刪除之 knowledge target），不自開 COMMIT／ROLLBACK；runtime profile 持有作用域內 `LOCK TABLES` 供 `FOR UPDATE` 鎖定讀取。LINE 對外帳號僅讀寫 LINE 自身必要邊界，嚴禁持有 `P01`–`P10` 或管理端寫入憑證。
+- **資料庫權限分離（`NAS-DB-01～03`）**：日常執行帳號無直接 `DELETE`／`DDL`／`GRANT OPTION`／`CREATE USER`；刪除一律透過專用不可登入 DEFINER 預存程序 `P01`–`P10` 執行（P01 日期、P02 資格／交通差、P03 六項關聯、P04 偏好集合、P05 歷史人員替換、P06 案號虛擬帳號 mapping、P07 被替換排班世代、P08 失效異常投影、P09 過期已封存 audit、P10 核准刪除之 knowledge target），不自開 COMMIT／ROLLBACK；runtime profile 持有作用域內 `LOCK TABLES` 供 `FOR UPDATE` 鎖定讀取。LINE 對外帳號僅讀寫 LINE 自身必要邊界，嚴禁持有 `P01`–`P10` 或管理端寫入憑證。
 - **Worker 內部服務驗證與邊界隔離**：Worker 與 monitor 透過 loopback `local_shared_key`（至少 32 字元之共享金鑰與 `X-Internal-Service-Name` 操作端點綁定，缺漏、過短或非支援模式皆 fail closed）呼叫 Private Operations API，嚴禁攜帶 DB 帳密或冒充他服務操作。
 - **禁止 legacy key**：human mutation 嚴禁接受 `X-Legacy-Shared-Key`。
 

@@ -18,7 +18,7 @@
 8. `actual_hours = 有效 assignment-owned 正式服務日數 × orders.service_hours_per_day`；不得 fallback 到 `planned_hours` 或 `orders.staff_id`。
 9. cancelled assignment 保留歷史，但不得參與 current 排班、日期、工時或薪資。
 10. 服務資料鎖、取消限制與完整履約薪資依 Orders／Scheduling／Payroll 規格；Global 只要求 caller 不得旁路 owner predicate。
-11. 所有服務日期、完成時刻與到期日政策以 `Asia/Taipei` 解讀；測試注入 clock。前端顯示的業務日期與時間固定使用台灣時間，純日期欄位保留原日曆日期。MySQL 執行期連線及 NAS 伺服器的預設 SQL 時區固定為 UTC，`_utc`、事件時刻、租約及重試紀錄維持 UTC；顯示時轉為台灣時間。若 SQL 需要業務當日，明確由 UTC 時刻計算台灣日期。
+11. 所有服務日期、完成時刻與到期日政策以 `Asia/Taipei` 解讀；測試注入 clock。前端顯示的業務日期與時間固定使用台灣時間，純日期欄位保留原日曆日期。MySQL 執行期連線及本機 Docker MySQL 伺服器的預設 SQL 時區固定為 UTC，`_utc`、事件時刻、租約及重試紀錄維持 UTC；顯示時轉為台灣時間。若 SQL 需要業務當日，明確由 UTC 時刻計算台灣日期。
 12. Alert／Anomalies 不是 Domain mutation gate；它只投影 owner predicate。
 13. 無法從 current root facts 唯一判定原因或修復方式時，停止自動更正，不得猜測 adjustment／reversal／target status。
 14. `#anomalies` 概念僅限 current issue；一般 owner review／work item 留在 owning page，且皆只能呼叫 owning typed command，不直接寫 Domain root。
@@ -41,17 +41,17 @@
 - terminal receipt/error 使用 closed command discriminator＋schema version；禁止 raw map 穿透 public view。
 - repository 不 hidden commit／rollback；application composition 是唯一 outer UoW／commit owner。
 
-### 2.2 地端 NAS 受控檔案與投影契約
+### 2.2 地端主機受控檔案與投影契約
 
-既有工會 NAS 是契約、月嫂履歷／證明、寶寶日誌附件、餐食照片及其他大型檔案的實體 bytes 來源；MySQL 只保存 Domain 關聯、opaque object reference、content digest、MIME、size、版本、狀態、actor 與時間等 metadata，不保存大型 binary。各 Domain 仍擁有檔案的業務關聯、可見範圍、完成條件與生命週期；共用檔案能力只負責受控探索、完整性核對、版本讀取與傳輸。
+工會地端主機的本機受控儲存目錄是契約、月嫂履歷／證明、寶寶日誌附件、餐食照片及其他大型檔案的實體 bytes 來源；MySQL 只保存 Domain 關聯、opaque object reference、content digest、MIME、size、版本、狀態、actor 與時間等 metadata，不保存大型 binary。各 Domain 仍擁有檔案的業務關聯、可見範圍、完成條件與生命週期；共用檔案能力只負責受控探索、完整性核對、版本讀取與傳輸。
 
 - 工會人員可把既有檔案移入已配置的 Domain／subject 投放區。watcher／reconciliation 只有在檔案穩定、類型／大小／digest 與唯一 subject 關聯成立後才建立索引；未知 subject、重名歧義、寫入中、digest drift、mount unavailable 或權限錯誤 fail closed。
 - 可變檔名不是 identity。每個接受版本以 opaque object identity＋digest 識別；同內容可 replay，同 object reference 指向不同內容固定 conflict。
-- Web／LIFF 只提供去敏 logical projection 與 authenticated download；不得暴露 drive letter、UNC／NAS path、storage locator 或公開下載 URL。
+- Web／LIFF 只提供去敏 logical projection 與 authenticated download；不得暴露本機實體路徑、drive letter、UNC path、storage locator 或公開下載 URL。
 - 修改採「下載 → 外部工具 → 放回投放區／受控 upload 形成新版本」，不提供原地編輯或 OS file browser 模擬。
 - owner command 發送文件時鎖定 subject、purpose、version、digest，再建立 committed download receipt／delivery task；worker 重新核對相同 identity／digest。
-- metadata 與 NAS bytes 必須有 backup／restore／reconciliation；實體 mount、retention、搬檔、schema、deployment 仍走各自 Authority／DB gate。
-- exact management routes、closed owner／purpose registry、Preview／Apply、Freeze-Before-Send、staging／cleanup／reconciliation 與 readiness／backup machine contract 由 [Controlled File Storage / NAS 規格](30_Controlled_File_Storage_NAS正式規格.md) 單一擁有；本節不複製 machine fields。
+- metadata 與受控實體檔案 bytes 必須有 backup／restore／reconciliation；實體儲存路徑、retention、搬檔、schema、deployment 仍走各自 Authority／DB gate。
+- exact management routes、closed owner／purpose registry、Preview／Apply、Freeze-Before-Send、staging／cleanup／reconciliation 與 readiness／backup machine contract 由 [Controlled File Storage 正式規格](30_Controlled_File_Storage正式規格.md) 單一擁有；本節不複製 machine fields。
 
 ### 2.3 Concurrency／Fingerprint 簡化原則
 

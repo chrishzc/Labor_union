@@ -97,6 +97,14 @@ class ControlledFileStagingContent:
     expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class ControlledFileStagingVerification:
+    staging_id: str
+    size_bytes: int
+    sha256_digest: str
+    expires_at: datetime
+
+
 class ControlledFileStoragePort(Protocol):
     def readiness(self) -> ControlledFileStorageReadiness: ...
 
@@ -166,5 +174,6 @@ __all__ = [
     "ControlledFileStagingContent",
     "ControlledFileStagingRegistrationStatus",
     "ControlledFileStagingResult",
+    "ControlledFileStagingVerification",
     "DiscoveredControlledFile",
 ]

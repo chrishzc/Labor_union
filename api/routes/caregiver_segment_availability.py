@@ -211,6 +211,8 @@ class CaregiverConflict(BaseModel):
     actual_start_date: date | None = None
     service_start_at: datetime | None = None
     service_end_at: datetime | None = None
+    assignment_start_date: date | None = Field(default=None, exclude_if=lambda value: value is None)
+    assignment_end_date: date | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class CaregiverSegmentAvailabilityResponse(BaseModel):
@@ -298,6 +300,7 @@ def search_candidate_inquiry(
             as_of=request.as_of,
             facts_port=MySqlSegmentedAvailabilityFactsRepository(get_connection, candidate_inquiry=True),
             filter_policy=request.filters.model_dump(),
+            include_assignment_dates=True,
         )
         return _response_from_service(result, "預計服務期間候選查詢完成；未確認需求待確認。")
     except CandidateMatchingError as exc:
