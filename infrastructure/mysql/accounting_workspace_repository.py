@@ -316,7 +316,10 @@ class MySqlAccountingWorkspaceState:
         self.connection.rollback()
 
 
-def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None, payroll_candidate_total=None, bank_candidate=False):
+def query_subsidy_payable_handoff(
+    connection, case_no, *, proposed_scheme=None, payroll_candidate_total=None,
+    complete_payroll_total: int | None = None, bank_candidate=False,
+):
     """Borrow current Orders, owner money facts and the last saved plan; query only."""
     from domains.staff_payables.subsidy_handoff import SubsidyHandoffFacts, decide_subsidy_handoff
     with connection.cursor() as cursor:
@@ -331,7 +334,7 @@ def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None, 
     case = build_accounting_workspace(connection, include_staff_availability=False).query(case_no)
     funding = case.funding
     status = str(row['status'])
-    staff_total = case.staff_receivable_ntd
+    staff_total = complete_payroll_total if complete_payroll_total is not None else case.staff_receivable_ntd
     if staff_total is None:
         staff_total = payroll_candidate_total
     total = case.scheme_case_total_ntd if case.scheme_case_total_ntd is not None else staff_total

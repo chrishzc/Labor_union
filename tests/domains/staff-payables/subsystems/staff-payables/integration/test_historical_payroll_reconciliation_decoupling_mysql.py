@@ -1263,6 +1263,15 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_preserves_paid_ca
     )
 
 
+def test_historical_sync_two_caregivers_with_confirmed_advance_leaves_actual_funding_conflict_pending(
+    mysql_connection: pymysql.connections.Connection,
+) -> None:
+    _assert_historical_sync_with_confirmed_advance(
+        mysql_connection, case_no="115000438", identity_cards=("F223456050", "F223456051"),
+        paid_first=True, paid_amount=7201, expected_new_due=None,
+    )
+
+
 def _paid_caregiver_rows(
     connection: pymysql.connections.Connection, identity: str, staff_id: int,
 ) -> dict[str, list[dict[str, object]]]:
@@ -1288,6 +1297,8 @@ def _assert_historical_sync_with_confirmed_advance(
     case_no: str,
     identity_cards: tuple[str, str],
     paid_first: bool,
+    paid_amount: int = 7200,
+    expected_new_due: str | None = "2026-10-15",
 ) -> None:
     august_end = date(2026, 8, 31)
     september_end = date(2026, 9, 2)
@@ -1346,46 +1357,47 @@ def _assert_historical_sync_with_confirmed_advance(
                 "before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,"
                 "resulting_payroll_version,idempotency_key,actor,reason"
                 ") VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff','established',"
-                "0,7200,'2026-09-15',%s,0,1,%s,'synthetic','original obligation')",
-                (paid_identity, first_assignment, case_no, first_staff,
+                "0,%s,'2026-09-15',%s,0,1,%s,'synthetic','original obligation')",
+                (paid_identity, first_assignment, case_no, first_staff, paid_amount,
                  _fingerprint(paid_identity), f"obligation:{paid_identity}"),
             )
             cursor.execute(
                 "INSERT INTO staff_obligations("
                 "obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,"
                 "amount_due_ntd,due_date,status,current_event_id,payroll_version,payout_history_exists"
-                ") VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',7200,'2026-09-15','open',%s,1,1)",
-                (paid_identity, first_assignment, case_no, first_staff, cursor.lastrowid),
+                ") VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',%s,'2026-09-15','open',%s,1,1)",
+                (paid_identity, first_assignment, case_no, first_staff, paid_amount, cursor.lastrowid),
             )
             cursor.execute(
                 "INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) "
-                "VALUES(%s,'client',7200,'2026-09-15')", (paid_identity,),
+                "VALUES(%s,'client',%s,'2026-09-15')", (paid_identity, paid_amount),
             )
             cursor.execute(
                 "INSERT INTO staff_payout_events("
                 "staff_id,finance_import_row_id,event_type,amount_ntd,occurred_on,bank_account_identity_hash,"
                 "reconciliation_reference,idempotency_key,actor,reason"
-                ") VALUES(%s,NULL,'payout',7200,'2026-09-15',%s,'PAID-ORIG',%s,'synthetic','already paid')",
-                (first_staff, _fingerprint(f"account:{paid_identity}"), f"payout:{paid_identity}"),
+                ") VALUES(%s,NULL,'payout',%s,'2026-09-15',%s,'PAID-ORIG',%s,'synthetic','already paid')",
+                (first_staff, paid_amount, _fingerprint(f"account:{paid_identity}"), f"payout:{paid_identity}"),
             )
             payout_event_id = int(cursor.lastrowid)
             cursor.execute(
                 "INSERT INTO staff_payout_obligation_links("
                 "payout_event_id,obligation_identity,allocated_amount_ntd,allocation_ordinal"
-                ") VALUES(%s,%s,7200,1)", (payout_event_id, paid_identity),
+                ") VALUES(%s,%s,%s,1)", (payout_event_id, paid_identity, paid_amount),
             )
             cursor.execute(
                 "INSERT INTO staff_payable_projections("
                 "obligation_identity,staff_id,obligation_amount_ntd,net_paid_ntd,balance_ntd,status,"
                 "aggregate_version,current_event_id"
-                ") VALUES(%s,%s,7200,7200,0,'completed',1,%s)", (paid_identity, first_staff, payout_event_id),
+                ") VALUES(%s,%s,%s,%s,0,'completed',1,%s)",
+                (paid_identity, first_staff, paid_amount, paid_amount, payout_event_id),
             )
     mysql_connection.commit()
 
     snapshot_scope = {"case_nos": (case_no,), "staff_ids": tuple(row["staff_id"] for row in staff)}
     expected = {
-        (staff[0]["assignment_id"], staff[0]["staff_id"]): (7200, "2026-09-15"),
-        (staff[1]["assignment_id"], staff[1]["staff_id"]): (5600, "2026-10-15"),
+        (staff[0]["assignment_id"], staff[0]["staff_id"]): (paid_amount if paid_first else 7200, "2026-09-15"),
+        (staff[1]["assignment_id"], staff[1]["staff_id"]): (5600, expected_new_due),
     }
     accounting_url = f"/api/v1/finance-import/cases/{case_no}/accounting"
     sync_url = f"/api/v1/orders/{case_no}/payroll/sync-historical-baseline-obligations"
@@ -1405,7 +1417,7 @@ def _assert_historical_sync_with_confirmed_advance(
             old_payable = initial_payables[0]
             assert (old_payable["identity"], old_payable["expected_ntd"], old_payable["due_date"],
                     old_payable["actual_ntd"], old_payable["has_payment"]) == (
-                paid_identity, 7200, "2026-09-15", 7200, True,
+                paid_identity, paid_amount, "2026-09-15", paid_amount, True,
             ), old_payable
             assert all(len(rows) == 1 for rows in paid_before.values()), paid_before
             assert _paid_caregiver_rows(mysql_connection, paid_identity, first_staff) == paid_before
@@ -1426,6 +1438,10 @@ def _assert_historical_sync_with_confirmed_advance(
             assert next(item for item in items if item["staff_id"] == staff[1]["staff_id"])["action"] == "created", receipt
         else:
             assert all(item["action"] == "created" for item in items), receipt
+        if expected_new_due is None:
+            new_item = next(item for item in items if item["staff_id"] == staff[1]["staff_id"])
+            assert new_item["payment_arrangement_pending"] is True, receipt
+            assert new_item["pending_reason"] == "historical_payroll_funding_conflict", receipt
         assert {(item["assignment_id"], item["staff_id"]): item["amount_ntd"] for item in items} == {
             pair: amount for pair, (amount, _) in expected.items()
         }, receipt
@@ -1437,7 +1453,7 @@ def _assert_historical_sync_with_confirmed_advance(
             item["obligation_identity"]: item["amount_ntd"] for item in items
         }
         assert {item["identity"]: item["actual_ntd"] for item in payables if item["has_payment"]} == (
-            {paid_identity: 7200} if paid_first else {}
+            {paid_identity: paid_amount} if paid_first else {}
         )
         assert all(not item["actual_ntd"] for item in payables if not item["has_payment"])
         if paid_first:
@@ -1461,7 +1477,8 @@ def _assert_historical_sync_with_confirmed_advance(
         assert {item["obligation_identity"]: item["due_date"] for item in items} == expected_dates, receipt
         assert {item["identity"]: item["due_date"] for item in payables} == expected_dates
         for table in ("staff_obligations", "staff_obligation_events"):
-            assert {row["obligation_identity"]: str(row["due_date"]) for row in after_sync[table]} == expected_dates
+            assert {row["obligation_identity"]: str(row["due_date"]) if row["due_date"] is not None else None
+                    for row in after_sync[table]} == expected_dates
 
         repeat = client.post(sync_url)
         assert repeat.status_code == 200, repeat.text
