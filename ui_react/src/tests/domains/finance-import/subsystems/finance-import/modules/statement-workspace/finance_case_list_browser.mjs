@@ -33,6 +33,8 @@ const prefix = `browser-${process.env.FINANCE_SIDE ?? 'unknown'}-${process.env.F
 let server;
 let browser;
 let completed = false;
+const staleOnly = process.env.FINANCE_BROWSER_MODE === 'stale';
+const staleOracle = { status: 'not_run', failure: null, observations: [] };
 
 function syntheticReply(url, fixture, accounting, notices) {
   const cursor = url.searchParams.get('after_case_no');
@@ -62,6 +64,7 @@ async function scenario(fixture, { denied = new Set(), token = 'synthetic-sessio
   const page = await context.newPage();
   const accounting = new Map(fixture.accounting);
   const notices = new Map(fixture.notices);
+  const gates = new Map();
   const errors = [];
   const traces = [];
   let active = 0;
@@ -77,6 +80,8 @@ async function scenario(fixture, { denied = new Set(), token = 'synthetic-sessio
     try {
       assert.equal(request.method(), 'GET', 'Synthetic fixture is read-only');
       await new Promise(done => setTimeout(done, 20));
+      const gate = gates.get(url.pathname);
+      if (gate) await gate.promise;
       const authorized = request.headers().authorization === 'Bearer synthetic-session';
       const status = authorized ? denied.has(url.pathname) ? 403 : 200 : 401;
       const payload = status === 200 ? { success: true, message: 'Synthetic only', error: null, data: syntheticReply(url, fixture, accounting, notices) } : { detail: 'Synthetic denied' };
@@ -141,7 +146,91 @@ async function scenario(fixture, { denied = new Set(), token = 'synthetic-sessio
     assert(traces.every(trace => trace.outcome === 'success' && trace.ended >= trace.started));
     measurements.push({ scenario: phase, size: fixture.size, ...timing, requests: traces.length, success: traces.filter(trace => trace.outcome === 'success').length, failures: traces.filter(trace => trace.outcome === 'failure').length, maxConcurrent, trace: structuredClone(traces) });
   }
-  return { page, context, rows, settled, measure, accounting, traces, errors, mount: async (options) => { await page.evaluate(() => window.financeMount()); await settled(options); } };
+  return { page, context, rows, settled, measure, accounting, notices, denied, traces, errors, hold: path => {
+    let release;
+    const promise = new Promise(resolve => { release = resolve; });
+    gates.set(path, { promise });
+    return () => { gates.delete(path); release(); };
+  }, mount: async (options) => { await page.evaluate(() => window.financeMount()); await settled(options); } };
+}
+
+async function verifyStaleRefresh(source) {
+  const included = new Set(['SYN-0001', 'SYN-0002', 'SYN-0004']);
+  const fixture = { ...source, size: included.size,
+    orders: source.orders.filter(row => included.has(row.case_no)),
+    timelines: source.timelines.filter(row => included.has(row.case_no)),
+    accounting: source.accounting.filter(([id]) => included.has(id)),
+    notices: source.notices.filter(([id]) => included.has(id)),
+    expectedRows: source.expectedRows.filter(row => included.has(row.caseNo)),
+    expectedRefreshRows: source.expectedRefreshRows.filter(row => included.has(row.caseNo)),
+  };
+  const current = await scenario(fixture);
+  const releases = [];
+  const staleText = '更新中，顯示上次資料';
+  async function check(caseNo, stale, phase) {
+    const row = current.page.locator(`[data-accounting-case="${caseNo}"]`);
+    const visible = await row.getByText(staleText, { exact: true }).isVisible();
+    const description = await row.evaluate(element => (element.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean).map(id => document.getElementById(id)?.textContent ?? '').join(' '));
+    const amount = await row.locator('td').nth(3).textContent();
+    staleOracle.observations.push({ phase, caseNo, stale, visible, description, amount });
+  }
+  try {
+    await current.mount();
+    assert.deepEqual(await current.rows(), fixture.expectedRows);
+    const fast = 'SYN-0002';
+    const slow = 'SYN-0004';
+    const oldFast = current.accounting.get(fast);
+    const oldSlow = current.accounting.get(slow);
+    assert(oldFast && oldSlow);
+    current.accounting.set(fast, { ...oldFast, staff_receivable_ntd: 76544 });
+    current.accounting.set(slow, { ...oldSlow, staff_receivable_ntd: 65432 });
+    for (const id of [fast, slow]) {
+      releases.push(current.hold(`/api/v1/finance-import/cases/${id}/accounting`));
+      releases.push(current.hold(`/api/v1/line/payment-overdue-reminders/cases/${id}`));
+    }
+    current.traces.length = 0;
+    await current.page.evaluate(() => {
+      window.financeSettledFlash = false;
+      window.financeSettledObserver = new MutationObserver(() => {
+        if (document.querySelector('[data-accounting-case="SYN-0001"]')) window.financeSettledFlash = true;
+      });
+      window.financeSettledObserver.observe(document.body, { subtree: true, childList: true });
+      window.financeRefresh();
+    });
+    await current.page.waitForFunction(() => document.querySelector('button.finance-btn-primary')?.disabled);
+    await check(fast, true, 'before-fast');
+    await check(slow, true, 'before-fast');
+    releases[0](); releases[1]();
+    await current.page.locator(`[data-accounting-case="${fast}"]`).getByText('NT$ 76,544', { exact: true }).waitFor();
+    await check(fast, false, 'after-fast');
+    await check(slow, true, 'after-fast');
+    await current.page.screenshot({ path: resolve(evidence, `${prefix}-stale-after-fast.png`), fullPage: true });
+    assert.equal((await current.rows()).find(row => row.caseNo === slow)?.amount, fixture.expectedRows.find(row => row.caseNo === slow)?.amount);
+    if (staleOracle.observations.some(row => row.stale && !row.visible)) throw new Error('STALE_ROW_MARK_MISSING');
+    for (const row of staleOracle.observations) {
+      assert.equal(row.visible, row.stale, `${row.phase}: only old rows carry a visible mark`);
+      assert.equal(row.description.includes(staleText), row.stale, `${row.phase}: old mark is the accessible row description`);
+    }
+    assert.equal((await current.rows()).some(row => row.caseNo === 'SYN-0001'), false, 'Already settled case must never flash in ongoing refresh');
+    releases[2](); releases[3]();
+    await current.settled();
+    await check(fast, false, 'complete');
+    await check(slow, false, 'complete');
+    for (const row of staleOracle.observations.filter(row => row.phase === 'complete')) {
+      assert.equal(row.visible, false);
+      assert.equal(row.description.includes(staleText), false);
+    }
+    assert.equal((await current.rows()).find(row => row.caseNo === slow)?.amount, 'NT$ 65,432');
+    assert.equal(await current.page.getByText(staleText, { exact: true }).count(), 0);
+    assert.equal(await current.page.evaluate(() => {
+      window.financeSettledObserver.disconnect();
+      return window.financeSettledFlash;
+    }), false, 'Settled case must never transiently appear');
+    staleOracle.status = 'passed';
+  } finally {
+    for (const release of releases) release();
+    await current.context.close();
+  }
 }
 
 let origin;
@@ -169,6 +258,11 @@ window.financeRefresh=()=>{revision++;render();};
   origin = `http://127.0.0.1:${address.port}`;
   base = typeof config.base === 'string' ? config.base : '/';
   browser = await chromium.launch({ headless: true });
+  if (staleOnly) {
+    const small = data.fixtures.find(fixture => fixture.size === 16);
+    assert(small);
+    await verifyStaleRefresh(small);
+  } else {
   for (const fixture of data.fixtures) {
     const current = await scenario(fixture);
     try {
@@ -198,11 +292,17 @@ window.financeRefresh=()=>{revision++;render();};
   }
   const small = data.fixtures.find(fixture => fixture.size === 16);
   assert(small);
-  for (const mode of ['individual-denied', 'list-denied', 'no-token']) {
+  for (const mode of ['individual-denied', 'list-denied', 'no-token', 'refresh-accounting-denied', 'refresh-notice-denied']) {
     const denied = new Set(mode === 'individual-denied' ? ['/api/v1/finance-import/cases/SYN-0002/accounting', '/api/v1/line/payment-overdue-reminders/cases/SYN-0004'] : mode === 'list-denied' ? ['/api/v1/orders/summaries'] : []);
     const current = await scenario(small, { denied });
     try {
       await current.mount({ drainVisibleError: true });
+      if (mode.startsWith('refresh-')) {
+        assert.deepEqual(await current.rows(), small.expectedRows);
+        current.denied.add(mode === 'refresh-accounting-denied' ? '/api/v1/finance-import/cases/SYN-0002/accounting' : '/api/v1/line/payment-overdue-reminders/cases/SYN-0004');
+        await current.page.evaluate(() => window.financeRefresh());
+        await current.settled();
+      }
       if (mode === 'no-token') {
         await current.page.evaluate(() => { window.financeToken = null; window.financeRefresh(); });
         await current.page.getByRole('alert').waitFor();
@@ -217,6 +317,16 @@ window.financeRefresh=()=>{revision++;render();};
         assert(!accounting.actions.includes('發出提醒'));
         assert(!notice.actions.includes('發出提醒'));
         assert.equal(current.traces.filter(trace => trace.outcome === 'failure').length, 2);
+      } else if (mode.startsWith('refresh-')) {
+        const accountingDenied = mode === 'refresh-accounting-denied';
+        const caseNo = accountingDenied ? 'SYN-0002' : 'SYN-0004';
+        const row = (await current.rows()).find(row => row.caseNo === caseNo);
+        assert(row);
+        assert(row.status.includes(accountingDenied ? '帳務來源待確認' : '通知紀錄待確認'));
+        assert(!row.actions.includes('發出提醒'));
+        assert(!row.status.includes('尚無成功通知紀錄'));
+        if (accountingDenied) assert.notEqual(row.amount, small.expectedRows.find(row => row.caseNo === caseNo)?.amount);
+        assert.equal(current.traces.filter(trace => trace.outcome === 'failure').length, 1);
       } else {
         assert.equal(await current.page.getByRole('alert').count(), 1);
         assert.equal((await current.rows()).length, 0);
@@ -232,11 +342,15 @@ window.financeRefresh=()=>{revision++;render();};
     await capture.page.screenshot({ path: resolve(evidence, `${prefix}.png`), fullPage: true });
     await capture.context.tracing.stop({ path: resolve(evidence, `${prefix}-untimed-trace.zip`) });
   } finally { await capture.context.close(); }
+  }
   completed = true;
+} catch (error) {
+  if (staleOnly) { staleOracle.status = 'failed'; staleOracle.failure = error instanceof Error ? error.message : String(error); }
+  throw error;
 } finally {
   try {
     await mkdir(evidence, { recursive: true });
-    await writeFile(resolve(evidence, `${prefix}.json`), JSON.stringify({ surface: 'Real Chromium, production FinanceCaseList and typed HTTP clients; synthetic intercepted HTTP only. Real API/DB and formal end-to-end not_run.', sha: process.env.FINANCE_CHECKOUT_SHA, browser: browser?.version(), node: process.version, completed, timedTracing: false, measurements, checks }, null, 2));
+    await writeFile(resolve(evidence, `${prefix}.json`), JSON.stringify({ surface: 'Real Chromium, production FinanceCaseList and typed HTTP clients; synthetic intercepted HTTP only. Real API/DB and formal end-to-end not_run.', sha: process.env.FINANCE_CHECKOUT_SHA, browser: browser?.version(), node: process.version, completed, timedTracing: false, mode: staleOnly ? 'stale' : 'performance', staleOracle, measurements, checks }, null, 2));
   } finally {
     try { await browser?.close(); }
     finally {

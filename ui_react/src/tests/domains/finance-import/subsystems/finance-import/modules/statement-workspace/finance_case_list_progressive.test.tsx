@@ -68,6 +68,20 @@ function expectAmount(id: string, amount: string): void {
   if (!row) throw new Error(`Missing visible case ${id}`);
   expect(within(row).getByText(amount)).toBeVisible();
 }
+const staleText = '更新中，顯示上次資料';
+function expectStale(id: string, stale: boolean): void {
+  const row = screen.getByRole('button', { name: id }).closest('tr');
+  if (!row) throw new Error(`Missing visible case ${id}`);
+  if (!stale) {
+    expect(within(row).queryByText(staleText)).not.toBeInTheDocument();
+    expect(row).not.toHaveAccessibleDescription(staleText);
+    return;
+  }
+  expect(within(row).queryByText(staleText), 'STALE_ROW_MARK_MISSING').toBeVisible();
+  expect(row).toHaveAccessibleDescription(staleText);
+  const descriptionIds = row.getAttribute('aria-describedby')?.split(/\s+/) ?? [];
+  expect(descriptionIds.some(id => document.getElementById(id)?.textContent === staleText)).toBe(true);
+}
 function expectIncomplete(): void {
   expect(screen.getByRole('button', { name: '查詢案件' })).toBeDisabled();
   expect(screen.getByText('—')).toBeVisible();
@@ -112,7 +126,7 @@ describe('Finance case list progressive owner results', () => {
     expect(screen.getByText(/搜尋範圍共 4 案；已顯示全部/)).toBeVisible();
   });
 
-  it('updates a fast refreshed case while retaining slow old rows, then removes completed and no-longer-eligible cases', async () => {
+  it('marks stale refresh rows accessibly while publishing a fast new case and completing the slow case', async () => {
     const view = render(<FinanceCaseList onCase={vi.fn()} />);
     await started();
     for (const id of cases) await finish(id);
@@ -123,18 +137,24 @@ describe('Finance case list progressive owner results', () => {
     view.rerender(<FinanceCaseList onCase={vi.fn()} revision={1} />);
     await started('SYN-P-003');
     expectAmount('SYN-P-002', 'NT$ 11,000');
+    expectStale('SYN-P-001', true);
+    expectStale('SYN-P-002', true);
     await finish('SYN-P-001', 21000);
     expect(rowIds()).toEqual(['SYN-P-001', 'SYN-P-002', 'SYN-P-003']);
     expectAmount('SYN-P-001', 'NT$ 21,000');
+    expectStale('SYN-P-001', false);
+    expectStale('SYN-P-002', true);
     expectAmount('SYN-P-002', 'NT$ 11,000');
     expectIncomplete();
-    await finish('SYN-P-002', 22000, true);
-    expect(rowIds()).toEqual(['SYN-P-001', 'SYN-P-003']);
+    await finish('SYN-P-002', 22000);
+    expectAmount('SYN-P-002', 'NT$ 22,000');
+    expectStale('SYN-P-002', false);
+    expect(rowIds()).toEqual(['SYN-P-001', 'SYN-P-002', 'SYN-P-003']);
     expectIncomplete();
-    await finish('SYN-P-003', 23000);
+    await finish('SYN-P-003', 23000, true);
     await loaded();
-    expect(rowIds()).toEqual(['SYN-P-001', 'SYN-P-003']);
-    expectAmount('SYN-P-003', 'NT$ 23,000');
+    expect(rowIds()).toEqual(['SYN-P-001', 'SYN-P-002']);
+    expect(screen.queryByText(staleText)).not.toBeInTheDocument();
     expect(screen.getByText(/搜尋範圍共 2 案；已顯示全部/)).toBeVisible();
   });
 
@@ -173,6 +193,36 @@ describe('Finance case list progressive owner results', () => {
     expect(screen.queryByText('NT$ 99,000')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByText(/搜尋範圍共 1 案；已顯示全部/)).toBeVisible();
+  });
+
+
+  it.each(['accounting', 'notices'])('does not reuse successful sensitive %s data after refresh denies that owner', async owner => {
+    const view = render(<FinanceCaseList onCase={vi.fn()} />);
+    await started();
+    for (const id of cases) await finish(id, 41000, id === 'SYN-P-004');
+    await loaded();
+    expect(rowIds()).not.toContain('SYN-P-004');
+    generation();
+    vi.mocked(financeAccountingClient.query).mockClear();
+    view.rerender(<FinanceCaseList onCase={vi.fn()} revision={1} />);
+    await started();
+    expect(rowIds()).not.toContain('SYN-P-004');
+    const value = pendingCase('SYN-P-001');
+    await act(async () => {
+      const denied = new ApiHttpError(403, 'FORBIDDEN', 'Synthetic access revoked');
+      if (owner === 'accounting') { value.accounting.reject(denied); value.notices.resolve([]); }
+      else { value.accounting.resolve(accounting('SYN-P-001', 51000)); value.notices.reject(denied); }
+    });
+    const row = screen.getByRole('button', { name: 'SYN-P-001' }).closest('tr');
+    if (!row) throw new Error('Missing denied case');
+    expect(within(row).queryByText('NT$ 41,000')).not.toBeInTheDocument();
+    expect(within(row).getByText(owner === 'accounting' ? '帳務來源待確認' : '通知紀錄待確認')).toBeVisible();
+    expect(within(row).queryByText('尚無成功通知紀錄')).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: '發出提醒' })).not.toBeInTheDocument();
+    for (const id of cases.slice(1)) await finish(id, 51000, id === 'SYN-P-004');
+    await loaded();
+    expect(rowIds()).not.toContain('SYN-P-004');
+    expect(screen.queryByText(staleText)).not.toBeInTheDocument();
   });
 
   it.each(['orders', 'timelines'])('hides previously visible sensitive rows when the refreshed %s owner denies access', async owner => {
