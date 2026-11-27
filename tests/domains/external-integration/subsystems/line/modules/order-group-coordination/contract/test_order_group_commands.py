@@ -323,26 +323,93 @@ def test_retired_alert_registration_command_has_no_effect_on_service_groups():
     assert not uow.audits and not uow.commits
 
 
-def test_operator_feedback_ignores_saved_copy_and_is_reply_only_while_private_invitations_remain_push():
-    from subsystems.line.message_copy import copy_template_id
+def test_group_success_and_format_copy_are_configurable_and_reply_only(monkeypatch):
+    from subsystems.line import order_group_application
+    from subsystems.line.message_copy_catalog import default_copy_templates
+
+    monkeypatch.setattr(
+        order_group_application, "_group_command_aliases",
+        lambda: (("綁定訂單", "群組開案"), ("送出邀請",)),
+    )
     uow = Uow()
-    reads = []
-    def settings(kind):
-        reads.append(kind)
-        return NS(revision=NS(value=1), definition_json=json.dumps({'templates':[
-            {'id':copy_template_id(key), 'name':key, 'message_type':'text', 'enabled':True,
-             'content':'不可顯示的舊設定', 'variables':[]}
-            for key in ('group-bound','group-invitations-queued','group-format-empty')]}))
-    uow.configurations = NS(get=settings)
-    command(uow, f'綁定訂單 {CASE}', 'bad-input')
-    command(uow, f'綁定訂單 {CASE} {URL}', 'setup')
-    assert not reads
-    command(uow, '發送邀請', 'send')
+    defaults = default_copy_templates()
+    one_line_errors = (
+        ("群組開案", "empty"),
+        (f"群組開案 {URL}", "case"),
+        (f"群組開案 {CASE}", "url"),
+        (f"群組開案{CASE} {URL}", "spacing"),
+        (f"群組開案 {CASE}{URL}", "case-url-spacing"),
+        (f"群組開案 {CASE} {URL} extra", "split"),
+        (f"群組開案 ??? {URL}", "invalid-case"),
+        (f"群組開案 {CASE} https://example.invalid/group", "invalid-url"),
+    )
+    content_by_key = {
+        **{f"group-format-{key}": "{command} " + key for _, key in one_line_errors},
+        "group-format-invite": "{invite_command}；{binding_format}",
+        "group-format-guided-case": "請輸入正確案號。",
+        "group-format-guided-url": "請貼上正確邀請連結。",
+        "group-bound": "單行完成 {case_no}",
+        "group-guided-bound": "三步完成 {case_no}",
+        "group-invitations-queued": "已排入 {case_no} 共 {recipient_count} 人",
+    }
+    saved = [
+        {**defaults[key], "content": content}
+        for key, content in content_by_key.items()
+    ]
+    uow.configurations = NS(get=lambda _: NS(
+        revision=NS(value=1), definition_json=json.dumps({"templates": saved}),
+    ))
+
+    for text, key in one_line_errors:
+        command(uow, text, f"bad-{key}")
+        assert replies(uow)[-1] == f"群組開案 {key}"
+    command(uow, f"送出邀請 {URL}", "bad-invite")
+    assert replies(uow)[-1] == "送出邀請；格式：綁定訂單 案件編號 邀請網址"
+    assert not uow.order_groups.binds and not invitations(uow)
+
+    assert guided_message(uow, "綁定訂單", 1)
+    assert guided_message(uow, URL, 2)
+    assert replies(uow)[-1] == "請輸入正確案號。"
+    assert guided_message(uow, CASE, 3)
+    assert guided_message(uow, "https://example.invalid/group", 4)
+    assert replies(uow)[-1] == "請貼上正確邀請連結。"
+    assert guided_message(uow, URL, 5)
+    assert replies(uow)[-1] == f"三步完成 {CASE}"
+    assert len(invitations(uow)) == 2
+
+    command(uow, f"綁定訂單 {CASE} {URL}", "setup")
+    assert replies(uow)[-1] == f"單行完成 {CASE}"
+    command(uow, "送出邀請", "send")
+    assert replies(uow)[-1] == f"已排入 {CASE} 共 2 人"
+
+    uow.admins.get_linked_admin = lambda _: None
+    command(uow, "送出邀請", "permission")
+    assert replies(uow)[-1] == "此操作只允許已綁定 LINE 的工會人員使用。"
     feedback = [request for request in uow.delivery_tasks.requests.values()
                 if request.recipient.identity.value == 'C-group']
-    assert len(feedback) == 3
     assert all(request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE for request in feedback)
-    assert all('不可顯示的舊設定' not in request.payload_json for request in feedback)
-    assert len(invitations(uow)) == 2
+    assert all(URL not in request.payload_json for request in feedback)
+    assert len(invitations(uow)) == 4
     assert {request.recipient.identity.value for request in invitations(uow)} == {'U-customer','U-staff'}
     assert all(request.source_aggregate_type == 'line_order_group_invitation' for request in invitations(uow))
+
+
+def test_oversize_group_reply_expansion_uses_sendable_default(monkeypatch):
+    from subsystems.line import order_group_application
+    from subsystems.line.message_copy_catalog import default_copy_templates
+
+    key = 'group-format-url'
+    saved = {**default_copy_templates()[key], 'content': 'A' * 4990 + '{command}'}
+    uow = Uow()
+    uow.configurations = NS(get=lambda _: NS(
+        revision=NS(value=1), definition_json=json.dumps({'templates': [saved]}),
+    ))
+    alias = '新指令' * 10
+    monkeypatch.setattr(order_group_application, '_group_command_aliases', lambda: ((alias,), ('發送邀請',)))
+    command(uow, f'{alias} {CASE}', 'bad-url')
+    assert replies(uow)[-1] == order_group_application.GROUP_OPERATOR_REPLY_COPY[key].format(command=alias)
+
+    alias = '新指令' * 1000
+    command(uow, f'{alias} {CASE}', 'long-alias')
+    assert replies(uow)[-1] == order_group_application.GROUP_OPERATOR_REPLY_COPY[key].format(command='綁定訂單')
+    assert not uow.order_groups.binds and not invitations(uow)

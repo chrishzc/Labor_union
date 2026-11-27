@@ -7,7 +7,15 @@ import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useId, useRef, useState, type FC } from 'react';
 import { ChevronDown, LayoutPanelTop, MessageSquare, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, FLOW_PREVIEW_ONLY_IDS, LINE_MESSAGE_FLOWS, messageStageOrder, type FlowJourneyId } from '../adapters/line_configuration/line_message_flow_adapter';
+import {
+  FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS,
+  FLOW_PREVIEW_ONLY_IDS,
+  LINE_MESSAGE_FLOWS,
+  messageStageOrder,
+  ORDER_GROUP_BIND_REPLY_TEMPLATES,
+  ORDER_GROUP_INVITE_REPLY_TEMPLATES,
+  type FlowJourneyId,
+} from '../adapters/line_configuration/line_message_flow_adapter';
 import { LineMessagePreviewWorkspace } from './LineMessagePreviewWorkspace';
 import { LineCardCopyEditor, cardCopyFieldId, type CardCopyField } from './LineCardCopyEditor';
 import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
@@ -68,6 +76,9 @@ const BUILTIN_RECIPIENTS: Record<string, string> = {
   'card-candidate-information-3': '候選月嫂私人聊天室', 'card-caregiver-information': '正式媒合月嫂私人聊天室',
   'card-caregiver-information-2': '正式媒合月嫂私人聊天室',
   'group-invitation-customer': '客戶私人聊天室', 'group-invitation-staff': '月嫂私人聊天室',
+  ...Object.fromEntries(
+    [...ORDER_GROUP_BIND_REPLY_TEMPLATES, ...ORDER_GROUP_INVITE_REPLY_TEMPLATES].map(({ id }) => [id, '案件服務群組']),
+  ),
   'helper-menu-card': '案件服務群組', 'helper-menu-completed': '案件服務群組', 'helper-confirm-start-card': '案件服務群組',
   'helper-postponement-card': '案件服務群組', 'helper-guidelines-card': '案件服務群組',
 };

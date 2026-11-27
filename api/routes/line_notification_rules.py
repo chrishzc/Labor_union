@@ -68,6 +68,7 @@ from subsystems.line.message_configuration import (
     LineMessageConfigurationError,
     validate_message_templates,
 )
+from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY, render_group_operator_reply_copy
 from subsystems.line.notification_manual_replay_application import LineNotificationWarningSkipConflict
 from infrastructure.mysql.current_anomaly_issue_repository import CurrentIssueOwnerSnapshotUnavailable
 from infrastructure.mysql.line_notification_repository import LineNotificationManualReplayValidationError
@@ -171,6 +172,12 @@ def update_notification_rule_message_template(
             template["content"] = payload.content
         elif len(payload.content) > 5000:
             raise LineMessageConfigurationError("通知文案不可超過 5000 字。")
+        elif rule_id in GROUP_OPERATOR_REPLY_COPY:
+            from subsystems.line.message_preview_samples import group_operator_reply_sample_values
+            render_group_operator_reply_copy(
+                definition, rule_id, group_operator_reply_sample_values(rule_id), content=payload.content,
+            )
+            template["content"] = payload.content
         else:
             from subsystems.line.service_start_day import GREETING_COPY_KEYS, PAYMENT_COPY_VARIABLES, greeting_directions
             if rule_id == 'payment-first-reminder' and not all(variable in payload.content for variable in PAYMENT_COPY_VARIABLES):

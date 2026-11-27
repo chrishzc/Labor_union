@@ -33,6 +33,26 @@ export const MESSAGE_DELIVERY_LABELS: Record<MessageDeliveryMode, string> = {
   reply: '只在聊天室回覆',
 };
 
+export const ORDER_GROUP_BIND_REPLY_TEMPLATES = [
+  { id: 'group-bound', label: '單行綁定成功' },
+  { id: 'group-guided-bound', label: '三步綁定成功' },
+  { id: 'group-format-empty', label: '缺少案件編號與邀請網址' },
+  { id: 'group-format-case', label: '缺少案件編號' },
+  { id: 'group-format-url', label: '缺少邀請網址' },
+  { id: 'group-format-spacing', label: '缺少分隔空白' },
+  { id: 'group-format-case-url-spacing', label: '案件編號與網址之間缺少空白' },
+  { id: 'group-format-split', label: '參數過多或網址被拆開' },
+  { id: 'group-format-invalid-case', label: '案件編號格式錯誤' },
+  { id: 'group-format-invalid-url', label: '邀請網址格式錯誤' },
+  { id: 'group-format-guided-case', label: '三步綁定的案件編號格式錯誤' },
+  { id: 'group-format-guided-url', label: '三步綁定的邀請網址格式錯誤' },
+] as const;
+
+export const ORDER_GROUP_INVITE_REPLY_TEMPLATES = [
+  { id: 'group-invitations-queued', label: '邀請已排入發送' },
+  { id: 'group-format-invite', label: '發送邀請指令格式錯誤' },
+] as const;
+
 interface FlowNodeDefinition {
   id: string;
   title: string;
@@ -70,6 +90,8 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
       { id: 'deposit-settled', title: '訂金確認入帳', summary: '確認入帳後，由工會人員在 LINE 官方帳號聊天後台使用預設訊息手動發送，並於系統內標記已通知以消除待辦。' },
       { id: 'deposit-overdue', title: '訂金逾期－私訊補寄與人工提醒', delivery: ['automatic', 'manual'], ids: ['payment-overdue-deposit'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；任何私訊或按鈕回覆後改人工提醒，未核銷款項保留待辦。' },
       { id: 'payment-reported', title: '已匯款回報受理', delivery: ['reply'], ids: ['payment-reminder-ack'], summary: '客戶從繳費提醒回報已匯款後，系統在原聊天室回覆受理。實際入帳仍需工會核對。' },
+      { id: 'group-bind-replies', title: '案件群組綁定回覆', delivery: ['reply'], ids: ORDER_GROUP_BIND_REPLY_TEMPLATES.map(({ id }) => id) },
+      { id: 'group-invitation-replies', title: '案件群組邀請指令回覆', delivery: ['reply'], ids: ORDER_GROUP_INVITE_REPLY_TEMPLATES.map(({ id }) => id) },
       { id: 'group-invitation', title: '寄送案件群組邀請', delivery: ['manual'], ids: ['group-invitation-customer', 'group-invitation-staff'], summary: '訂金正式核銷後，人員在案件群組設定綁定與邀請網址，再輸入「發送邀請」；不以簽約完成作為建群門檻。' },
     ] },
     { title: '開始服務', nodes: [

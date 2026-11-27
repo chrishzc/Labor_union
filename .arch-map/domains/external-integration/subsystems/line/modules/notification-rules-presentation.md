@@ -77,6 +77,6 @@ Reconcile when unified notification content presentation、configured card copy�
 
 2026-10-30：目錄與文案編輯清單排除重大客訴／系統異常管理員告警模板及 runtime-system-health。流程圖改為主動查看系統／客服狀態；保留歷史設定，不提供重新啟用 Push。
 
-2026-10-30 最新裁決：18 項給操作人員的 group-bound／group-invitations-queued／group-error-*／group-format-* 改固定 Reply-only，目錄、default copy 與舊編輯／公版入口均移除。管理員告警 rule 文案 Query／PUT 同樣關閉，保留原設定及歷史；客戶／月嫂邀請與有效業務通知不變。
+案件群組的綁定成功、邀請排入成功與格式錯誤維持 Reply-only，透過統一通知文案工作台提供編輯與公版預覽。引導動作以訊息深連結定位對應範本。業務拒絕維持固定 Reply，歷史停用文案保留且不重新套用。管理員告警 rule 文案 Query／PUT 維持關閉。契約見 [群組指令與驗收](../../../../../requirements/17A_LINE_Gateway_Inbox與通知投遞正式規格.md#3-服務群組綁定待辦與代班邀請)。
 
 2026-11-14 擴充：步驟 5（開始服務）補齊案件群組小幫手選單卡（`helper-menu-card`）、開工日確認卡與自動排班回覆（`helper-confirm-start-*`）、未確認開工日排程提示（`helper-schedule-unconfirmed`）、雙方合意延期確認與回覆（`helper-postponement-*`）、專員協助受理與結案回覆（`helper-staff-assistance-*`）及使用說明與客戶常見疑問標準回答（`helper-guidelines-card`、`helper-faq-*`）之文案編輯、變數插入與公版預覽支援；流程圖步驟 5 直接導向編輯工作台，小幫手選單與專員結案回覆並提示前往 `#line-interface?tab=guidance` 調整觸發／結案指令。

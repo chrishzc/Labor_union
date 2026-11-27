@@ -558,9 +558,10 @@ def test_substitute_and_date_record_preview_disclose_sparse_dates_and_caregiver(
 
 
 def test_current_group_preview_names_use_case_group_terminology():
-    names = [item.name for item in app().catalog(actor()) if item.id.startswith('group-')]
-    assert names and all('服務群組' not in name for name in names)
-    assert set(names) == {'案件群組邀請卡－客戶', '案件群組邀請卡－月嫂'}
+    names = {item.id: item.name for item in app().catalog(actor()) if item.id.startswith('group-')}
+    assert all('服務群組' not in name for name in names.values())
+    assert names['group-invitation-customer'] == '案件群組邀請卡－客戶'
+    assert names['group-invitation-staff'] == '案件群組邀請卡－月嫂'
 
 
 def test_group_helper_only_completed_sample_shows_survey():
@@ -826,21 +827,39 @@ def test_old_card_copy_preserves_its_saved_title_while_the_new_description_is_em
     assert original == before
 
 
-def test_fixed_operator_feedback_and_admin_alerts_have_no_catalog_or_default_copy():
+def test_group_reply_public_previews_render_saved_and_draft_copy():
+    from subsystems.line.message_configuration import LineMessageConfigurationError
     from subsystems.line.message_copy_catalog import default_copy_templates
     from subsystems.line.configuration_store import read_raw_config
-    keys = {'group-bound','group-invitations-queued','group-error-invitation-url','group-format-invite',
-            'group-error-admin','group-error-order','group-error-unbound','group-error-identity',
-            'group-error-cancelled','group-error-unpaid','group-error-occupied','group-format-empty',
-            'group-format-case','group-format-url','group-format-spacing','group-format-split',
-            'group-format-invalid-case','group-format-invalid-url','runtime-system-health'}
+    from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY
+
+    fixed = {'group-error-invitation-url', 'group-error-admin', 'group-error-order', 'group-error-unbound',
+             'group-error-identity', 'group-error-cancelled', 'group-error-unpaid', 'group-error-occupied',
+             'runtime-system-health'}
     from pathlib import Path
     rules = json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
-    catalog = LineMessagePreviewApplication._catalog(read_raw_config('message_templates'),rules)
+    catalog = LineMessagePreviewApplication._catalog(read_raw_config('message_templates'), rules)
     ids = {item.id for item in catalog}
-    assert not keys & ids and not keys & set(default_copy_templates())
+    defaults = default_copy_templates()
+    assert not fixed & ids and not fixed & defaults.keys()
+    assert GROUP_OPERATOR_REPLY_COPY.keys() <= ids
     assert {'group-invitation-customer','group-invitation-staff'} <= ids
     assert not {'LU96-M4-SAFE-ALERT-RULE-V1','LU96-M4-COMPLAINT-HIGH-RULE-V1'} & ids
-    for key in keys:
+    for key in fixed:
         with pytest.raises(MessagePreviewNotFound):
-            app().render(key,None,None,None,actor(),sample=True)
+            app().render(key, None, None, None, actor(), sample=True)
+
+    for key, default in GROUP_OPERATOR_REPLY_COPY.items():
+        selected = defaults[key]
+        variables = tuple(variable['name'] for variable in selected['variables'])
+        configuration = Configuration(selected['id'], variables, '已儲存。\n' + default)
+        application = app(configuration)
+        saved = application.render(key, None, None, None, actor(), sample=True)
+        draft = application.render(key, content='未儲存。\n' + default, case_no=None, staff_id=None, actor=actor(), sample=True)
+        assert saved.status == draft.status == 'ready'
+        assert saved.text.startswith('已儲存。\n')
+        assert draft.text.startswith('未儲存。\n')
+        assert all('{' + variable + '}' not in draft.text for variable in variables)
+    with pytest.raises(LineMessageConfigurationError, match='LINE 字數上限'):
+        app().render('group-format-invite', 'A' * 4984 + '{binding_format}', None, None, actor(), sample=True)
+    assert app().render('group-bound', None, None, None, actor()).status == 'unavailable'

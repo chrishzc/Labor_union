@@ -153,6 +153,7 @@ def _card_defaults():
 def default_copy_templates():
     """Virtual genesis entries; reads never persist or replace existing settings."""
     from subsystems.line.deposit_notifications import ASSISTANCE_ACK
+    from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY
     from subsystems.line.service_start_messages import GROUP_ASSISTANCE_DIRECTIONS
     from subsystems.scheduling.matching_line_cards import MATCHING_ASSISTANCE_DIRECTIONS
 
@@ -160,6 +161,9 @@ def default_copy_templates():
     result = {}
     for key, content in _text_defaults().items():
         result[key] = _template(copy_template_id(key), key, content)
+    for key, content in GROUP_OPERATOR_REPLY_COPY.items():
+        # Earlier overrides were retired. Opening the editor must not reactivate them.
+        result[key] = _template(copy_template_id(f"{key}-reply-v2"), key, content)
     for key, payload in _card_defaults().items():
         if key == 'card-candidate-information-3':
             continue  # The weekly picture contains owner data, not editable copy.
