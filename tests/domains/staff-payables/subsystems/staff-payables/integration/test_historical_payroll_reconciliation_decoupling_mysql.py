@@ -1273,7 +1273,9 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_leaves_actual_fun
 
 
 def _paid_caregiver_rows(
-    connection: pymysql.connections.Connection, identity: str, staff_id: int,
+    connection: pymysql.connections.Connection | mysql_adapter._PooledMySqlConnection,
+    identity: str,
+    staff_id: int,
 ) -> dict[str, list[dict[str, object]]]:
     queries = (
         ("staff_obligations", "obligation_identity", identity, "obligation_identity"),
@@ -1283,7 +1285,7 @@ def _paid_caregiver_rows(
         ("staff_payout_obligation_links", "obligation_identity", identity, "id"),
         ("staff_payable_projections", "obligation_identity", identity, "obligation_identity"),
     )
-    with connection.cursor() as cursor:
+    with connection.cursor(pymysql.cursors.DictCursor) as cursor:
         records: dict[str, list[dict[str, object]]] = {}
         for table, key, value, order_by in queries:
             cursor.execute(f"SELECT * FROM {table} WHERE {key}=%s ORDER BY {order_by}", (value,))
