@@ -1273,7 +1273,11 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_leaves_actual_fun
 
 
 def _paid_caregiver_rows(
-    connection: pymysql.connections.Connection | mysql_adapter._PooledMySqlConnection,
+    connection: (
+        pymysql.connections.Connection
+        | pymysql.connections.Connection[pymysql.cursors.DictCursor]
+        | mysql_adapter._PooledMySqlConnection
+    ),
     identity: str,
     staff_id: int,
 ) -> dict[str, list[dict[str, object]]]:
