@@ -11,6 +11,7 @@ import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import { AccountingDifferencePanel } from './AccountingDifferencePanel';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
+import { useAdminOperationsViews } from '../pages/admin_operations_view_cache';
 import { ClientRefundReturnReconciliationPanel } from './ClientRefundReturnReconciliationPanel';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {financeAccountingClient,type CaseAccounting,type AccountingWarning} from '../api/finance_import/finance_accounting_client';
@@ -580,6 +581,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
 }
 
 export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation,onPayableReview,reviewObligation,settlementFocus,onOpenGovernmentList}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void;onViewCase?:()=>void;externalPurposeReview?:boolean;previewRefundOnMount?:boolean};onPayableReview?:(item:HistoricalPayableAuditItem)=>void;reviewObligation?:string;settlementFocus?:'client_settlement'|'staff_payout';onOpenGovernmentList?:()=>void}){
+ const views=useAdminOperationsViews();
  const {requestLeave}=useUnsavedNavigation();
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;pricing?:CasePricing;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[recoveries,setRecoveries]=useState<StaffRecoveryView|null>(null);
@@ -628,6 +630,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
    section.current?.querySelector<HTMLElement>(`[data-settlement-focus="${settlementFocus}"]`)?.focus();
  }, [caseLoaded, initialCase, settlementFocus]);
  function refresh(){setRevision(v=>v+1);onChanged?.();}
+ function refreshAfterAccountingChange(){views.invalidateWorkbench();refresh();}
  function open(next:Stage|'plan'){returnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;returnScroll.current=section.current?.closest('.drawer-body')?.scrollTop??0;requestLeave(()=>setView(next));}
  function back(){requestLeave(()=>setView(null));}
  function copyVirtual(val:string){if(!val)return;if(typeof navigator!=='undefined'&&navigator.clipboard){void navigator.clipboard.writeText(val).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2000);});}}
@@ -727,10 +730,10 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  </details>}
  {data&&bankReconciliation&&!showFullCase&&<fieldset style={{border:0,padding:0,margin:0,minWidth:0}} disabled={termsEditState.busy||termsEditState.dirty||pricingEditState.busy||pricingEditState.dirty||(pendingAccountingRefresh&&!reconciliationBusy)}>
    {cancellationObservedRowId===bankReconciliation.row.row_id&&<p role="status">取消結算已完成，請核對原流水與最新款項。</p>}
-   {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||freshBankRow.row_id!==bankReconciliation.row.row_id||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} pricing={state.pricing} multiBirthCount={multiBirthCount} refundAccountNo={refundAccountNo} refundName={refundName} onOpenParamsEdit={isSubsidyRefundReview?undefined:()=>setParamsDrawerOpen(true)} onBusyChange={reportReconciliationBusy} onViewCase={bankReconciliation.onViewCase??(()=>setShowFullCase(true))} onCancellationObserved={()=>{setCancellationObservedRowId(freshBankRow.row_id);setPendingAccountingRefresh(true);onChanged?.();}}/>}
+   {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||freshBankRow.row_id!==bankReconciliation.row.row_id||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} onPosted={()=>{views.invalidateWorkbench();bankReconciliation.onPosted();}} pricing={state.pricing} multiBirthCount={multiBirthCount} refundAccountNo={refundAccountNo} refundName={refundName} onOpenParamsEdit={isSubsidyRefundReview?undefined:()=>setParamsDrawerOpen(true)} onBusyChange={reportReconciliationBusy} onViewCase={bankReconciliation.onViewCase??(()=>setShowFullCase(true))} onCancellationObserved={()=>{views.invalidateWorkbench();setCancellationObservedRowId(freshBankRow.row_id);setPendingAccountingRefresh(true);onChanged?.();}}/>}
  </fieldset>}
  {data&&(!bankReconciliation||showFullCase)&&<><div hidden={view!==null}>
- <OrderAttributionFundingReview key={initialCase} caseNo={initialCase} revision={revision} onSaved={refresh} />
+ <OrderAttributionFundingReview key={initialCase} caseNo={initialCase} revision={revision} onSaved={refreshAfterAccountingChange} />
  {showFullCase&&bankReconciliation&&(
    <div className="finance-reconciliation-return-banner">
      <div>
@@ -748,7 +751,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  {settlementFocus && <div data-settlement-focus={settlementFocus} tabIndex={-1}>
    <AccountingDifferencePanel key={`${initialCase}:${settlementFocus}`} caseNo={initialCase}
      initialOwner={settlementFocus === 'client_settlement' ? 'client' : data.staff_items.some(item => item.direction === 'receivable' && !item.settled) ? 'staff' : 'payroll'}
-     refreshVersion={revision} onChanged={refresh} />
+     refreshVersion={revision} onChanged={refreshAfterAccountingChange} />
  </div>}
  <AccountingParametersCard
    caseNo={initialCase}
@@ -843,7 +846,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      subsidyNtd={data.subsidy_ntd ?? 0}
      onSuccess={updated => {
        setState(old => ({ ...old, data: updated }));
-       refresh();
+       refreshAfterAccountingChange();
      }}
      onClose={() => setShowSupplement(false)}
    />
@@ -1078,7 +1081,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     const located=recovery.has_source_cash_evidence&&recovery.source_obligation_identities?.some(identity=>staffItems.some(item=>item.identity===identity));
     return <div key={recovery.identity}><span>{recovery.party} · 正式未解除追償 {money(recovery.remaining_ntd)}</span>{located?<button type="button" className="finance-btn-secondary" onClick={()=>setRecoveryTarget({staffId:recovery.staff_id,identity:recovery.identity})}>核對追償</button>:<span>差額待查</span>}</div>;
   }):recoveryError?<p>差額待查</p>:null}
-  {recoveryTarget&&<StaffOverpaymentRecoveryActions staffId={recoveryTarget.staffId} recoveryIdentity={recoveryTarget.identity} onCommitted={refresh}/>}
+  {recoveryTarget&&<StaffOverpaymentRecoveryActions staffId={recoveryTarget.staffId} recoveryIdentity={recoveryTarget.identity} onCommitted={refreshAfterAccountingChange}/>}
  </div></details>
 
  <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
@@ -1205,7 +1208,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   {onOpenGovernmentList && <button type="button" className="finance-btn-link" disabled={accountingBusy}
     onClick={onOpenGovernmentList}>前往政府補助清單</button>}
  </div></details>
- </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} subsidyAmount={data.subsidy_ntd} bankMemos={data.bank_memos??[]} arrangement={data.arrangement} canConfirmDirect={data.can_confirm_direct === true} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
+ </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} subsidyAmount={data.subsidy_ntd} bankMemos={data.bank_memos??[]} arrangement={data.arrangement} canConfirmDirect={data.can_confirm_direct === true} onBack={back} onSaved={()=>{setView(null);refreshAfterAccountingChange();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
  {data && paramsDrawerOpen && (
    <AccountingParametersDrawer
      key={initialCase}
@@ -1216,7 +1219,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      canEditHistoricalDays={state.order?.order_status === '歷史訂單－服務完成'}
      onCommitted={() => {
        setPendingAccountingRefresh(true);
-       refresh();
+       refreshAfterAccountingChange();
      }}
    />
  )}

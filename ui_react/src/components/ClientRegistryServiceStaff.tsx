@@ -6,6 +6,7 @@ import type { StaffDirectorySummary } from '../api/staff_directory/staff_directo
 import { ClientRegistryReplacementCandidates } from './ClientRegistryReplacementCandidates';
 import { OrderActualStartPanel } from './OrderActualStartPanel';
 import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
+import { useAdminOperationsViews } from '../pages/admin_operations_view_cache';
 
 interface Props {
   caseNo: string;
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function ClientRegistryServiceStaff({ caseNo, revision, disabled, onCommitted, onStateChange, onOpenServiceArrangement }: Props) {
+  const views = useAdminOperationsViews();
   const [plan, setPlan] = useState<AssignmentPlan | null>(null);
   const [historicalOrder, setHistoricalOrder] = useState<boolean | null>(null);
   const [people, setPeople] = useState<Record<number, StaffDirectorySummary>>({});
@@ -87,6 +89,8 @@ export function ClientRegistryServiceStaff({ caseNo, revision, disabled, onCommi
       {!correctingStart && <button type="button" disabled={disabled || candidateState.busy || loading} onClick={() => setCorrectingStart(true)}>更正實際開始日</button>}
       {correctingStart && <><fieldset className="registry-terms-fieldset" disabled={disabled || candidateState.busy}>
         <OrderActualStartPanel key={caseNo} caseNo={caseNo} autoLoad staffNames={Object.fromEntries(Object.entries(people).map(([id, person]) => [id, staffDisplayLabel(person.union_no, person.name ?? '姓名未設定')]))} onEditStateChange={setStartState} onObserved={operation => {
+          views.invalidateSchedulingMonths();
+          views.invalidateWorkbench(operation === 'date_only' ? 'actual-start-date' : 'all');
           setRecalculateDates(operation === 'date_only');
           setStartNotice(operation === 'reschedule' ? '實際開始日與各段排班已一併更新，請前往服務安排核對調整結果。' : '實際開始日已儲存，請前往服務安排重新確認日期表。');
           setRetry(value => value + 1); void onCommitted();
@@ -99,7 +103,11 @@ export function ClientRegistryServiceStaff({ caseNo, revision, disabled, onCommi
       }} href={`#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`}>前往本案服務安排確認 →</a>
     </section>
     {!choosing && plan?.assignments.length === 0 && <button type="button" disabled={disabled} onClick={() => setChoosing(true)}>選擇接任月嫂</button>}
-    {choosing && <ClientRegistryReplacementCandidates caseNo={caseNo} disabled={disabled} onObserved={onCommitted} onStateChange={setCandidateState} />}
+    {choosing && <ClientRegistryReplacementCandidates caseNo={caseNo} disabled={disabled} onObserved={() => {
+      views.invalidateWorkbench();
+      views.scheduling.options.invalidate();
+      return onCommitted();
+    }} onStateChange={setCandidateState} />}
     </>}
   </section>;
 }
