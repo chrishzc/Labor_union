@@ -111,6 +111,16 @@ def _mobile(token, capability):
     return _mobile_admin_context(token, capability)[0]
 
 
+class MobileDismissCustomerBindingReminder(DismissCustomerBindingReminder, MobileAuth):
+    pass
+
+
+@mobile_router.post('/customer-binding-reminder/dismiss')
+def mobile_dismiss_customer_binding_reminder(body: MobileDismissCustomerBindingReminder):
+    principal = _mobile(body.line_id_token, LineCapability.IDENTITY_BINDING_MANAGE)
+    return dismiss_customer_binding_reminder(body, principal)
+
+
 @mobile_router.post('/notification-failures/{issue_key}/query', response_model=BaseResponse[NotificationFailureDetailView])
 def mobile_notification_failure_detail(issue_key: Annotated[str, Path(pattern=r'^ci_[0-9a-f]{64}$')], body: MobileAuth):
     return BaseResponse(data=_failure_detail(issue_key, _mobile(body.line_id_token, LineCapability.MONITOR_READ)))
