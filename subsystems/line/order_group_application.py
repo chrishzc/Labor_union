@@ -10,6 +10,7 @@ from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 import json
 import re
 from datetime import datetime
+from hashlib import sha256
 from typing import Callable
 
 from domains.line.canonical_payload import canonical_line_payload_json
@@ -32,10 +33,13 @@ from shared_kernel.identities import (
 )
 from subsystems.line.capabilities import (
     LineCapability,
+    LineCapabilityDeniedError,
     line_capabilities_for_role,
     require_line_capability,
 )
 from subsystems.line.order_group_contracts import (
+    GROUP_BINDING_REPLY_TTL,
+    GroupBindingReplyStage,
     OpeningGreetingSkipPage,
     PaidOrderGroupTodoPage,
     BindLineOrderGroupCommand,
@@ -45,6 +49,7 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupWorkspaceEventPage,
     UnbindLineOrderGroupCommand,
     DeleteLineOrderGroupHistoryCommand,
+    group_binding_reply_key_prefix,
 )
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
@@ -54,6 +59,10 @@ from subsystems.line.navigation_catalog import route_aliases
 _BIND_FORMAT = "格式：綁定訂單 案件編號 邀請網址\n例如：綁定訂單 115000157 https://line.me/R/ti/g/xxxxx\n各項之間可用空白或換行，網址請完整貼上。"
 _INVITE_COMMAND_FORMAT = "邀請指令只需輸入「發送邀請」。\n首次設定或更新網址請使用：\n" + _BIND_FORMAT
 _INVITATION_URL_REQUIRED = "請先設定本群組邀請網址。\n" + _BIND_FORMAT
+_START_BINDING = "綁定群組"
+_CASE_NO = re.compile(r"[A-Za-z0-9_-]{1,50}")
+_CASE_PROMPT = "請輸入要綁定的案號。"
+_URL_PROMPT = "請貼上本群組的邀請連結。\n從右上角設定選擇「邀請」，再複製「邀請網址」。"
 
 
 def _group_command_aliases() -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -72,6 +81,9 @@ _SAFE_RUNTIME_ERRORS = {
     "settled_deposit_required_for_line_group",
     "alert_group_registration_unavailable",
 }
+_SAFE_COMMAND_ERRORS = _SAFE_RUNTIME_ERRORS | {
+    "linked_admin_required", "order_not_found", "group_not_bound",
+}
 _ALERT_TARGET_COMMAND = "設定異常通知群組"
 
 
@@ -89,19 +101,13 @@ class LineOrderGroupApplication:
         self._alert_group_registrar = alert_group_registrar
 
     def handle_reply(self, inbox, unit_of_work) -> bool:
-        text = _message_text(inbox)
-        if not text:
-            return False
-        bind_aliases, invite_aliases = _group_command_aliases()
-        if _matched_prefix(text, bind_aliases) is not None or _matched_prefix(text, invite_aliases) is not None:
-            return self.handle_message(inbox, unit_of_work)
-        return False
+        return self.handle_message(inbox, unit_of_work)
 
     def handle_message(self, inbox, unit_of_work) -> bool:
         event = inbox.event
         if event.source.source_type is not LineSourceType.GROUP:
             return False
-        text = _message_text(inbox)
+        text = _message_text(event)
         if text is None:
             return False
         bind_aliases, invite_aliases = _group_command_aliases()
@@ -111,10 +117,13 @@ class LineOrderGroupApplication:
         is_invite_command = not is_bind_command and matched_invite is not None
         if text == _ALERT_TARGET_COMMAND:
             return True  # Retired command: no registration, reply or delivery intent.
-        if not (is_bind_command or is_invite_command):
-            return False
         try:
-            if is_bind_command:
+            if text == _START_BINDING:
+                _linked_actor(inbox, unit_of_work, LineCapability.ORDER_GROUP_BIND)
+                previous = unit_of_work.webhook_inbox.latest_group_binding_reply(event)
+                if previous is None or previous.event.occurred_at < event.occurred_at:
+                    self._reply_to_group(inbox, unit_of_work, _CASE_PROMPT, GroupBindingReplyStage.CASE)
+            elif is_bind_command:
                 case_no, invitation_url = _parse_binding(text, bind_aliases)
                 self._bind(inbox, unit_of_work, case_no, invitation_url)
             elif is_invite_command:
@@ -128,16 +137,48 @@ class LineOrderGroupApplication:
                     )
                     raise LineOrderGroupCommandRejected(hint)
                 self._relay(inbox, unit_of_work)
+            else:
+                return self._continue_binding(inbox, unit_of_work, text)
         except (LookupError, PermissionError, RuntimeError, ValueError) as error:
-            # Persistence failures must reach the outer consumer and roll back.
-            if isinstance(error, LineOrderGroupBindingConflict):
-                raise
-            if isinstance(error, ValueError) and not isinstance(error, LineOrderGroupCommandRejected):
-                raise
-            if isinstance(error, RuntimeError) and str(error) not in _SAFE_RUNTIME_ERRORS:
+            if not isinstance(error, (LineOrderGroupCommandRejected, LineCapabilityDeniedError)) and (
+                str(error) not in _SAFE_COMMAND_ERRORS
+            ):
                 raise
             message = _safe_error_message(error)
             self._reply_to_group(inbox, unit_of_work, message, "error")
+        return True
+
+    def _continue_binding(self, inbox, unit_of_work, text: str) -> bool:
+        event = inbox.event
+        if event.source.user_id is None or not (
+            _CASE_NO.fullmatch(text) or "://" in text or text.lower().startswith(("line.me/", "www.line.me/"))
+        ):
+            return False
+        previous = unit_of_work.webhook_inbox.latest_group_binding_reply(event)
+        if (
+            previous is None
+            or previous.stage is GroupBindingReplyStage.COMPLETE
+            or event.occurred_at <= previous.event.occurred_at
+            or self._now() - previous.event.occurred_at > GROUP_BINDING_REPLY_TTL
+        ):
+            return False
+        _linked_actor(inbox, unit_of_work, LineCapability.ORDER_GROUP_BIND)
+        if previous.stage is GroupBindingReplyStage.CASE:
+            if not _CASE_NO.fullmatch(text):
+                raise LineOrderGroupCommandRejected(_CASE_PROMPT)
+            if unit_of_work.order_audiences.get(text) is None:
+                raise LineOrderGroupCommandRejected("找不到指定案件。" + _CASE_PROMPT)
+            self._reply_to_group(inbox, unit_of_work, _URL_PROMPT, GroupBindingReplyStage.URL)
+            return True
+
+        case_no = _message_text(previous.event)
+        if case_no is None:
+            raise RuntimeError("group_binding_case_reply_missing_input")
+        try:
+            validate_invitation_url(text)
+        except ValueError as error:
+            raise LineOrderGroupCommandRejected("邀請連結格式不正確。\n" + _URL_PROMPT) from error
+        self._bind(inbox, unit_of_work, case_no, text, guided=True)
         return True
 
     def handle_membership(self, inbox, unit_of_work) -> bool:
@@ -165,7 +206,7 @@ class LineOrderGroupApplication:
             )
         return True
 
-    def _bind(self, inbox, unit_of_work, case_no: str, invitation_url: str) -> None:
+    def _bind(self, inbox, unit_of_work, case_no: str, invitation_url: str, *, guided: bool = False) -> None:
         actor = _linked_actor(inbox, unit_of_work, LineCapability.ORDER_GROUP_BIND)
         audience = unit_of_work.order_audiences.get(case_no)
         if audience is None:
@@ -194,11 +235,15 @@ class LineOrderGroupApplication:
         unit_of_work.audit.append(
             LineAuditIntent("order_group.bind", actor.actor_id, "order", case_no)
         )
+        message = group_binding_acknowledgement(case_no)
+        if guided:
+            self._queue_invitations(inbox, unit_of_work, actor, binding, invitation_url, audience)
+            message += "\n已將客戶及月嫂的群組邀請連結排入發送。"
         self._reply_to_group(
             inbox,
             unit_of_work,
-            group_binding_acknowledgement(case_no),
-            "bound",
+            message,
+            GroupBindingReplyStage.COMPLETE if guided else "bound",
         )
 
     def _relay(self, inbox, unit_of_work) -> None:
@@ -215,6 +260,18 @@ class LineOrderGroupApplication:
         if settings.invitation_url is None:
             raise LineOrderGroupCommandRejected(_INVITATION_URL_REQUIRED)
         binding = settings.binding
+        unit_of_work.order_groups.sync_participants(audience)
+        recipient_count = self._queue_invitations(
+            inbox, unit_of_work, actor, binding, settings.invitation_url, audience,
+        )
+        self._reply_to_group(
+            inbox,
+            unit_of_work,
+            group_invitation_acknowledgement(binding.case_no, recipient_count),
+            "invite-queued",
+        )
+
+    def _queue_invitations(self, inbox, unit_of_work, actor, binding, invitation_url, audience) -> int:
         recipients = tuple(
             sorted(
                 {audience.customer_line_user_id, *audience.staff_line_user_ids},
@@ -226,13 +283,12 @@ class LineOrderGroupApplication:
         relay = LineGroupInvitationRelay(
             binding.case_no,
             binding.group_id,
-            settings.invitation_url,
+            invitation_url,
             recipients,
             actor,
             correlation_id,
         )
         relay_key = IdempotencyKey(f"group-invite:{event_identity}")
-        unit_of_work.order_groups.sync_participants(audience)
         unit_of_work.order_groups.record_invitation_relay(relay, relay_key)
         for recipient in relay.recipients:
             unit_of_work.delivery_tasks.enqueue(
@@ -254,15 +310,14 @@ class LineOrderGroupApplication:
                 relay.invitation_fingerprint.value,
             )
         )
-        self._reply_to_group(
-            inbox,
-            unit_of_work,
-            group_invitation_acknowledgement(binding.case_no, len(recipients)),
-            "invite-queued",
-        )
+        return len(recipients)
 
-    def _reply_to_group(self, inbox, unit_of_work, text: str, suffix: str) -> None:
+    def _reply_to_group(self, inbox, unit_of_work, text: str, suffix: str | GroupBindingReplyStage) -> None:
         event_identity = inbox.event.event_id.value
+        key = f"group-reply:{event_identity}:{suffix}"
+        if isinstance(suffix, GroupBindingReplyStage):
+            prefix = group_binding_reply_key_prefix(inbox.event)
+            key = f"{prefix}{sha256(event_identity.encode()).hexdigest()}:{suffix.value}"
         unit_of_work.delivery_tasks.enqueue(
             LineDeliveryRequest(
                 LineRecipient(
@@ -272,7 +327,7 @@ class LineOrderGroupApplication:
                 LineMessageKind.TEXT,
                 canonical_line_payload_json({"type": "text", "text": text}),
                 inbox.event.occurred_at,
-                IdempotencyKey(f"group-reply:{event_identity}:{suffix}"),
+                IdempotencyKey(key),
                 CorrelationId(f"line-event:{event_identity}"),
                 REPLY_ONLY_WEBHOOK_SOURCE,
                 event_identity,
@@ -405,8 +460,8 @@ def _linked_actor(inbox, unit_of_work, capability: LineCapability) -> ActorConte
     return actor
 
 
-def _message_text(inbox) -> str | None:
-    payload = json.loads(inbox.event.payload_json)
+def _message_text(event) -> str | None:
+    payload = json.loads(event.payload_json)
     message = payload.get("message")
     if not isinstance(message, dict) or message.get("type") != "text":
         return None
@@ -460,7 +515,7 @@ def _parse_binding(text: str, bind_prefixes: tuple[str, ...] = ("綁定訂單",)
                   else "請貼上本群組邀請網址。")
     elif len(args) > 2:
         reason = "請只填寫案件編號與一個完整邀請網址；網址中間不要換行或加空白。"
-    elif not re.fullmatch(r"[A-Za-z0-9_-]{1,50}", args[0]):
+    elif not _CASE_NO.fullmatch(args[0]):
         reason = "案件編號格式不正確。"
     else:
         try:

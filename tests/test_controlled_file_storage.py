@@ -252,6 +252,28 @@ def test_finalize_moves_registered_staging_to_durable_case_locator(tmp_path: Pat
     assert replayed.replayed is True
 
 
+def test_staff_profile_finalize_does_not_create_unused_staff_directories(tmp_path: Path) -> None:
+    from infrastructure.file.storage_layout import STAFF_DIRECTORY
+
+    storage = FileSystemControlledFileStorage(tmp_path)
+    staff_root = tmp_path / STAFF_DIRECTORY / "ID7_fixture"
+    for version in (1, 2):
+        content = f"photo-{version}".encode()
+        digest = hashlib.sha256(content).hexdigest()
+        filename = f"photo_v{version}_{digest[:6]}.png"
+        staged = storage.put_staged(
+            idempotency_key=f"staff-profile-picture-{version}",
+            filename=filename,
+            mime_type="image/png",
+            content=content,
+        )
+        locator = f"{STAFF_DIRECTORY}/ID7_fixture/web_profile/{filename}"
+        storage.finalize_staged(staged.staging_id, expected_sha256=digest, object_reference=locator)
+        assert storage.read_registered_staged(staged.staging_id, expected_sha256=digest).content == content
+        assert (tmp_path / locator).read_bytes() == content
+        assert {child.name for child in staff_root.iterdir()} == {"web_profile"}
+
+
 def test_registered_staging_read_remains_available_after_staging_ttl(tmp_path: Path) -> None:
     current = [200.0]
     content = b"registered-content"

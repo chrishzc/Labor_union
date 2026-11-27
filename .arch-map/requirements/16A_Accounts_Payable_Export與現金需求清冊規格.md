@@ -29,7 +29,7 @@
   - 回傳 `rows`（`row_id`、案件、受款人、款項類型、預估／已確定、來源、來源金額、未付款額、付款日、日期是否預估、待確認原因）；分頁的 `next_cursor` 與 `rows` 並列，不放在個別列內。未知金額／日期回 `null`，不輸出銀行帳號或身分證號。
   - 前端須載完所有批次方計算月份小計；部分失敗不顯示殘缺小計。
 - **畫面整併與完成狀態（`payment_status`／`receipt_status`）**：
-  - 預估需求由「進行中案件（WF-01）」與相關查詢承接；已確定十欄 Excel 匯出整併於「每月帳務（WF-06）」專屬出口。
+  - 預估需求由「進行中案件（WF-01）」與相關查詢承接；已確定十欄 Excel 匯出整併於「每月帳務（WF-06）」專屬出口。畫面入口與查詢口徑見[帳務工作台](22B_帳務差額處置與工作台UI正式規格.md#finance-six-surfaces-ui)，清冊納入資格仍由本規格 §3.2 定義。
   - 查詢清單保留已付款與歷史結清項，提供 `payment_status`（`pending | partially_paid | paid | settled`）與 `receipt_status`（`pending | unpaid | partially_received | received | settled`），與 `certainty` 正交；歷史 `paid | settled` 僅於 obligation identity、金額快照與 version 符合目前義務時有效。超付負餘額另列追償提示，不得導致清單查詢失敗。
 
 ### 3.2 已確定款項清冊匯出與歷史漏列查核
@@ -41,6 +41,7 @@
   2. `anomaly`、`completed`、`refunded`、`review_required` 嚴禁進入 Excel；被排除義務必須於查詢區明確呈現待確認或排除原因。
   3. 月嫂部分付款（`partially_paid`）屬正常可匯出狀態（取正數 `remaining`）。
 - **歷史月嫂款未列入清冊查核（每月帳務 → 應付清冊「查未列入原因」）**：依案號或月嫂查詢，將缺應付或日期的案件帶回同案查核 [Payroll 計算來源與同步結果](03_Payroll_Domain.md#32-未核銷重建與已核銷追加rebuildpayrollforcase)。收款資料缺項由原 owner 補齊。已有已付線索但未關聯時走 [手動補登 §6](22_銀行流水匯入與帳務異常處理正式規格.md#case-manual-accounting-supplement) 或 [Staff Payables 歷史付款契約](05_Staff_Payables_Export_Domain.md)。條件俱全的未清應付進入對應月份清冊。
+  - **查核與同步分開**：「查核歷史月嫂款」只讀回正式應付或案件來源，必要時試算同步結果；「已查到同步所需資料」不代表已建帳。經辦從結果進入本案後，可對有待同步資料的款項選「同步月嫂應付」，再重新讀取本案及清冊。已有正式應付但缺付款日、付款月份不同、帳戶待查與已有付款證據，各自依查核結果判讀，不能用清冊是否有列來推定是否已付。
 
 ### 3.3 三方案映射與十欄會計 Excel 規範（`APX-SOURCE-01～08`）
 

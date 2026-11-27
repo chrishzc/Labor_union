@@ -81,6 +81,9 @@ class _FakeApplyCursor:
         return False
 
     def execute(self, statement: str, parameters=None) -> None:
+        if statement.startswith("SELECT GET_LOCK("):
+            self._row = {"acquired": 1}
+            return
         if statement.startswith("SELECT DATABASE()"):
             self._row = {"db": self.candidate}
             return
@@ -461,6 +464,186 @@ def _snapshot_from_descriptor(descriptor: dict[str, object]):
         "triggers": triggers,
         "views": [],
     }
+
+
+@pytest.mark.parametrize(
+    ("crash_index", "crash_status", "changed_evidence", "failure"),
+    [
+        (1, "prepared", None, None),
+        (1, "applied", None, None),
+        (1, "prepared", "drop_journal", "DROP journal"),
+        (1, "applied", "statement_hash", "DROP journal"),
+        (1, "applied", "release", "release mismatch"),
+        (1, "applied", "restore", "original verified candidate restore"),
+        (1, "applied", "schema", "candidate changed after DROP"),
+        (1, "applied", "rows", "candidate changed after DROP"),
+        (1, "applied", "source", "source contains partial/drift"),
+        (2, "prepared", None, None),
+        (2, "applied", None, None),
+        (2, "exact", None, None),
+        (2, "prepared", "create_journal", "CREATE journal"),
+        (2, "prepared", "statement_hash", "CREATE journal"),
+        (2, "applied", "create_metadata", "CREATE journal candidate metadata mismatch"),
+        (2, "applied", "copied_receipt", "candidate changed after DROP"),
+        (3, "exact", None, None),
+        (3, "exact", "release", "release mismatch"),
+        (3, "exact", "copied_receipt", "candidate changed after DROP"),
+        (0, "exact", None, None),
+    ],
+    ids=["after-ddl", "after-journal", "missing-journal", "wrong-statement",
+         "wrong-release", "wrong-restore", "schema-drift", "row-drift", "source-trigger-missing",
+         "after-create-ddl", "after-create-journal", "after-create-exact",
+         "missing-create-journal", "wrong-create-statement", "wrong-create-metadata", "copied-create-receipt",
+         "after-schema-applied", "schema-applied-wrong-release", "schema-applied-copied-receipt",
+         "already-exact-source"],
+)
+def test_faq_delete_guard_requires_the_original_candidate_ddl_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    crash_index: int,
+    crash_status: str,
+    changed_evidence: str | None,
+    failure: str | None,
+) -> None:
+    source, candidate = "lu_test_source", "lu_test_candidate"
+    runtime = "163_knowledge_runtime.sql"
+    artifact = "1088_faq_permanent_delete_guard.sql"
+    trigger = "trg_knowledge_item_versions_before_delete"
+    release = "labor_union_2026_11_27_faq_permanent_delete_guard_v1.json"
+    runtime_descriptor = migration._canonical_artifact_descriptor(runtime)
+    runtime_released = migration.OWNED_OBJECTS[runtime]
+    for attribute in ("RELEASE_MANIFEST", "SCHEMA_PARTS", "OWNED_OBJECTS", "MANIFEST_DRIVEN_RELEASE"):
+        monkeypatch.setattr(migration, attribute, getattr(migration, attribute))
+    migration.configure_release_manifests((ROOT / "db/migration_releases" / release,))
+    migration.SCHEMA_PARTS = (ROOT / "db/schema_parts" / runtime, *migration.SCHEMA_PARTS)
+    migration.OWNED_OBJECTS = {runtime: runtime_released, **migration.OWNED_OBJECTS}
+    source_schema = _snapshot_from_descriptor(runtime_descriptor)
+    source_schema["triggers"].sort(key=lambda row: row["trigger_name"])
+    if crash_index == 0:
+        _, successor = migration._faq_permanent_delete_guard_contracts()
+        for row in source_schema["triggers"]:
+            if row["trigger_name"] == trigger:
+                row.update(successor)
+    candidate_schema = deepcopy(source_schema)
+    source_data = {"knowledge_item_versions": {"count": 1, "checksum": 123}}
+    candidate_data = deepcopy(source_data)
+    is_restored = False
+
+    def identity(config: object, database: str) -> dict[str, object]:
+        return {"database": database, "server": "test-server", "version": "8",
+                "host": "127.0.0.1", "port": 3306}
+
+    def snapshot(config: object, database: str, **kwargs: object) -> dict[str, object]:
+        payload = deepcopy(source_schema if database == source else candidate_schema)
+        return {**payload, "sha256": migration._sha256_bytes(migration._canonical_json(payload))}
+
+    monkeypatch.setattr(migration, "server_identity", identity)
+    monkeypatch.setattr(migration, "_schema_snapshot", snapshot)
+    monkeypatch.setattr(migration, "database_exists", lambda config, database: is_restored)
+    monkeypatch.setattr(migration, "_table_evidence", lambda config, database: (
+        source_data if database == source else candidate_data
+    ))
+    monkeypatch.setattr(migration, "run_candidate_post_schema", lambda *args, **kwargs: read_receipt(args[3]))
+    drop, create = split_sql(migration.SCHEMA_PARTS[-1].read_text(encoding="utf-8"))
+
+    class Cursor(_FakeApplyCursor):
+        def execute(self, statement: str, parameters=None) -> None:
+            super().execute(statement, parameters)
+            if statement == drop:
+                candidate_schema["triggers"] = [row for row in candidate_schema["triggers"]
+                                               if row["trigger_name"] != trigger]
+            if statement == create:
+                _, successor = migration._faq_permanent_delete_guard_contracts()
+                candidate_schema["triggers"].append({"trigger_name": trigger, **successor})
+                candidate_schema["triggers"].sort(key=lambda row: row["trigger_name"])
+
+    cursor = Cursor(candidate)
+    config = _FakeApplyConfig(cursor)
+    plan_path, operation_path = tmp_path / "plan.json", tmp_path / "operation.json"
+    plan = build_plan(config, source, candidate)
+    expected_source = "exact" if crash_index == 0 else "absent"
+    assert plan["source_objects"] == {runtime: "exact", artifact: expected_source}
+    write_receipt(plan_path, plan)
+    is_restored = True
+    write_receipt(operation_path, {
+        "kind": "preserved_database_upgrade", "status": "restored", "restored_at": "restored",
+        "source": identity(config, source), "candidate": identity(config, candidate),
+        "candidate_database": candidate, "restored_data": candidate_data,
+        "source_dump": {"database": source, "server": "test-server", "sha256": "a" * 64},
+    })
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt_at_step(path: Path, receipt: dict[str, object]) -> str:
+        steps = receipt.get("schema_steps", [])
+        if crash_index == 3 and receipt["status"] == "schema_applied":
+            write_receipt(path, receipt)
+            raise Interrupted()
+        if (steps and steps[-1].get("part") == artifact and steps[-1].get("index") == crash_index
+                and steps[-1].get("status") == ("applied" if crash_status == "prepared" else crash_status)):
+            if crash_status != "prepared":
+                write_receipt(path, receipt)
+            raise Interrupted()
+        return write_receipt(path, receipt)
+
+    if crash_index == 0:
+        receipt = apply_schema(config, source, candidate, plan_path, operation_path)
+        assert cursor.executed == []
+        assert receipt["schema_steps"][-1]["outcome"] == "existing_part_skipped"
+        assert apply_schema(config, source, candidate, plan_path, operation_path) == receipt
+        return
+
+    with monkeypatch.context() as crash:
+        crash.setattr(migration, "write_receipt", interrupt_at_step)
+        with pytest.raises(Interrupted):
+            apply_schema(config, source, candidate, plan_path, operation_path)
+    executed = [drop] if crash_index == 1 else [drop, create]
+    state = "partial" if crash_index == 1 else "exact"
+    assert cursor.executed == executed
+    assert migration._owned_classification(snapshot(config, candidate)) == {runtime: state, artifact: state}
+    interrupted = read_receipt(operation_path)
+    step = interrupted["schema_steps"][-1]
+    assert step["status"] == crash_status
+
+    if changed_evidence in {"drop_journal", "create_journal"}:
+        interrupted["schema_steps"].pop()
+    elif changed_evidence == "statement_hash":
+        step["statement_sha256"] = "b" * 64
+    elif changed_evidence == "release":
+        interrupted["release_fingerprint"] = "c" * 64
+    elif changed_evidence == "restore":
+        interrupted["candidate"]["host"] = "other candidate"
+    elif changed_evidence == "schema":
+        candidate_schema["views"].append({"table_name": "extra", "view_definition": "select 1"})
+    elif changed_evidence == "rows":
+        candidate_data["knowledge_item_versions"]["checksum"] = 456
+    elif changed_evidence == "source":
+        source_schema["triggers"] = candidate_schema["triggers"]
+    elif changed_evidence == "create_metadata":
+        step["before_schema_sha256"] = "d" * 64
+    elif changed_evidence == "copied_receipt":
+        operation_path = tmp_path / "copied-operation.json"
+    if failure is not None:
+        write_receipt(operation_path, interrupted)
+        with pytest.raises(UpgradeBlocked, match=failure):
+            apply_schema(config, source, candidate, plan_path, operation_path,
+                         allowed_partial_artifacts=frozenset({runtime, artifact}))
+        assert cursor.executed == executed
+        assert read_receipt(operation_path) == interrupted
+        return
+
+    receipt = apply_schema(config, source, candidate, plan_path, operation_path)
+    assert cursor.executed == [drop, create]
+    assert receipt["status"] == "schema_applied"
+    assert receipt["owned_objects"] == {runtime: "exact", artifact: "exact"}
+    drop_receipt, create_receipt = receipt["schema_steps"][-2:]
+    if crash_index == 1:
+        assert drop_receipt["reconciled_from_status"] == crash_status
+    if crash_index == 2 and crash_status != "exact":
+        assert create_receipt["reconciled_from_status"] == crash_status
+    assert (create_receipt["index"], create_receipt["status"]) == (2, "exact")
+    assert snapshot(config, source)["sha256"] == plan["source_schema_sha256"]
 
 
 def test_105_owned_column_subset_is_partial_then_exact() -> None:

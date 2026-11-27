@@ -16,7 +16,7 @@
 3. Preview 零 durable 副作用；Apply 才可建立正式檔案／版本或執行明確允許的 cleanup／reconciliation command。
 4. 同一正式檔案 identity 不可覆寫既有 frozen revision；更正使用 additive revision 並保留 lineage。
 5. 外送、列印、下載供正式用途或提交政府／合作方前，必須引用 immutable frozen artifact，不得讀取仍可變動的 live workspace 檔案。個人網頁的照片讀取依[發布版本契約](35_月嫂個人網頁與照片審核發布正式規格.md#22-送審內容與發布版本staff-web-02)取得對應不可變檔案版本。
-6. NAS 只是 storage backend；「NAS 上有檔案」本身不是 business Authority、publication receipt、簽署成功或 owner state。
+6. 受控檔案的正式儲存位於單一 Windows 主機的受控根目錄，不依賴獨立 NAS。儲存已有檔案不代表取得 business Authority、publication receipt、簽署成功或 owner state。
 
 ## 3. FILE_PURPOSE_REGISTRY 與排除範圍
 
@@ -28,11 +28,11 @@
 - `staff_profile_photo`：月嫂個人網頁照片，由 Staff 個人網頁 owner 關聯模板項目及發布版本；bytes、格式驗證與存取仍經本受控檔案邊界。
 - `staff_certificate`：月嫂專業證照（PDF / JPG）
 - `staff_health_exam`：月嫂體檢合格證明與良民證（PDF / JPG）
-- `client_passbook_cover`：客戶存摺封面照片（JPG / PNG / WebP；由客戶需求 LIFF `register.html` 市民／非市民申請時必填上傳，供工會人員核對銀行帳號與分行代碼，並於人員審核／建檔時歸檔至 NAS）
+- `client_passbook_cover`：實際收到的客戶存摺封面照片（JPG / PNG / WebP），供工會人員核對銀行帳號與分行代碼。是否收集及必填資格只依 [Case Import §3.1 `NC-FORM-01～02`](17B_Case_Import與非市民Redis待審正式規格.md#31-非市民進件與配號nc-entrync-formnc-approvalnc-numbernc-stat)，切換前資料依該規格 §3.1.2；本檔不另定申請類型的收集規則。已合法收件且於核准時交付的圖片依 §5 納管並確認歸檔，實體定位依 §8.2，申請核准及有圖／無圖收尾由 [Case Import §3.2](17B_Case_Import與非市民Redis待審正式規格.md#32-核准前問卷不得進-mysql-與獨立-redis-7-架構reg-boundaryreg-redisreg-expiry) 決定。既有正式歸檔保留原 identity、版本與讀取位置，不因圖片收集資格改變而刪除、搬移或重寫。
 - `rich_menu_background`：LINE 圖文選單底圖（PNG）
-- `database_backup`：資料庫 SQL 快照備份（`SQL.GZ + SHA256`，正式 Windows 每日預設 18:00 觸發並寫至 NAS，時間可於 `database-backup` 修改，復原契約由 [NAS Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md) 擁有）
+- `database_backup`：資料庫 SQL 快照備份（`SQL.GZ + SHA256`，排程、目的目錄與復原依 [單機 Docker MySQL 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md#windows-nas-maintenance) §5，本節不另定時間或硬體）
 
-**非永久儲存排除項目**：`unsigned_contract`（待簽約草案動態產製不落地永久儲存）、紙本簽到工作單、服務日期確認書、排班行事曆圖卡與 LINE 客服對話截圖及附件，均不列入 NAS 永久儲存清單。
+**非永久儲存排除項目**：`unsigned_contract`（待簽約草案動態產製不落地永久儲存）、紙本簽到工作單、服務日期確認書、排班行事曆圖卡與 LINE 客服對話截圖及附件，均不列入受控檔案的永久儲存清單。
 
 每個 purpose 至少定義 `owner_domain`、`file_format`、`source_of_truth`、`generation_cadence`、`db_reference`、`consumers`、`overwrite_policy`、`retention_policy`、`backup_required`、`restore_owner`；新增 purpose 須先有唯一 owner 與 typed consumer。
 
@@ -113,9 +113,7 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 ├── 02_客戶存摺封面 (passbooks)/{客戶姓名}_{客戶編號}/
 │   └── 存摺封面_{客戶姓名}_{客戶編號}_v{版本號}_{短Hash}.{副檔名}
 ├── 03_月嫂檔案與資格 (staff)/{月嫂編號}_{姓名}/
-│   ├── resume/月嫂履歷_{月嫂編號}_{月嫂姓名}_v{版本號}_{短Hash}.pdf
-│   ├── certificates/證照_{月嫂編號}_{證照名稱}_{短Hash}.pdf
-│   └── health_and_police/{體檢報告|良民證}_{月嫂編號}_{年份}_{短Hash}.pdf
+│   └── web_profile/{物件識別}_v{版本號}_{短Hash}.{副檔名}
 ├── 04_LINE選單資源 (media)/rich_menus/
 │   └── {預設選單底圖|月嫂專用選單底圖}_{發布日期}.png
 ├── 05_資料庫冷備份 (db_backups)/{YYYY-MM}/
@@ -127,14 +125,20 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 
 - Windows 正式環境單一設定 `.env` 之 `CONTROLLED_FILE_STORAGE_ROOT` 為唯一受控根目錄設定（須為明確絕對本機路徑，未設定時不得默默改存專案暫存目錄），優先於 `APP_ENV=development` 等啟動標記。
 - 根目錄由維運人員於主機磁碟預先建立並設定適當存取權限；程式於首次寫入時自動建立 `01`～`05`（含 `04_LINE選單資源 (media)/rich_menus`）與 `_staging`（唯讀 Query 與 dry run 不建立資料夾）；未填 `union_no` 之月嫂以 `ID{staff.id}` 命名快照（後續更名不搬移原有檔案）；不合法路徑字元轉底線且嚴防 root escape。
+- 月嫂正式檔案歸檔只在需要寫入時建立該檔案的目標目錄。履歷網頁發布寫入 `web_profile/`，不預建 `resume/`、`certificates/`、`health_and_police/`。既有受控舊用途確有文件寫入時，仍用其對應位置；既存檔案按原紀錄查閱，不因發布照片而搬移或刪除。
 - 新正式受控附件於原 outer transaction 保存 finalize intent，commit 後由 bounded finalize runner 歸檔至 `01`～`04` 新 locator；未綁定 LINE 原始媒體位於 `_staging/line_media`。
 - 明確設定本機絕對儲存路徑時，新上傳的客戶服務契約及月嫂委任契約歸檔至 `01`，客戶審核／建檔時確認的存摺封面歸檔至 `02`，月嫂履歷、證照及體檢文件歸檔至 `03`。登錄時建立 finalize intent，由背景工作歸檔並維持原檔案識別的下載能力。新上傳的 LINE 選單素材由既有媒體資產流程直接寫入 `04/rich_menus/`，以資產識別讀取。既有檔案位置照原紀錄讀取。
-- **共用根下的備份目錄**：`05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一受控根目錄（或由 `NAS_BACKUP_DIR` 另行指定獨立目錄）。本項只描述共用根內的目錄；Windows 維護入口的備份目的目錄選擇見 [單機 Docker MySQL 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md) §5，異地備份與跨磁碟保存由維護人員另行設定複寫。
+- **備份目錄不等於附件根目錄**：使用共用根時，資料庫備份位於 `CONTROLLED_FILE_STORAGE_ROOT/05_資料庫冷備份 (db_backups)/YYYY-MM/`，但仍由資料庫維護入口管理。`NAS_BACKUP_DIR` 是既有備份路徑設定名稱，不要求另部署 NAS，也不會改變契約、存摺等附件的受控根目錄。維護入口擇定備份路徑的優先序及未設定時的行為只見 [單機 Docker MySQL 初始化與維護復原 §5](10A_NAS_Fresh初始化與維護復原規格.md)。異地備份與跨磁碟保存由維護人員另行設定複寫。
   - Global migration 使用 `_partial/` 與 `_maintenance/`。備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過後封裝為單一 `.zip` 發布（並向下相容讀取 `_receipts/YYYY-MM/` 三檔格式）。
   - 一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
 - 實體檔案命名固定為 `[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`；透過 `FileSystemControlledFileStorage.readiness()` Fail-Closed 保護寫入一致性。新歸檔的存摺封面採用登錄當時的正式客戶姓名，附客戶編號以區分同名客戶。過長的姓名截短至可完整表示於前 180 個 UTF-8 bytes 的字元。既有存摺封面仍依原儲存位置讀取。
 
 ## 9. 驗收標準
+
+| ID | S：情境與前提 | T：任務 | A：操作 | R：可觀察結果 |
+| --- | --- | --- | --- | --- |
+| CFS-WINDOWS-ROOT-01 | Windows 正式主機有可寫的受控附件根，另依 §5 指定備份目的地，沒有獨立 NAS | 分別保存受控附件與 DB 備份 | 歸檔一份合成附件；在隔離維護環境用備份入口存放合成庫備份；再讀回兩邊 | 附件仍寫到受控根的業務目錄，備份只寫到維護設定選定的目的地；一般附件入口不能讀取備份專區。 |
+| CFS-WINDOWS-ROOT-02 | Windows 正式附件根未設定，但維護入口依 §5 可以解析備份目的地 | 確認備份設定不是附件儲存的替代值 | 分別檢查附件 readiness／嘗試保存附件，以及執行維護預檢 | 附件不得轉存專案暫存或備份路徑；維護入口仍依 §5 判斷備份路徑及可用性，不能反推附件已就緒。 |
 
 1. source contract／focused tests、shared MySQL Apply／replay／constraint／fail-closed 通過。
 2. authenticated browser list／detail／download／readiness 與未授權／missing／hash mismatch fail-closed 通過。

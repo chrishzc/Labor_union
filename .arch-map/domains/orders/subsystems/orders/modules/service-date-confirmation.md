@@ -52,6 +52,10 @@
 - 規則型別與純轉換放在 `domains/scheduling/service_date_adjustment.py`；`subsystems/scheduling/service_date_adjustment.py` 協調 Query／Preview／Apply，`infrastructure/mysql/service_date_adjustment_repository.py` 實作保存埠。既有服務日期 route／dependency／schema 與 `OrderServiceDatesPanel.tsx` 接入同一命令，不經會更正金額的服務歸屬流程。
 - 事前日期仍由 Orders immutable confirmed version 保存。逐日記錄 nullable `staff_id` 及 `service_hours_override`，正式首排完整承接；沒有正式 generation 時也可合併、分裂及復原，不先製造正式指派。
 - `service_date_adjustment_receipts` 是本功能的不可變操作紀錄，保存精確 request identity、來源／結果日班及被復原操作，供事前與正式階段共同辨認配對。既有 Scheduling receipt 要求非空 rebuild／generation，不能用來假裝保存沒有世代重建的異動。復原只還原該次結果的來源原值，NULL 亦精確恢復，不回退整案後續變更。
+- **正式班表的 API 接線**：唯讀 `GET /api/v1/orders/{case_no}/service-dates` 從 `data.date_adjustment` 取有效逐日資料、可用月嫂及 `pairs`。合併先送同一路徑的 `POST /adjustment/preview`，帶 `source_dates`、`targets`（每列 `service_date,staff_id`）及 `reverse_receipt_id:null`；不送事前日期。再送 `POST /adjustment/apply`，原意圖另帶 Preview 的 Orders、Scheduling、確認日期版本與 `preview_fingerprint`，並附 `Idempotency-Key` 與 `X-Correlation-ID`。成功取得 `receipt_id` 後，以 GET 核對最新有效日班；要復原時再用有效配對的原回執，不以預覽或首次排班資料當正式結果。
+- **兩種重試**：若 Apply 回覆遺失且同一編輯畫面的草稿未改，沿用原內容、版本、fingerprint、同一操作鍵；同一操作者取得原回執，不再寫一次。若已收到回執但 GET 失敗，只重讀，不重送 Apply。新鍵帶舊版本回 409，不自動更新版本後重送。
+- **交接驗收（正式班表）**：已有 20 個各 4 小時的正式服務日，來源日及目標日均未啟用國定假日雙倍，將兩名月嫂各自的一天合到空白日，由其中一人服務。Preview 不寫；Apply 後 19 日共 80 小時，新日 8 小時且不推造上下班時間。獨立重開編輯器後須能從原回執配對復原兩天原人員與兩筆 NULL 覆寫，其他日與帳務不動；缺配對即未通過復原驗收，不以畫面的儲存成功取代。
+- **寫後回滾對照**：在隔離驗收中，確認同一交易內已有新日班、占用、Scheduling 版本、Orders 結束日／版本及回執，再於提交前中斷。交易結束後另開新交易，核對這些本次寫入都未留存；用同基線的正常提交證明獨立讀取確會看到寫入。預檢拒絕或單見錯誤回應不能代替回滾驗收。
 - 實作沿用下方 test roots；純轉換測試為 `tests/domains/scheduling/subsystems/scheduling/modules/schedule-generation/test_service_date_adjustment.py`，來源選取及復原互動為同一前端 test root 的 `service_date_adjustment_selection.test.tsx`。
 
 - `GET／POST /api/v1/orders/{case_no}/service-dates` — confirmed-date Query／Preview／Apply。

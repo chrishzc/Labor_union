@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-shared-line-faq-v1",
+  "release_id": "labor-union-validation-schema-faq-permanent-delete-guard-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 210,
-    "ordered_digest_sha256": "6dea99e7e5a467312f04e4c3f701c50f6dccb789945e0d1ce7794eb0511a08d6",
-    "terminal_artifact": "1087_shared_line_faq.sql"
+    "expected_count": 211,
+    "ordered_digest_sha256": "f28bd518f9047c1bcaacc90c5e611c45f4f1db320c34fc0b5db6ff8f30e77b1e",
+    "terminal_artifact": "1088_faq_permanent_delete_guard.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "0ce1e1080039f3715758e3ae6eebf140334a03a17d85fe0747ff5089fc3b082a"
+    "sha256": "81e308a2decee8bd5f4404e67c674cc432ca32614cf88ee8a7fe2d7bd582b8e6"
   },
   "full_release": {
     "path": "scratch/validation-schema/labor_union_validation_schema.sql",

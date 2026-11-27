@@ -41,6 +41,8 @@ from api.schemas.line_identity import (
     CustomerIdentityApplyRequest,
     CustomerIdentityRequest,
     LineIdentityApplyResponse,
+    LineIdentityBindingResultRequest,
+    LineIdentityBindingResultResponse,
     LineIdentityCandidateResponse,
     LineIdentityFlowOpenRequest,
     LineIdentityFlowOpenResponse,
@@ -267,6 +269,24 @@ def validate_identity_flow(payload: LineIdentityFlowValidationRequest):
 
 
 @public_router.post(
+    "/flow/binding-result",
+    response_model=BaseResponse[LineIdentityBindingResultResponse],
+)
+def read_identity_binding_result(payload: LineIdentityBindingResultRequest):
+    line_user_id = _verified_line_user_id(payload)
+    result = get_line_identity_application().binding_result(
+        LineIdentityFlowId(payload.flow_id),
+        LineIdentityFlowPurpose(payload.purpose),
+        line_user_id,
+        payload.attempt_id,
+    )
+    status, receipt_identity = result or ("unconfirmed", None)
+    return BaseResponse(data=LineIdentityBindingResultResponse(
+        status=status, receipt_identity=receipt_identity,
+    ))
+
+
+@public_router.post(
     "/customer/preview",
     response_model=BaseResponse[LineIdentityPreviewResponse],
 )
@@ -295,6 +315,8 @@ def apply_customer(payload: CustomerIdentityApplyRequest):
         ExpectedVersion(payload.expected_version),
         PreviewFingerprint(payload.preview_fingerprint),
         _correlation_id("customer"),
+        payload.attempt_id,
+        binding_attempt=payload.attempt_id is not None,
     )
     publish_line_wakeup_best_effort()
     return BaseResponse(data=_apply_response(result, payload.preview_fingerprint))
@@ -329,6 +351,8 @@ def apply_staff(payload: StaffIdentityApplyRequest):
         ExpectedVersion(payload.expected_version),
         PreviewFingerprint(payload.preview_fingerprint),
         _correlation_id("staff"),
+        payload.attempt_id,
+        binding_attempt=payload.attempt_id is not None,
     )
     publish_line_wakeup_best_effort()
     return BaseResponse(data=_apply_response(result, payload.preview_fingerprint))
@@ -363,6 +387,8 @@ def apply_admin(payload: AdminIdentityBindingApplyRequest):
         ExpectedVersion(payload.expected_version),
         PreviewFingerprint(payload.preview_fingerprint),
         _correlation_id("admin"),
+        payload.attempt_id,
+        binding_attempt=payload.attempt_id is not None,
     )
     publish_line_wakeup_best_effort()
     return BaseResponse(data=_apply_response(result, payload.preview_fingerprint))
@@ -739,7 +765,7 @@ def _development_identity_fallback_enabled() -> bool:
     }
 
 
-def _translate_identity_errors(call, *arguments):
+def _translate_identity_errors(call, *arguments, binding_attempt=False):
     try:
         return call(*arguments)
     except ProvisionalRegistrationDomainError as error:
@@ -760,6 +786,11 @@ def _translate_identity_errors(call, *arguments):
             _correlation_id("customer-rebind-blocked").value,
         ) from error
     except LineIdentityConflictError as error:
+        if binding_attempt:
+            raise typed_http_error(
+                409, "conflict", "line_identity_binding_conflict", str(error),
+                _correlation_id("identity-binding-conflict").value,
+            ) from error
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=410, detail=str(error)) from error

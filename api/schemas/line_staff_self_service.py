@@ -5,9 +5,12 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from api.schemas.staff_availability import StaffUnavailabilityBlockView
 
 
 class StaffLiffRequest(BaseModel):
@@ -15,6 +18,35 @@ class StaffLiffRequest(BaseModel):
     flow_id: str = Field(default="", max_length=191)
     line_id_token: str = Field(default="", max_length=4096)
     development_line_user_id: str = Field(default="", max_length=191)
+
+
+class StaffAvailabilityLiffAuth(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    line_id_token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
+
+
+class StaffAvailabilityLiffQueryBody(StaffAvailabilityLiffAuth):
+    after_id: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class StaffAvailabilityLiffPreviewBody(StaffAvailabilityLiffAuth):
+    start_date: date
+    end_date: date
+    reason: str = Field(default="", max_length=500)
+
+
+class StaffAvailabilityLiffApplyBody(StaffAvailabilityLiffPreviewBody):
+    expected_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    idempotency_key: UUID
+
+
+class StaffAvailabilityLiffPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    staff_id: int = Field(gt=0)
+    items: list[StaffUnavailabilityBlockView]
+    next_after_id: int | None = Field(gt=0)
 
 
 class StaffOrderSearchRequest(StaffLiffRequest):

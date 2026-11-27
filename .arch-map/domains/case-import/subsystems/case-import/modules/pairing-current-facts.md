@@ -15,7 +15,7 @@
 - `infrastructure/mysql/import_field_issues_repository.py` — created receipt root_id／review_identity與accepted bound_case_no關聯；失敗重匯不附掛舊案件。
 - `api/dependencies/import_field_issues.py` — 共用Query組成，供名冊與通知工作台使用。
 - `api/routes/import_field_issues.py` — 管理員唯讀 GET /api/v1/case-import/field-issues。
-- `api/schemas/import_field_issues.py` — 共用問題與分頁HTTP型別。
+- `api/schemas/import_field_issues.py` — 共用問題與分頁HTTP型別。具修改權限的通知事項只顯示已確認可留白 HCM 欄位的目前 review 入口；Preview／Apply 以 optional-only 方案再次限制欄位，不修改正式資料。BeClass 沿名冊既有欄位留空流程。
 - `domains/case_import/refund_account.py` — 共用退款欄位正規化、typed有效來源及遮蔽。
 - `infrastructure/mysql/beclass_refund_account.py` — 一般／補助退款快照委派的唯一有效帳戶Query，無寫入。
 - `scripts/repair_registration_refund_accounts.py` — 預設唯讀採納預覽，唯一bound原問卷才可由原correction Q/P/A補正；真實Apply須另行授權，不重寫原問卷或既有金融快照。

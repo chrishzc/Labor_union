@@ -29,7 +29,7 @@
 - tests: see the holiday-maintenance test module leaf.
 - integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_holiday_router.py`
 - test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/holiday-maintenance/`
-- test_root: `ui_react/src/tests/scheduling_holiday_flow.test.tsx` — 既有管理工作台的自動查詢、版本化儲存與結果回讀；保留 current legacy UI 路徑。
+- test_root: `ui_react/src/tests/scheduling_holiday_flow.test.tsx` — 既有管理工作台的自動查詢、版本化儲存與結果回讀；模擬 API 的前端測試分別驗證編輯名稱不開抽屜且保留已啟用的雙倍，以及頁內刪除後重讀清單並保留成功回執（`HOLIDAY-EDITOR-01`／`HOLIDAY-EDITOR-02`）。不代表正式環境驗收。
 - boundary: Subsystem
 - oracles: actual parser, transport call order, zero-write Preview, fresh per-date Apply version, preserve/skip/partial failure, awaited UI readback failure, and adapter state/retry transitions.
 
@@ -47,7 +47,7 @@
   source: holiday-maintenance-holiday-pricing
   target: ".arch-map/requirements/02_Assignments_Scheduling_Domain.md#^holiday-annual-settings"
 ```
-- 年度設定沿既有 Query／Preview／Apply 接線。`SchedulingPage.tsx` 以年度起訖呼叫既有 GET。年度列直接顯示雙倍狀態及啟用／取消按鈕，逐列走既有 typed client Query／Preview／Apply／readback，不開抽屜或確認視窗。每列保存送出鎖、錯誤及原命令重送鍵，讀回失敗只重讀，未明 Apply 以同鍵重送；版本衝突重新查詢預覽。成功只更新該列，失敗保留原顯示並提供列內重試。新增、改名及日期修改沿原抽屜入口，與雙倍按鈕分開。CSV 入口沿現有逐筆預覽／套用及全年讀回。`SchedulingHolidayQuery` 提供版本化日期及雙倍旗標；`holiday_maintenance.py` 的 Apply 為假日異動協調入口，沿 caller UoW 串接受影響案件的兩方 owner。正式收付保護由各帳務 owner 提供 fresh facts，不由 UI 判斷。API 應回正式收據及重算／保留／待決策的案件結果，前端回讀後端結果，不自行乘二。
+- 年度設定沿既有 Query／Preview／Apply 接線。`SchedulingPage.tsx` 以年度起訖呼叫既有 GET。年度列直接顯示雙倍狀態及啟用／取消按鈕，逐列走既有 typed client Query／Preview／Apply／readback，不開抽屜或確認視窗。每列保存送出鎖、錯誤及原命令重送鍵，讀回失敗只重讀，未明 Apply 以同鍵重送；版本衝突重新查詢預覽。成功只更新該列，失敗保留原顯示並提供列內重試。新增使用頁內表單；編輯既有假日由該列展開，改名、日期修改及刪除都在頁內完成，不開抽屜，與列內雙倍切換分開。CSV 入口沿現有逐筆預覽／套用及全年讀回。`SchedulingHolidayQuery` 提供版本化日期及雙倍旗標；`holiday_maintenance.py` 的 Apply 為假日異動協調入口，沿 caller UoW 串接受影響案件的兩方 owner。正式收付保護由各帳務 owner 提供 fresh facts，不由 UI 判斷。API 應回正式收據及重算／保留／待決策的案件結果，前端回讀後端結果，不自行乘二。
 
 - `MySqlHolidayRepricing` 沿假日 Apply 同一 UoW 先保存受保護原定價、再處理未收付案件；收據 `case_results` 回傳逐案重算、保留、歷史排除或資金待決策。Preview 的 `payroll_impact` 區分無異動與 `reprice_unpaid_cases`。
 

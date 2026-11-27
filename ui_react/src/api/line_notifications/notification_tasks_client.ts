@@ -19,7 +19,7 @@ const logSchema = z.object({case_no:z.string(),staff_id:z.number().int(),missing
 const itemSchema = z.object({id:z.string(),source:sourceSchema,group:groupSchema,title:z.string(),case_no:z.string().nullable(),
   reference_id:z.number().int().nullable(),person:z.string(),summary:z.string(),reason:z.string(),time:z.string(),tag:z.string(),
   recipient:z.string().nullable(),message:z.string().nullable(),unavailable_reason:z.string().nullable(),expected_version:z.number().int().nullable(),
-  delivery_status:z.string().nullable(),payment:paymentSchema.nullable(),log:logSchema.nullable(),
+  delivery_status:z.string().nullable(),payment:paymentSchema.nullable(),log:logSchema.nullable(),can_dismiss:z.boolean().optional(),
   import_field_issues:z.array(ImportFieldIssueSchema).optional(),
   failure:z.object({issue_key:z.string().regex(/^ci_[0-9a-f]{64}$/),notification_reason:z.enum(['recipient_unavailable','template_or_schedule_invalid']),related_task_ids:z.array(z.number().int().positive())}).strict().nullable().optional(),
   receipt:z.object({
@@ -30,7 +30,11 @@ const itemSchema = z.object({id:z.string(),source:sourceSchema,group:groupSchema
     source_reference:z.string().min(1).max(128).optional(),
   }).strict().nullable().optional()}).strict();
 const pageSchema = z.object({items:z.array(itemSchema),total:z.number().int().nonnegative().nullable(),next_cursor:z.union([z.number().int().nonnegative(),z.string().min(1).max(2048)]).nullable()}).strict();
-const catalogSchema = z.array(z.object({source:sourceSchema,label:z.string(),group:groupSchema}).strict());
+const catalogSchema = z.array(z.object({
+  source:sourceSchema,label:z.string(),group:groupSchema,
+  category_id:z.string().min(1).optional(),category_label:z.string().min(1).optional(),
+}).strict());
+const dismissReceiptSchema = z.object({dismissed:z.literal(true),replayed:z.boolean()}).strict();
 export type NotificationItem = z.infer<typeof itemSchema>;
 export type NotificationPage = z.infer<typeof pageSchema>;
 export type NotificationCatalog = z.infer<typeof catalogSchema>;
@@ -50,9 +54,17 @@ export const notificationTasksClient = {
     const raw=await transport.post<{data:unknown}>('/api/v1/line/notification-task-actions/customer-binding-reminder/dismiss',{
       subject_reference:item.reference_id,case_no:item.case_no,reason,idempotency_key:key,
     },notificationOptions());
-    const result=z.object({dismissed:z.literal(true),replayed:z.boolean()}).strict().parse(raw.data);
+    const result=dismissReceiptSchema.parse(raw.data);
     notifyNotificationTasksChanged();
     return result;
+  },
+  async dismissReminder(item: Pick<NotificationItem, 'source' | 'id'>, key: string) {
+    const raw = await transport.post<{data: unknown}>('/api/v1/line/notification-task-actions/reminders/dismiss', {
+      source: item.source,
+      item_id: item.id,
+      idempotency_key: key,
+    }, notificationOptions());
+    return dismissReceiptSchema.parse(raw.data);
   },
   async pendingCount(signal?:AbortSignal):Promise<number> {
     const sources = await notificationTasksClient.catalog(signal);

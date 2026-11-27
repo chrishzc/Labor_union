@@ -611,67 +611,43 @@ def group_guidelines_card():
 
 
 def resolve_case_bank_account_info(cursor: Any, case_no: str) -> dict[str, str]:
-    """依年度規則解析案件專屬匯款帳號：115年度前為匯入虛擬帳號，116年度後為內建流水虛擬帳號。"""
+    """取得可唯一反查至本案的有效匯款帳號。"""
     import os
+
+    from domains.client_finance.virtual_account import allows_case_account_edit
+    from subsystems.client_finance.virtual_account_resolution import (
+        build_effective_formula_account,
+        resolve_case_virtual_account,
+    )
 
     bank_name = os.getenv("CLIENT_DEPOSIT_BANK_NAME", "永豐銀行")
     bank_code = os.getenv("CLIENT_DEPOSIT_BANK_CODE", "807")
     normalized = str(case_no or "").strip()
 
-    is_imported_year = False
-    if normalized:
-        if normalized.startswith("A") and len(normalized) >= 4:
-            year_part = normalized[1:4]
-        else:
-            year_part = normalized[:3]
-        if year_part.isdigit() and int(year_part) <= 115:
-            is_imported_year = True
-
-    virtual_account = ""
-    account_note = ""
-
-    if is_imported_year:
+    resolution: dict[str, str | None] = {"reason": "case_not_representable"}
+    try:
         if cursor is not None:
-            try:
-                cursor.execute(
-                    "SELECT virtual_account FROM client_legacy_virtual_accounts "
-                    "WHERE case_no = %s ORDER BY id DESC LIMIT 1",
-                    (normalized,),
-                )
-                row = cursor.fetchone()
-                if row:
-                    virtual_account = str(row.get("virtual_account") if isinstance(row, dict) else row[0]).strip()
-            except Exception:
-                virtual_account = ""
-        else:
-            try:
-                from infrastructure.mysql.mysql_adapter import get_connection
-                with get_connection() as auto_conn:
-                    with auto_conn.cursor() as auto_cur:
-                        auto_cur.execute(
-                            "SELECT virtual_account FROM client_legacy_virtual_accounts "
-                            "WHERE case_no = %s ORDER BY id DESC LIMIT 1",
-                            (normalized,),
-                        )
-                        row = auto_cur.fetchone()
-                        if row:
-                            virtual_account = str(row.get("virtual_account") if isinstance(row, dict) else row[0]).strip()
-            except Exception:
-                virtual_account = ""
-        if not virtual_account:
-            virtual_account = "尚未匯入（請洽工會專員）"
-            account_note = "115年度前案件（待匯入專屬帳號）"
-        else:
-            account_note = "115年度前案件（匯入專屬帳號）"
+            resolution = resolve_case_virtual_account(cursor, normalized)
+        elif allows_case_account_edit(normalized) or build_effective_formula_account(normalized):
+            from infrastructure.mysql.mysql_adapter import get_connection
+
+            with get_connection() as connection, connection.cursor() as auto_cursor:
+                resolution = resolve_case_virtual_account(auto_cursor, normalized)
+    except Exception:
+        resolution = {"reason": "account_lookup_unavailable"}
+
+    virtual_account = resolution.get("virtual_account")
+    if virtual_account:
+        account_note = "案件專屬帳號"
+    elif resolution.get("reason") == "imported_account_missing":
+        virtual_account = "尚未匯入（請洽工會專員）"
+        account_note = "115年度前案件（待匯入專屬帳號）"
+    elif resolution.get("reason") == "case_not_representable":
+        virtual_account = "待建立流水帳號"
+        account_note = "案件專屬帳號待建立"
     else:
-        from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
-        built = build_client_virtual_account(normalized)
-        if built:
-            virtual_account = built
-            account_note = "116年度起案件（內建流水帳號）"
-        else:
-            virtual_account = "待建立流水帳號"
-            account_note = "116年度起案件"
+        virtual_account = "待確認（請洽工會專員）"
+        account_note = "案件專屬帳號待確認"
 
     return {
         "bank_name": bank_name,

@@ -384,7 +384,7 @@ export function FaqChatLayoutPanel() {
           {selectedAnswer ? <>
             <button type="button" className="faq-preview-navigation line-secondary-btn" onClick={() => setAnswer('')}>返回卡片</button>
             <div className="faq-preview-message">
-              <h3>{selectedAnswer.question}</h3><p>{selectedAnswer.answer}</p>
+              <p>{selectedAnswer.answer}</p>
             </div>
           </> : preview ? <>
             <button type="button" className="faq-preview-navigation line-secondary-btn" onClick={resetPreview}>返回分類選單</button>

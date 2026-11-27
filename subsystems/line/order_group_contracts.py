@@ -6,11 +6,13 @@ Description: 定義 LINE 訂單群組綁定、邀請與唯讀 numbered query 的
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
+from hashlib import sha256
+import json
 from typing import Literal
 
-from domains.line.identities import LineGroupId, LineUserId
+from domains.line.identities import LineGroupId, LineSourceType, LineUserId
 from domains.line.order_group import (
     LineGroupInvitationRelay,
     LineOrderGroupBindingCandidate,
@@ -18,10 +20,35 @@ from domains.line.order_group import (
     LineOrderGroupBindingStatus,
     validate_invitation_url,
 )
+from domains.line.webhook import CanonicalLineWebhookEvent
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
+GROUP_BINDING_REPLY_TTL = timedelta(minutes=10)
+
+
+class GroupBindingReplyStage(StrEnum):
+    CASE = "case"
+    URL = "url"
+    COMPLETE = "complete"
+
+
+@dataclass(frozen=True, slots=True)
+class GroupBindingPreviousReply:
+    stage: GroupBindingReplyStage
+    event: CanonicalLineWebhookEvent = field(repr=False)
+
+
+def group_binding_reply_key_prefix(event: CanonicalLineWebhookEvent) -> str:
+    source = event.source
+    if source.source_type is not LineSourceType.GROUP or source.user_id is None:
+        raise ValueError("group binding reply requires a group and sender")
+    scope = json.dumps(
+        [event.destination_id.value, source.source_id, source.user_id.value],
+        separators=(",", ":"),
+    )
+    return f"group-bind-flow:{sha256(scope.encode('utf-8')).hexdigest()}:"
 
 
 class LineOrderGroupCommandOutcome(StrEnum):
@@ -258,6 +285,10 @@ class LineOrderGroupWorkspaceEventPage:
 
 
 __all__ = [
+    "GROUP_BINDING_REPLY_TTL",
+    "GroupBindingPreviousReply",
+    "GroupBindingReplyStage",
+    "group_binding_reply_key_prefix",
     "PaidOrderGroupTodo",
     "PaidOrderGroupTodoPage",
     "OpeningGreetingSkip",

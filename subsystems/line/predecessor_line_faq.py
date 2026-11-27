@@ -38,8 +38,6 @@ class PredecessorLineFaq:
             official = self._catalog.get(old.qa_id)
             if official is not None:
                 return (official,)
-            if not self._catalog.has_identity(old.qa_id):
-                return (old,)
             return ()
         return self._catalog.match_alias(text) or None
 

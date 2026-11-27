@@ -453,7 +453,8 @@ def customer_recommendation_followups(payload: _MobileTodoPageRequest):
     except Exception as error:
         raise internal_query_error("customer_recommendation_followups_internal_error", "客戶推薦確認待辦查詢失敗。",
                                    "line-mobile-admin:customer-recommendation-followups") from error
-    return BaseResponse(data={"items": [asdict(item) for item in items], "total": total,
+    return BaseResponse(data={"items": [_CustomerRecommendationFollowupView.model_validate(item, from_attributes=True)
+                                        for item in items], "total": total,
                               "page": payload.page, "page_size": payload.page_size}, message="成功取得客戶推薦確認待辦")
 
 

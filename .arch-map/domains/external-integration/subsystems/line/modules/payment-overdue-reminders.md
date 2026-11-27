@@ -55,12 +55,15 @@
 
 ## Contracts
 - `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §4.5 — GET `/api/v1/line/payment-overdue-reminders/cancellation-notices/{case_no}` 預覽，POST 同路徑加 `/send` 建立既有寄送工作。
-- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §6.7～6.11。
+- [LINE §6.2 繳款提醒與人工收據](../../../../../requirements/20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範) — 期款提醒使用 LINE 寄送工作；人工入帳通知的標記不觸發推播。
 - `.arch-map/requirements/04_Client_Finance_Domain.md` — 款項期別、正式到期日及餘額。
 
-- `.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md` §18.4 — GET `/api/v1/line/payment-overdue-reminders/cases/{case_no}` and POST `/cases/send`; manual case reminders may precede due date but retain current contract, unique recipient, positive balance, queue pending and fresh provider guards. All entries share existing delivery tasks and audit/history; requested/queued time never becomes sent time, original automatic schedule unchanged.
+- [帳務工作台 §§3.1–3.3：進行中案件與精簡抽屜](../../../../../requirements/22B_帳務差額處置與工作台UI正式規格.md#finance-six-surfaces-ui) — 仍有有效正額待收且符合寄送條件才可送；未到期本身不阻擋人工提醒，不改自動排程。
+- 案件詳情讀 `GET /api/v1/line/payment-overdue-reminders/cases/{case_no}`：各期回傳可空的 `payment`（待收可為 0）、對象標籤、文案、可否寄送、原因及歷史。確認送出用 `POST /api/v1/line/payment-overdue-reminders/cases/send`：只送該期正額款項快照（案號、期別、義務識別、投影版本、事件識別、到期日、待收金額）及 body `idempotency_key`，回 `data.task_id` 與 `data.status`。欄位型別沿用上列 route DTO 與 React client，不建平行介面。
+- 排入寄送前重讀正式款項，重驗資格並解析當時有效的唯一收件人及文案；發送前再檢查接收者與款項。一般期款提醒不綁定 GET 畫面上的對象版本或文案指紋；取消通知的 Preview fingerprint 是另一契約。排入不當作送達，最後成功時間不取請求或排入時間。
 
 ## Verification
+- **跨角色對照**：第一期未到期但有效待收 NT$4,000，契約狀態及唯一收件人符合條件。看通知不寫入；確認送出排入一筆工作，仍不更新最後成功發送時間。若送出回覆遺失，重送原快照與同鍵取得同一 task；另用新鍵提交已變更的舊快照，回 HTTP 409，不另排工作。此對照不把取消通知的文案指紋套進來。
 - layout_status: `custom_current`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/payment-overdue-reminders/`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_payment_overdue_reminders_mysql.py`

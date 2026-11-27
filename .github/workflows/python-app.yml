@@ -15,6 +15,230 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  liff-mutation-readback:
+    name: LIFF availability and original result contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: development
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Confirm the exact candidate checkout
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install declared runtime and focused test dependencies
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 playwright
+      - name: Install Chromium for the LIFF browser contract
+        run: python -m playwright install --with-deps chromium
+      - name: Verify staff profile photo viewer and storage layout
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -vv --junitxml=staff-profile-protection.xml \
+            tests/domains/staff/subsystems/staff/modules/staff-roster-profile/contract/test_staff_web_profile.py::test_staff_profile_photo_viewer_supports_mobile_pinch_and_reuses_published_image \
+            tests/test_controlled_file_storage.py::test_staff_profile_finalize_does_not_create_unused_staff_directories
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse('staff-profile-protection.xml').findall('.//testcase')
+          assert len(cases) == 2 and all(case.find(tag) is None for case in cases for tag in ('failure', 'error', 'skipped')), 'Staff photo protection tests did not both pass'
+          PY
+      - name: Verify original receipts and protected LIFF writes
+        run: |
+          set -euo pipefail
+          export STAFF_PROFILE_CHANGE_TEST_REDIS_PORT=6391
+          redis_container="liff-profile-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker rm -fv "$redis_container" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$redis_container" \
+            -p "127.0.0.1:$STAFF_PROFILE_CHANGE_TEST_REDIS_PORT:6379" \
+            redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+          for attempt in $(seq 1 25); do
+            if docker exec "$redis_container" redis-cli ping | grep -qx PONG; then break; fi
+            sleep 1
+          done
+          docker exec "$redis_container" redis-cli ping | grep -qx PONG
+          line_tests=tests/domains/external-integration/subsystems/line
+          python -m pytest -vv --junitxml=liff-mutation-contracts.xml \
+            "$line_tests/modules/staff-service-day-media/contract/test_line_staff_calendar_contract.py" \
+            "$line_tests/integration/test_staff_leave_intake_api.py" \
+            "$line_tests/modules/line-identity-management/contract/test_identity_binding_readback.py" \
+            "$line_tests/modules/line-identity-management/contract/test_customer_binding_presentation.py" \
+            "$line_tests/modules/line-identity-management/contract/test_line_identity_api_routes.py" \
+            tests/domains/staff/subsystems/staff/modules/staff-roster-profile/contract/test_staff_profile_change_intake.py
+      - name: Confirm focused LIFF cases ran without skips
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse("liff-mutation-contracts.xml").findall(".//testcase")
+          for required in ("test_staff_availability_ui_requires_original_receipt_and_formal_readback",
+                           "test_postponement_lost_group_acknowledgement_only_queries_original_proposal",
+                           "test_liff_submission_recovery_in_browser",
+                           "test_binding_known_conflict_stays_definitive_without_masking_unknown",
+                           "test_binding_result_readback_requires_exact_verified_original_operation",
+                           "test_customer_bind_page_reads_lost_apply_receipt_after_reopen",
+                           "test_postponement_receipt_uses_original_actor_and_group_event"):
+              assert any(case.get("name", "").startswith(required) for case in cases), required
+          assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error"))
+          print(f"{len(cases)} LIFF cases passed with no skips")
+          PY
+
+  non-citizen-passbook:
+    name: Non-citizen LIFF passbook contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports: ["127.0.0.1:3307:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      APP_ENV: development
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3307"
+      DB_USER: root
+      DB_SSL_MODE: disabled
+      DB_DATABASE: lu_test_nc_passbook_${{ github.run_id }}_${{ github.run_attempt }}
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Confirm the exact candidate checkout
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install declared runtime and focused test dependencies
+        id: registration-dependencies
+        run: python -m pip install -r requirements.txt httpx2==2.10.0
+      - name: Install the browser used by registration presentation contracts
+        run: python -m playwright install --with-deps chromium
+      - name: Verify rendered forms and Preview Apply approval contracts
+        run: >-
+          python -m pytest -vv --junitxml=passbook-contracts.xml
+          tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py
+          tests/domains/case-import/subsystems/case-import/modules/provisional-registration/test_registration_intake.py
+      - name: Initialize credentials for this disposable MySQL service
+        run: |
+          python - <<'PY'
+          import os
+          import secrets
+          import pymysql
+          password = secrets.token_urlsafe(32)
+          print(f"::add-mask::{password}")
+          connection = pymysql.connect(host='127.0.0.1', port=3307, user='root', password='', autocommit=True)
+          try:
+              with connection.cursor() as cursor:
+                  for host in ('%', 'localhost'):
+                      cursor.execute("ALTER USER 'root'@%s IDENTIFIED BY %s", (host, password))
+          finally:
+              connection.close()
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as environment:
+              environment.write(f'DB_PASSWORD={password}\n')
+          PY
+      - name: Verify no-image approval receipt and formal readback in isolated MySQL
+        env:
+          NON_CITIZEN_MYSQL: "1"
+        run: >-
+          python -m pytest -vv --junitxml=passbook-mysql.xml
+          tests/domains/case-import/subsystems/case-import/integration/test_registration_staged_approval_mysql.py::test_no_passbook_non_citizen_approval_completes_and_replays_original_case
+      - name: Verify original receipt retry and persistence with isolated Redis
+        if: ${{ !cancelled() && steps.registration-dependencies.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          export REGISTRATION_REDIS_TEST=1
+          export REGISTRATION_REDIS_DURABILITY_TEST=1
+          export REGISTRATION_REDIS_TEST_PORT=6381
+          export REGISTRATION_REDIS_TEST_CONTAINER="registration-receipt-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export REGISTRATION_REDIS_TEST_SECRET_DIR
+          REGISTRATION_REDIS_TEST_SECRET_DIR="$(mktemp -d "$RUNNER_TEMP/registration-receipt.XXXXXX")"
+          trap 'docker rm -fv "$REGISTRATION_REDIS_TEST_CONTAINER" >/dev/null 2>&1 || true' EXIT
+          python - <<'PY'
+          import os
+          import secrets
+          from pathlib import Path
+          root = Path(os.environ['REGISTRATION_REDIS_TEST_SECRET_DIR'])
+          for role in ('admin', 'intake'):
+              token = secrets.token_urlsafe(32)
+              print(f"::add-mask::{token}")
+              path = root / f'{role}.secret'
+              path.write_text(token, encoding='ascii')
+              path.chmod(0o600)
+          PY
+          docker run -d --name "$REGISTRATION_REDIS_TEST_CONTAINER" \
+            -p 127.0.0.1:6381:6379 \
+            --mount "type=bind,src=$PWD/deploy/registration/redis.conf,dst=/usr/local/etc/redis/redis.conf,readonly" \
+            --mount "type=bind,src=$PWD/deploy/registration/redis-entrypoint.sh,dst=/usr/local/bin/registration-redis-entrypoint,readonly" \
+            --mount "type=bind,src=$REGISTRATION_REDIS_TEST_SECRET_DIR/admin.secret,dst=/run/secrets/registration_admin_password,readonly" \
+            --mount "type=bind,src=$REGISTRATION_REDIS_TEST_SECRET_DIR/intake.secret,dst=/run/secrets/registration_intake_password,readonly" \
+            --entrypoint /bin/sh redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 \
+            /usr/local/bin/registration-redis-entrypoint
+          python - <<'PY'
+          import os
+          import time
+          from pathlib import Path
+          from redis import Redis
+          from redis.exceptions import RedisError
+          secret = Path(os.environ['REGISTRATION_REDIS_TEST_SECRET_DIR']) / 'admin.secret'
+          with Redis(host='127.0.0.1', port=6381, username='registration-admin',
+                     password=secret.read_text(encoding='ascii'), socket_connect_timeout=1, socket_timeout=1) as client:
+              for attempt in range(30):
+                  try:
+                      if client.ping():
+                          break
+                  except RedisError:
+                      pass
+                  time.sleep(1)
+              else:
+                  raise RuntimeError('isolated registration Redis did not become ready')
+          PY
+          REGISTRATION_REDIS_TEST_CONTAINER_ID="$(docker inspect "$REGISTRATION_REDIS_TEST_CONTAINER" --format "{{.Id}}")"
+          export REGISTRATION_REDIS_TEST_CONTAINER_ID
+          test_root=tests/domains/case-import/subsystems/case-import/modules/provisional-registration
+          python -m pytest -vv --junitxml=registration-receipt-redis.xml \
+            "$test_root/test_registration_redis.py::test_unknown_acknowledgement_can_only_be_resolved_by_original_submission" \
+            "$test_root/test_registration_redis.py::test_unavailable_status_never_claims_unreceived_and_original_key_can_retry" \
+            "$test_root/test_registration_durability.py::test_acknowledged_pending_and_high_water_survive_ungraceful_restart"
+      - name: Confirm required test groups executed without skips
+        if: ${{ !cancelled() }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree
+          for report in ('passbook-contracts.xml', 'passbook-mysql.xml', 'registration-receipt-redis.xml'):
+              root = ElementTree.parse(Path(report)).getroot()
+              cases = list(root.iter('testcase'))
+              assert cases, f'{report}: no cases executed'
+              for case in cases:
+                  assert case.find('skipped') is None, f'{report}: skipped {case.attrib}'
+                  assert case.find('failure') is None, f'{report}: failed {case.attrib}'
+                  assert case.find('error') is None, f'{report}: error {case.attrib}'
+                  print(f"{report}: {case.get('classname')}::{case.get('name')} passed")
+          PY
+
   python-syntax:
     name: Python syntax
     runs-on: ubuntu-latest
@@ -127,15 +351,17 @@ jobs:
               environment.write(f'LABOR_UNION_TEST_MYSQL_PASSWORD={password}\n')
           PY
       - name: Run weekly report contracts with real imports
+        id: weekly_contracts
         run: >-
-          python -m pytest -v
+          python -m pytest -v --junitxml="${RUNNER_TEMP}/lu-weekly-contracts.xml"
           tests/test_weekly_operations_report_contract.py
           tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/test_subsidy_reconciliation_register.py
           tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py
           tests/test_weekly_operations_report_api_versions.py
       - name: Run session-authenticated API and export against MySQL
+        id: weekly_mysql
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
-        run: python -m pytest -q tests/test_weekly_operations_report_mysql.py
+        run: python -m pytest -q --junitxml="${RUNNER_TEMP}/lu-weekly-mysql.xml" tests/test_weekly_operations_report_mysql.py
       - name: Run canonical scheduling to weekly report MySQL regression
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
         run: >-
@@ -152,6 +378,184 @@ jobs:
           python -m pytest -q
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
           -k holiday
+      - name: Summarize weekly report acceptance evidence (pilot)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          CONTRACTS_OUTCOME: ${{ steps.weekly_contracts.outcome }}
+          MYSQL_OUTCOME: ${{ steps.weekly_mysql.outcome }}
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          def sha(value):
+              return value if isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) else "UNKNOWN"
+
+          def git(*args):
+              result = subprocess.run(["git", *args], capture_output=True, text=True)
+              return result.stdout.strip() if result.returncode == 0 else ""
+
+          def case_status(case):
+              if case.find("failure") is not None or case.find("error") is not None:
+                  return "failed"
+              return "not_run" if case.find("skipped") is not None else "passed"
+
+          def evidence(filename, outcome, module, name):
+              if outcome == "skipped":
+                  return "not_run", "step skipped"
+              try:
+                  root = ET.parse(Path(os.environ["RUNNER_TEMP"]) / filename).getroot()
+              except (OSError, ET.ParseError):
+                  return "UNKNOWN", "no readable JUnit"
+              cases = list(root.iter("testcase"))
+              counts = Counter(case_status(case) for case in cases)
+              totals = f"{counts['passed']} passed / {counts['failed']} failed / {counts['not_run']} skipped"
+              matches = [
+                  case for case in cases
+                  if case.get("classname", "").rsplit(".", 1)[-1] == module
+                  and case.get("name") == name
+              ]
+              if len(matches) > 1 or not cases or outcome not in {"success", "failure"}:
+                  return "UNKNOWN", totals
+              if not matches:
+                  return ("not_run" if outcome == "success" else "UNKNOWN"), totals
+              return case_status(matches[0]), totals
+
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+          pr = event.get("pull_request") or {}
+          actual = sha(git("rev-parse", "HEAD"))
+          expected = sha(os.environ["GITHUB_SHA"])
+          head = sha(pr.get("head", {}).get("sha")) if pr else expected
+          base = sha(pr.get("base", {}).get("sha"))
+          headers = git("cat-file", "-p", "HEAD").partition("\n\n")[0]
+          parents = [line[7:] for line in headers.splitlines() if line.startswith("parent ")]
+          provenance = "UNKNOWN"
+          if actual != "UNKNOWN" and actual == expected:
+              if actual == head:
+                  provenance = "head"
+              elif pr and base != "UNKNOWN" and head != "UNKNOWN" and parents == [base, head]:
+                  provenance = "pull-request merge"
+          rows = [
+              ("contract / fake DB", "lu-weekly-contracts.xml", "CONTRACTS_OUTCOME",
+               "test_subsidy_reconciliation_register",
+               "test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim"),
+              ("API / isolated MySQL", "lu-weekly-mysql.xml", "MYSQL_OUTCOME",
+               "test_weekly_operations_report_mysql",
+               "test_real_export_matches_api_totals_without_mutating_business_rows"),
+          ]
+          lines = [
+              "### Weekly report acceptance evidence (pilot)",
+              "",
+              f"Run: {os.environ['GITHUB_RUN_ID']} · attempt {os.environ['GITHUB_RUN_ATTEMPT']}",
+              f"Checkout: `{actual}` ({provenance}); expected: `{expected}`",
+              f"Source head: `{head}`; PR base: `{base}`",
+              "",
+              "| Scope | Case | Case result | Suite counts / evidence |",
+              "| --- | --- | --- | --- |",
+          ]
+          for scope, filename, variable, module, name in rows:
+              result, note = evidence(filename, os.environ.get(variable), module, name)
+              lines.append(f"| {scope} | `{module}::{name}` | {result} | {note} |")
+          lines += [
+              "",
+              "The isolated MySQL case covers export/API parity. It does not establish the unserved-order exclusion in MySQL.",
+              "An unverified checkout or UNKNOWN case needs follow-up evidence. This summary does not change the job result.",
+          ]
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Compare weekly report test selection and verify a missing-case rejection
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.weekly_contracts.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+          import xml.etree.ElementTree as ET
+
+          # Trial mapping for this one boundary, not a general change selector.
+          module = "test_subsidy_reconciliation_register"
+          source = (
+              "tests/domains/government-subsidy/subsystems/government-subsidy/"
+              f"modules/reconciliation-register-query/{module}.py"
+          )
+          required = (
+              "test_established_unserved_is_zero_without_registered_volume_or_missing_rate_fallback",
+              "test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim",
+              "test_order_accounting_projection_reuses_operations_report_amount_by_case",
+          )
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def read_receipt(path):
+              root = ET.parse(path).getroot()
+              cases = list(root.iter("testcase"))
+              suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+              if not cases or not suites:
+                  raise ValueError("empty test evidence")
+              seconds = round(sum(float(suite.attrib["time"]) for suite in suites), 3)
+              matches = {}
+              for case in cases:
+                  name = case.get("name")
+                  if case.get("classname", "").rsplit(".", 1)[-1] != module or name not in required:
+                      continue
+                  status = "passed"
+                  if name in matches:
+                      status = "ambiguous"
+                  elif case.find("failure") is not None or case.find("error") is not None:
+                      status = "failed"
+                  elif case.find("skipped") is not None:
+                      status = "skipped"
+                  matches[name] = status
+              rejected = {
+                  name: matches.get(name, "not_run")
+                  for name in required
+                  if matches.get(name) != "passed"
+              }
+              return {"cases": len(cases), "suite_seconds": seconds, "rejected": rejected}
+
+          def run_trial(label, names):
+              report = temp / f"lu-weekly-trial-{label}.xml"
+              start = time.monotonic()
+              subprocess.run(
+                  [sys.executable, "-m", "pytest", "-q", f"--junitxml={report}",
+                   *(f"{source}::{name}" for name in names)], check=True, timeout=120,
+              )
+              return {**read_receipt(report), "process_seconds": round(time.monotonic() - start, 3)}
+
+          baseline = read_receipt(temp / "lu-weekly-contracts.xml")
+          selected = run_trial("selected", required)
+          omitted = required[1]
+          probe = run_trial("omission", (required[0], required[2]))
+          probe_ok = probe["rejected"] == {omitted: "not_run"} and probe["cases"] == 2
+          comparison_ok = not baseline["rejected"] and not selected["rejected"] and selected["cases"] == 3
+          checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          result = {
+              "trial": "weekly-report-selection-v1",
+              "run": os.environ["GITHUB_RUN_ID"],
+              "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "checkout": checkout,
+              "runner_expected_checkout": os.environ["GITHUB_SHA"],
+              "baseline": baseline,
+              "selected": selected,
+              "omission_probe": probe,
+              "omission_rejected_as_expected": probe_ok,
+              "passed": comparison_ok and probe_ok and checkout == os.environ["GITHUB_SHA"],
+          }
+          print("WEEKLY_SELECTION_TRIAL " + json.dumps(result, sort_keys=True))
+          if not result["passed"]:
+              raise SystemExit("Weekly report selection trial did not satisfy its evidence checks.")
+          PY
 
   weekly-report-frontend:
     name: Weekly report frontend
@@ -207,8 +611,9 @@ jobs:
           ruff check --select E9,F63,F7,F82 domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py subsystems/client_finance/pricing_configuration.py
           pyright domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py infrastructure/mysql/holiday_accounting_results.py
       - name: Verify holiday pricing and historical exclusions
+        id: holiday_contracts
         run: >-
-          python -m pytest -q
+          python -m pytest -q --junitxml=${{ runner.temp }}/lu-holiday-baseline.xml
           tests/domains/scheduling/subsystems/scheduling/integration/test_holiday_router.py
           tests/domains/scheduling/subsystems/scheduling/modules/schedule-generation/test_service_date_adjustment.py
           tests/domains/payroll/subsystems/payroll/modules/tiered-payroll/test_tiered_payroll.py
@@ -217,6 +622,87 @@ jobs:
           tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/
           tests/domains/payroll/subsystems/payroll/integration/test_terms_impact.py
           tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py
+      - name: Compare holiday evidence selection without changing the gate
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.holiday_contracts.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+
+          module = "test_holiday_router"
+          source = f"tests/domains/scheduling/subsystems/scheduling/integration/{module}.py"
+          required = (
+              "test_holiday_toggle_reprices_once_and_omitted_import_preserves_manual_setting",
+              "test_transaction_failure_before_flag_change_never_commits_setting_or_receipt",
+              "test_holiday_accounting_results_failure_is_not_an_empty_success",
+          )
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def evidence(path):
+              cases = list(ET.parse(path).getroot().iter("testcase"))
+              scoped = [case for case in cases if case.get("classname", "").rsplit(".", 1)[-1] == module]
+              if not scoped:
+                  raise ValueError("holiday router results missing")
+              results = {}
+              for case in scoped:
+                  name = case.get("name")
+                  if name not in required:
+                      continue
+                  if name in results:
+                      results[name] = "ambiguous"
+                  elif case.find("failure") is not None or case.find("error") is not None:
+                      results[name] = "failed"
+                  elif case.find("skipped") is not None:
+                      results[name] = "skipped"
+                  else:
+                      results[name] = "passed"
+              return {
+                  "job_cases": len(cases),
+                  "holiday_router_cases": len(scoped),
+                  "case_seconds": round(sum(float(case.get("time", "0")) for case in scoped), 3),
+                  "required": {name: results.get(name, "not_run") for name in required},
+              }
+
+          def run_trial(label, names):
+              report = temp / f"lu-holiday-{label}.xml"
+              subprocess.run(
+                  [sys.executable, "-m", "pytest", "-q", f"--junitxml={report}",
+                   *(f"{source}::{name}" for name in names)], check=True, timeout=120,
+              )
+              return evidence(report)
+
+          checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          parents = subprocess.check_output(["git", "show", "-s", "--format=%P", "HEAD"], text=True).split()
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))["pull_request"]
+          event_base, head = event["base"]["sha"], event["head"]["sha"]
+          expected_ref = f"refs/pull/{event['number']}/merge"
+          version_ok = (checkout == os.environ["GITHUB_SHA"] and os.environ["GITHUB_REF"] == expected_ref
+                        and len(parents) == 2 and parents[1] == head)
+          tested_base = parents[0] if version_ok else None
+          baseline = evidence(temp / "lu-holiday-baseline.xml")
+          selected = run_trial("selected", required)
+          omission = run_trial("omitted-consumer", required[:2])
+          passed_cases = dict.fromkeys(required, "passed")
+          expected_omission = {**passed_cases, required[-1]: "not_run"}
+          ok = (version_ok and baseline["required"] == passed_cases
+                and selected["required"] == passed_cases and selected["holiday_router_cases"] == 3
+                and omission["required"] == expected_omission and omission["holiday_router_cases"] == 2)
+          print("HOLIDAY_SELECTION_TRIAL " + json.dumps({
+              "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "checkout": checkout, "head": head, "tested_base": tested_base, "event_base": event_base,
+              "event_base_matches_tested": event_base == tested_base,
+              "baseline": baseline, "selected": selected, "omitted_consumer": omission,
+              "omitted_consumer_rejected": omission["required"] == expected_omission, "passed": ok,
+          }, sort_keys=True))
+          if not ok:
+              raise SystemExit("Holiday selection evidence did not satisfy its trial contract.")
+          PY
+
       - name: Verify current specification hygiene
         run: python scripts/validate_spec_hygiene.py
       - name: Verify whitespace

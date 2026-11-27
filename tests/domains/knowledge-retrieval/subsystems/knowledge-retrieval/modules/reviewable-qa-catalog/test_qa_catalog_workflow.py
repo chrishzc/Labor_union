@@ -4,13 +4,17 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import api.dependencies.knowledge_retrieval as knowledge_dependencies
 import api.routes.knowledge_retrieval as knowledge_routes
+from api.dependencies.admin_auth import require_admin
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
 from api.dependencies.llm_configuration import _qa_id_from_source
 from domains.knowledge_retrieval.qa_catalog import decode_governed_qa, encode_governed_qa
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.knowledge_retrieval.application import KnowledgeApplication
 from subsystems.knowledge_retrieval.contracts import (
     PublishKnowledgeItemCommand,
@@ -343,3 +347,43 @@ def test_builtin_catalog_import_rejects_empty_request_identity() -> None:
             "",
             "ui-correlation-id",
         )
+
+
+@pytest.mark.parametrize(("can_manage", "active", "status"), [
+    (False, False, 403),
+    (True, True, 409),
+    (True, False, 200),
+])
+def test_faq_delete_route_requires_manage_and_returns_owner_conflict(
+    monkeypatch, can_manage, active, status,
+) -> None:
+    submitted = []
+
+    def delete_faq(command):
+        submitted.append(command)
+        if active:
+            raise RuntimeError("knowledge_faq_delete_published")
+        return command.item_id
+
+    monkeypatch.setattr(knowledge_routes, "get_knowledge_application", lambda: SimpleNamespace(delete_faq=delete_faq))
+    app = FastAPI()
+    app.include_router(knowledge_routes.router)
+    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(
+        7, "fixture", "fixture", "line_agent" if can_manage else "operator",
+    )
+    with TestClient(app) as client:
+        result = client.post(
+            "/api/v1/knowledge/items/41/delete-faq",
+            json={"expected_version": 3, "reason": "fixture deletion"},
+            headers={"Idempotency-Key": "delete-41", "X-Correlation-ID": "delete-41-correlation"},
+        )
+    assert result.status_code == status, result.text
+    if not can_manage:
+        assert submitted == []
+        return
+    [command] = submitted
+    assert (command.item_id, command.expected_version, command.actor) == (41, ExpectedVersion(3), ActorContext("7"))
+    if active:
+        assert result.json()["detail"]["code"] == "knowledge_faq_delete_published"
+    else:
+        assert result.json()["item_id"] == 41

@@ -1,5 +1,5 @@
 /** Verify the approved identity workspace against real typed query/command boundaries. */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LineIdentityWorkbench } from '../../../../../../components/LineIdentityWorkbench';
 import { LineIdentityClientError } from '../../../../../../api/line_identity/line_identity_errors';
@@ -78,6 +78,45 @@ describe('身分與授權精簡工作區', () => {
     );
     expect(await screen.findByRole('button', { name: '重新同步選單' })).toBeDisabled();
     expect(screen.queryByText('選單已同步')).toBeNull();
+  });
+
+  it.each([
+    ['synced', null, '選單已同步'],
+    ['failed', 'line_http_401', '選單同步失敗（LINE 憑證無效）'],
+  ] as const)('自動讀回選單同步的 %s 結果後停止查詢', async (status, errorCode, label) => {
+    const pending = { ...binding, rich_menu_sync_status: 'pending' as const };
+    const terminal = { ...binding, rich_menu_sync_status: status, rich_menu_sync_error_code: errorCode };
+    const api = { ...client([binding]), resyncMenu: vi.fn().mockResolvedValue(pending) };
+    api.listBindings
+      .mockResolvedValueOnce({ items: [binding], total: 1, page: 1, page_size: 25 })
+      .mockResolvedValueOnce({ items: [pending], total: 1, page: 1, page_size: 25 })
+      .mockRejectedValueOnce(new Error('temporary list failure'))
+      .mockResolvedValue({ items: [terminal], total: 1, page: 1, page_size: 25 });
+
+    vi.useFakeTimers();
+    try {
+      render(<LineIdentityWorkbench client={api} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '重新同步選單' })); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+      expect(screen.getByText('選單同步中')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '重新同步選單' })).toBeDisabled();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(screen.getByText('選單同步中')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('目前無法完成這項操作');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '重新同步選單' })).toBeEnabled();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      expect(api.listBindings).toHaveBeenCalledTimes(4);
+      expect(api.resyncMenu).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('重新同步送到單筆角色限定的 API 並解碼受理狀態', async () => {
@@ -225,6 +264,24 @@ describe('身分與授權精簡工作區', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(api.applyRevocation).not.toHaveBeenCalled();
   });
+  it('由網址開啟指定審核一次，重新渲染時保留已填內容', async () => {
+    window.history.replaceState(null, '', '/#line-management?identity=reviews&review=71');
+    const api = client();
+    const { rerender } = render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(await screen.findByRole('radio', { name: '核准' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '審核原因（選填）' }), {
+      target: { value: '資料已核對' },
+    });
+
+    rerender(<LineIdentityWorkbench client={{ ...api }} />);
+
+    expect(api.getReview).toHaveBeenCalledExactlyOnceWith(71, expect.objectContaining({
+      signal: expect.anything(),
+    }));
+    expect(screen.getByRole('radio', { name: '核准' })).toBeChecked();
+    expect(screen.getByRole('textbox', { name: '審核原因（選填）' })).toHaveValue('資料已核對');
+  });
+
   it('待審核不預選核准，通過正式 Preview／Apply 後自動查回審核結果', async () => {
     const api = client(); api.getReview.mockResolvedValueOnce(review).mockResolvedValue({ ...review, status: 'approved', version: 4 });
     render(<LineIdentityWorkbench client={api} />); fireEvent.click(screen.getByRole('tab', { name: /待審核/ }));

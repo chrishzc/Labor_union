@@ -14,13 +14,16 @@ Query／Preview／Apply／readback。此 Module 不建立mobile business state�
 LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React password／MFA登入。
 
 ## Implementation
-- Binding reminder sources `customer_binding` / `staff_binding` reuse LINE Identity's bounded owner query and binding-read capability. Desktop and mobile expose manual telephone/copy actions only; no new notification state or outbound task.
+- `customer_binding` 與 `staff_binding` 沿 LINE Identity 的 bounded Query 及原讀取權限。`architecture_declared`：桌面與手機依 #20 §5.1.1 提供 `customer_binding` 單案移除，兩端轉接同一 LINE Identity 管理命令。`staff_binding` 保留人工聯絡方式。
 - `api/routes/notification_tasks.py`、`api/schemas/notification_tasks.py` — 桌面與 LIFF 共用逐來源唯讀 projection、allowlisted catalog 及 bounded cursor；每次請求只讀原 owner，不新增 inbox／read state。來源失敗明示，來源原分頁保留；搜尋明示只限已載入事項。舊 `customer_service` 查詢回 410，推薦待辦使用配對方案與跟進狀態組成的識別碼。
+- `architecture_declared`：共用目錄提供分類識別與名稱，供桌面及 LIFF 篩選與計數，保留原來源及 `review`／`reminder` 識別。`registration` 轉接 `RegistrationReviewApplication.pending_registrations`，僅投影 #20 的卡片欄位，保留原分頁、來源錯誤及 `registration_id`。桌面與 LIFF 依原編號進入既有審核入口。
 - 月嫂資料異動只列於桌面「通知事項」，唯讀查詢 Staff 申請的 Redis 待審摘要，從單筆連結開啟月嫂名冊審核；不建立 LINE 寄送工作。
 - `import_fields` 只列於桌面「通知事項」，以 `data_browser.read` 查詢 Case Import 的 bounded current field issues。每案一筆，逐欄連到客戶名冊的正式修正入口，讀回後依目前問題更新。
 - `api/routes/notification_task_actions.py` — session／LINE capability 薄轉接原訂金、登記與 delivery command；runtime/query 改為 authenticated 唯讀系統摘要，舊 target command 由原 owner 回退役錯誤；原 owner 擁有 fresh check、冪等、receipt 及 outer commit。LIFF 不接受桌面 Session。
+- `architecture_declared`：此路由以桌面 Session 或 server-verified LINE token 辨識操作人，驗證同一 `IDENTITY_BINDING_MANAGE` 權限，將客戶、案號、#20 §5.1.1 的固定原因與冪等鍵交給既有 LINE Identity 單案移除命令。UI 提供單次點擊操作並呈現讀回結果。
+- `subsystems/line/signing_reminder_dismissal.py` — 桌面與 LIFF 共用待簽約提醒的移除命令。重新核對媒合查閱與管理權限及當次提醒，於同一 LINE 交易保存收據及移除事件。`infrastructure/mysql/matching_notification_repository.py` 以 Orders 現行契約完約事實及該筆移除事件，共同過濾清單與計數。
 - `ui_react/src/pages/NotificationTasksPreviewPage.tsx`、`ui_react/src/pages/NotificationTasksPreviewPage.css`、`ui_react/src/api/line_notifications/notification_tasks_client.ts` — 正式通知事項查詢、來源分頁、同案工作區入口及缺綁定修復入口；沒有範例資料 fallback。
-- `ui_react/src/components/NotificationTaskActions.tsx` — 桌面通知僅提供正式作業深連結與客戶／月嫂綁定、人工建群三類指引。`source_observed`：服務登記、資料異動、服務中換人、寄送異常、通知建立異常仍有 owning 工作面連結，攜帶單筆 identity；不在通知頁重複操作。推薦待辦連到本案推薦或簽約工作區。
+- `ui_react/src/components/NotificationTaskActions.tsx` — 桌面正式作業深連結、月嫂綁定及人工建群指引。服務登記、資料異動、服務中換人、寄送異常及通知建立異常攜帶單筆 identity 連到原工作面。推薦待辦連到本案推薦或簽約工作區。後端確認可移除時，待簽約與客戶綁定卡提供各自的單筆移除操作。
 - `ui_react/src/components/TaskOperation.css` — 通知人工指引與正式作業面沿用相同按鈕／表單樣式，無流程邏輯。
 - `ui_react/src/components/RegistrationApplications.tsx` — notification initial ID 與原核准後 readback callback。
 - `ui_react/src/components/LineIdentityWorkbench.tsx` — notification review deep link 讀取同一審核申請。
@@ -39,6 +42,7 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 通知中心 `payment_receipt` 來源只投影 LINE 入帳通知 owner 的已核銷待辦；桌面按「前往帳務確認」攜帶案號、期別及 settlement identity，帳務才可人員 Send。手機僅提供帳務處理指引與案號複製，不引導跨 Session 或直接寄送。訂金舊來源只列未核銷提醒，避免已核銷項目重複列入。
 
 ## Dependencies
+- outbound: `case-import/provisional-registration` — 共用原審核清單 Query 與同編號明細；申請及核准狀態由 Case Import 維護。
 - outbound: `scheduling/leave-substitution` — 服務中換人需求沿其原案件流程，請假記錄保留歷史 Query；開工與延期衝突的管理員調班不列代班待辦。
 - outbound: `scheduling/matching-coordination` — 以 `/matching-followups` 唯讀呈現 24 小時月嫂未回覆提醒，以 `/customer-recommendation-followups` 唯讀呈現推薦回覆待處理、待簽約與實際送達後 7 天待跟進。
 - outbound: `orders/order-summary` — bounded unfinished Order case options only；mobile不推算可編輯狀態。
@@ -57,6 +61,7 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 
 ## Contracts
 - `architecture_declared`：`.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §2、§5.1.1 與 §5.2 規定客服工單待辦退役、留言由 LINE 官方帳號處理，舊手機入口導向待辦工作台。舊 Query 與歷史保留依 `19_Global_Entry_Point_Governance.md` §3.2。
+- `architecture_declared`：`.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §5.1.1 的 `LINE-TODO-03`、`LINE-TODO-REG-01～03`、客戶綁定提醒的 `LINE-TODO-04` 及 `LINE-TODO-BIND-02` 定義兩端分類、原申請導航及單案移除驗收。
 - `architecture_declared`：`.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §5.1.1 的 `service_start` 來源只呈現服務中換人需求。開工、延期衝突與局部代班不列通知待辦及總數，入口退役依 `19_Global_Entry_Point_Governance.md`。
 
 ## Verification

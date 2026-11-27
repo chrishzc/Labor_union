@@ -28,8 +28,11 @@
 - outbound: `orders/historical-precision-restart` — precision restart 後，沒有 generation ownership 的舊歷史 assignment 不再構成 waiting-lock occupancy。
 - inbound: `scheduling/matching-coordination` — 工會確認的 matching plan 與 current confirmed service dates 提供檔期鎖候選事實；月嫂意願是推薦輸入，不以簽約或 precontract commitment 作為鎖定前置條件。
 
+<a id="waiting-deposit-lock-lifecycle"></a>
+
 ## Contracts
-- Waiting-deposit lock ownership and cancellation — `.arch-map/requirements/02_Assignments_Scheduling_Domain.md`.
+- [需求書 §3.2「等待訂金檔期鎖」](../../../../../requirements/02_Assignments_Scheduling_Domain.md#waiting-deposit-lock) 定義生命週期。訂金逾期不自動釋放，檔期保留仍只作提醒，不是正式排班衝突。
+- 來源定位：`api/routes/caregiver_availability_locks.py` 的解除使用 `waiting-deposit-locks/{lock_id}/release/preview`／`apply`；舊 `availability-locks/{lock_id}/release`（帶媒合方案）與 `availability-locks/{lock_id}/convert`（案層）端點回 410。首次正式排班的鎖轉換仍由 Assignment Plan Preview／Apply 執行，並非取消轉換規則。
 - Cancellation must remove future Scheduling occupancy — `.arch-map/requirements/01_Orders_Domain.md` §3.5.
 
 ## Verification

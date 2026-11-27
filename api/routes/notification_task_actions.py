@@ -8,7 +8,7 @@ from dataclasses import asdict
 from subsystems.line.notification_handling import failure_handling
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
-from api.dependencies.admin_auth import require_capability, admin_actor_context, has_required_capability
+from api.dependencies.admin_auth import AdminPrincipal, require_capability, admin_actor_context, has_required_capability
 from subsystems.line.capabilities import LineCapability
 from api.dependencies.line_deposit import get_deposit_notifications
 from api.schemas.base import BaseResponse
@@ -18,6 +18,7 @@ from api.routes.line_deposit_payment import DepositReminderReceipt
 from api.error_contracts import typed_http_error
 from shared_kernel.identities import IdempotencyKey
 from subsystems.line.deposit_notifications import DepositNotificationConflict
+from subsystems.line.signing_reminder_dismissal import SigningReminderConflict, dismiss_signing_reminder
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from domains.line.identities import LineDeliveryTaskId
 
@@ -31,6 +32,29 @@ class DismissCustomerBindingReminder(BaseModel):
     case_no: str = Field(min_length=1, max_length=50)
     reason: str = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+class DismissSigningReminder(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    source: Literal['recommendation']
+    item_id: str = Field(pattern=r'^recommendation:[1-9][0-9]{0,19}:awaiting_signing:[0-9a-f]{64}$')
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+@router.post('/reminders/dismiss')
+def dismiss_reminder(body: DismissSigningReminder,
+                     principal: AdminPrincipal = Depends(require_capability(LineCapability.MATCHING_OVERRIDE))):
+    if not has_required_capability(principal, str(LineCapability.MATCHING_READ)):
+        raise typed_http_error(403, 'forbidden', 'notification_source_forbidden',
+                               '目前帳號沒有查看此類事項的權限。', 'notification-workbench')
+    _, plan_id, _, occurrence = body.item_id.split(':')
+    try:
+        replayed = dismiss_signing_reminder(open_line_unit_of_work, int(plan_id), occurrence,
+                                           IdempotencyKey(body.idempotency_key), admin_actor_context(principal))
+    except SigningReminderConflict as error:
+        raise typed_http_error(409, 'conflict', str(error),
+                               '此提醒已更新，請重新整理待辦。', 'notification-workbench') from error
+    return BaseResponse(data={'dismissed': True, 'replayed': replayed})
 
 
 @router.post('/customer-binding-reminder/dismiss')
@@ -109,6 +133,26 @@ class MobileAuth(BaseModel):
 def _mobile(token, capability):
     from api.routes.line_mobile_admin import _mobile_admin_context
     return _mobile_admin_context(token, capability)[0]
+
+
+class MobileDismissCustomerBindingReminder(DismissCustomerBindingReminder, MobileAuth):
+    pass
+
+
+class MobileDismissSigningReminder(DismissSigningReminder, MobileAuth):
+    pass
+
+
+@mobile_router.post('/reminders/dismiss')
+def mobile_dismiss_reminder(body: MobileDismissSigningReminder):
+    principal = _mobile(body.line_id_token, LineCapability.MATCHING_OVERRIDE)
+    return dismiss_reminder(body, principal)
+
+
+@mobile_router.post('/customer-binding-reminder/dismiss')
+def mobile_dismiss_customer_binding_reminder(body: MobileDismissCustomerBindingReminder):
+    principal = _mobile(body.line_id_token, LineCapability.IDENTITY_BINDING_MANAGE)
+    return dismiss_customer_binding_reminder(body, principal)
 
 
 @mobile_router.post('/notification-failures/{issue_key}/query', response_model=BaseResponse[NotificationFailureDetailView])

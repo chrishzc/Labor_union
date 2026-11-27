@@ -20,13 +20,14 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.access.integration_capabilities import IntegrationCapability
 from api.dependencies.line_faq_layout import get_service_help_faq_readers
 from api.dependencies.line_ai_qa_catalog import load_line_ai_qa_catalog
-from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa, format_line_faq_reply
+from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
 from domains.line.faq_chat_layout import FaqCategory, FaqLayout, FaqQuestionLink, project_category
 from domains.line.identities import LineSourceType, LineUserId
 from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
-from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
+from subsystems.knowledge_retrieval.faq_catalog import PredecessorPublishedFaqCatalog, PublishedFaq, PublishedFaqCatalog
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.faq_chat_layout import FaqCategoryNotPublished, FaqLayoutUnavailable
+from subsystems.line.predecessor_line_faq import PredecessorLineFaq
 from subsystems.line.service_help_application import LineServiceHelpApplication, ServiceHelpFaqReaders
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
@@ -122,6 +123,8 @@ def faq_layout():
 def client(faq_repository, faq_layout):
     catalog = PublishedFaqCatalog(faq_repository.unit)
     faq_layout.catalog = catalog
+    # These route contracts use fake ports and do not exercise startup database or Redis work.
+    client = TestClient(app)
     original = dict(app.dependency_overrides)
     app.dependency_overrides[get_service_help_faq_readers] = lambda: lambda: ServiceHelpFaqReaders(catalog, faq_layout)
     app.dependency_overrides[require_admin] = lambda: AdminPrincipal(
@@ -129,9 +132,9 @@ def client(faq_repository, faq_layout):
         capabilities=frozenset({IntegrationCapability.KNOWLEDGE_READ.value}),
     )
     try:
-        with TestClient(app) as client:
-            yield client
+        yield client
     finally:
+        client.close()
         app.dependency_overrides.clear()
         app.dependency_overrides.update(original)
 
@@ -181,11 +184,11 @@ def _private_inbox(*, text="", postback="", group=False):
     ))
 
 
-def _reply_handlers(repository, layout):
+def _reply_handlers(repository, layout, *, faq_reader=None):
     catalog = PublishedFaqCatalog(repository.unit)
     layout.catalog = catalog
     service_help = LineServiceHelpApplication(
-        lambda: datetime.now(timezone.utc), faq_catalog=catalog, faq_layout=layout,
+        lambda: datetime.now(timezone.utc), faq_catalog=catalog, faq_layout=layout, faq_reader=faq_reader,
     )
     return LineWebhookIdentityHandlers(
         lambda: datetime.now(timezone.utc),
@@ -223,7 +226,8 @@ def test_faq_02_official_version_is_shared_by_admin_and_line(client, faq_reposit
     legacy = "這是上一張 LINE 卡片送出的問題？"
     handlers = _reply_handlers(faq_repository, faq_layout)
     faq_repository.legacy[legacy] = (qa_id,)
-    faq_repository.official[qa_id] = _faq_row(qa_id, "正式答案 A", question=legacy)
+    official_a = "正式答案 A\n\n提醒：請先聯絡工會。"
+    faq_repository.official[qa_id] = _faq_row(qa_id, official_a, question=legacy)
     faq_repository.rows[qa_id] = _faq_row(qa_id, "草稿答案 B", version=2, question="新問題？")
 
     def assert_shared_answer(expected, version):
@@ -233,10 +237,10 @@ def test_faq_02_official_version_is_shared_by_admin_and_line(client, faq_reposit
         assert item["answer"] == expected
         assert item["version"] == version
         assert item["category"] == "服務流程"
-        assert expected in _reply_payload(handlers, text=legacy)["text"]
-        assert expected in _reply_payload(handlers, postback=f"faq:v1:question:{qa_id}")["text"]
+        for kwargs in ({"text": legacy}, {"postback": f"faq:v1:question:{qa_id}"}):
+            assert _reply_payload(handlers, **kwargs) == {"type": "text", "text": expected}
 
-    assert_shared_answer("正式答案 A", 1)
+    assert_shared_answer(official_a, 1)
     faq_repository.official[qa_id] = faq_repository.rows[qa_id]
     assert_shared_answer("草稿答案 B", 2)
     faq_repository.rows[qa_id] = _faq_row(qa_id, "未發布 C", version=3)
@@ -311,21 +315,41 @@ def test_faq_05_only_one_current_exact_legacy_match_is_answered(faq_repository, 
     assert "暫時無法使用" in _reply_payload(handlers, text="舊版問題文字")["text"]
 
 
-def test_faq_05_reply_budget_includes_source_note_and_utf16_units(faq_repository, faq_layout):
+def test_faq_05_predecessor_uses_seed_only_to_identify_a_question(faq_repository, faq_layout):
+    seed = PublishedFaq(
+        qa_id="qa-seed", category="服務流程", category_id=None, tag="",
+        question="舊版按鈕文字", answer="種子檔答案", aliases=(),
+        source_ref="種子來源", source_identity="line-common-qa:qa-seed", source_version=0, source_uri="",
+    )
+    catalog = Mock(spec=PredecessorPublishedFaqCatalog)
+    catalog.get.return_value = None
+    catalog.has_identity.return_value = False
+    predecessor = PredecessorLineFaq(catalog, lambda: (seed,))
+    handlers = _reply_handlers(
+        faq_repository, faq_layout, faq_reader=lambda: ServiceHelpFaqReaders(catalog, None, predecessor),
+    )
+    guidance = _reply_payload(handlers, text=seed.question)
+    assert "返回常見問題" in guidance["text"]
+    assert seed.answer not in guidance["text"]
+
+    faq_repository.official[seed.qa_id] = _faq_row(seed.qa_id, "正式答案")
+    catalog.get.return_value = PublishedFaqCatalog(faq_repository.unit).get(seed.qa_id)
+    assert _reply_payload(handlers, text=seed.question) == {"type": "text", "text": "正式答案"}
+
+
+def test_faq_05_reply_budget_counts_only_answer_utf16_units(faq_repository, faq_layout):
     handlers = _reply_handlers(faq_repository, faq_layout)
-    suffix_units = len(format_line_faq_reply("", "正式題庫來源").encode("utf-16-le")) // 2
-    answer = "答" * (5000 - suffix_units - 2) + "😀"
+    answer = "答" * 4998 + "😀"
     faq_repository.official = {
         "fits": _faq_row("fits", answer),
         "oversize": _faq_row("oversize", answer + "答"),
     }
     reply = _reply_payload(handlers, postback="faq:v1:question:fits")
-    assert reply["text"] == format_line_faq_reply(answer, "正式題庫來源")
+    assert reply == {"type": "text", "text": answer}
     assert len(reply["text"].encode("utf-16-le")) // 2 == 5000
     fallback = _reply_payload(handlers, postback="faq:v1:question:oversize")
     assert "無法完整顯示" in fallback["text"]
     assert "請直接在此留言" in fallback["text"]
-    assert fallback["quickReply"]["items"]
     assert answer not in fallback["text"]
 
 

@@ -16,15 +16,6 @@ _FAQ_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}")
 LINE_FAQ_REPLY_MAX_UNITS = 5000
 
 
-def format_line_faq_reply(answer: str, source_ref: str) -> str:
-    sources = f"資料來源：{source_ref}\n" if source_ref else ""
-    return (
-        f"{answer}\n\n"
-        f"{sources}此資訊僅供說明，請以工會確認為準。\n\n"
-        "如需進一步協助，請直接在此留言。"
-    )
-
-
 def line_faq_reply_fits(text: str) -> bool:
     # LINE counts Unicode text in UTF-16 code units.
     return sum(2 if ord(char) > 0xFFFF else 1 for char in text) <= LINE_FAQ_REPLY_MAX_UNITS

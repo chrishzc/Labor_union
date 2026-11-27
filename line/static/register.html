@@ -250,7 +250,8 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         <div class="subtitle">請填寫服務需求，送出後由工會審核。</div>
     </div>
 
-    <div id="statusMessage" class="status-message"></div>
+    <div id="statusMessage" class="status-message" role="status"></div>
+    <button type="button" id="registrationStatusButton" class="btn-secondary" hidden>重新送出</button>
     <a id="registrationRestart" href="/line-gateway" hidden>重新開啟客戶登記與綁定</a>
 
     <p id="studioPreviewNotice" hidden>表單預覽，可試選服務條件。請使用測試資料。</p>
@@ -378,8 +379,8 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             <input type="text" class="form-input" data-survey="服務時間內是否有其他寶寶" required placeholder="例如: 無 / 有一個3歲大寶">
         </div>
         
-        <div class="form-group">
-            <label class="form-label">哺乳方式</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">哺乳方式</label>
             <div class="radio-group">
                 <div class="radio-item"><input type="radio" name="breastfeed" value="母乳" id="bf1"><label for="bf1">母乳</label></div>
                 <div class="radio-item"><input type="radio" name="breastfeed" value="配方奶" id="bf2"><label for="bf2">配方奶</label></div>
@@ -387,22 +388,23 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             </div>
         </div>
 
-        <div class="form-group">
-            <label class="form-label">洗澡水準備 (可複選)</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">洗澡水準備 (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="一般熱水" id="bw1"><label for="bw1">一般熱水</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="薑水" id="bw2"><label for="bw2">薑水</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="中藥包" id="bw3"><label for="bw3">中藥包</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="不需另外準備" id="bw_none" data-care-none><label for="bw_none">不需另外準備</label></div>
             </div>
         </div>
 
-        <div class="form-group">
-            <label class="form-label">媽咪有無過敏體質</label>
-            <textarea class="form-input" data-survey="5媽咪有無過敏體質：" placeholder="若無請填無"></textarea>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">媽咪有無過敏體質</label>
+            <textarea class="form-input" data-survey="5媽咪有無過敏體質：" required placeholder="若無請填「無」"></textarea>
         </div>
-        <div class="form-group">
-            <label class="form-label">特殊照護注意事項</label>
-            <textarea class="form-input" data-survey="特殊照護時應注意事項：" placeholder="例如: 剖腹產、有妊娠糖尿病等"></textarea>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">特殊照護注意事項</label>
+            <textarea class="form-input" data-survey="特殊照護時應注意事項：" required placeholder="例如：剖腹產、有妊娠糖尿病。若無請填「無」"></textarea>
         </div>
 
         <!-- Section 3: 飲食偏好 -->
@@ -414,32 +416,32 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
                 <div class="radio-item"><input type="radio" name="needs_cooking" value="不需要下廚" id="needs_cooking_no"><label for="needs_cooking_no">不需要下廚</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">月子餐點調理喜好/飲食習慣</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">月子餐點調理喜好/飲食習慣</label>
             <div class="radio-group">
                 <div class="radio-item"><input type="radio" name="diet" value="葷食" id="dt1"><label for="dt1">葷食</label></div>
                 <div class="radio-item"><input type="radio" name="diet" value="素食" id="dt2"><label for="dt2">素食</label></div>
                 <div class="radio-item"><input type="radio" name="diet" value="不用料理/訂月餐" id="dt3"><label for="dt3">不用料理/訂月餐</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">若遇無法媒合到葷食人員時，是否可接受蛋奶素人員？</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">若遇無法媒合到葷食人員時，是否可接受蛋奶素人員？</label>
             <div class="radio-group">
                 <div class="radio-item"><input type="radio" name="veg_staff" value="可接受" id="vs1"><label for="vs1">可接受</label></div>
                 <div class="radio-item"><input type="radio" name="veg_staff" value="無法接受" id="vs2"><label for="vs2">無法接受</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">可以接受中藥補品 (可複選)</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">可以接受中藥補品 (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="茶飲" id="hm1"><label for="hm1">茶飲</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="藥飲" id="hm2"><label for="hm2">藥飲</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="藥膳" id="hm3"><label for="hm3">藥膳</label></div>
-                <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="無法接受中藥補品" id="hm4"><label for="hm4">無法接受中藥補品</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="無法接受中藥補品" id="hm4" data-care-none><label for="hm4">無法接受中藥補品</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">餐飲含酒比例</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">餐飲含酒比例</label>
             <div class="radio-group">
                 <div class="radio-item"><input type="radio" name="alcohol" value="全酒" id="al1"><label for="al1">全酒</label></div>
                 <div class="radio-item"><input type="radio" name="alcohol" value="半酒" id="al2"><label for="al2">半酒</label></div>
@@ -447,24 +449,25 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
                 <div class="radio-item"><input type="radio" name="alcohol" value="無酒料理" id="al4"><label for="al4">無酒料理</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">料理用油 (可接受種類) (可複選)</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">料理用油 (可接受種類) (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="苦茶油(前兩週)" id="oil1"><label for="oil1">苦茶油(前兩週)</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="麻油(後兩週)" id="oil2"><label for="oil2">麻油(後兩週)</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="橄欖油" id="oil3"><label for="oil3">橄欖油</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="一般食用油" id="oil4"><label for="oil4">一般食用油</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="不適用" id="oil_none" data-care-none><label for="oil_none">不適用</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">餐點喜忌備註</label>
-            <textarea class="form-input" data-survey="餐點喜忌備註：" placeholder="例如: 不吃牛、不吃內臟等"></textarea>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">餐點喜忌備註</label>
+            <textarea class="form-input" data-survey="餐點喜忌備註：" required placeholder="例如：不吃牛、不吃內臟。若無請填「無」"></textarea>
         </div>
 
         <!-- Section 4: 居家設備與環境 -->
         <div class="section-title">🍳 4. 居家設備與環境</div>
-        <div class="form-group">
-            <label class="form-label">烹煮與加熱工具 (請勾選家中有的設備) (可複選)</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">烹煮與加熱工具 (請勾選家中有的設備) (可複選)</label>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="炒菜鍋"><label>炒菜鍋</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="大同電鍋"><label>大同電鍋</label></div>
@@ -474,21 +477,24 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="奶瓶消毒鍋"><label>奶瓶消毒鍋</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="洗碗機"><label>洗碗機</label></div>
                 <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="(煮/泡 洗澡大豐草/艾草水) 的鍋或盆"><label>(煮/泡 洗澡大豐草)的鍋或盆</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="無上述設備" id="tools_none" data-care-none><label for="tools_none">無上述設備</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">透天服務樓層方式 (會加收樓層費)</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">透天服務樓層方式 (會加收樓層費)</label>
             <div class="radio-group">
                 <div class="radio-item"><input type="radio" name="floor_fee" value="大樓公寓無樓層問題"><label>大樓公寓無樓層問題</label></div>
+                <div class="radio-item"><input type="radio" name="floor_fee" value="透天服務範圍1層樓"><label>透天服務範圍 1 層樓</label></div>
                 <div class="radio-item"><input type="radio" name="floor_fee" value="服務範圍2層樓(+100/元)每日"><label>服務範圍2層樓(+100/元)每日</label></div>
                 <div class="radio-item"><input type="radio" name="floor_fee" value="服務範圍3層樓(+200/元)每日"><label>服務範圍3層樓(+200/元)每日</label></div>
             </div>
         </div>
-        <div class="form-group">
-            <label class="form-label">提供服務人員轎車停車位</label>
+        <div class="form-group" data-required-care>
+            <label class="form-label required">提供服務人員轎車停車位</label>
             <div class="radio-group">
                 <div class="radio-item"><input type="radio" name="parking" value="有"><label>有</label></div>
                 <div class="radio-item"><input type="radio" name="parking" value="無(願意負擔停車費用)"><label>無 (願意負擔停車費用)</label></div>
+                <div class="radio-item"><input type="radio" name="parking" value="無（停車費另行確認）"><label>無（停車費另行確認）</label></div>
             </div>
         </div>
 
@@ -522,15 +528,17 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             <input type="text" class="form-input" id="refund_bank_account" data-survey="銀行帳號" required placeholder="請輸入完整帳號">
             <div class="form-hint">請填入產婦本人銀行帳號。</div>
         </div>
-        <div class="form-group">
-            <label class="form-label required" for="passbook_cover">存摺封面</label>
-            <input type="file" class="form-input" id="passbook_cover" accept="image/jpeg,image/png,image/webp" required>
-            <div class="form-hint">請上傳清晰的產婦本人存摺封面照片（JPG、PNG 或 WebP，5 MB 以內），供人員核對銀行帳號與分行代碼。</div>
-            <div id="passbookPreviewBox" style="display:none; margin-top:8px;">
-                <img id="passbookPreviewImg" alt="存摺封面預覽" style="max-width:100%; max-height:200px; border-radius:6px; border:1px solid #d1d5db;">
-                <div id="passbookUploadStatus" class="form-hint" style="margin-top:4px;"></div>
+        <template id="passbookCoverTemplate">
+            <div class="form-group">
+                <label class="form-label required" for="passbook_cover">存摺封面</label>
+                <input type="file" class="form-input" id="passbook_cover" accept="image/jpeg,image/png,image/webp" required>
+                <div class="form-hint">請上傳清晰的產婦本人存摺封面照片（JPG、PNG 或 WebP，5 MB 以內），供人員核對銀行帳號與分行代碼。</div>
+                <div id="passbookPreviewBox" style="display:none; margin-top:8px;">
+                    <img id="passbookPreviewImg" alt="存摺封面預覽" style="max-width:100%; max-height:200px; border-radius:6px; border:1px solid #d1d5db;">
+                    <div id="passbookUploadStatus" class="form-hint" style="margin-top:4px;"></div>
+                </div>
             </div>
-        </div>
+        </template>
         <div class="form-group">
             <label class="form-label">確認條款</label>
             <div class="form-hint">點選「已確實詳閱退費原則」，讀完後按「已閱讀並同意」，即可勾選並送出。</div>
@@ -551,7 +559,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             <div class="preview-summary" id="registrationPreviewSummary"></div>
             <div class="preview-actions">
                 <button type="button" class="btn-secondary" id="cancelRegistrationPreview">返回修改</button>
-                <button type="button" class="btn-submit" id="confirmRegistrationApply">確認套用這份登記預覽</button>
+                <button type="button" class="btn-submit" id="confirmRegistrationApply">確認並送出申請</button>
             </div>
         </div>
     </form>
@@ -600,12 +608,14 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     const studioPreview = isNonCitizen && new URLSearchParams(location.search).get('studio_preview') === '1';
     const nonCitizenFields = ['service_start_date', 'service_time', 'residence_type', 'delivery_type', 'service_type', 'notes'];
     let refundPolicyAccepted = false;
-    let pendingRegistrationPreview = null;
+    let pendingRegistrationApply = null;
     let registrationSubmissionPending = false;
-    let registrationResultUnknown = false;
     const submissionStorageKey = `registration-submission:${isNonCitizen ? 'non-citizen' : 'subsidy'}`;
     let registrationSubmissionId = studioPreview ? '' : sessionStorage.getItem(submissionStorageKey);
     const hadSubmission = Boolean(registrationSubmissionId);
+    const registrationConflictStorageKey = submissionStorageKey + ':conflict';
+    let registrationConflict = hadSubmission && sessionStorage.getItem(registrationConflictStorageKey) === registrationSubmissionId;
+    let registrationResultUnknown = hadSubmission;
     if (!studioPreview && !hadSubmission) {
         registrationSubmissionId = crypto.randomUUID();
         sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
@@ -770,20 +780,25 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             document.getElementById('studioPreviewNotice').hidden = false;
             document.getElementById('registrationPreviewButton').disabled = true;
         }
+        const passbookTemplate = document.getElementById('passbookCoverTemplate');
         if (isNonCitizen) {
+            passbookTemplate.remove();
             document.getElementById('nonCitizenServiceFields').hidden = false;
             for (const id of [...nonCitizenFields, 'city', 'gender', 'birth_date']) document.getElementById(id).required = true;
             document.getElementById('service_days').removeAttribute('max');
             document.getElementById('refund_bank_code').previousElementSibling.textContent = '退款銀行與分行代號';
             document.getElementById('refund_bank_account').previousElementSibling.textContent = '退款帳戶';
+        } else {
+            passbookTemplate.replaceWith(passbookTemplate.content);
+            setupPassbookCoverPreview();
         }
         initializeLiff();
+        document.getElementById('registrationStatusButton').addEventListener('click', queryRegistrationStatus);
         setupRefundPolicyAgreement();
         if (!studioPreview) autofillFromQueryParams();
         setupIdNumberAutoUppercase();
         setupEmailTypoHint();
         setupServiceDaysIntegerInput();
-        setupPassbookCoverPreview();
     });
 
     let uploadedPassbookFile = null;
@@ -1093,7 +1108,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     }
 
     function clearFieldErrors() {
-        document.querySelectorAll('.form-input.invalid, .form-select.invalid').forEach(control => {
+        document.querySelectorAll('#registerForm .invalid').forEach(control => {
             control.classList.remove('invalid');
         });
         document.querySelectorAll('.field-error').forEach(error => {
@@ -1274,6 +1289,23 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             addError(errors, otherChildren, '請填寫服務時間內是否有其他大寶或寶寶；若無請填「無」。');
         }
 
+        for (const group of document.querySelectorAll('[data-required-care]')) {
+            const text = group.querySelector('textarea');
+            if (text) {
+                if (!text.value.trim()) addError(errors, text, `請填寫「${fieldLabel(text)}」；若無請填「無」。`);
+                continue;
+            }
+            const firstChoice = group.querySelector('input');
+            if (!group.querySelector('input:checked')) {
+                addError(errors, firstChoice, `請選擇「${fieldLabel(firstChoice)}」的答案。`);
+            }
+        }
+
+        const diet = document.querySelector('input[name="diet"]:checked');
+        if (needsCooking && diet && (needsCooking.value === '不需要下廚') !== (diet.value === '不用料理/訂月餐')) {
+            addError(errors, diet, '飲食習慣須符合下廚需求。若不需要下廚，請選「不用料理/訂月餐」。');
+        }
+
         const refundBankCodeValue = refundBankCode.value.trim();
         if (!refundBankCodeValue) {
             addError(errors, refundBankCode, '請輸入補助款退款銀行代號加分行。');
@@ -1285,14 +1317,16 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         } else if (isNonCitizen && !/^[0-9０-９]{1,50}$/.test(refundBankAccount.value.replace(/[\s-]/g, ''))) {
             addError(errors, refundBankAccount, '退款帳戶請輸入 1 至 50 碼數字。');
         }
-        const passbookInput = document.getElementById('passbook_cover');
-        const passbookFile = passbookInput && passbookInput.files && passbookInput.files[0];
-        if (!passbookFile) {
-            addError(errors, passbookInput, '請上傳存摺封面照片。');
-        } else if (passbookFile.size > 5 * 1024 * 1024) {
-            addError(errors, passbookInput, '存摺封面圖片大小不可超過 5 MB。');
-        } else if (passbookFile.type && !['image/jpeg', 'image/png', 'image/webp'].includes(passbookFile.type)) {
-            addError(errors, passbookInput, '存摺封面只接受 JPG、PNG 或 WebP 圖片。');
+        if (!isNonCitizen) {
+            const passbookInput = document.getElementById('passbook_cover');
+            const passbookFile = passbookInput && passbookInput.files && passbookInput.files[0];
+            if (!passbookFile) {
+                addError(errors, passbookInput, '請上傳存摺封面照片。');
+            } else if (passbookFile.size > 5 * 1024 * 1024) {
+                addError(errors, passbookInput, '存摺封面圖片大小不可超過 5 MB。');
+            } else if (passbookFile.type && !['image/jpeg', 'image/png', 'image/webp'].includes(passbookFile.type)) {
+                addError(errors, passbookInput, '存摺封面只接受 JPG、PNG 或 WebP 圖片。');
+            }
         }
 
         if (isNonCitizen) {
@@ -1357,9 +1391,21 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         return { ok: true };
     }
 
+    document.getElementById("registerForm").addEventListener("change", event => {
+        const choice = event.target;
+        if (!(choice instanceof HTMLInputElement) || !choice.checked || !choice.matches('[data-required-care] input[type="checkbox"]')) return;
+        const group = choice.closest('[data-required-care]');
+        const incompatibleChoices = choice.hasAttribute('data-care-none')
+            ? 'input[type="checkbox"]:not([data-care-none])'
+            : '[data-care-none]';
+        for (const incompatible of group.querySelectorAll(incompatibleChoices)) {
+            incompatible.checked = false;
+        }
+    });
+
     document.getElementById("registerForm").addEventListener("submit", async function(e) {
         e.preventDefault();
-        if (studioPreview || registrationSubmissionPending || registrationResultUnknown) return;
+        if (studioPreview || !currentIdToken || registrationSubmissionPending || registrationResultUnknown || registrationConflict) return;
         const validation = validateRegistrationForm();
         if (!validation.ok || !validateCustomFields()) {
             const requiredMessage = document.getElementById("statusMessage");
@@ -1375,8 +1421,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         statusMsg.className = "status-message";
         loader.style.display = "flex";
         registrationSubmissionPending = true;
-        const submitButton = document.querySelector('#registerForm button[type="submit"]');
-        submitButton.disabled = true;
+        updateRegistrationControls();
 
         try {
             // 收集 survey_details
@@ -1452,32 +1497,29 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
                 payload.baby_info = surveyDetails['特殊計費:胎數'];
             }
 
-            loader.style.display = "flex";
-            statusMsg.style.display = "none";
-
-            // 0. 上傳存摺封面圖片取得暫存識別碼
-            const passbookFile = document.getElementById('passbook_cover').files[0];
-            if (!uploadedPassbookImageId || uploadedPassbookFile !== passbookFile) {
-                const formData = new FormData();
-                formData.append('file', passbookFile);
-                formData.append('line_id_token', currentIdToken || '');
-                formData.append('development_line_user_id', '');
-                const uploadRes = await fetch('/api/v1/line/identity/registration/passbook', {
-                    method: 'POST',
-                    body: formData
-                });
-                const uploadResult = await uploadRes.json();
-                if (!uploadRes.ok || !uploadResult.data || !uploadResult.data.passbook_image_id) {
-                    loader.style.display = "none";
-                    statusMsg.textContent = registrationErrorMessage(uploadResult, uploadRes.status);
-                    statusMsg.className = "status-message error";
-                    statusMsg.style.display = "block";
-                    return;
+            if (!isNonCitizen) {
+                const passbookFile = document.getElementById('passbook_cover').files[0];
+                if (!uploadedPassbookImageId || uploadedPassbookFile !== passbookFile) {
+                    const formData = new FormData();
+                    formData.append('file', passbookFile);
+                    formData.append('line_id_token', currentIdToken || '');
+                    formData.append('development_line_user_id', '');
+                    const uploadRes = await fetch('/api/v1/line/identity/registration/passbook', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const uploadResult = await uploadRes.json();
+                    if (!uploadRes.ok || !uploadResult.data || !uploadResult.data.passbook_image_id) {
+                        statusMsg.textContent = registrationErrorMessage(uploadResult, uploadRes.status);
+                        statusMsg.className = "status-message error";
+                        statusMsg.style.display = "block";
+                        return;
+                    }
+                    uploadedPassbookFile = passbookFile;
+                    uploadedPassbookImageId = uploadResult.data.passbook_image_id;
                 }
-                uploadedPassbookFile = passbookFile;
-                uploadedPassbookImageId = uploadResult.data.passbook_image_id;
+                payload.passbook_image_id = uploadedPassbookImageId;
             }
-            payload.passbook_image_id = uploadedPassbookImageId;
 
             // 1. 建立背景預覽取得安全指紋與版號
             const previewRes = await fetch('/api/v1/line/identity/registration/preview', {
@@ -1488,7 +1530,6 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             const previewResult = await previewRes.json();
 
             if (!previewRes.ok || !previewResult.data) {
-                loader.style.display = "none";
                 statusMsg.textContent = registrationErrorMessage(previewResult, previewRes.status);
                 statusMsg.className = "status-message error";
                 statusMsg.style.display = "block";
@@ -1497,92 +1538,160 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
 
             const preview = requireRegistrationPreview(previewResult.data);
 
-            // 2. 一鍵自動套用登記
-            registrationResultUnknown = true;
-            const applyRes = await fetch('/api/v1/line/identity/registration/apply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Idempotency-Key': registrationSubmissionId },
+            pendingRegistrationApply = {
+                submissionId: registrationSubmissionId,
                 body: JSON.stringify({
                     ...payload,
                     expected_binding_version: preview.expected_binding_version,
-                    preview_fingerprint: preview.preview_fingerprint
-                })
-            });
-            const applyResult = await applyRes.json();
-            loader.style.display = "none";
-
-            if (!applyRes.ok || !applyResult.data) {
-                if (!applyRes.ok && applyRes.status < 500 && applyRes.status !== 408) registrationResultUnknown = false;
-                statusMsg.textContent = !applyResult.data && applyRes.ok
-                    ? '登記結果讀回不完整，請勿重複送出並聯絡工會確認。'
-                    : registrationErrorMessage(applyResult, applyRes.status);
-                statusMsg.className = "status-message error";
-                statusMsg.style.display = "block";
-                return;
-            }
-
-            renderRegistrationSuccess(applyResult.data);
+                    preview_fingerprint: preview.preview_fingerprint,
+                }),
+            };
+            await applyRegistration(pendingRegistrationApply);
         } catch (error) {
-            console.error(error);
-            loader.style.display = "none";
-            statusMsg.textContent = error.message || "系統連線錯誤，請檢查網路狀態。";
-            statusMsg.className = "status-message error";
-            statusMsg.style.display = "block";
+            if (registrationResultUnknown) showRegistrationRetry();
+            else showRegistrationMessage(error.message || '系統連線錯誤，請重試。', true);
         } finally {
+            loader.style.display = 'none';
             registrationSubmissionPending = false;
-            submitButton.disabled = registrationResultUnknown;
+            updateRegistrationControls();
         }
     });
+
+    function showRegistrationMessage(message, isError) {
+        const status = document.getElementById('statusMessage');
+        status.textContent = message;
+        status.className = isError ? 'status-message error' : 'status-message info';
+        status.style.display = 'block';
+    }
+
+    function showRegistrationRetry() {
+        const message = registrationConflict
+            ? '這次沒有送出。你可能已經有一份申請在等工會審核。請先按「查詢原申請」，不用重填。'
+            : '還不知道工會有沒有收到。請按「確認送出結果」，不用重填。看到申請編號後就可以關掉這頁。';
+        showRegistrationMessage(message, true);
+    }
+
+    function updateRegistrationControls() {
+        const form = document.getElementById('registerForm');
+        const retry = document.getElementById('registrationStatusButton');
+        const formLocked = registrationSubmissionPending || registrationResultUnknown || registrationConflict;
+        form.inert = formLocked;
+        document.getElementById('registrationPreviewButton').disabled = studioPreview || formLocked;
+        retry.textContent = registrationConflict ? '查詢原申請' : '確認送出結果';
+        retry.hidden = !registrationResultUnknown || studioPreview;
+        retry.disabled = registrationSubmissionPending;
+    }
+
+    async function postRegistrationResult(path, body, headers = {}) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        try {
+            const response = await fetch(path, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', ...headers},
+                body,
+                signal: controller.signal,
+            });
+            return {response, result: await response.json()};
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    async function applyRegistration({submissionId, body}) {
+        registrationResultUnknown = true;
+        const {response, result} = await postRegistrationResult('/api/v1/line/identity/registration/apply', body, {'Idempotency-Key': submissionId});
+        if (response.ok) {
+            renderRegistrationSuccess(result.data);
+            return;
+        }
+        const errorCode = result?.detail?.error?.code || result?.detail?.code || result?.error?.code;
+        if (response.status === 409 && errorCode === 'registration_conflict') {
+            registrationConflict = true;
+            pendingRegistrationApply = null;
+            sessionStorage.setItem(registrationConflictStorageKey, submissionId);
+            showRegistrationRetry();
+            return;
+        }
+        if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status) && result.detail) {
+            registrationResultUnknown = false;
+            pendingRegistrationApply = null;
+            showRegistrationMessage(registrationErrorMessage(result, response.status), true);
+            return;
+        }
+        showRegistrationRetry();
+    }
 
     function renderRegistrationSuccess(receipt) {
         if (!receipt || !Number.isSafeInteger(receipt.registration_id) || receipt.registration_id <= 0
             || !['pending_approval', 'approving', 'approved', 'rejected', 'expired'].includes(receipt.identity_status)
+            || receipt.status !== (receipt.identity_status === 'pending_approval' ? 'pending' : receipt.identity_status)
             || (receipt.identity_status === 'pending_approval'
-                && (receipt.client_id !== null || receipt.beclass_record_id !== null))) {
-            throw new Error('登記結果讀回不完整，請勿重複送出並聯絡工會確認。');
+                && (receipt.client_id !== null || receipt.beclass_record_id !== null || receipt.case_no !== null))) {
+            throw new Error('登記結果讀回不完整。');
         }
         registrationResultUnknown = false;
+        pendingRegistrationApply = null;
+        document.getElementById('statusMessage').style.display = 'none';
         const terminal = ['rejected', 'expired'].includes(receipt.identity_status);
         document.getElementById('reapplyButton').style.display = terminal ? 'block' : 'none';
-        const lifecycle = {pending_approval: '申請已送出，待工會核准。', approving: '核准建檔或清除確認中，請查詢原申請。', approved: '申請已核准，待審問卷內容已清除。', rejected: '申請已拒絕，問卷內容已清除。', expired: '申請已到期，問卷內容已清除。'};
+        const lifecycle = {pending_approval: '您可以關閉頁面，後續由工會審核。', approving: '工會正在處理這筆申請，您可以關閉頁面。', approved: '工會已核准你的申請。', rejected: '這次申請沒有通過。你可以聯絡工會，或重新申請。', expired: '這份申請已到期。請按「重新申請」。'};
         const successDescription = document.querySelector('.success-desc');
         successDescription.style.whiteSpace = 'pre-line';
         successDescription.textContent = [...new Set([
-            runtimePage?.success_description || '',
             lifecycle[receipt.identity_status],
-            receipt.expires_at_utc ? `待審到期：${new Date(receipt.expires_at_utc).toLocaleString('zh-TW', {timeZone:'Asia/Taipei'})}（台北時間）` : '',
+            receipt.identity_status === 'pending_approval' ? runtimePage?.success_description : '',
             `申請編號：${receipt.registration_id}`,
         ])].filter(Boolean).join('\n');
-        document.querySelector('.success-title').textContent = terminal ? (receipt.identity_status === 'expired' ? '申請已到期' : '申請已拒絕') : receipt.identity_status === 'approved' ? '申請已核准' : '申請已送出';
+        document.querySelector('.success-title').textContent = terminal ? (receipt.identity_status === 'expired' ? '申請已到期' : '申請已拒絕') : receipt.identity_status === 'approved' ? '申請已核准' : '申請已收到';
         document.getElementById('formHeader').style.display = 'none';
         document.getElementById('registerForm').style.display = 'none';
         document.getElementById('successCard').style.display = 'block';
     }
 
     async function queryRegistrationStatus() {
-        const statusMsg = document.getElementById('statusMessage');
-        const button = document.getElementById('registrationStatusButton');
-        if (button) button.disabled = true;
+        if (studioPreview || !currentIdToken || registrationSubmissionPending || (registrationConflict && !registrationResultUnknown)) return;
+        registrationSubmissionPending = true;
+        registrationResultUnknown = true;
+        updateRegistrationControls();
+        showRegistrationMessage('正在確認原申請，請稍候。', false);
         try {
-            const response = await fetch('/api/v1/line/identity/registration/status', {
-                method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({line_id_token: currentIdToken, submission_id: registrationSubmissionId})
-            });
-            const result = await response.json();
-            if (!response.ok || !result.data) throw new Error('原申請結果暫時無法確認，請稍後再查詢。');
-            if (result.data.status === 'not_received') {
+            const {response, result} = await postRegistrationResult('/api/v1/line/identity/registration/status', JSON.stringify({
+                line_id_token: currentIdToken,
+                submission_id: registrationSubmissionId,
+            }));
+            if (!response.ok || !result.data) {
+                showRegistrationRetry();
+                return;
+            }
+            if (result.data.status !== 'not_received') {
+                renderRegistrationSuccess(result.data);
+                if (registrationConflict) {
+                    registrationConflict = false;
+                    sessionStorage.removeItem(registrationConflictStorageKey);
+                }
+            } else if (Object.keys(result.data).length !== 1) {
+                showRegistrationRetry();
+            } else if (registrationConflict) {
                 registrationResultUnknown = false;
-                document.querySelector('#registerForm button[type="submit"]').disabled = false;
-                statusMsg.textContent = '目前尚未收到這筆申請，可使用原識別送出表單。';
-                statusMsg.style.display = 'block';
-            } else renderRegistrationSuccess(result.data);
-        } catch (error) {
-            statusMsg.textContent = error.message || '原申請結果暫時無法確認。';
-            statusMsg.style.display = 'block';
-        } finally { if (button) button.disabled = false; }
+                showRegistrationMessage('本次申請未送出。已有待審申請或申請狀態已變更，請聯絡工會確認。', true);
+            } else if (pendingRegistrationApply) {
+                showRegistrationMessage('正在重新送出，請稍候。', false);
+                await applyRegistration(pendingRegistrationApply);
+            } else {
+                registrationResultUnknown = false;
+                showRegistrationMessage('目前尚未收到這筆申請，請填妥表單後送出。', false);
+            }
+        } catch {
+            showRegistrationRetry();
+        } finally {
+            registrationSubmissionPending = false;
+            updateRegistrationControls();
+        }
     }
 
     function startNewRegistration() {
+        if (registrationConflict) return;
         registrationSubmissionId = crypto.randomUUID();
         sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
         registrationResultUnknown = false;
@@ -1591,17 +1700,17 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         document.getElementById('successCard').style.display = 'none';
         document.getElementById('formHeader').style.display = 'block';
         document.getElementById('registerForm').style.display = 'block';
-        document.querySelector('#registerForm button[type="submit"]').disabled = false;
+        updateRegistrationControls();
     }
 
     function requireRegistrationPreview(data) {
         const fingerprint = /^[0-9a-f]{64}$/;
-        if (!data || typeof data.status !== 'string'
+        if (!data || data.status !== 'ready'
             || !Number.isInteger(data.expected_binding_version)
             || data.expected_binding_version < 0
             || !fingerprint.test(data.payload_fingerprint || '')
             || !fingerprint.test(data.preview_fingerprint || '')) {
-            throw new Error('預覽回應格式不完整，請勿送出並聯絡工會確認。');
+            throw new Error('這次沒有送出。請先聯絡工會，不用再填一次。');
         }
         return data;
     }
@@ -1613,12 +1722,11 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             return '登記連結已失效或已使用，請重新開啟客戶登記與綁定。';
         }
         const detail = result?.detail;
-        if (typeof detail === 'string') return detail;
-        const code = detail?.code || detail?.error?.code || result?.error?.code;
-        const message = detail?.message || detail?.error?.message || result?.error?.message;
-        if (code && message) return `${code}：${message}`;
-        if (message) return message;
-        return '發生未知錯誤，請重試。';
+        const message = typeof detail === 'string' ? detail : (detail?.message || detail?.error?.message || result?.error?.message);
+        if (typeof message === 'string' && message.trim() && !/^[a-z][a-z0-9_]+$/i.test(message.trim())) {
+            return message.trim();
+        }
+        return '這次沒有送出。請稍後再試；還是不行，請聯絡工會。';
     }
 </script>
 </body>

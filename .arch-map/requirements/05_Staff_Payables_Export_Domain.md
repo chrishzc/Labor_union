@@ -82,7 +82,7 @@ staff_payout_obligation_links
 
 ### 3.4 Payable Anomaly Facts 與 Accounts Payable Export 不變量
 
-- Payable Anomaly 投影輸出：`PAYOUT-001`（到期未匯）、`PAYOUT-003`（銀行主檔不完整）及 ownership／共享帳戶／金額衝突。人工 resolve 警示僅記錄處置，不變更義務或實付。應付於原基準日後始形成或變動的 `PAYOUT-002` 依 [Payroll §3.6](03_Payroll_Domain.md#36-payout-002-晚到義務處置) 處置，不進 [Anomalies runtime current issues](06_Anomalies_Domain.md#33-退役代碼歸屬對照不進-runtime-current-issues)。
+- Payable Anomaly 投影輸出：`PAYOUT-001`（到期未匯）、`PAYOUT-003`（銀行主檔不完整）及 ownership／共享帳戶／金額衝突。人工 resolve 警示僅記錄處置，不變更義務或實付。`PAYOUT-001`／`PAYOUT-003` 由應付側投影，不是全域 Anomalies API 的 current rows；該 API 只呈現 [LINE-006](06_Anomalies_Domain.md#6-line-006-current-contract)。應付於原基準日後始形成或變動的 `PAYOUT-002` 依 [Payroll §3.6](03_Payroll_Domain.md#36-payout-002-晚到義務處置) 處置，不進 [Anomalies runtime current issues](06_Anomalies_Domain.md#33-退役代碼歸屬對照不進-runtime-current-issues)。
 - **Accounts Payable Export（唯讀快照管道）**：
   ```text
   一致性 read transaction 讀取當下 payable

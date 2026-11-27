@@ -1,4 +1,5 @@
 """Shared notification read contract and thin command/auth boundaries."""
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from domains.line.delivery import LineDeliveryStatus
 import pytest
@@ -279,7 +280,8 @@ def test_import_fields_is_catalogued_for_desktop_roster_readers_only(monkeypatch
         desktop = '/api/v1/line/notification-tasks'
         mobile = '/api/v1/line/mobile-admin/notification-tasks'
         body = {'line_id_token': 'synthetic-token'}
-        descriptor = {'source': 'import_fields', 'label': '進件資料待修正', 'group': 'review'}
+        descriptor = {'source': 'import_fields', 'label': '進件資料待修正', 'group': 'review',
+                      'category_id': 'applications', 'category_label': '申請與資料'}
         assert descriptor in client.get(desktop).json()['data']
         assert descriptor not in client.post(mobile, json=body).json()['data']
         assert client.post(f'{mobile}/import_fields', json=body).status_code == 404
@@ -382,7 +384,8 @@ def test_recommendation_notifications_use_owner_page_and_plan_status_identity(mo
 
     records = (
         CustomerRecommendationFollowup('CASE-1', 1, 'response_failed', None, None, '回覆處理異常'),
-        CustomerRecommendationFollowup('CASE-2', 2, 'awaiting_signing', None, None),
+        CustomerRecommendationFollowup('CASE-2', 2, 'awaiting_signing', None, None,
+                                       signing_reminder_occurrence='a' * 64),
         CustomerRecommendationFollowup('CASE-3', 3, 'reply_reminder', None, None),
     )
     tail = tuple(CustomerRecommendationFollowup('CASE-4', plan, 'reply_reminder', None, None)
@@ -407,10 +410,11 @@ def test_recommendation_notifications_use_owner_page_and_plan_status_identity(mo
     assert len(first.items) == query.SIZE and len(last.items) == 1
     assert [(item.id, item.case_no, item.tag) for item in first.items[:3]] == [
         ('recommendation:1:response_failed', 'CASE-1', '待跟進'),
-        ('recommendation:2:awaiting_signing', 'CASE-2', '待簽約'),
+        (f'recommendation:2:awaiting_signing:{"a" * 64}', 'CASE-2', '待簽約'),
         ('recommendation:3:reply_reminder', 'CASE-3', '待跟進'),
     ]
     assert first.items[0].summary == '回覆處理異常'
+    assert [item.can_dismiss for item in first.items[:3]] == [False, True, False]
     assert all(item.source == source and item.reference_id is None for item in first.items + last.items)
 
 
@@ -430,26 +434,159 @@ def test_catalog_excludes_delivery_and_notification_failure_from_todo(monkeypatc
         assert excluded not in mobile_sources
 
 
+def test_work_categories_share_order_and_keep_legacy_groups(monkeypatch):
+    monkeypatch.setattr(query, 'has_required_capability', lambda *_: True)
+    expected = {
+        'applications': ('申請與資料', 'review', ('registration', 'staff_profile', 'import_fields')),
+        'identity': ('LINE 身分', 'review', ('identity', 'customer_binding', 'staff_binding')),
+        'coordination': ('媒合、簽約與交接', 'review', ('followup', 'recommendation', 'service_start')),
+        'payments': ('款項', 'reminder', ('deposit', 'payment_receipt', 'overdue')),
+        'groups': ('案件群組', 'reminder', ('group',)),
+    }
+    desktop = [
+        (source, category, label, group)
+        for category, (label, group, sources) in expected.items()
+        for source in sources
+    ]
+    for mobile in (False, True):
+        catalog = query._catalog(PRINCIPAL, mobile=mobile)
+        assert [(r.source.value, r.category_id, r.category_label, r.group) for r in catalog] == [
+            row for row in desktop if not mobile or row[0] not in {'staff_profile', 'import_fields'}
+        ]
+
+
+def test_registration_todo_reads_pending_owner_page_without_personal_fields(monkeypatch):
+    timestamp = datetime(2026, 11, 27, 3, 42, tzinfo=UTC)
+    registrations = [
+        (41, 'subsidy', 'pending'), (42, 'non_citizen', 'pending'),
+        (43, 'non_citizen', 'approving'), (44, 'non_citizen', 'approved'),
+        (45, 'non_citizen', 'rejected'), (46, 'non_citizen', 'expired'),
+    ]
+    calls = []
+
+    def pending(*, after_id, limit):
+        calls.append((after_id, limit))
+        return tuple(
+            SimpleNamespace(registration_id=number, registration_kind=kind, status=status, submitted_at_utc=timestamp)
+            for number, kind, status in registrations if number > after_id
+        )
+
+    monkeypatch.setattr(query, 'SIZE', 6)
+    monkeypatch.setattr(query, 'get_registration_review_query_application',
+                        lambda: SimpleNamespace(pending_registrations=pending))
+    result = query.query_source(NotificationSource.REGISTRATION, 40, PRINCIPAL)
+    assert [(r.id, r.reference_id, r.title, r.time) for r in result.items] == [
+        ('registration:41', 41, '服務登記待審核', timestamp.isoformat()),
+        ('registration:42', 42, '非市民申請待審核', timestamp.isoformat()),
+    ]
+    assert all(not r.person and r.recipient is None and r.case_no is None and r.message is None
+               for r in result.items)
+    assert result.next_cursor == 46
+    next_page = query.query_source(NotificationSource.REGISTRATION, result.next_cursor, PRINCIPAL)
+    assert next_page.items == [] and next_page.next_cursor is None
+    assert calls == [(40, 6), (46, 6)]
+
+
+def test_registration_todo_unavailable_does_not_initialize_storage(monkeypatch):
+    from api.dependencies import registration_applications
+    from subsystems.case_import.provisional_registration_types import ProvisionalRegistrationStorageError
+
+    def unavailable(**_kwargs):
+        raise ProvisionalRegistrationStorageError('registration_redis_initialization_required')
+
+    staging = SimpleNamespace(
+        pending=unavailable,
+        ensure_initialized=unavailable,
+        initialize=lambda *_args, **_kwargs: pytest.fail('notification query initialized staging'),
+    )
+    formal = SimpleNamespace(
+        registration_id_high_water=lambda: pytest.fail('notification query read SQL high-water'),
+    )
+    monkeypatch.setattr(registration_applications, 'get_registration_staging_repository', lambda: staging)
+    monkeypatch.setattr(registration_applications, 'get_line_identity_application', lambda: formal)
+    getter = registration_applications.get_registration_review_query_application
+    getter.cache_clear()
+    try:
+        with pytest.raises(HTTPException) as failure:
+            query.query_source(NotificationSource.REGISTRATION, 0, PRINCIPAL)
+    finally:
+        getter.cache_clear()
+    assert failure.value.status_code == 503
+    assert failure.value.detail['error']['code'] == 'notification_source_unavailable'
+    assert failure.value.detail['error']['retryable'] is True
+
+
 @pytest.mark.parametrize('source,role,label', [
     (NotificationSource.CUSTOMER_BINDING,'customer','客戶'),
     (NotificationSource.STAFF_BINDING,'staff','月嫂'),
 ])
-def test_binding_reminder_projection_keeps_original_owner_page_and_manual_contact(monkeypatch,source,role,label):
+@pytest.mark.parametrize('can_manage', [True, False])
+def test_binding_reminder_projection_keeps_owner_page_and_limits_dismissal(monkeypatch,source,role,label,can_manage):
     from api.routes import line_identity_management
     from subsystems.line.identity_management_contracts import LineIdentityBindingReminder,LineIdentityBindingReminderPage
     calls=[]
     def read(request):
         calls.append(request)
-        return LineIdentityBindingReminderPage((LineIdentityBindingReminder('7','合成姓名','0987654321','115000001' if role=='customer' else None),),51)
+        cases = ('115000001', '115000002', None) if role == 'customer' else (None,)
+        return LineIdentityBindingReminderPage(tuple(
+            LineIdentityBindingReminder('7', '合成姓名', '0987654321', case) for case in cases
+        ), 51)
     monkeypatch.setattr(line_identity_management,'_application',lambda:SimpleNamespace(binding_reminders=read))
+    monkeypatch.setattr(query, 'has_required_capability', lambda _, cap: can_manage and cap == 'line.identity.binding.manage')
     result=query._read_source(source,1,PRINCIPAL)
     assert result.total==51 and result.next_cursor==2
     assert calls[0].subject_type.value==role and calls[0].page==2 and calls[0].page_size==25
     item=result.items[0]
     assert item.title==f'人工提醒{label}綁定 LINE' and item.person=='合成姓名'
-    assert item.recipient=='0987654321' and item.tag=='待人工提醒'
-    assert ('身分證字號與生日' in item.message) is (role=='staff')
+    assert item.tag=='待人工提醒'
+    if role == 'customer':
+        assert item.recipient is None and item.message is None
+        assert [r.id for r in result.items[:2]] == ['customer_binding:7:115000001', 'customer_binding:7:115000002']
+        assert [r.can_dismiss for r in result.items] == [can_manage, can_manage, False]
+    else:
+        assert item.can_dismiss is False
+        assert item.recipient == '0987654321' and '身分證字號與生日' in item.message
     assert query.SOURCES[source][2].value=='line.identity.binding.read'
+
+
+def test_mobile_binding_dismiss_checks_capability_and_reuses_case_command(monkeypatch):
+    from api.dependencies import line_identity
+    from subsystems.line.capabilities import LineCapability
+
+    calls = []
+
+    def mobile_context(token, capability):
+        assert capability is LineCapability.IDENTITY_BINDING_MANAGE
+        if token != 'synthetic-mobile':
+            raise HTTPException(403, 'not an authorized LINE manager')
+        return PRINCIPAL, None
+
+    def dismiss(subject_reference, case_no, reason, key, actor):
+        calls.append((subject_reference, case_no, reason, key.value, actor.actor_id))
+        if case_no == 'stale-case':
+            raise LookupError('binding_reminder_subject_changed')
+        return len(calls) > 1
+
+    monkeypatch.setattr(line_mobile_admin, '_mobile_admin_context', mobile_context)
+    monkeypatch.setattr(line_identity, 'get_line_identity_management_application',
+                        lambda: SimpleNamespace(dismiss_customer_binding_reminder=dismiss))
+    app = FastAPI()
+    app.include_router(actions.mobile_router)
+    path = '/api/v1/line/mobile-admin/notification-task-actions/customer-binding-reminder/dismiss'
+    body = {'line_id_token': 'synthetic-mobile', 'subject_reference': 7, 'case_no': '115000001',
+            'reason': '使用者移除提醒', 'idempotency_key': 'same-intent'}
+    with TestClient(app) as client:
+        assert client.post(path, json={**body, 'line_id_token': 'unbound'}).status_code == 403
+        assert calls == []
+        first = client.post(path, json=body)
+        replay = client.post(path, json=body)
+        stale = client.post(path, json={**body, 'case_no': 'stale-case'})
+    assert first.status_code == replay.status_code == 200
+    assert first.json()['data'] == {'dismissed': True, 'replayed': False}
+    assert replay.json()['data'] == {'dismissed': True, 'replayed': True}
+    assert calls[:2] == [(7, '115000001', '使用者移除提醒', 'same-intent', 'admin:1')] * 2
+    assert stale.status_code == 409
+    assert stale.json()['detail']['error']['code'] == 'binding_reminder_subject_changed'
 
 
 @pytest.mark.parametrize('code,message',[('deposit_customer_not_bound','尚未綁定 LINE'),('deposit_payment_details_incomplete','繳費資訊尚未完整'),('deposit_liff_not_configured','LIFF')])
@@ -619,7 +756,7 @@ import {Window} from './ui_react/node_modules/happy-dom/lib/index.js';
 const source=fs.readFileSync('line/static/mobile_admin.html','utf8').replace(/\r\n/g,'\n');
 const extract=h=>{const i=source.indexOf(h);assert(i>=0,h);return source.slice(i,source.indexOf('\n}',i)+2)};
 const window=new Window();const document=window.document;
-document.body.innerHTML='<div id="reviewPane"><div class="workstream-list"></div></div><div id="notificationSources"></div>';
+document.body.innerHTML='<div id="reviewPane"><strong id="reviewTotal">—</strong><div class="workstream-list"></div></div><div id="notificationSources"></div>';
 const calls=[];
 const ctx=vm.createContext({document,notificationSequence:0,notificationSelection:null,target:'staff_review',
   notificationGroups:{all:'全部',reminder:'提醒'},restoreNotificationPanels(){},updateNotificationCards(){},showStatus(){},

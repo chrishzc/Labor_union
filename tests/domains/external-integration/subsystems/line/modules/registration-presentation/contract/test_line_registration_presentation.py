@@ -3,10 +3,16 @@ File: test_line_registration_presentation.py
 Description: 驗證 LINE LIFF 客戶登記頁呈現、胎數必填與預覽送出契約。
 """
 
+from contextlib import closing
+from datetime import datetime
 import json
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from domains.case_import.non_citizen_registration import LIFF_SERVICE_TIME_OPTIONS
 
@@ -16,6 +22,329 @@ ROOT = next(
     for parent in Path(__file__).resolve().parents
     if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
 )
+
+
+CARE_ANSWERS = (
+    ("#bf1", "哺乳方式：", "母乳"),
+    ('[data-survey-array="洗澡水準備："][value="不需另外準備"]', "洗澡水準備：", "不需另外準備"),
+    ('[data-survey="5媽咪有無過敏體質："]', "5媽咪有無過敏體質：", "無"),
+    ('[data-survey="特殊照護時應注意事項："]', "特殊照護時應注意事項：", "無"),
+    ("#dt3", "月子餐點調理喜好/飲食習慣：", "不用料理/訂月餐"),
+    ("#vs1", "呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？", "可接受"),
+    ("#hm4", "可以接受中藥補品：□茶飲 □藥飲 □藥膳", "無法接受中藥補品"),
+    ("#al4", "2．餐飲含酒比例：", "無酒料理"),
+    ('[data-survey-array="3．料理用油：(可接受種類)"][value="不適用"]', "3．料理用油：(可接受種類)", "不適用"),
+    ('[data-survey="餐點喜忌備註："]', "餐點喜忌備註：", "無"),
+    ('[data-survey-array="烹煮工具"][value="無上述設備"]', "烹煮工具", "無上述設備"),
+    ('input[name="floor_fee"][value="大樓公寓無樓層問題"]', "透天服務樓層方式(會加收樓層費)", "大樓公寓無樓層問題"),
+    ('input[name="parking"][value="有"]', "提供服務人員轎車停車位", "有"),
+)
+
+
+@pytest.mark.parametrize(
+    ("path", "kind", "studio", "interruption"),
+    [
+        pytest.param("/line-registration", "subsidy", False, None, id="subsidy"),
+        pytest.param("/line-non-citizen-registration", "non_citizen", False, None, id="non-citizen"),
+        pytest.param("/line-non-citizen-registration", "non_citizen", False, "receipt_lost", id="receipt-lost"),
+        pytest.param("/line-non-citizen-registration", "non_citizen", False, "conflict", id="receipt-conflict"),
+        pytest.param(
+            "/line-non-citizen-registration", "non_citizen", False, "conflict_not_received", id="conflict-not-received",
+        ),
+        pytest.param("/line-non-citizen-registration", "non_citizen", False, "not_received", id="not-received"),
+        pytest.param("/line-non-citizen-registration", "non_citizen", False, "reload", id="reload"),
+        pytest.param(
+            "/api/v1/line/identity/studio-preview/non-citizen-registration?studio_preview=1",
+            "non_citizen", True, None, id="studio-preview",
+        ),
+    ],
+)
+def test_registration_passbook_controls_and_submission_in_browser(
+    path: str, kind: str, studio: bool, interruption: str | None,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from playwright.sync_api import Route, expect, sync_playwright
+
+    from api.routes.line_identity import page_router, public_router
+
+    pages = FastAPI()
+    pages.include_router(page_router)
+    pages.include_router(public_router)
+    origin = "https://registration.example.test"
+    registration_api = "/api/v1/line/identity/registration"
+    conflict = interruption in {"conflict", "conflict_not_received"}
+    requests: list[tuple[str, str | None]] = []
+    apply_keys: list[str] = []
+    status_requests: list[dict[str, str]] = []
+    receipt = {
+        "registration_id": 234, "status": "pending", "identity_status": "pending_approval",
+        "client_id": None, "beclass_record_id": None, "case_no": None,
+    }
+    runtime = {
+        "revision": "synthetic-revision",
+        "theme": {
+            "primary_color": "#357abd", "primary_hover_color": "#357abd", "background": "#fff",
+            "text_color": "#000", "muted_text_color": "#333", "font_family": "sans-serif",
+        },
+        "page": {
+            "title": "需求調查", "subtitle": "", "submit_button": "送出測試申請",
+            "success_title": "提交結果", "loading_text": "處理中", "content": {},
+            "fields": [{"id": "gender", "system_field": True, "required": True, "label": "性別",
+                        "options": [{"value": "女", "label": "女"}]}],
+        },
+    }
+
+    def route_request(route: Route) -> None:
+        url = urlsplit(route.request.url)
+        if route.request.is_navigation_request() and url.netloc == "registration.example.test":
+            response = page_client.get(path)
+            route.fulfill(status=response.status_code, body=response.content, content_type="text/html; charset=utf-8")
+        elif url.path == "/api/config/liff/runtime":
+            route.fulfill(json=runtime)
+        elif url.path == "/api/v1/line/identity/runtime-config":
+            route.fulfill(json={"data": {"liff_id": "synthetic-liff"}})
+        elif url.path.startswith(registration_api + "/"):
+            endpoint = url.path.removeprefix(registration_api + "/")
+            requests.append((endpoint, route.request.post_data if endpoint != "passbook" else None))
+            if endpoint == "passbook":
+                route.fulfill(json={"data": {"passbook_image_id": "pbk_synthetic_cover"}})
+            elif endpoint == "preview":
+                route.fulfill(json={"data": {"status": "ready", "expected_binding_version": 0,
+                                             "payload_fingerprint": "a" * 64,
+                                             "preview_fingerprint": "a" * 64}})
+            elif endpoint == "apply":
+                apply_keys.append(route.request.headers["idempotency-key"])
+                if conflict:
+                    route.fulfill(status=409, json={"detail": {"error": {"code": "registration_conflict"}}})
+                elif interruption and len(apply_keys) == 1:
+                    route.abort()
+                else:
+                    route.fulfill(json={"data": receipt})
+            elif endpoint == "status":
+                status_requests.append(route.request.post_data_json)
+                if interruption in {"receipt_lost", "conflict"}:
+                    route.fulfill(json={"data": receipt})
+                elif interruption == "conflict_not_received":
+                    route.fulfill(json={"data": {"status": "not_received"}})
+                elif len(status_requests) == 1:
+                    route.fulfill(status=503, json={"detail": {"code": "registration_unavailable"}})
+                elif interruption == "not_received" and len(status_requests) == 2:
+                    route.fulfill(json={"data": {"status": "not_received", "registration_id": 234}})
+                else:
+                    route.fulfill(json={"data": {"status": "not_received"}})
+            else:
+                route.fulfill(status=404)
+        else:
+            route.abort()
+
+    with TestClient(pages) as page_client, sync_playwright() as playwright, closing(playwright.chromium.launch()) as browser:
+        page = browser.new_page()
+        page.route("**/*", route_request)
+        page.add_init_script("""
+            window.liff = { init: async () => {}, isLoggedIn: () => true, getIDToken: () => 'synthetic-token' };
+        """)
+        page.goto(origin + path)
+        submit = page.locator("#registrationPreviewButton")
+        passbook = page.locator("#passbook_cover")
+        expect(page.locator("#refund_bank_code")).to_be_visible()
+        expect(page.locator("#refund_bank_account")).to_be_visible()
+        expect(page.get_by_text("請填入產婦本人銀行帳號。", exact=True)).to_be_visible()
+        if kind == "non_citizen":
+            expect(page.locator('input[type="file"]')).to_have_count(0)
+            expect(page.locator("#passbookPreviewBox")).to_have_count(0)
+            expect(page.get_by_text("存摺封面")).to_have_count(0)
+        if studio:
+            expect(submit).to_have_text("預覽模式")
+            expect(submit).to_be_disabled()
+            expect(page.locator("#studioPreviewNotice")).to_be_visible()
+            page.locator("#registerForm").dispatch_event("submit")
+            assert requests == []
+            return
+
+        expect(submit).to_have_text("送出測試申請")
+        page.wait_for_function("currentIdToken === 'synthetic-token'")
+        today = datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat()
+        for field, value in {
+            "name": "合成申請", "phone": "0900000000", "expected_date": today, "service_days": "10",
+            "address": "合成地址", "email": "test@example.com", "refund_bank_code": "0000000",
+            "refund_bank_account": "0000000000",
+        }.items():
+            page.locator(f"#{field}").fill(value)
+        page.locator('[data-survey="服務時間內是否有其他寶寶"]').fill("無")
+        page.locator("#ingredient_purchase").select_option("自行準備")
+        for field in ("multi_birth_single", "needs_cooking_no", "agree2", "agree3"):
+            page.locator(f"#{field}").check()
+        page.locator('label[for="agree1"]').click()
+        page.locator("#refundPolicyAccept").click()
+
+        if interruption is None:
+            submit.click()
+            for selector, _, _ in CARE_ANSWERS:
+                group = page.locator(".form-group").filter(has=page.locator(selector))
+                expect(group.locator(".form-label.required")).to_be_visible()
+                expect(group.locator(".field-error")).to_be_visible()
+            assert requests == []
+
+        for selector, _, answer in CARE_ANSWERS:
+            control = page.locator(selector)
+            if control.evaluate("input => input.type === 'textarea'"):
+                control.fill(answer)
+            else:
+                control.check()
+
+        if kind == "non_citizen":
+            for field, value in {"city": "新竹市", "birth_date": "1990-01-01",
+                                 "service_start_date": today, "notes": "無"}.items():
+                page.locator(f"#{field}").fill(value)
+            for field, value in {"gender": "女", "service_time": "08:30-12:30 (4小時)",
+                                 "residence_type": "電梯大樓", "delivery_type": "自然產",
+                                 "service_type": "週休1日"}.items():
+                page.locator(f"#{field}").select_option(value)
+            for field, valid in (("refund_bank_code", "0000000"), ("refund_bank_account", "0000000000")):
+                control = page.locator(f"#{field}")
+                for value in ("", "X"):
+                    control.fill(value)
+                    submit.click()
+                    expect(control).to_have_class(re.compile(r"\binvalid\b"))
+                    assert requests == []
+                control.fill(valid)
+        else:
+            expect(passbook).to_be_visible()
+            assert passbook.evaluate("input => input.required") is True
+            submit.click()
+            status_message = page.locator("#statusMessage")
+            expect(status_message).to_have_text("請上傳存摺封面照片。")
+            expect(status_message).to_be_visible()
+            assert requests == []
+            passbook.set_input_files({
+                "name": "synthetic.png", "mimeType": "image/png",
+                "buffer": bytes.fromhex(
+                    "89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b55"
+                    "0000000a49444154789c636000000002000148afa4710000000049454e44ae426082"
+                ),
+            })
+            expect(page.locator("#passbookPreviewImg")).to_be_visible()
+
+        if interruption is None:
+            herb_choice = page.locator("#hm1")
+            no_herbs = page.locator("#hm4")
+            herb_choice.check()
+            expect(no_herbs).not_to_be_checked()
+            herb_choice.uncheck()
+            submit.click()
+            expect(page.locator("#statusMessage")).to_contain_text("可以接受中藥補品")
+            assert requests == []
+            herb_choice.check()
+            no_herbs.check()
+            expect(herb_choice).not_to_be_checked()
+
+            diet = page.locator("#dt1")
+            diet.check()
+            submit.click()
+            diet_group = page.locator(".form-group").filter(has=diet)
+            expect(diet_group.locator(".field-error")).to_be_visible()
+            assert requests == []
+            page.locator("#dt3").check()
+
+        submit.click()
+        retry = page.locator("#registrationStatusButton")
+        if interruption:
+            expect(retry).to_be_enabled()
+            expect(retry).to_be_visible()
+            expect(submit).to_be_disabled()
+            expect(page.locator("#successCard")).to_be_hidden()
+            action_label = retry.inner_text()
+            if not conflict:
+                expect(page.locator("#statusMessage")).to_contain_text("還不知道工會有沒有收到")
+            expect(page.locator("#name")).to_have_value("合成申請")
+            assert [endpoint for endpoint, _ in requests] == ["preview", "apply"]
+            if conflict:
+                assert page.evaluate("sessionStorage.getItem('registration-submission:non-citizen')") == apply_keys[0]
+            else:
+                assert page.evaluate("Object.values(sessionStorage)") == apply_keys
+
+            if interruption == "reload":
+                page.reload()
+
+            if not conflict and interruption != "receipt_lost":
+                if interruption != "reload":
+                    retry.click()
+                expect(retry).to_be_enabled()
+                expect(retry).to_be_visible()
+                expect(submit).to_be_disabled()
+                expect(page.locator("#successCard")).to_be_hidden()
+                expect(page.locator("#statusMessage")).to_contain_text("還不知道工會有沒有收到")
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status"]
+
+            if interruption == "not_received":
+                retry.click()
+                expect(retry).to_be_enabled()
+                expect(retry).to_be_visible()
+                expect(submit).to_be_disabled()
+                expect(page.locator("#successCard")).to_be_hidden()
+                expect(page.locator("#statusMessage")).to_contain_text("還不知道工會有沒有收到")
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status", "status"]
+                page.locator("#name").evaluate("(field) => { field.value = '異動後資料'; }")
+            retry.click()
+            if interruption == "reload":
+                expect(submit).to_be_enabled()
+                expect(retry).to_be_hidden()
+                expect(page.locator("#successCard")).to_be_hidden()
+                expect(page.locator("#statusMessage")).to_contain_text("目前尚未收到")
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status", "status"]
+            elif interruption == "conflict_not_received":
+                page.wait_for_function("!registrationSubmissionPending")
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status"]
+                assert "查詢原申請" in action_label
+                expect(page.locator("#statusMessage")).to_contain_text("本次申請未送出")
+                expect(page.locator("#statusMessage")).to_contain_text("待審申請")
+                expect(retry).to_be_hidden()
+                expect(submit).to_be_disabled()
+                expect(page.locator("#reapplyButton")).to_be_hidden()
+                expect(page.locator("#successCard")).to_be_hidden()
+                page.reload()
+                expect(page.locator("#statusMessage")).to_contain_text("本次申請未送出")
+                expect(retry).to_be_hidden()
+                expect(submit).to_be_disabled()
+                expect(page.locator("#reapplyButton")).to_be_hidden()
+                expect(page.locator("#successCard")).to_be_hidden()
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status", "status"]
+                assert len(apply_keys) == 1
+                assert page.evaluate("sessionStorage.getItem('registration-submission:non-citizen')") == apply_keys[0]
+            elif interruption in {"receipt_lost", "conflict"}:
+                expect(page.locator(".success-desc")).to_contain_text("申請編號：234")
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status"]
+            else:
+                expect(page.locator(".success-desc")).to_contain_text("申請編號：234")
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status", "status", "status", "apply"]
+                assert requests[1] == requests[-1]
+                assert apply_keys[0] == apply_keys[1]
+            assert all(item == {"line_id_token": "synthetic-token", "submission_id": apply_keys[0]} for item in status_requests)
+        else:
+            expect(page.locator(".success-desc")).to_contain_text("申請編號：234")
+            endpoints = [endpoint for endpoint, _ in requests]
+            assert endpoints == (["passbook", "preview", "apply"] if kind == "subsidy" else ["preview", "apply"])
+
+        if interruption not in {"reload", "conflict_not_received"}:
+            expect(page.locator(".success-title")).to_have_text("申請已收到")
+            expect(page.locator(".success-desc")).to_contain_text("您可以關閉頁面")
+            expect(retry).to_be_hidden()
+        for endpoint, raw_payload in requests:
+            if endpoint not in {"apply", "preview"}:
+                continue
+            assert raw_payload is not None
+            payload = json.loads(raw_payload)
+            if kind == "non_citizen":
+                assert payload["registration_kind"] == "non_citizen"
+                assert "passbook_image_id" not in payload
+            else:
+                assert payload.get("registration_kind", "subsidy") == "subsidy"
+                assert payload["passbook_image_id"] == "pbk_synthetic_cover"
+            assert payload["survey_details"]["補助款退款:銀行代號+分行代號"] == "0000000"
+            assert payload["survey_details"]["銀行帳號"] == "0000000000"
+            for _, key, answer in CARE_ANSWERS:
+                assert payload["survey_details"][key] == answer
 
 
 def test_non_citizen_service_choices_match_manual_case_form():
@@ -94,35 +423,51 @@ def test_success_readback_requires_a_real_receipt_and_renders_current_registrati
     renderer = "function renderRegistrationSuccess(receipt)" + source.split(
         "function renderRegistrationSuccess(receipt)", 1
     )[1].split("function requireRegistrationPreview", 1)[0]
+    preview_validator = "function requireRegistrationPreview(data)" + source.split(
+        "function requireRegistrationPreview(data)", 1
+    )[1].split("function registrationErrorMessage", 1)[0]
+    error_renderer = "function registrationErrorMessage(result, status)" + source.split(
+        "function registrationErrorMessage(result, status)", 1
+    )[1].split("</script>", 1)[0]
     script = r'''
 const assert = require('node:assert/strict');
 const nodes = new Map();
 const element = id => {if(!nodes.has(id))nodes.set(id,{style:{display:'block'},textContent:''});return nodes.get(id)};
 const document={getElementById:element,querySelector:element};
 let runtimePage = null;
-''' + renderer + r'''
-const pending={registration_id:42,identity_status:'pending_approval',client_id:null,beclass_record_id:null};
+let registrationResultUnknown = true;
+let pendingRegistrationApply = {body:'synthetic'};
+''' + renderer + preview_validator + error_renderer + r'''
+assert.equal(registrationErrorMessage({detail:{code:'internal_preview_error',message:'請確認姓名。'}},422),'請確認姓名。');
+assert(!registrationErrorMessage({detail:'internal_preview_error'},422).includes('internal_preview_error'));
+const preview={status:'ready',expected_binding_version:0,payload_fingerprint:'a'.repeat(64),preview_fingerprint:'b'.repeat(64)};
+assert.equal(requireRegistrationPreview(preview),preview);
+assert.throws(()=>requireRegistrationPreview({...preview,status:'pending'}),/這次沒有送出/);
+const pending={registration_id:42,status:'pending',identity_status:'pending_approval',client_id:null,beclass_record_id:null,case_no:null,expires_at_utc:'2026-12-10T03:00:00Z'};
 renderRegistrationSuccess(pending);
-assert.equal(element('.success-desc').textContent,'申請已送出，待工會核准。\n申請編號：42');
-assert.equal(element('.success-title').textContent,'申請已送出');
+assert.equal(element('.success-desc').textContent,'您可以關閉頁面，後續由工會審核。\n申請編號：42');
+assert.equal(element('.success-title').textContent,'申請已收到');
 assert.equal(element('successCard').style.display,'block');
 assert.equal(element('registerForm').style.display,'none');
+assert.equal(registrationResultUnknown,false);
+assert.equal(pendingRegistrationApply,null);
 const outcomes = {
-  approving: '核准建檔或清除確認中，請查詢原申請。',
-  approved: '申請已核准，待審問卷內容已清除。',
-  rejected: '申請已拒絕，問卷內容已清除。',
-  expired: '申請已到期，問卷內容已清除。',
+  approving: '工會正在處理這筆申請，您可以關閉頁面。',
+  approved: '工會已核准你的申請。',
+  rejected: '這次申請沒有通過。你可以聯絡工會，或重新申請。',
+  expired: '這份申請已到期。請按「重新申請」。',
 };
 for(const [status, message] of Object.entries(outcomes)){
-  renderRegistrationSuccess({...pending,identity_status:status,client_id:10,beclass_record_id:11});
+  renderRegistrationSuccess({...pending,status,identity_status:status,client_id:10,beclass_record_id:11});
   assert.equal(element('.success-desc').textContent,message+'\n申請編號：42');
+  assert.equal(element('reapplyButton').style.display, ['rejected','expired'].includes(status) ? 'block' : 'none');
   assert(!element('.success-desc').textContent.includes('待工會核准'));
   assert(!element('.success-desc').textContent.includes('10'));
 }
 for(const invalid of [null,{}, {...pending,registration_id:0},{...pending,registration_id:'42'},
   {...pending,identity_status:null},{...pending,identity_status:'unrecognized'},
   {...pending,identity_status:'bound'},{...pending,identity_status:'existing'},
-  {...pending,client_id:10},{...pending,beclass_record_id:11}]){
+  {...pending,status:'not_received'},{...pending,case_no:'A115001'},{...pending,client_id:10},{...pending,beclass_record_id:11}]){
   element('successCard').style.display='none';element('registerForm').style.display='block';
   assert.throws(()=>renderRegistrationSuccess(invalid),/讀回不完整/);
   assert.equal(element('successCard').style.display,'none');
@@ -130,8 +475,10 @@ for(const invalid of [null,{}, {...pending,registration_id:0},{...pending,regist
 }
 runtimePage={success_title:'設定成功標題',success_description:'設定成功說明'};
 renderRegistrationSuccess(pending);
-assert.equal(element('.success-title').textContent,'申請已送出');
-assert.equal(element('.success-desc').textContent,'設定成功說明\n申請已送出，待工會核准。\n申請編號：42');
+assert.equal(element('.success-title').textContent,'申請已收到');
+assert.equal(element('.success-desc').textContent,'您可以關閉頁面，後續由工會審核。\n設定成功說明\n申請編號：42');
+renderRegistrationSuccess({...pending,status:'expired',identity_status:'expired'});
+assert(!element('.success-desc').textContent.includes('設定成功說明'));
 console.log('registration receipt rendering passed');
 '''
     result = subprocess.run(["node"], input=script, capture_output=True, text=True,
@@ -164,7 +511,8 @@ def test_registration_page_uses_only_canonical_identity_endpoints() -> None:
     assert "function canUseDevelopmentIdentityFallback(error)" not in source
     assert 'development_line_user_id: ""' in source
     assert "developmentLineUserId" not in source
-    assert "const code = detail?.code || detail?.error?.code || result?.error?.code;" in source
+    assert "/api/v1/line/identity/registration/status" in source
+    assert "errorCode === 'registration_conflict'" in source
     assert "/api/line/register" not in source
     assert "/api/line/config" not in source
 
@@ -423,7 +771,7 @@ console.log('missing dom system field safely skipped');
 def test_multi_select_survey_labels_display_multi_choice_hint() -> None:
     source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
     groups = re.findall(
-        r'<div class="form-group">\s*<label class="form-label[^"]*">([^<]+)</label>(.*?)</div>\s*(?=<div class="form-group">|<div id="customFieldsSection"|<!-- Section)',
+        r'<div class="form-group"[^>]*>\s*<label class="form-label[^"]*">([^<]+)</label>(.*?)</div>\s*(?=<div class="form-group"|<div id="customFieldsSection"|<!-- Section)',
         source,
         re.S,
     )
@@ -482,44 +830,3 @@ console.log('custom field multi-select label contract passed');
 '''
     result = subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
     assert "custom field multi-select label contract passed" in result.stdout
-
-
-def test_registration_status_button_removed_and_reload_query_stays_null_safe() -> None:
-    source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
-    assert 'id="registrationStatusButton"' not in source
-    assert "查詢原申請結果" not in source
-
-    query_fn = "async function queryRegistrationStatus()" + source.split(
-        "async function queryRegistrationStatus()", 1
-    )[1].split("function startNewRegistration()", 1)[0]
-    script = r'''
-const assert = require('node:assert/strict');
-const statusMsg = { textContent: '', style: { display: 'none' } };
-const submitButton = { disabled: true };
-let registrationResultUnknown = true;
-const currentIdToken = 'tok';
-const registrationSubmissionId = '00000000-0000-4000-8000-000000000000';
-const document = {
-    getElementById(id) {
-        if (id === 'statusMessage') return statusMsg;
-        if (id === 'registrationStatusButton') return null;
-        return null;
-    },
-    querySelector(sel) {
-        assert.equal(sel, '#registerForm button[type="submit"]');
-        return submitButton;
-    },
-};
-const fetch = async () => ({ ok: true, json: async () => ({ data: { status: 'not_received' } }) });
-function renderRegistrationSuccess() { throw new Error('should not render success for not_received'); }
-''' + query_fn + r'''
-(async () => {
-    await queryRegistrationStatus();
-    assert.equal(registrationResultUnknown, false);
-    assert.equal(submitButton.disabled, false);
-    assert.equal(statusMsg.style.display, 'block');
-    console.log('null-safe reload query passed');
-})().catch(error => { console.error(error); process.exit(1); });
-'''
-    result = subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
-    assert "null-safe reload query passed" in result.stdout

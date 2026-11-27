@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time as time_module
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping
 import zipfile
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -397,11 +397,17 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_24_staff_web_file_management_v1.json",
     "labor_union_2026_11_24_staff_web_feedback_v1.json",
     "labor_union_2026_11_26_shared_line_faq_v1.json",
+    "labor_union_2026_11_27_faq_permanent_delete_guard_v1.json",
 )
 _STAFF_WEB_PROFILE_ARTIFACT = "1083_staff_web_profile.sql"
 _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT = "1085_staff_web_file_management.sql"
 _SHARED_LINE_FAQ_ARTIFACT = "1087_shared_line_faq.sql"
 _SHARED_LINE_FAQ_RELEASE = "labor-union-shared-line-faq-2026-11-26-v1"
+_FAQ_PERMANENT_DELETE_GUARD_ARTIFACT = "1088_faq_permanent_delete_guard.sql"
+_FAQ_PERMANENT_DELETE_TRIGGER = "trg_knowledge_item_versions_before_delete"
+_FAQ_PERMANENT_DELETE_GUARD_DESCRIPTORS = (
+    ROOT / "db/migration_releases/labor_union_2026_11_27_faq_permanent_delete_guard_v1.descriptors.json"
+)
 SHARED_LINE_FAQ_BACKFILL_ID = "shared-line-faq-cutover-v1"
 SHARED_LINE_FAQ_BACKFILL_CONTRACT = "shared-line-faq-cutover-backfill/v1"
 _STAFF_WEB_FEEDBACK_ARTIFACT = "1086_staff_web_feedback.sql"
@@ -2286,7 +2292,12 @@ def local_additive_target_state(
         "indexes": [row for row in snapshot.get("indexes", ()) if row.get("table_name") in owned_tables],
         "foreign_keys": [row for row in snapshot.get("foreign_keys", ()) if row.get("table_name") in owned_tables],
         "checks": [row for row in snapshot.get("constraints", ()) if row.get("table_name") in owned_tables and row.get("constraint_type") == "CHECK"],
-        "triggers": [row for row in snapshot.get("triggers", ()) if row.get("event_object_table") in owned_tables],
+        "triggers": [
+            row for row in snapshot.get("triggers", ())
+            if row.get("event_object_table") in owned_tables
+            or (artifact == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT
+                and row.get("trigger_name") == _FAQ_PERMANENT_DELETE_TRIGGER)
+        ],
     }
     if descriptor.get("views"):
         target["views"] = [
@@ -2602,6 +2613,46 @@ def _registry_guard_metadata():
         path = ROOT / "db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json"
         _REGISTRY_GUARD_METADATA = json.loads(path.read_text(encoding="utf-8"))
     return _REGISTRY_GUARD_METADATA
+
+
+@lru_cache(maxsize=1)
+def _faq_permanent_delete_guard_contracts() -> tuple[dict[str, str], dict[str, str]]:
+    catalog = json.loads(_FAQ_PERMANENT_DELETE_GUARD_DESCRIPTORS.read_text(encoding="utf-8"))
+    return (
+        catalog["predecessor_triggers"][_FAQ_PERMANENT_DELETE_TRIGGER],
+        catalog["successor_triggers"][_FAQ_PERMANENT_DELETE_TRIGGER],
+    )
+
+
+def _faq_permanent_delete_guard_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    *,
+    defer_missing_triggers: bool,
+) -> str:
+    predecessor, successor = _faq_permanent_delete_guard_contracts()
+    if descriptor["triggers"] != {_FAQ_PERMANENT_DELETE_TRIGGER: successor}:
+        raise UpgradeBlocked("FAQ deletion guard descriptor differs from canonical SQL")
+    row = next((
+        row for row in snapshot["triggers"]
+        if row["trigger_name"] == _FAQ_PERMANENT_DELETE_TRIGGER
+    ), None)
+    if row is None:
+        if defer_missing_triggers and not any(
+            column["table_name"] == successor["event_object_table"]
+            for column in snapshot["columns"]
+        ):
+            return "absent"
+        return "partial"
+    actual = {key: row.get(key) for key in successor}
+    action = actual["action_statement"]
+    if isinstance(action, str) and action not in (
+        predecessor["action_statement"], successor["action_statement"],
+    ):
+        actual["action_statement"] = _normalize_sql_contract(action)
+    if actual == successor:
+        return "exact"
+    return "absent" if actual == predecessor else "drift"
 
 
 _LINE_GROUP_HISTORY_DELETE_ARTIFACT = "1078_line_order_group_history_delete_guards.sql"
@@ -5565,8 +5616,9 @@ def _blocking_schema_states(
         if state == "drift"
         or (
             state == "partial"
-            and name not in allowed_partial_artifacts
             and name not in PURE_RETIREMENT_ARTIFACTS
+            and (name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT
+                 or name not in allowed_partial_artifacts)
         )
     }
 
@@ -6326,6 +6378,8 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         (path for path in SCHEMA_PARTS if path.name == part_name),
         None,
     )
+    if path is None and part_name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT:
+        path = ROOT / "db/schema_parts" / part_name
     if path is None:
         if part_name == "109_scheduling_generations.sql" and any(
             item.name == "1047_scheduling_buffer_advisory.sql" for item in SCHEMA_PARTS
@@ -6553,7 +6607,11 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         r"`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+?)(?=;\s*(?:$|\n))",
         re.I | re.S,
     )
-    if part_name in {"1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT, _LINE_DELIVERY_RETENTION_ARTIFACT, _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT}:
+    if part_name in {
+        "1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT,
+        _LINE_DELIVERY_RETENTION_ARTIFACT, _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT,
+        _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT,
+    }:
         complete_pattern = re.compile(r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+)", re.I | re.S)
         trigger_matches = [match for statement in split_sql(sql) if (match := complete_pattern.fullmatch(statement))]
     else:
@@ -8306,6 +8364,10 @@ def _artifact_metadata_state(
     defer_missing_triggers: bool = False,
     owned_tables: frozenset[str] | None = None,
 ) -> str:
+    if part_name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT:
+        return _faq_permanent_delete_guard_state(
+            snapshot, descriptor, defer_missing_triggers=defer_missing_triggers,
+        )
     snapshot, registry_state = _registry_guard_snapshot(snapshot, part_name)
     if registry_state is not None:
         return registry_state
@@ -8475,6 +8537,15 @@ def _artifact_metadata_state(
         return "drift"
     if expected_checks - actual_checks and actual_checks:
         return "partial"
+    trigger_action_contracts = {
+        item["action_statement"] for item in descriptor["triggers"].values()
+    }
+    if (
+        part_name == "163_knowledge_runtime.sql"
+        and _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT in OWNED_OBJECTS
+    ):
+        _, successor = _faq_permanent_delete_guard_contracts()
+        trigger_action_contracts.add(successor["action_statement"])
     triggers = {
         row["trigger_name"]: {
             "action_timing": str(row["action_timing"]).upper(),
@@ -8485,10 +8556,7 @@ def _artifact_metadata_state(
             "action_statement": (
                 row["action_statement"]
                 if row["action_statement"]
-                in {
-                    item["action_statement"]
-                    for item in descriptor["triggers"].values()
-                }
+                in trigger_action_contracts
                 else _normalize_sql_contract(row["action_statement"])
             ),
         }
@@ -8513,6 +8581,14 @@ def _artifact_metadata_state(
             continue
         owned_presence.append(actual is not None)
         if actual is not None and actual != expected:
+            if (
+                part_name == "163_knowledge_runtime.sql"
+                and name == _FAQ_PERMANENT_DELETE_TRIGGER
+                and _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT in OWNED_OBJECTS
+            ):
+                predecessor, successor = _faq_permanent_delete_guard_contracts()
+                if expected == predecessor and actual == successor:
+                    continue
             return "drift"
     if part_name == "1082_service_date_adjustments.sql":
         # 109 created this parent index. 1082 replaces it so inactive dates can
@@ -9024,6 +9100,12 @@ def schema_statements_for_state(
     state: str,
     snapshot: Mapping[str, Any],
 ) -> list[str]:
+    if part.name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT:
+        if state == "exact":
+            return []
+        if state != "absent":
+            raise UpgradeBlocked(f"FAQ deletion guard cannot be applied from {state} state")
+        return _faq_guard_statements(part)
     statements = split_sql(part.read_text(encoding="utf-8"))
     if part.name == _SHARED_LINE_FAQ_ARTIFACT and state == "partial":
         completed = _shared_faq_ddl_prefix(snapshot, _canonical_artifact_descriptor(part.name))
@@ -9112,7 +9194,12 @@ def _receipt_resumable_partial_artifacts(
         return frozenset()
     resumable: set[str] = set()
     parts = {part.name: part for part in SCHEMA_PARTS}
-    for step in receipt.get("schema_steps", ()):
+    recorded_steps = receipt.get("schema_steps", ())
+    if not isinstance(recorded_steps, (list, tuple)):
+        raise UpgradeBlocked("invalid operation schema journal")
+    for step in recorded_steps:
+        if not isinstance(step, Mapping):
+            raise UpgradeBlocked("invalid operation schema journal step")
         if step.get("status") not in {"prepared", "failed", "applied"}:
             continue
         if step.get("status") == "applied" and (
@@ -9121,6 +9208,8 @@ def _receipt_resumable_partial_artifacts(
         ):
             continue
         part_name = str(step.get("part") or "")
+        if part_name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT:
+            continue
         part = parts.get(part_name)
         index = int(step.get("index") or 0)
         if part is None or index < 1:
@@ -9132,6 +9221,204 @@ def _receipt_resumable_partial_artifacts(
         if step.get("statement_sha256") == expected_sha:
             resumable.add(part_name)
     return frozenset(resumable)
+
+
+def _faq_guard_statements(part: Path) -> list[str]:
+    sql = part.read_bytes()
+    expected = next((
+        item["sha256"] for item in RELEASE_MANIFEST.artifacts if item["name"] == part.name
+    ), None)
+    if _sha256_bytes(sql) != expected:
+        raise UpgradeBlocked("FAQ deletion guard artifact differs from the release manifest")
+    statements = split_sql(sql.decode("utf-8"))
+    if len(statements) != 2 or statements[0] != f"DROP TRIGGER IF EXISTS {_FAQ_PERMANENT_DELETE_TRIGGER}":
+        raise UpgradeBlocked("FAQ deletion guard statement boundary is invalid")
+    return statements
+
+
+def _faq_guard_operation_fingerprint(
+    plan: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    path: Path,
+    candidate_identity: Mapping[str, Any],
+) -> str:
+    source = plan["source"]
+    dump = receipt.get("source_dump")
+    if (
+        plan.get("candidate_exists") is not False
+        or receipt.get("kind") != "preserved_database_upgrade"
+        or not isinstance(receipt.get("restored_at"), str)
+        or receipt.get("source") != source
+        or receipt.get("candidate") != candidate_identity
+        or receipt.get("restored_data") != plan["source_data"]
+        or not isinstance(dump, Mapping)
+        or dump.get("database") != source["database"]
+        or dump.get("server") != source["server"]
+        or not isinstance(dump.get("sha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", dump["sha256"])
+    ):
+        raise UpgradeBlocked("FAQ deletion guard requires the original verified candidate restore")
+    return _sha256_bytes(_canonical_json({
+        "plan_fingerprint": plan["plan_fingerprint"],
+        "operation_receipt": str(path.expanduser().resolve()),
+        "restored_at": receipt["restored_at"],
+        "candidate": candidate_identity,
+        "source_dump": dump,
+    }))
+
+
+def _faq_guard_schema_fingerprint(snapshot: Mapping[str, Any]) -> str:
+    payload = {key: value for key, value in snapshot.items() if key != "sha256"}
+    if "show_create_tables" in payload:
+        payload["show_create_tables"] = {
+            name: re.sub(r"(?m)^(\) ENGINE=\w+) AUTO_INCREMENT=\d+(?= )", r"\1", ddl)
+            for name, ddl in payload["show_create_tables"].items()
+        }
+    return _sha256_bytes(_canonical_json(payload))
+
+
+def _faq_guard_drop_boundary(
+    snapshot: Mapping[str, Any],
+    candidate_data_sha256: str,
+    operation_fingerprint: str,
+) -> dict[str, Any]:
+    target = next((
+        (index, row) for index, row in enumerate(snapshot["triggers"])
+        if row["trigger_name"] == _FAQ_PERMANENT_DELETE_TRIGGER
+    ), None)
+    if target is None or _owned_classification(snapshot)[_FAQ_PERMANENT_DELETE_GUARD_ARTIFACT] != "absent":
+        raise UpgradeBlocked("FAQ deletion guard predecessor changed before DROP")
+    trigger_index, trigger = target
+    return {
+        "operation_fingerprint": operation_fingerprint,
+        "before_schema_sha256": snapshot["sha256"],
+        "before_schema_fingerprint": _faq_guard_schema_fingerprint(snapshot),
+        "candidate_data_sha256": candidate_data_sha256,
+        "predecessor_trigger_index": trigger_index,
+        "predecessor_trigger": trigger,
+    }
+
+
+def _faq_guard_reconcile_journal(
+    part: Path,
+    snapshot: Mapping[str, Any],
+    candidate_data: Mapping[str, Any] | None,
+    plan: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    receipt_path: Path,
+    candidate_identity: Mapping[str, Any],
+    *,
+    exact_part_snapshot: Mapping[str, Any] | None = None,
+    schema_complete: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    drop, create = _faq_guard_statements(part)
+    steps = [step for step in receipt.get("schema_steps", ()) if step.get("part") == part.name]
+    drop_position = next((
+        position for position in reversed(range(len(steps)))
+        if type(steps[position].get("index")) is int and steps[position]["index"] == 1
+    ), -1)
+    first = steps[drop_position] if drop_position >= 0 else {}
+    boundary = first.get("faq_guard_drop")
+    if (
+        (not schema_complete and (receipt.get("status"), receipt.get("phase")) != ("partial", "schema_apply"))
+        or receipt.get("release_id") != plan["release_id"]
+        or receipt.get("plan_release_fingerprint") != plan["release_fingerprint"]
+        or first.get("status") not in {"prepared", "applied", "failed"}
+        or first.get("before_part_state") != "absent"
+        or first.get("statement_sha256") != _sha256_bytes(drop.encode("utf-8"))
+        or not isinstance(boundary, Mapping)
+    ):
+        raise UpgradeBlocked("FAQ deletion guard missing or mismatched DROP journal")
+    create_steps = steps[drop_position + 1:]
+    last = create_steps[-1] if exact_part_snapshot is not None and create_steps else None
+    for step in create_steps:
+        statuses = {"prepared", "failed"}
+        if step is last:
+            statuses.update({"applied", "exact"})
+        if (
+            type(step.get("index")) is not int or step["index"] != 2
+            or step.get("status") not in statuses
+            or step.get("statement_sha256") != _sha256_bytes(create.encode("utf-8"))
+        ):
+            raise UpgradeBlocked("FAQ deletion guard CREATE journal does not match the candidate")
+    if exact_part_snapshot is not None and (
+        last is None or first.get("status") != "applied"
+        or last.get("before_part_state") not in {"absent", "partial"}
+        or (schema_complete and last.get("status") != "exact")
+        or (last.get("status") in {"exact", "failed"} and (
+            last.get("after_part_state") != "exact"
+            or last.get("after_schema_sha256") != exact_part_snapshot["sha256"]
+        ))
+    ):
+        raise UpgradeBlocked("FAQ deletion guard missing or mismatched CREATE journal")
+    operation_fingerprint = _faq_guard_operation_fingerprint(
+        plan, receipt, receipt_path, candidate_identity,
+    )
+    triggers = [
+        row for row in snapshot["triggers"]
+        if exact_part_snapshot is None or row["trigger_name"] != _FAQ_PERMANENT_DELETE_TRIGGER
+    ]
+    trigger = boundary.get("predecessor_trigger")
+    index = boundary.get("predecessor_trigger_index")
+    if (
+        not isinstance(trigger, Mapping)
+        or trigger.get("trigger_name") != _FAQ_PERMANENT_DELETE_TRIGGER
+        or type(index) is not int
+        or not 0 <= index <= len(triggers)
+        or any(row["trigger_name"] == _FAQ_PERMANENT_DELETE_TRIGGER for row in triggers)
+    ):
+        raise UpgradeBlocked("FAQ deletion guard DROP journal does not describe a missing trigger")
+    triggers.insert(index, trigger)
+    predecessor = {key: value for key, value in snapshot.items() if key != "sha256"}
+    predecessor["triggers"] = triggers
+    predecessor["sha256"] = _sha256_bytes(_canonical_json(predecessor))
+    if last is not None and exact_part_snapshot is not None and not schema_complete:
+        if last["before_part_state"] == "partial":
+            before_create = {key: value for key, value in snapshot.items() if key != "sha256"}
+            before_create["triggers"] = [row for row in snapshot["triggers"]
+                                         if row["trigger_name"] != _FAQ_PERMANENT_DELETE_TRIGGER]
+        else:
+            before_create = {key: value for key, value in exact_part_snapshot.items() if key != "sha256"}
+            before_create["triggers"] = [trigger if row["trigger_name"] == _FAQ_PERMANENT_DELETE_TRIGGER else row
+                                         for row in exact_part_snapshot["triggers"]]
+        if last.get("before_schema_sha256") != _sha256_bytes(_canonical_json(before_create)):
+            raise UpgradeBlocked("FAQ deletion guard CREATE journal candidate metadata mismatch")
+    data_sha256 = boundary.get("candidate_data_sha256")
+    if candidate_data is not None:
+        data_sha256 = _sha256_bytes(_canonical_json(candidate_data))
+    if not isinstance(data_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", data_sha256):
+        raise UpgradeBlocked("FAQ deletion guard candidate data fingerprint is invalid")
+    expected_boundary = _faq_guard_drop_boundary(predecessor, data_sha256, operation_fingerprint)
+    if "before_schema_fingerprint" not in boundary:
+        expected_boundary.pop("before_schema_fingerprint")
+    elif schema_complete and plan["backfills"]:
+        expected_boundary["before_schema_sha256"] = boundary.get("before_schema_sha256")
+    if boundary != expected_boundary:
+        raise UpgradeBlocked("FAQ deletion guard candidate changed after DROP")
+    states = _owned_classification(predecessor)
+    states[part.name] = "exact"
+    if not _candidate_schema_is_exact(states):
+        raise UpgradeBlocked("FAQ deletion guard candidate has other unfinished or drifted artifacts")
+    return first, last
+
+
+@contextmanager
+def _faq_guard_apply_lock(
+    config: DatabaseConfig | SeparateDatabaseConfig, candidate: str,
+) -> Iterator[None]:
+    if not any(part.name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT for part in SCHEMA_PARTS):
+        yield
+        return
+    lock_name = "lu:faq-delete-guard:" + _sha256_bytes(candidate.casefold().encode())[:40]
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, 0) AS acquired", (lock_name,))
+            if (cursor.fetchone() or {}).get("acquired") != 1:
+                raise UpgradeBlocked("FAQ deletion guard candidate is already being upgraded")
+        yield
+    finally:
+        connection.close()
 
 
 def _customer_service_runtime_recovery_statements(
@@ -9251,12 +9538,40 @@ def apply_schema(
     faq_legacy_catalog: Path | None = None,
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
+    with _faq_guard_apply_lock(config, candidate):
+        return _apply_schema(
+            config, source, candidate, plan_path, operation_receipt_path,
+            mysql_container=mysql_container,
+            allowed_partial_artifacts=allowed_partial_artifacts,
+            source_recovery_root=source_recovery_root,
+            faq_reviewed_mapping=faq_reviewed_mapping,
+            faq_legacy_catalog=faq_legacy_catalog,
+        )
+
+
+def _apply_schema(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    source: str,
+    candidate: str,
+    plan_path: Path,
+    operation_receipt_path: Path,
+    *,
+    mysql_container: str | None,
+    allowed_partial_artifacts: frozenset[str],
+    source_recovery_root: Path | None,
+    faq_reviewed_mapping: Path | None,
+    faq_legacy_catalog: Path | None,
+) -> dict[str, Any]:
     operation_receipt = read_receipt(operation_receipt_path)
-    if _shared_faq_selected() and operation_receipt.get("status") in {"backfilled", "verified"}:
+    faq_guard_part = next((part for part in SCHEMA_PARTS
+                           if part.name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT), None)
+    receipt_status = operation_receipt.get("status")
+    shared_faq_complete = _shared_faq_selected() and receipt_status in {"backfilled", "verified"}
+    if faq_guard_part is None and shared_faq_complete:
         _require_shared_faq_operation_identity(config, source, candidate, operation_receipt)
         _verify_shared_faq_operation(config, candidate, operation_receipt, faq_reviewed_mapping, faq_legacy_catalog)
         return operation_receipt
-    if operation_receipt.get("status") == "schema_applied":
+    if faq_guard_part is None and receipt_status == "schema_applied":
         if operation_receipt.get("candidate_database") != candidate:
             raise UpgradeBlocked("operation receipt targets another candidate")
         return run_candidate_post_schema(
@@ -9273,7 +9588,9 @@ def apply_schema(
         raise UpgradeBlocked("plan is not ready")
     if plan.get("source_recovery") is not None and source_recovery_root is None:
         raise UpgradeBlocked("source recovery requires fresh original journal and backup verification")
-    existing_receipt = read_receipt(operation_receipt_path)
+    existing_receipt = operation_receipt
+    if existing_receipt.get("candidate_database") != candidate:
+        raise UpgradeBlocked("operation receipt targets another candidate")
     schema_artifacts = plan.get("schema_artifacts") or []
     artifact_names = [
         str(artifact.get("name"))
@@ -9285,24 +9602,17 @@ def apply_schema(
         canonical_release_fingerprint = local_additive_release_qualification(
             str(plan["release_id"]), artifact_names[0]
         )["release_fingerprint"]
-    existing_receipt.update(
+    release_fields = dict(
         release_id=plan.get("release_id"),
         release_fingerprint=canonical_release_fingerprint,
         plan_release_fingerprint=plan.get("release_fingerprint"),
         artifact_names=artifact_names,
         artifact_name=(artifact_names[0] if len(artifact_names) == 1 else None),
     )
-    write_receipt(operation_receipt_path, existing_receipt)
     allowed_partial_artifacts = allowed_partial_artifacts.union(
         _receipt_resumable_partial_artifacts(existing_receipt, candidate)
     )
-    if existing_receipt.get("status") == "schema_applied":
-        return run_candidate_post_schema(
-            config, source, candidate, operation_receipt_path,
-            mysql_container=mysql_container,
-            faq_reviewed_mapping=faq_reviewed_mapping,
-            faq_legacy_catalog=faq_legacy_catalog,
-        )
+    faq_guard_terminal = faq_guard_part is not None and receipt_status in VERIFYABLE_CANDIDATE_STATUSES
     fresh = (
         build_plan(config, source, candidate, allowed_partial_artifacts,
                    source_recovery_root=source_recovery_root)
@@ -9322,10 +9632,16 @@ def apply_schema(
         raise UpgradeBlocked("source data changed after planning")
     if not database_exists(config, candidate):
         raise UpgradeBlocked("candidate has not been restored")
+    if (
+        _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT in artifact_names
+        and existing_receipt.get("status") == "restored"
+        and fresh.get("candidate_matches_source") is not True
+    ):
+        raise UpgradeBlocked("candidate data does not match restored source")
     # Preserve compatibility with legacy/minimal operation receipts while
     # enforcing the source-data invariant for receipts produced by the real
     # restore workflow.  The latter always records candidate_data.
-    if isinstance(existing_receipt.get("candidate_data"), Mapping):
+    if not faq_guard_terminal and isinstance(existing_receipt.get("candidate_data"), Mapping):
         candidate_data = _table_evidence(config, candidate)
         if not _candidate_preserves_source_data(
             plan.get("source_data") or {}, candidate_data
@@ -9335,23 +9651,85 @@ def apply_schema(
     if candidate_identity["server"] != plan["source"]["server"]:
         raise UpgradeBlocked("candidate is on a different server")
     rebuild_plan = plan.get("legacy_knowledge_empty_rebuild") or {}
-    if rebuild_plan.get("eligible") is True:
+    before = _schema_snapshot(config, candidate)
+    preapply_states = _upgrade_admission_states(before)
+    faq_guard_state = preapply_states.get(_FAQ_PERMANENT_DELETE_GUARD_ARTIFACT)
+    faq_resume = faq_guard_state == "partial"
+    faq_source_exact = plan.get("source_objects", {}).get(_FAQ_PERMANENT_DELETE_GUARD_ARTIFACT) == "exact"
+    faq_created = faq_guard_state == "exact" and (
+        not faq_source_exact
+        or any(step.get("part") == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT and step.get("index") != 0
+               for step in existing_receipt.get("schema_steps", ()))
+    )
+    if rebuild_plan.get("eligible") is True and not (faq_resume or faq_created or faq_guard_terminal):
         _rebuild_empty_legacy_knowledge_candidate(
             config, candidate, existing_receipt, operation_receipt_path
         )
-    before = _schema_snapshot(config, candidate)
+        before = _schema_snapshot(config, candidate)
+        preapply_states = _upgrade_admission_states(before)
     states = _owned_classification(before)
-    preapply_states = _upgrade_admission_states(before)
-    blocking_states = _blocking_schema_states(
-        preapply_states, allowed_partial_artifacts
-    )
-    if blocking_states:
-        raise UpgradeBlocked(
-            f"candidate schema is partial/drift: {blocking_states}"
-        )
     receipt = existing_receipt
-    if receipt.get("candidate_database") != candidate:
-        raise UpgradeBlocked("operation receipt targets another candidate")
+    parts = SCHEMA_PARTS
+    if faq_resume or faq_created or faq_guard_terminal:
+        if any(receipt.get(key) != value for key, value in release_fields.items()):
+            raise UpgradeBlocked("FAQ deletion guard DROP journal release mismatch")
+    if faq_guard_terminal:
+        recorded_schema = receipt.get("faq_guard_schema_fingerprint") if plan["backfills"] else None
+        schema_matches = (
+            recorded_schema == _faq_guard_schema_fingerprint(before)
+            if recorded_schema is not None
+            else receipt.get("candidate_schema_sha256") == before["sha256"]
+        )
+        if (
+            not _candidate_schema_is_exact(states)
+            or states.get(_FAQ_PERMANENT_DELETE_GUARD_ARTIFACT) != "exact"
+            or not schema_matches
+            or receipt.get("source") != plan["source"]
+            or receipt.get("candidate") != candidate_identity
+        ):
+            raise UpgradeBlocked("FAQ deletion guard completed schema does not match the operation receipt")
+    if faq_guard_part is not None and (faq_resume or faq_created):
+        exact_part_snapshot = _schema_snapshot(config, candidate, owned_part=faq_guard_part.name) if faq_created else None
+        if exact_part_snapshot is not None and _owned_classification(exact_part_snapshot)[faq_guard_part.name] != "exact":
+            raise UpgradeBlocked("FAQ deletion guard candidate changed during CREATE reconciliation")
+        # A completed schema may already have run manifest-authorized data backfills.
+        current_data = None if faq_guard_terminal and plan["backfills"] else _table_evidence(config, candidate)
+        drop_step, create_step = _faq_guard_reconcile_journal(
+            faq_guard_part, before, current_data, plan, receipt, operation_receipt_path, candidate_identity,
+            exact_part_snapshot=exact_part_snapshot, schema_complete=faq_guard_terminal,
+        )
+        if exact_part_snapshot is None:
+            drop_step.update(
+                reconciled_from_status=drop_step.get("reconciled_from_status", drop_step["status"]),
+                status="applied", outcome="drop_reconciled", after_part_state="partial",
+                verification_status="pending_part_completion", reconciled_at=_now(),
+            )
+            parts = (faq_guard_part,)
+        else:
+            parts = ()
+            if create_step is not None and create_step["status"] != "exact":
+                create_step.update(
+                    reconciled_from_status=create_step["status"], status="exact", outcome="create_reconciled",
+                    verification_status="exact", after_part_state="exact",
+                    after_schema_sha256=exact_part_snapshot["sha256"], verified_at=_now(),
+                )
+    if faq_guard_terminal:
+        if shared_faq_complete:
+            _require_shared_faq_operation_identity(config, source, candidate, receipt)
+            _verify_shared_faq_operation(config, candidate, receipt, faq_reviewed_mapping, faq_legacy_catalog)
+        if receipt_status == "schema_applied":
+            return run_candidate_post_schema(
+                config, source, candidate, operation_receipt_path,
+                mysql_container=mysql_container,
+                faq_reviewed_mapping=faq_reviewed_mapping, faq_legacy_catalog=faq_legacy_catalog,
+            )
+        return receipt
+    if not faq_resume:
+        blocking_states = _blocking_schema_states(preapply_states, allowed_partial_artifacts)
+        if blocking_states:
+            raise UpgradeBlocked(f"candidate schema is partial/drift: {blocking_states}")
+    receipt.update(release_fields)
+    write_receipt(operation_receipt_path, receipt)
     steps = receipt.setdefault("schema_steps", [])
     connection = config.connect(candidate)
     try:
@@ -9359,7 +9737,7 @@ def apply_schema(
             cursor.execute("SELECT DATABASE() AS db")
             if cursor.fetchone()["db"] != candidate:
                 raise UpgradeBlocked("mutation connection is not candidate")
-            for part in SCHEMA_PARTS:
+            for part in parts:
                 # A newly created NAS candidate is not exposed to runtime
                 # writers. Exact parts have no statements to run; reuse the
                 # complete admission snapshot for them. Pending/partial parts
@@ -9367,7 +9745,12 @@ def apply_schema(
                 # verification and switch fresh reads remain mandatory.
                 initial_state = states.get(part.name)
                 isolated = getattr(_candidate_connection_config(config, candidate), "isolated_candidate", False)
-                if isolated and (initial_state == "exact" or
+                if faq_resume:
+                    part_before = _schema_snapshot(config, candidate)
+                    if part_before["sha256"] != before["sha256"]:
+                        raise UpgradeBlocked("FAQ deletion guard candidate changed before CREATE")
+                    before_state = "partial"
+                elif isolated and (initial_state == "exact" or
                         initial_state == "absent" and part.name in LOCAL_RETIRED_ABSENT_ARTIFACTS):
                     part_before, before_state = before, initial_state
                 else:
@@ -9375,6 +9758,11 @@ def apply_schema(
                         config, candidate, owned_part=part.name
                     )
                     before_state = _owned_classification(part_before)[part.name]
+                if (
+                    part.name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT
+                    and before_state == "exact" and not faq_source_exact
+                ):
+                    raise UpgradeBlocked("FAQ deletion guard candidate changed before apply")
                 if (
                     before_state == "exact"
                     or (
@@ -9405,13 +9793,16 @@ def apply_schema(
                     raise UpgradeBlocked(
                         f"candidate schema drift before {part.name}"
                     )
-                statements = schema_statements_for_state(
-                    part, before_state, part_before
-                )
                 part_steps: list[dict[str, Any]] = []
                 first_index = 1
-                if part.name == _SHARED_LINE_FAQ_ARTIFACT and before_state == "partial":
-                    first_index += len(split_sql(part.read_text(encoding="utf-8"))) - len(statements)
+                if faq_resume:
+                    _, create = _faq_guard_statements(part)
+                    statements = [create]
+                    first_index = 2
+                else:
+                    statements = schema_statements_for_state(part, before_state, part_before)
+                    if part.name == _SHARED_LINE_FAQ_ARTIFACT and before_state == "partial":
+                        first_index += len(split_sql(part.read_text(encoding="utf-8"))) - len(statements)
                 for index, statement in enumerate(statements, start=first_index):
                     step = {
                         "part": part.name,
@@ -9424,6 +9815,15 @@ def apply_schema(
                         "before_part_state": before_state,
                         "prepared_at": _now(),
                     }
+                    if part.name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT and index == 1:
+                        operation_fingerprint = _faq_guard_operation_fingerprint(
+                            plan, receipt, operation_receipt_path, candidate_identity,
+                        )
+                        step["faq_guard_drop"] = _faq_guard_drop_boundary(
+                            _schema_snapshot(config, candidate),
+                            _sha256_bytes(_canonical_json(_table_evidence(config, candidate))),
+                            operation_fingerprint,
+                        )
                     steps.append(step)
                     part_steps.append(step)
                     receipt.update(status="partial", phase="schema_apply")
@@ -9488,6 +9888,8 @@ def apply_schema(
         schema_applied_at=_now(), candidate_schema_sha256=after["sha256"],
         owned_objects=states,
     )
+    if faq_guard_part is not None:
+        receipt["faq_guard_schema_fingerprint"] = _faq_guard_schema_fingerprint(after)
     write_receipt(operation_receipt_path, receipt)
     return run_candidate_post_schema(
         config, source, candidate, operation_receipt_path,

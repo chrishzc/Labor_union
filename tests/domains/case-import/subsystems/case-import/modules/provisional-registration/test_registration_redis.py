@@ -40,13 +40,17 @@ def stores():
         client.close()
 
 
-def candidate():
+def candidate(*, line_user_id=None, name="合成待審申請"):
     return build_provisional_registration_candidate(ProvisionalRegistrationIntent(
-        line_user_id="U-synthetic-" + uuid4().hex, name="合成待審申請", phone="0900000000",
-        expected_date="2026-11-20", service_days=10, address="合成地址", gender=None,
-        email=None, birth_date=None, tel=None, ext=None, city=None, zip_code=None,
-        id_number=None, liff_config_revision=None,
-        survey_details={"特殊計費:胎數": "單胞胎", "銀行帳號": "000012345678", "補助款退款:銀行代號+分行代號": "0000000"}))
+        line_user_id=line_user_id or "U-synthetic-" + uuid4().hex, name=name, phone="0900000000",
+        expected_date="2026-11-20", service_days=10, address="合成地址", gender="女",
+        email="synthetic@example.com", birth_date="1990-01-01", tel=None, ext=None, city="新竹市", zip_code=None,
+        id_number=None, liff_config_revision=None, registration_kind="non_citizen", service_start_date="2026-11-20",
+        service_time="08:30-12:30 (4小時)", residence_type="電梯大樓", delivery_type="自然產",
+        service_type="週休 1 日", baby_info="單胞胎", notes="無",
+        survey_details={"特殊計費:胎數": "單胞胎", "代購食材": "自行準備", "銀行帳號": "000012345678",
+                        "補助款退款:銀行代號+分行代號": "0000000", "服務時間內是否有其他寶寶": "無",
+                        "是否需要下廚：": "不需要下廚"}))
 
 
 def receipt():
@@ -208,10 +212,56 @@ def test_unknown_acknowledgement_can_only_be_resolved_by_original_submission(sto
     unknown = RedisRegistrationStagingRepository(SimpleNamespace(eval=execute_then_timeout))
     with pytest.raises(ProvisionalRegistrationStorageError): unknown.submit(value, key)
     saved = intake.status_for_submission(value.line_user_id, key)
-    assert saved.status == "pending"
+    assert saved is not None and saved.status == "pending"
+    replay = intake.replay_submission(value, key)
+    assert replay is not None and replay.replayed and replay.registration_id == saved.registration_id
+    with pytest.raises(ProvisionalRegistrationConflictError):
+        intake.replay_submission(replace(value, payload_fingerprint=type(value.payload_fingerprint)("a" * 64)), key)
     assert intake.submit(value, key).registration_id == saved.registration_id
     assert intake.status_for_submission("U-other-synthetic", key) is None
+    conflicting_key = str(uuid4())
+    different_candidate = candidate(line_user_id=value.line_user_id, name="不同內容申請")
+    counter = admin.client.get(PREFIX + "counter")
+    with pytest.raises(ProvisionalRegistrationConflictError, match="registration_active_application_conflict"):
+        intake.submit(different_candidate, conflicting_key)
+    assert intake.status_for_submission(value.line_user_id, conflicting_key) is None
+    assert admin.client.get(PREFIX + "counter") == counter
+    pending = admin.pending(after_id=saved.registration_id - 1)
+    assert [item.registration_id for item in pending] == [saved.registration_id]
+    assert pending[0].candidate == value
     admin.reject(saved.registration_id, 1, "synthetic-admin")
+
+
+def test_unavailable_status_never_claims_unreceived_and_original_key_can_retry(stores) -> None:
+    from redis.exceptions import TimeoutError
+    from subsystems.case_import.provisional_registration_types import ProvisionalRegistrationStorageError
+    admin, intake = stores
+    value, key = candidate(), str(uuid4())
+
+    def unavailable(*_args: object) -> None:
+        raise TimeoutError("synthetic unavailable before write")
+
+    broken = RedisRegistrationStagingRepository(SimpleNamespace(eval=unavailable, get=unavailable))
+    with pytest.raises(ProvisionalRegistrationStorageError, match="registration_redis_unavailable"):
+        broken.submit(value, key)
+    with pytest.raises(ProvisionalRegistrationStorageError, match="registration_redis_unavailable"):
+        broken.status_for_submission(value.line_user_id, key)
+    assert intake.status_for_submission(value.line_user_id, key) is None
+
+    counter = admin.client.get(PREFIX + "counter")
+    assert counter is not None
+    try:
+        admin.client.delete(PREFIX + "counter")
+        with pytest.raises(ProvisionalRegistrationStorageError, match="registration_redis_initialization_required"):
+            intake.status_for_submission(value.line_user_id, key)
+    finally:
+        admin.client.set(PREFIX + "counter", counter)
+
+    first = intake.submit(value, key)
+    assert first.status == "pending" and not first.replayed
+    assert intake.submit(value, key).registration_id == first.registration_id
+    assert [item.registration_id for item in admin.pending(after_id=first.registration_id - 1)] == [first.registration_id]
+    admin.reject(first.registration_id, 1, "synthetic-admin")
 
 
 def test_configured_internal_host_starts_and_stops_durable_maintenance(stores, monkeypatch):

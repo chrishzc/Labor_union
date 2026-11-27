@@ -86,8 +86,6 @@
 - storage: current `weekly_report_metrics` uses Monday `week_start_date` as its key and nullable promotion／inquiry counts; fresh `218` and preserve `1035` provide the table. Released `1031` batch objects are historical compatibility only and have no current runtime reader／writer.
 
 ## Contracts
-- `architecture_declared`：依 [逐日工時口徑](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-service-daily-hours) 擴充既有 Query／typed facts／JSON／XLSX，施工中。有效日班工時取逐日覆寫值，NULL 才沿用案件原訂時數；按實際日期與當日人員加總，不納入停用來源日班。報表只讀，不改原合約與帳務。
-
 - HCM 審核不符合優先於訂單狀況，六項資格欄位每筆至多一個；資格來源缺漏保留待確認。確認符合並歸一般市民的案件只計一般市民符合；原住民及其來源別名（`原民`、`原住民市民`）依審查結果計入原住民符合或原住民不符合；實為非市民誤報、原 HCM 作廢者依 `QUAL-STAT-03` 維持計入一般市民不符合且不轉換成 `A` 案。週報畫面、同候選 Excel 與待辦看板共用分類。
 - 2026-11-04 核准搬移：營運畫面只留案件／工時兩分頁，補助統計及季度／年度移至 Finance 唯一入口；原三 worksheet、typed API／owner formula／XLSX 不變。案件操作仍使用 Finance 原抽屜，原查詢條件與來源位置保留；不維護第二套 CSV。
 - 週報 React／XLSX 案件受理總表使用 A:Z 26 欄雙層表頭，取消原因讀取 Orders 生效的取消事件或歷史訂單資料。`補助案件統計表` 支援三軌獨立分區（`general`、`subsidized`、`indigenous`）與頂端六列兩年度統計。看板 summary 與 `WorkbenchCaseStatistics` 同步呈現在三大資格群組共六欄與模板四欄計數，非市民區塊獨立呈現。正式欄位裁決：`.arch-map/requirements/34_營運報表與統計口徑正式規格.md` §2–§5。
@@ -114,6 +112,8 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 ### 週報人工指標的儲存與輸出 ^reporting-weekly-metrics-null-zero
 
 [需求書 §2.1「每週人工指標：未登錄與實際零」](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-metrics-null-zero) 定義畫面和匯出行為。`WeeklyMetricsEditor.tsx` 將空欄轉成 `null`，數字 `0` 則原樣經 `weekly_report_metrics_client.ts` 交給管理員的週指標 PUT 路由。`WeeklyReportMetricsService.save_metric` 在寫入前驗證星期一與非負數，再用 `week_start_date` 更新 `weekly_report_metrics` 的兩個可空欄位；非星期一由路由回傳 400，不寫入。
+
+例如管理員呼叫 `PUT /api/v1/operations-reports/weekly/metrics/2026-08-24`，主體為 `{"promotion_count":0,"inquiry_count":null}`：兩個鍵都必填，`0` 儲存實際零，明傳 `null` 會清除該週欄位的舊值。成功回應的 `data` 是整列，含 `week_start_date`、`week_end_date`、兩個計數及 `updated_at`，沒有版本欄位。省略任一鍵回 422；兩鍵合法但把週起日改為 2026-08-25（週二），回 400 `weekly_report_metric_invalid`。兩例都不變更已存資料。
 
 週報明細用 `week_start_date` 對應當週指標，不從案件列推算。React 的 `OperationsReportsWorkspace.tsx` 對該週只畫一次，經 `displayWeeklyMetric` 將 `null` 顯示為「未登錄／待補正」；XLSX 由 `weekly_operations_report_export.py` 每週各寫一次，`null` 寫為「未登錄」。兩邊的實際零都保留。
 
@@ -143,6 +143,8 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 
 `OperationsReportsWorkspace.tsx` 與 `weekly_operations_report_export.py` 消費這兩組統計，年度累計先於週資料，月小計在相同月份最後一組週資料後；畫面與 XLSX 不各自重算歸屬。
 
+版本交接：前端查詢請求新版；若回應明示 `operations-report.v3`，`weekly_operations_report_adapter.ts` 將兩組總計標為不可用，工作區顯示舊版提示並停用新版 XLSX，不以零值或畫面明細補算。宣告新版卻缺任一總計陣列時，由嚴格解碼拒絕，不降為舊版。這是版本相容分支，不代表需求書的新版畫面／XLSX 已驗收。
+
 驗證定位：`tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py` 的 `test_partial_date_selection_keeps_case_filter_but_never_splits_week_metrics` 與 `test_early_january_week_remains_in_previous_december` 覆蓋查詢與歸屬；`test_cross_year_months_follow_monday_and_annual_cases_follow_calendar_year` 另核對 XLSX 列順序。這些是合成資料的查詢與活頁簿測試，不是 React 或真實資料庫驗收。
 
 ```yaml archmap-impact
@@ -163,6 +165,44 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 - kind: implements_requirement
   source: reporting-weekly-cancel-reason
   target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^weekly-case-cancel-reason'
+```
+
+### 每週服務工時的來源與輸出 ^reporting-weekly-daily-hours
+
+[需求書 §2.2「每週服務中與工時的逐日時數」](../../../../../requirements/34_營運報表與統計口徑正式規格.md#weekly-service-daily-hours) 定義日班認列與週工時。報表只讀，不修改合約、排班或帳務。
+
+| 負責角色 | 正式約定與接線 | 去哪查 |
+| --- | --- | --- |
+| Scheduling／資料來源 | 生效班表提供實際工作日、當日人員及逐日時數覆寫。Reporting 以唯讀 SQL 選有效工作日，排除取消或已替換指派。逐日覆寫為 `NULL` 才沿用案件原訂時數。 | `infrastructure/mysql/weekly_operations_report_query_adapter.py` 的 `_SERVICE_FACTS_SQL` |
+| Reporting／後端 | 依人員、案件及實際服務日期所在的星期一分組。SQL 計有效日期數，工時齊全時加總逐日時數；同組含不同日工時時不回傳單一每日時數。Query 優先使用回讀的 `weekly_hours`；XLSX 使用查詢列的週天數及週工時，不另算。 | `WeeklyOperationsReportQuery._service_row`、`weekly_operations_report_export.py` |
+| 前端 | 讀取查詢結果的 `weekly_work_days` 與 `weekly_hours`。每日時數為 `null` 時留空，不把原訂時數或自行計算的平均值填上。 | `OperationsReportsWorkspace.tsx`、`ui_react/src/tests/reports_weekly_service_display.test.tsx` |
+
+[驗證定位](../../../../../tests/domains/global/subsystems/reporting/modules/weekly-operations-report.md) 區分替身資料的畫面檢查與資料來源檢查。需求書的跨週合併／分裂情境仍須核對 Scheduling 到週報 JSON、畫面與 XLSX 的完整鏈路；本節不宣稱已執行。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-weekly-daily-hours
+  target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^weekly-service-daily-hours'
+```
+
+### 補助資格分類與報表輸出 ^reporting-qualification-stats
+
+[需求書 §3](../../../../../requirements/34_營運報表與統計口徑正式規格.md#qualification-and-aboriginal-stats) 定義三軌資格、HCM 作廢與新 `A` 案隔離。Reporting 只讀分類，不更正原案或重新計價。
+
+| 負責角色 | 正式約定與現行接線 | 去哪查 |
+| --- | --- | --- |
+| 案件來源／資料 | 讀取正式 `identity_status`、`hcm_review_status` 與案件識別。整案審核不符合的原 HCM 紀錄留在週報候選；另立的 `A` 案仍依 §5 分流，不把新案回灌到原 HCM 計數。 | `infrastructure/mysql/weekly_operations_report_query_adapter.py` 的 `_REPORT_CASE_CATEGORY_SQL` |
+| Reporting／後端 | `review_result` 每案一個；六項資格旗標與四項案件狀況分開，不相加作總件數。確認為零時保留數值 `0`；有未能歸類的拒絕且該拒絕欄沒有已知計數時，該欄回 `null`，不補零。相同日期範圍才比較週報與待辦看板；年度補助統計的範圍另算。 | `WeeklyOperationsReportQuery._case_row`、`_qualification_summary`、`weekly_report_metrics_service.py` |
+| 前端／匯出 | 待辦看板把未知的資格彙總顯示為 `—`。週報 XLSX 彙總保留真實數字 `0`，未知留空；明細的 `0/1` 旗標則是 `0` 留空、`1` 顯示，不改 JSON 的數值。 | `WorkbenchCaseStatistics.tsx`、`weekly_operations_report_export.py` |
+
+未證實的邊界：若實為非市民的誤報案作廢後仍保留原住民 `identity_status`，週報分類器會把該筆判為原住民不符合。尚未確認作廢上游是否在投影前提供更正後的身分，因此不能把 `QUAL-STAT-03` 視為已驗收，也不更動該條規格。
+
+驗證定位：`tests/test_weekly_operations_report_contract.py::test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_period` 核對替身資料的相同期間、已知零與未知值。它不證明原住民誤報作廢的正式資料鏈、實際畫面或 XLSX 資格儲存格已驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-qualification-stats
+  target: '.arch-map/requirements/34_營運報表與統計口徑正式規格.md#^qualification-and-aboriginal-stats'
 ```
 
 ## Verification

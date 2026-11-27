@@ -7,6 +7,7 @@ export const ImportFieldIssueSchema = z.strictObject({
   source: z.enum(['hcm', 'client_beclass']),
   owner: z.enum(['client_profile', 'client_beclass', 'order_terms']),
   field: z.string(), source_field: z.string(), code: z.string(), message: z.string(),
+  optional_skip_review_identity: z.string().min(1).nullish(),
 });
 export type ImportFieldIssue = z.infer<typeof ImportFieldIssueSchema>;
 const PageSchema = z.object({ data: z.object({

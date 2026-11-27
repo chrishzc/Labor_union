@@ -82,7 +82,7 @@
     }
     .bank-choice input { accent-color: var(--accent); width: 26px; height: 26px; flex: none; margin: 0; cursor: pointer; }
     #bank-fields { margin-top: 16px; }
-    .submit-panel button {
+    .submit-panel button, #submission-recovery {
       width: 100%;
       min-height: 56px;
       padding: 14px 20px;
@@ -96,8 +96,8 @@
       cursor: pointer;
       box-shadow: 0 4px 10px rgba(171, 66, 31, .2);
     }
-    .submit-panel button:hover:not(:disabled) { background: var(--accent-hover); }
-    .submit-panel button:disabled { opacity: .65; cursor: wait; }
+    .submit-panel button:hover:not(:disabled), #submission-recovery:hover:not(:disabled) { background: var(--accent-hover); }
+    .submit-panel button:disabled, #submission-recovery:disabled { opacity: .65; cursor: wait; }
 
     /* 長者友善接案偏好 Chip / Pill 切換標籤 */
     .preference-group {
@@ -173,6 +173,7 @@
     <p class="help">只需填寫要變更的欄位。工會核准後，整張申請的資料才會一起更新。</p>
   </header>
   <p id="status" class="status" role="status" aria-live="polite">正在確認 LINE 身分…</p>
+  <button id="submission-recovery" type="button" hidden aria-describedby="status">查詢原申請</button>
   <form id="form" hidden>
     <div class="section"><fieldset><legend>聯絡方式</legend><div id="contact" class="field-grid"></div></fieldset></div>
     <div class="section"><fieldset><legend>聯絡地址</legend><div id="address-fields" class="field-grid"></div></fieldset></div>
@@ -189,9 +190,9 @@
     <div class="section">
       <fieldset id="profile-photos">
         <legend>履歷網頁照片與證照</legend>
-        <p class="help" id="photo-privacy-notice">上傳前請確認個資已經遮蔽，若無遮蔽則視為不介意讓客戶得知。</p>
+        <p class="help" id="photo-privacy-notice">這張照片審核後可能給客戶看。上傳前，請先蓋住身分證字號、地址和電話。</p>
         <div class="field-grid">
-          <label>模板項目<select id="photo-template"><option value="">請選擇項目</option></select></label>
+          <label>這是什麼照片？<select id="photo-template"><option value="">請選照片種類</option></select></label>
           <label>選擇照片<input id="photo-files" aria-describedby="photo-privacy-notice" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled></label>
         </div>
         <p class="help" id="photo-status" role="status"></p>
@@ -226,7 +227,12 @@ const send = document.getElementById("send");
 const submitStatus = document.getElementById("submit-status");
 const replacement = document.getElementById("replace-bank");
 const bankFields = document.getElementById("bank-fields");
-let identity, snapshot, previousSubmission;
+const recovery = document.getElementById("submission-recovery");
+const submissionKey = "staff-profile-change:submission";
+const conflictKey = submissionKey + ":conflict";
+let submissionId = sessionStorage.getItem(submissionKey);
+let submissionConflict = Boolean(submissionId) && sessionStorage.getItem(conflictKey) === submissionId;
+let identity, snapshot, pendingSubmission;
 const photoForm = createProfilePhotoForm();
 const applicationStatuses = { pending: "待工會審核", approving: "工會處理中", approved: "已核准", rejected: "已退回", conflict: "資料已更新，請重新申請" };
 
@@ -499,13 +505,123 @@ function changes() {
 }
 
 async function request(path, body) {
-  const response = await fetch("/api/v1/line/staff-self-service/profile-change/" + path, {
-    method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
-    body: JSON.stringify({ ...identity, ...body })
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.detail?.error?.message || result.error?.message || "處理失敗，請核對資料後再試。");
-  return result.data;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch("/api/v1/line/staff-self-service/profile-change/" + path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+      body: typeof body === "string" ? body : JSON.stringify({ ...identity, ...body }),
+      signal: controller.signal
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      const detail = result?.detail?.error || result?.error;
+      const error = new Error(detail?.message || "處理失敗，請核對資料後再試。");
+      error.httpStatus = response.status;
+      error.definitive = Boolean(detail?.code) && [400, 401, 403, 404, 422].includes(response.status);
+      throw error;
+    }
+    return result?.data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function showSubmitError(message) {
+  submitStatus.textContent = message;
+  submitStatus.setAttribute("data-error", "");
+}
+
+function enableForm(enabled) {
+  send.disabled = !enabled;
+  form.inert = !enabled;
+}
+
+function clearSubmission() {
+  sessionStorage.removeItem(submissionKey);
+  sessionStorage.removeItem(conflictKey);
+  submissionId = null;
+  submissionConflict = false;
+  pendingSubmission = undefined;
+  recovery.hidden = true;
+}
+
+function showReceipt(receipt) {
+  if (!Number.isSafeInteger(receipt?.id) || receipt.id <= 0
+      || !Number.isSafeInteger(receipt.version) || receipt.version <= 0
+      || !Object.hasOwn(applicationStatuses, receipt.status)) {
+    throw new Error("還不知道工會有沒有收到這次申請。");
+  }
+  clearSubmission();
+  form.reset();
+  photoForm.clear();
+  form.hidden = true;
+  show("申請 #" + receipt.id + "，" + applicationStatuses[receipt.status], "receipt");
+  window.scrollTo(0, 0);
+}
+
+function showRecovery(message) {
+  enableForm(false);
+  const queryOnly = submissionConflict || !pendingSubmission;
+  recovery.textContent = queryOnly ? "查詢原申請" : "確認送出結果";
+  recovery.hidden = false;
+  const fallback = submissionConflict
+    ? "這次沒有送出。請按「查詢原申請」，或聯絡工會。"
+    : "還不知道工會有沒有收到。請按「" + recovery.textContent + "」，不用再填一次。";
+  show(message ?? fallback, "error");
+}
+
+async function sendSubmission(retrying = false) {
+  try {
+    showReceipt(await request("submit", pendingSubmission));
+  } catch (error) {
+    if (error.httpStatus === 409) {
+      submissionConflict = true;
+      pendingSubmission = undefined;
+      sessionStorage.setItem(conflictKey, submissionId);
+    } else if (!retrying && error.definitive) {
+      clearSubmission();
+      showSubmitError(error.message);
+      enableForm(true);
+      return;
+    }
+    showRecovery();
+  }
+}
+
+async function loadForm() {
+  snapshot = await request("query", {});
+  render(snapshot);
+  photoForm.load(snapshot.web_profile);
+  showApplications(snapshot.applications ?? []);
+  form.hidden = false;
+  enableForm(true);
+  show("", "ready");
+}
+
+async function recoverSubmission() {
+  if (!submissionId || recovery.disabled) return;
+  recovery.disabled = true;
+  try {
+    const result = await request("submission-status", { submission_id: submissionId });
+    if (result?.status === "not_received" && Object.keys(result).length === 1) {
+      if (submissionConflict) {
+        recovery.hidden = true;
+        show("本次申請未送出。申請狀態已變更，請聯絡工會確認。", "error");
+      } else if (pendingSubmission) {
+        show("正在重新送出原申請…");
+        await sendSubmission(true);
+      } else {
+        showRecovery("目前查不到這份申請，這頁也沒有剛才填的資料。請聯絡工會確認後再填。");
+      }
+    } else {
+      showReceipt(result);
+    }
+  } catch {
+    showRecovery();
+  } finally {
+    recovery.disabled = false;
+  }
 }
 
 replacement.addEventListener("change", () => {
@@ -514,9 +630,8 @@ replacement.addEventListener("change", () => {
 });
 form.addEventListener("submit", async event => {
   event.preventDefault();
-  if (send.disabled) return;
-  send.disabled = true;
-  form.inert = true;
+  if (send.disabled || submissionId) return;
+  enableForm(false);
   send.textContent = "正在送出…";
   submitStatus.textContent = "";
   submitStatus.removeAttribute("data-error");
@@ -524,24 +639,20 @@ form.addEventListener("submit", async event => {
     const proposed = changes();
     const photos = await photoForm.upload(identity);
     if (photos.length) proposed.web_contents = photos;
-    const signature = JSON.stringify(proposed);
-    if (previousSubmission?.signature !== signature) previousSubmission = { signature, id: crypto.randomUUID() };
-    const result = await request("submit", { ...proposed, basis: snapshot.basis, submission_id: previousSubmission.id });
-    form.reset();
-    photoForm.clear();
-    previousSubmission = null;
-    form.hidden = true;
-    show("申請 #" + result.id + "，" + (applicationStatuses[result.status] || "已送出"), "receipt");
-    window.scrollTo(0, 0);
+    const id = crypto.randomUUID();
+    sessionStorage.setItem(submissionKey, id);
+    submissionId = id;
+    pendingSubmission = JSON.stringify({ ...identity, ...proposed, basis: snapshot.basis, submission_id: submissionId });
+    await sendSubmission();
   } catch (error) {
-    submitStatus.textContent = error.message || "送出失敗，請再試一次。";
-    submitStatus.setAttribute("data-error", "");
+    showSubmitError(error.message || "無法準備送件，請再試一次。");
+    enableForm(true);
   } finally {
-    send.disabled = false;
-    form.inert = false;
     send.textContent = "送出整張申請";
   }
 });
+
+recovery.addEventListener("click", recoverSubmission);
 
 async function init() {
   try {
@@ -556,12 +667,12 @@ async function init() {
     }
     if (!token && !flow) throw new Error("請從 LINE 圖文選單開啟此頁。");
     identity = token ? { line_id_token: token } : { flow_id: flow };
-    snapshot = await request("query", {});
-    render(snapshot);
-    photoForm.load(snapshot.web_profile);
-    showApplications(snapshot.applications ?? []);
-    form.hidden = false;
-    show("", "ready");
+    if (submissionId) {
+      enableForm(false);
+      await recoverSubmission();
+    } else {
+      await loadForm();
+    }
   } catch (error) { show(error.message || "無法載入資料，請重新開啟。", "error"); }
 }
 init();

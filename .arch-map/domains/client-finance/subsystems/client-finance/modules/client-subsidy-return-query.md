@@ -22,6 +22,11 @@
 - outbound: `client-finance/pricing-configuration` — adapter 重用 `CASE_PRICING_FACTS_SQL`，typed facts 帶 `CasePricingTerms` 至 Domain，Query 不寫政策／個案設定。
 - inbound: `historical-payment-settlement-presentation` — 既有 FinancePage 補助退款頁籤。
 
+### 交接給會計清冊
+- 此補助退款 GET 的 `target_month` 只篩選投影到期月份，並可帶 `is_estimate`。它不是正式清冊資料來源；同案有預估不表示能匯出或已退款。
+- [Accounts Payable Export](../../../../staff-payables/subsystems/staff-payables/modules/accounts-payable-export.md) 按 #16A §3.2 另讀正式退款義務。一般退款與補助退款為不同義務；清冊按所選月底讀可出款的正數未退餘額，前期尚未退完可列入，未知日期或受款資料不自行補齊。月嫂款的原到期月份規則不適用於客戶退款。
+- 規格 #16A §3.2–3.3 所需的受款快照沿正式 Client Finance 來源，匯出只讀。既有 DB projection 的 `amount_due_ntd` 在此已是剩餘額；已核銷金額用於來源／一致性檢查，不從剩餘額重扣，也不改原到期日或建立退款義務。
+
 ## Verification
 - test_root: `tests/domains/client-finance/subsystems/client-finance/modules/client-subsidy-return-query/`
 - 靜態來源（`subsystems/client_finance/subsidy_return_query.py` L57–78）：應用層呼叫 `query_facts` 後，以正式退款資訊等 facts 產生投影、回傳 `is_estimate`，並在指定月份時依到期月份篩選；這段未呼叫 repository 寫入。此處不驗證 adapter、HTTP 端點或實際退款。

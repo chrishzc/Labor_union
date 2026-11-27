@@ -17,9 +17,9 @@
 
 表中路徑接在前綴後，GET 根路徑不附尾斜線。所有寫入必帶 `Idempotency-Key`、`X-Correlation-ID`。expected_revision 為最近一次成功讀回之整份 draft revision；初始化未建立用 0，正常版本為正整數。每次成功寫入均前移 draft_revision；只有 publish 同一次設定交易更新 published_revision。前端若仍有未存編輯，先儲存再發布；兩次寫入使用不同操作鍵。回執識別等於本次操作鍵。相同鍵及相同命令重送回原回執，不新增版本；同鍵不同內容回 409。Query 讀回的現況可以比回執更新，兩者不可互相覆寫。
 
-**資料型別。** `Layout = {categories: CategoryCard[]}`（陣列即顯示順序）。`CategoryCard = {category_id: string, name: string, title: string, description: string, footer_label: string, questions: QuestionLink[]}`；`QuestionLink = {qa_id: string, label: string}`，ID 和短文是版面資料，不含答案。名稱 trim 後 1–24 字、同一清單正規化 NFKC 加大小寫折疊後唯一；名稱是識別顯示，卡片標題另可編輯。標題發布時必填，最長 36；說明 ≤150、底部文字 ≤28、題目短文 ≤24，空說明省略；`footer_label` 僅相容舊版面資料，不提供編輯、不渲染為按鈕，不改寫既有版本。題目短文空白使用正式題目產生受限短標籤，Quick Reply 另驗其上限，不能直接複用 24 字 Flex 標籤。最多四筆、同卡 qa_id 不重複；同題可用在不同卡片。可儲存空卡；發布若卡片無有效題目或指定引用已停用則回欄位錯誤，不影響舊版。既有分類、題目各沿原固定 ID；新分類 ID 後端生成，不受名稱影響。分類按建立順序顯示，既有分類延續目前順序；分類排序、改名、刪除與自訂 CTA 目的地本輪不做。分類建立後可供題庫選擇；分類公開可見以 LINE 已發布版面為準。
+**資料型別。** `Layout = {categories: CategoryCard[]}`（陣列即顯示順序）。`CategoryCard = {category_id: string, name: string, title: string, description: string, footer_label: string, questions: QuestionLink[]}`；`QuestionLink = {qa_id: string, label: string}`，ID 和短文是版面資料，不含答案。名稱 trim 後 1–24 字、同一清單正規化 NFKC 加大小寫折疊後唯一；名稱是識別顯示，卡片標題另可編輯。標題發布時必填，最長 36；說明 ≤150、底部文字 ≤28、題目短文 ≤24，空說明省略；`footer_label` 僅相容舊版面資料，不提供編輯、不渲染為按鈕，不改寫既有版本。題目短文空白使用正式題目產生受限短標籤，Quick Reply 另驗其上限，不能直接複用 24 字 Flex 標籤。最多四筆、同卡 qa_id 不重複；同題可用在不同卡片。可儲存空卡；發布若卡片無有效題目或指定引用已停用則回欄位錯誤，不影響舊版。既有分類、題目各沿原固定 ID；新分類 ID 後端生成，不受名稱影響。分類按建立順序顯示，既有分類延續目前順序；分類排序、改名、刪除與自訂 CTA 目的地本輪不做。分類公開可見以 LINE 已發布版面為準。
 
-**視圖型別。** Preview 回 `view={category_id,title,description,footer_label,buttons:[{qa_id,label,question,answer}]}`；有失效引用時不塞假答案，回 `issues:[{code, field, qa_id?}]`，field 為具體欄位／陣列路徑。後台正式題庫用 `GET /api/v1/line/faq-layout/published-questions`，回 `items,categories,next_cursor:string|null`，須登入且具 LINE `CONFIG_MANAGE` 或 Knowledge `READ`／`MANAGE`／`PUBLISH`；接受 `cursor` 與 `limit`（預設 50，1–100）。後台管理端逐頁取得完整題庫，不另寫固定上限。以 stable qa_id 排序／游標，服務端先套 published 與 FAQ 投影再分頁；游標無效回 422，資料故障回 503，不當空清單。分類名稱從共用映射讀取，不依賴卡片是否上線；正式讀回不帶草稿／稽核／管理員資料。版面選題讀取相同的正式投影。題庫編輯以 Knowledge 管理權限呼叫 `GET /api/v1/knowledge/faq-categories`，`data.categories` 回 `{category_id,name}[]`，來源為版面共用分類。題目正式清單每筆帶 `version` 與可空的 `category_id`。管理端可用 `qa_id` 精確讀回單題，與 `cursor` 互斥，沿用清單回應。編輯既有題目需帶當前 `expected_version`（本輪在現有 ingest body 增加既有 QA 修訂的版本欄位，保持首次建立與非 QA 呼叫相容）；發布／停用沿原 `expected_version`，回既有 item/version/index_job，另以受權限保護的正式讀回確認正式結果。若有正在修改的草稿且題目仍有正式版，從最新編輯版本提交停用時須即時撤下正式版；不能因編輯狀態是 draft 而拒絕撤下。只有從未發布的 draft 不可用「停用正式版」命令。
+**視圖型別。** Preview 回 `view={category_id,title,description,footer_label,buttons:[{qa_id,label,question,answer}]}`；有失效引用時不塞假答案，回 `issues:[{code, field, qa_id?}]`，field 為具體欄位／陣列路徑。後台正式題庫用 `GET /api/v1/line/faq-layout/published-questions`，回 `items,categories,next_cursor:string|null`，須登入且具 LINE `CONFIG_MANAGE` 或 Knowledge `READ`／`MANAGE`／`PUBLISH`；接受 `cursor` 與 `limit`（預設 50，1–100）。後台管理端逐頁取得完整題庫，不另寫固定上限。以 stable qa_id 排序／游標，服務端先套 published 與 FAQ 投影再分頁；游標無效回 422，資料故障回 503，不當空清單。分類名稱從共用映射讀取，不依賴卡片是否上線；正式讀回不帶草稿／稽核／管理員資料。版面選題讀取相同的正式投影。具 Knowledge 管理權限可透過 `GET /api/v1/knowledge/faq-categories` 查詢共用分類，`data.categories` 回 `{category_id,name}[]`，來源為版面共用分類。題庫編輯流程依 [#29 §4.1](../../../../../requirements/29_LINE服務說明、客服互動與選單角色正式規格.md#41-共用問答與聊天室版面)。題目正式清單每筆帶 `version` 與可空的 `category_id`。管理端可用 `qa_id` 精確讀回單題，與 `cursor` 互斥，沿用清單回應。編輯既有題目需帶當前 `expected_version`（本輪在現有 ingest body 增加既有 QA 修訂的版本欄位，保持首次建立與非 QA 呼叫相容）；發布／停用沿原 `expected_version`，回既有 item/version/index_job，另以受權限保護的正式讀回確認正式結果。若有正在修改的草稿且題目仍有正式版，從最新編輯版本提交停用時須即時撤下正式版；不能因編輯狀態是 draft 而拒絕撤下。只有從未發布的 draft 不可用「停用正式版」命令。
 
 | 結果 | 前端下一步 |
 |---|---|
@@ -33,13 +33,15 @@
 
 - 新分類卡片用 `faq:v1:category:<category_id>`；題目用 `faq:v1:question:<qa_id>`。ID 不帶名稱、答案或個資；沿既有已驗證一對一事件的 Reply-only 路徑。解析器驗動作和 ID 格式，不接受任意操作；未知／停用導回常見問題或專員，來源故障明示暫不可用。新題目取正式答案時不等索引，其他搜尋不得以舊索引越過停用／未發布檢查。
 - 舊 message action 不會改寫：保留兩個舊分類指令和舊題目文字的精確對照；多筆同名不任選。既有服務進度與修改資料保留；舊 AI 指令只回 FAQ／留言指引。分類、題目與故障指引皆不提供 AI LIFF 或模型回覆。分類主選單使用 6 個問答分類為一頁，既有固定行動另保留，如有後頁才呈現下一頁、非首段可返回；用 `faq:v1:menu:<page>` 帶非負頁碼（首段為 0），無效或超界回首段，不以 Quick Reply 決定清單涵蓋範圍。Flex 與 Quick Reply 的各自限制見版面模組。
-- 對照匯入以既有 JSONL／舊卡片為來源清單，比對正式項目，不在 runtime 讀取。保留別名、順序、既有特殊政策說明；無唯一匹配列差異，不把舊答案偷偷發布或用文字硬接其他題。
+- 對照匯入以既有 JSONL／舊卡片為來源清單，比對正式項目。切換前的相容讀取可用 JSONL 辨識舊題目，答案仍取正式題庫。共用讀取啟用後，聊天室不讀 JSONL。保留別名、順序及既有特殊政策說明；無唯一匹配時列出差異。
 
 - 舊 `/line-service-help` 及 LIFF 問答 target 只回 410 聊天室指引；舊公開 FAQ 與 ask API 回 typed 410，沒有資料、推論或寫入。後台不提供回答測試、回饋分析、模型設定。其他 LIFF／引導動作不受影響。
 
 **結果未明的操作。** 同一瀏覽器分頁只保留原操作種類與識別，不保存草稿內容。請求結束即可切頁；返回或重新載入後，可用原鍵 GET 查回執並讀正式版。無回執時保持結果未明，不自動重送，也不換鍵再送。
 
-**LINE 文字上限。** 發布題目或引用於新版面前，以答案、來源及固定提示合成後的單則 Reply 文字核對 5,000 UTF-16 code units。超限保持舊正式版；既有超長題目仍可維護，客戶點擊時回聊天室留言指引，不靜默、不截斷正式答案。
+**LINE 題目回覆。** 成功回覆依 [需求書 #29 §4.1](../../../../../requirements/29_LINE服務說明、客服互動與選單角色正式規格.md#41-共用問答與聊天室版面)，payload 只含 `type: "text"` 和 `text: answer`。題庫發布、版面檢查和傳送前都以答案原文核對單則訊息的 5,000 UTF-16 code units 上限。超限維持舊正式版。歷史超長答案仍可維護，聊天室回既有留言指引。
+
+題庫刪除沿 [Knowledge 問答目錄](../../../../knowledge-retrieval/subsystems/knowledge-retrieval/modules/reviewable-qa-catalog.md)。前端在題目沒有正式答案時顯示「永久刪除」，確認後使用畫面讀到的題目版本送出。已發布版面的題目引用按現行正式題庫投影；已刪除題目無法再解析為答案。
 
 ## DB 交接與切換
 
@@ -55,10 +57,10 @@
 | 案例 ID（需求書 §4.1） | 應斷言的結果 | 主責與證據 |
 |---|---|---|
 | FAQ-01 新分類 | 空名／重名不寫；有效草稿可預覽但不能見於已發布選單；有正式題後發布、重新開啟可見 | 前端走一條 Playwright 旅程；後端 fake port 驗狀態與錯誤契約。 |
-| FAQ-02 正式 A／草稿 B | 草稿 B 兩通路都仍回 A；發布 B 後舊按鈕及後台正式讀回都回 B；停用後舊按鈕走指引；不能由索引補回 A/B | 後端用例與 consumer/provider 契約；隔離 LINE payload fixture，不稱官方宿主實測。 |
+| FAQ-02 正式 A／草稿 B | 草稿 B 兩通路都仍回 A；發布 B 後新、舊按鈕及後台正式讀回都回 B；停用後舊按鈕走指引；不能由索引補回 A/B | 比對完整 LINE payload 及後台正式讀回，包含換行與管理員自寫提醒。 |
 | FAQ-03 完整 FAQ | 101 筆已發布＋非 FAQ 及草稿混合；逐頁恰好 101 筆，未選入卡片也找得到；503 不顯示零筆真相 | 後端測受權限保護的正式讀回；前端驗跨頁與錯誤。 |
 | FAQ-04 原子與重送 | 同鍵同命令一次寫入；變更內容同鍵 409；交易內正式指標與回執已寫後、提交前注入失敗，新連線仍讀舊正式版且無本次回執 | DB 在隔離 MySQL 只驗受影響持久化、升級及回讀；不重跑業務矩陣。 |
 | FAQ-06 問答退役 | 訪客和客戶從選單進聊天室分類並收到正式答案；前置版本和舊手勢均不上 AI LIFF；舊公開入口回 410；無權限讀後台題庫失敗 | 程式合約驗 Reply-only／入口，Playwright 驗後台工作室；正式 LINE 另驗。 |
-| FAQ-05 舊入口 | 舊詞可唯一映射則取得當前正式版；歧義不猜、已停用或不存在不給舊答案；LINE 無 Push、無 Rich Menu 發布 | 後端／LINE 合約測試與 SDK payload 驗證；正式 LINE 真宿主需獨立驗收。 |
+| FAQ-05 舊入口 | 舊詞可唯一映射則取得當前正式版；歧義、已停用或只存在種子檔時不回答案；LINE 無 Push、無 Rich Menu 發布 | 後端／LINE 合約測試與 SDK payload 驗證，覆蓋答案原文的 UTF-16 上限。 |
 
 在既有 Knowledge／LINE 測試入口擴充案例並讓 GitHub CI 有明確選跑，不在地端跑測試檔。記 PR head、base、實際 checkout、run／attempt、實跑 test ID；工作流程綠但案例沒選到仍是 not_run。不把執行證據寫回設計文件。文件接手測試先用 FAQ-02：若需求未定草稿可見性就是 PM 缺口；需求已定但 API 只讀目前版本就是後端設計缺口；契約正確而草稿造成正式讀取消失就是實作問題；若 CI 沒選到，先補驗收證據，不判定產品通過。

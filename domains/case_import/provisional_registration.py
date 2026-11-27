@@ -7,14 +7,53 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-import re
 from typing import Any, Literal, Mapping
 
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+from domains.case_import.cooking_requirement import CookingRequirementDomainError, normalize_cooking_requirement
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from domains.case_import.refund_account import refund_fields_from_survey
 from domains.case_import.registration_details import HOLIDAY_DOUBLE_PAY_SURVEY_FIELD, normalize_holiday_double_pay, normalize_id_number, INGREDIENT_PURCHASE_SURVEY_FIELD, normalize_ingredient_purchase
 from shared_kernel.validation import require_canonical_text, require_positive_integer
+
+
+_LIFF_REQUIRED_CARE_TEXT_KEYS = (
+    "服務時間內是否有其他寶寶",
+    "哺乳方式：",
+    "5媽咪有無過敏體質：",
+    "特殊照護時應注意事項：",
+    "月子餐點調理喜好/飲食習慣：",
+    "呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？",
+    "2．餐飲含酒比例：",
+    "餐點喜忌備註：",
+    "透天服務樓層方式(會加收樓層費)",
+    "提供服務人員轎車停車位",
+)
+_LIFF_CARE_EXCLUSIVE_CHOICES = {
+    "洗澡水準備：": "不需另外準備",
+    "可以接受中藥補品：□茶飲 □藥飲 □藥膳": "無法接受中藥補品",
+    "3．料理用油：(可接受種類)": "不適用",
+    "烹煮工具": "無上述設備",
+}
+
+
+def has_valid_liff_care_answers(survey: Mapping[str, object]) -> bool:
+    for key in _LIFF_REQUIRED_CARE_TEXT_KEYS:
+        answer = survey.get(key)
+        if not isinstance(answer, str) or not answer.strip():
+            return False
+    for key, exclusive_choice in _LIFF_CARE_EXCLUSIVE_CHOICES.items():
+        answer = survey.get(key)
+        if not isinstance(answer, str):
+            return False
+        choices = {choice.strip() for choice in answer.split(",")} - {""}
+        if not choices or (exclusive_choice in choices and len(choices) > 1):
+            return False
+    try:
+        normalize_cooking_requirement(survey)
+    except CookingRequirementDomainError:
+        return False
+    return True
 
 
 class ProvisionalRegistrationIssue(StrEnum):
@@ -79,7 +118,9 @@ def build_provisional_registration_candidate(
     expected_date = _required(intent.expected_date, "expected date", 100)
     address = _required(intent.address, "address", 255)
     service_days = _service_days(intent.service_days)
-    passbook_image_id = _required(intent.passbook_image_id, "passbook image", 128)
+    passbook_image_id = intent.passbook_image_id
+    if intent.registration_kind == "subsidy" or passbook_image_id is not None:
+        passbook_image_id = _required(passbook_image_id, "passbook image", 128)
     optional = _optional_payload(intent)
     survey_details = dict(_survey_details(intent.survey_details))
     survey_details["特殊計費:胎數"] = _required_multi_birth_count(survey_details)
@@ -154,7 +195,8 @@ def build_provisional_registration_candidate(
         beclass["survey_details"]["_liff_meta"].update(
             page="non_citizen_registration", registration_kind="non_citizen"
         )
-    beclass["survey_details"]["_liff_meta"]["passbook_image_id"] = passbook_image_id
+    if passbook_image_id is not None:
+        beclass["survey_details"]["_liff_meta"]["passbook_image_id"] = passbook_image_id
     return ProvisionalRegistrationCandidate(
         line_user_id,
         client,
@@ -282,4 +324,5 @@ __all__ = [
     "ProvisionalRegistrationIntent",
     "ProvisionalRegistrationIssue",
     "build_provisional_registration_candidate",
+    "has_valid_liff_care_answers",
 ]

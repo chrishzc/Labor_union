@@ -260,12 +260,12 @@
     const registrationGroups = {
         citizen: {
             label: '新竹市民',
-            heading: '新竹市民｜市府平台登記狀態',
+            heading: '你已在市府網站登記了嗎？',
             actions: ['registered_city', 'apply_city'],
         },
         nonCitizen: {
             label: '非新竹市民',
-            heading: '非新竹市民｜工會申請狀態',
+            heading: '你要申請服務，還是連結 LINE？',
             actions: ['non_citizen_binding', 'non_citizen_registration'],
         },
     };
@@ -328,7 +328,7 @@
 
             if (!liff.getIDToken()) throw new Error('無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。');
             if (flowPurpose === 'staff_web_profile') {
-                if (!webProfileStaff || !webProfileInteraction) throw new Error('連結不完整，請從推薦訊息重新開啟。');
+                if (!webProfileStaff || !webProfileInteraction) throw new Error('這個連結打不開。請回到工會傳給你的 LINE 訊息，再點一次月嫂連結。');
                 const query = new URLSearchParams({ staff_id: webProfileStaff, interaction: webProfileInteraction });
                 navigateTo(`/line-staff-web-profile?${query}`, false);
                 return;
@@ -408,7 +408,7 @@
             if (group === 'nonCitizen') {
                 const hint = document.createElement('p');
                 hint.className = 'pending-hint';
-                hint.textContent = '已送出申請，還在等工會審核？請等候審核結果，無須重複填寫。';
+                hint.textContent = '送出成功後，填表頁會顯示申請編號。看到編號後，請等候工會審核，不用再填一次。';
                 container.append(hint);
             }
             const back = document.createElement('button');

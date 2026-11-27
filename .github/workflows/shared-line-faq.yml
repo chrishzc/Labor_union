@@ -11,7 +11,9 @@ on:
       - 'api/routes/line_ai_events.py'
       - 'api/routes/line_service_help.py'
       - 'db/**/1087_shared_line_faq.sql'
+      - 'db/**/1088_faq_permanent_delete_guard.sql'
       - 'db/**/labor_union_2026_11_26_shared_line_faq_v1*.json'
+      - 'db/**/labor_union_2026_11_27_faq_permanent_delete_guard_v1*.json'
       - 'db/cutover_releases/labor_union_validation_schema_v1.json'
       - 'db/fresh_schema/**'
       - 'db/schema_assembly/**'
@@ -91,6 +93,8 @@ jobs:
             node: ''
           - suite: cutover
             node: test_faq_cutover_preserved_release_reads_official_a_and_replays
+          - suite: interrupt-1088
+            node: test_faq_cutover_1088_resumes_after_drop_and_preserves_source
           - suite: ambiguous
             node: test_faq_cutover_blocked_keeps_legacy_readers[ambiguous]
           - suite: unproven
@@ -153,7 +157,7 @@ jobs:
           from scripts.bootstrap_disposable_mysql_schema import bootstrap
           database = os.environ["DB_DATABASE"]
           if os.environ["FAQ_SUITE"] == "regression":
-              for name, maximum in ((database + "_fresh", None), (database, 1086)):
+              for name, maximum in ((database + "_fresh", None), (database, 1086), (database + "_delete_upgrade", 1087)):
                   print(bootstrap(Namespace(host="127.0.0.1", port=3307, user="root", password="",
                                             database=name, confirm_database=name, max_schema_part=maximum)))
           password = secrets.token_urlsafe(24)
@@ -162,6 +166,9 @@ jobs:
               with connection.cursor() as cursor:
                   cursor.execute("CREATE USER 'lu_faq_ci'@'%%' IDENTIFIED BY %s", (password,))
                   cursor.execute(f"GRANT ALL ON `{database}`.* TO 'lu_faq_ci'@'%'")
+                  if os.environ["FAQ_SUITE"] == "regression":
+                      for target in (database + "_fresh", database + "_delete_upgrade"):
+                          cursor.execute(f"GRANT ALL ON `{target}`.* TO 'lu_faq_ci'@'%'")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
               env.write(f"LABOR_UNION_TEST_MYSQL_PASSWORD={password}\n")
           PY
@@ -172,6 +179,16 @@ jobs:
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_compatible_upgrade_rerun
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_publication_and_receipt_rollback
           tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_04_mysql_legacy_audit_and_backfill_rerun
+      - name: Verify permanent FAQ deletion on fresh and upgraded MySQL
+        if: matrix.suite == 'regression'
+        run: |
+          upgrade_db="${DB_DATABASE}_delete_upgrade"
+          DB_DATABASE="$upgrade_db" LABOR_UNION_TEST_MYSQL_DATABASE="$upgrade_db" python -m pytest -vv \
+            tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_delete_guard_upgrade_preserves_1087_rows_and_reruns \
+            tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_delete_mysql_permanent_purge_and_active_answer_guard
+          fresh_db="${DB_DATABASE}_fresh"
+          DB_DATABASE="$fresh_db" LABOR_UNION_TEST_MYSQL_DATABASE="$fresh_db" python -m pytest -vv \
+            tests/test_access_knowledge_disposable_mysql_e2e.py::test_faq_delete_mysql_permanent_purge_and_active_answer_guard
       - name: Verify preserved FAQ through controlled upgrade and reader cutover
         if: matrix.suite != 'regression'
         env:

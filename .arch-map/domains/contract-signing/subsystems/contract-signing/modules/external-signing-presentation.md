@@ -66,7 +66,42 @@
 - `.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
 - `.arch-map/requirements/12_Global_效能與UX體感架構.md`
 
+### 契約欄位投影與瀏覽器列印 ^signing-current-projection-print
+
+[需求書 §3.2](../../../../../requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#contract-current-projection-print) 定義列印範圍與欄位口徑。此投影使用目前來源，不要求先進入簽約、付款或正式排班。
+
+| 負責角色 | 正式約定與接線 | 去哪查 |
+| --- | --- | --- |
+| Client Finance、Orders／資料來源 | 客戶契約讀客戶時薪、各期預計繳款日與本案虛擬帳號。預計日不讀實際入帳日，不借月嫂費率。 | `infrastructure/mysql/contract_full_preview_repository.py` 的客戶投影 |
+| Scheduling、Payroll／資料來源 | 月嫂契約依精確分段對應同案、同人員的來源，讀各自服務區段與應付；不挪用其他月嫂或整案合計。不唯一時不猜。 | 同一 repository 的 `load_staff_projection` 與月嫂分段解析 |
+| Contract Signing／後端、前端 | `FullContractPreviewApplication` 選用核准模板、驗映射後套入 typed 欄位。缺值是提示，不同於列印技術阻擋。已登入的 A4 HTML 入口依請求重讀同一投影，不快取、不建立檔案版本或簽署狀態；送交的檔期阻擋屬 §3.3。 | `full_contract_preview.py`、`api/routes/contract_external_signing.py`、`contract_full_preview_client.ts` |
+
+驗證定位：`test_full_contract_preview.py` 的 `test_client_contract_uses_planned_due_dates_and_per_case_virtual_account`、`test_real_templates_render_multi_staff_summary_and_personal_service_days`、`test_preview_reports_null_required_owner_fact_without_blocking` 對照客戶日期、多人隔離及缺值。A4 版面另見 `test_browser_contract_renderer.py::test_browser_print_contains_full_approved_wording_and_a4_layout_without_pdf_engine`。此定位不宣稱實際瀏覽器列印或獨立的「訂單資訊－1／2、每週服務時間」三個介面已驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: signing-current-projection-print
+  target: '.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#^contract-current-projection-print'
+```
+
+### 交接紀錄與直接歸檔分開驗收
+
+- 規格 #21 §3.3 的「記錄已送交」只留下交接回執；不代表拿到已簽 PDF 或 Orders 完約。§3.4 的直接歸檔不要求交接回執或 session；操作人確認簽名及內容，系統檢查檔案、案件與當前目標，不以 PDF 格式驗證代替簽名查核。
+- 前端用案件的 `GET /api/v1/orders/{case_no}/contract-external-signing/signed-archive` 取得當前 `staff_segments` 與既有 `files`（未歸檔為 `null`）。同一路徑的 POST 接收客戶 PDF `client`，每份月嫂 PDF `staff` 必須對應同位置的 `staff_segment_ids`；後端以 segment ID 重核當前目標，不以月嫂姓名或檔名配對。若沒有可列出的月嫂分段，只需客戶 PDF；若有分段卻缺一份，拒絕整批。
+- **直接歸檔接線**：POST 使用 `multipart/form-data`；`client` 恰一份，每位月嫂各附一個 `staff_segment_ids` 整數與一個 `staff` 檔案，對齊重複欄位的順序。送 `Idempotency-Key` 和 `X-Correlation-ID` header。每份須為 `.pdf`、MIME `application/pdf`、`%PDF-` 檔頭且不超過 20 MiB；這不驗內容是否有簽名。GET 正式讀回 `data.staff_segments` 與 `data.files`；POST 成功回 `data.files`。每項檔案帶 `target`（`client` 或 `staff:{segment_id}`）、`filename`、`file_id`。
+- **錯誤與未知結果**：檔案／分段欄位數不符、檔案類型不符或超限是 422 `contract_external_signing_input_invalid`；缺漏、重複或非目前案件的必要目標在 owner 查驗回 409 `final_signed_contract_documents_incomplete`。同鍵異指紋回 409 `contract_signature_idempotency_conflict`。同頁逾時後如以「重新確認歸檔結果」重送，沿用同一人、同案、原 key 和完全相同的檔案。未讀回、已選檔或本機試算不顯示完約。
+- Contract Signing 依 `subsystems/contract_signing/final_document_workflow.py` 交 Controlled File 納管，並在同一交易記錄 Orders 完約與歸檔回執。成功回執可讀各目標的檔名及檔案識別；同一請求重送回原結果，不再完約一次。歸檔失敗不能標完約；已有的完約事實不因重送而覆寫。排班、訂金與帳務仍由各自的規格判定。
+
+### 前端接手與驗收邊界
+
+在案件「回收簽署文件」使用 `ContractExternalSigningActions`。首次進入由 GET 讀回目標與既有檔案，依當前分段列出獨立上傳欄位；少任何必要檔案時「儲存簽署文件」不可送出。送出中顯示歸檔處理，成功回應有正式檔案才顯示「簽約已完成」及檔名，再通知案件重新讀取。不要把送交已記錄、暫存或異常回應當作成功。
+
+**現行逾時處理**：在同一頁按「重新確認歸檔結果」會用保留的原檔與原操作識別重送 POST；重開頁面才走初始 GET。既有測試覆蓋同鍵重送。先唯讀查核的後續設計見 [#439 DS-01](https://github.com/chrishzc/Labor_union/pull/439)。
+
 ## Verification
+- 前端現況覆蓋：`contract_external_signing_actions.test.tsx` 的 `archives directly with no session, handoff, unsigned version, or ready scheduling` 與 `retains the files and reuses the same archive command after a timeout` 確認操作、回條與同命令重送；不是正式環境瀏覽器或 GET 優先驗收。
+- 直接歸檔接線對照：`test_contract_external_signing_api.py::test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_session` 核對 multipart 到既有歸檔入口，不要求先產生未簽版本或 session。
+- 歸檔應用層正反例：`test_final_document_workflow.py::test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files` 同時覆蓋只有客戶檔與另有月嫂分段、缺任何應傳檔拒絕、成功回讀、同鍵重送及不同內容衝突。`test_archive_storage_failure_rolls_back_without_recording_completion` 使用假交易與單份客戶 PDF，在第一次 `apply_borrowed` 就失敗，核對不保存回執、不標完約。若要驗證正式檔案、Orders 完約及歸檔回執一起回滾，需在三類紀錄均已寫入同一交易、尚未提交時令交易失敗，再用新連線確認三者皆未留下，並以同一組輸入的成功案例對照。若在第二份檔案寫入時就失敗，只能驗證第一份正式檔案紀錄回滾，以及尚未執行的完約與歸檔回執沒有寫入。檔案暫存早於正式交易，不要求跟著回滾。這些隔離案例也不驗通知或待辦看板推進。
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/`
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx` — L546–550 的既有介面測試斷言：後端未提供本機測試能力時，不顯示測試跳過操作。此案例不驗證後端授權或正式環境拒絕。
@@ -82,3 +117,13 @@
 
 ## Change triggers
 Reconcile when external signing presentation、recovery confirmation、unknown-outcome handling、final PDF readback、technical-detail disclosure or focused test location changes.
+
+### 已簽 PDF 歸檔：資料庫查核落點
+
+| 查核哪一筆 | 寫入或查詢位置 | 成功應讀到什麼 |
+| --- | --- | --- |
+| 每份客戶／月嫂 PDF | `controlled_file_objects`、`controlled_file_apply_receipts`（`db/schema_parts/1004_controlled_file_storage_foundation.sql`） | 用 API 回傳的 `file_id` 對 `opaque_object_id`，每個已提交目標有一個正式物件及其 Apply 回執。用 `source_staging_id` 連回暫存來源，不把暫存列當成歸檔成功。 |
+| 案件的完約事實 | `orders.contract_identity`、`order_contract_flow_events`、`order_lifecycle_state_events`、`orders_domain_outbox`（`infrastructure/mysql/order_contract_completion_repository.py::record_archived_completion`） | 尚未完約的案件寫入 `contract_completed` 完約與生命週期事件、更新案件版本並寫入投影 outbox。已有完約事件時保留原完約事實，不再寫一次；不能只用狀態文字推定有無完約。 |
+| 整次歸檔操作 | `contract_signing_command_receipts`（`db/schema_parts/166_contract_signing_workflow.sql`） | 以 `case_no`、`command_kind='archive_signed_contract'` 與 `idempotency_key` 查到一筆；`result_snapshot.files` 的各目標、檔名及識別與 API 讀回一致。資料表的唯一鍵是完整 `idempotency_key`，不是「案件＋鍵」。 |
+
+隔離 DB 驗收先記錄同案例的案件版本及各類正式紀錄數。成功組用至少兩份 PDF 走正式歸檔；在新連線驗上述寫入。負向組用同樣的前置情境，讓外層交易在三類寫入後、提交前失敗；在另一個新連線按同一操作與目標比對，案件狀態和版本無變更，正式物件及回執、完約事件及 outbox、歸檔回執均沒有新增。此處只驗持久化與交易邊界，不把模擬失敗當成正式環境事故，也不要求已先提交的暫存消失。

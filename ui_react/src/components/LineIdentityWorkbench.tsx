@@ -4,7 +4,7 @@ import { useStaffIdentityLabels } from './StaffIdentityProvider';
  * File: LineIdentityWorkbench.tsx
  * Description: 以三個任務分頁呈現真實 LINE 身分查詢、角色限定維護、人工審核與待配對流程。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
 import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
@@ -26,6 +26,7 @@ const roles: Record<LineBindingSubjectType, string> = { customer: '客戶', staf
 const reviewTypes = { client_rebind: '客戶重新綁定', staff_verification: '月嫂身分驗證', admin_binding: '內部人員綁定' };
 const reviewTypeFilters = ['client_rebind', 'admin_binding'] as const;
 const pageSize = 25;
+const menuSyncRefreshIntervalMs = 2000;
 const identity = () => globalThis.crypto.randomUUID();
 const reference = (item: LineIdentityBindingView | LineIdentityCandidate) => item.subject_type === 'staff' ? '月嫂' : item.subject_display_reference || `${roles[item.subject_type]} #${item.subject_reference}`;
 const phone = (value: string) => value.length > 4 ? `${value.slice(0, 2)}••••${value.slice(-3)}` : '••••';
@@ -157,9 +158,39 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
     set('binding_q',search,'');set('binding_role',role,'all');set('binding_page',String(page),'1');const suffix=params.toString();window.history.replaceState(window.history.state,'',`${window.location.pathname}${window.location.search}${route}${suffix?`?${suffix}`:''}`);
   },[role,search,page]);
   useEffect(() => {
-    const abort = new AbortController();setLoading(true);setListError(null);setResult(null);
-    const timer = window.setTimeout(() => { void (client.listBindings?.({ subject_type: role === 'all' ? undefined : role, search: search.trim() || undefined, page, page_size: pageSize }, { signal: abort.signal }) ?? Promise.reject(unavailable())).then(value => { if (!abort.signal.aborted) setResult(value); }).catch(error => { if (!abort.signal.aborted) setListError(errorText(error)); }).finally(() => { if (!abort.signal.aborted) setLoading(false); }); }, 150);
-    return () => { abort.abort();window.clearTimeout(timer); };
+    const abort = new AbortController();
+    setLoading(true);
+    setListError(null);
+    setResult(null);
+
+    const query = { subject_type: role === 'all' ? undefined : role, search: search.trim() || undefined, page, page_size: pageSize };
+    let timer: number;
+    async function readBindings(refreshingMenu: boolean): Promise<void> {
+      let continueRefreshing = refreshingMenu;
+      try {
+        const value = await (client.listBindings?.(query, { signal: abort.signal }) ?? Promise.reject(unavailable()));
+        if (abort.signal.aborted) return;
+        setResult(value);
+        setListError(null);
+        continueRefreshing = value.items.some(item => item.status === 'bound' && item.rich_menu_sync_status === 'pending');
+      } catch (error) {
+        if (abort.signal.aborted) return;
+        setListError(errorText(error));
+        if (error instanceof LineIdentityClientError && (error.code === 'UNAUTHENTICATED' || error.code === 'FORBIDDEN')) {
+          continueRefreshing = false;
+        }
+      }
+      setLoading(false);
+      if (continueRefreshing) {
+        timer = window.setTimeout(() => void readBindings(true), menuSyncRefreshIntervalMs);
+      }
+    }
+
+    timer = window.setTimeout(() => void readBindings(false), 150);
+    return () => {
+      abort.abort();
+      window.clearTimeout(timer);
+    };
   }, [client, role, search, page, reload]);
   useEffect(() => () => {
     rowController.current?.abort();
@@ -236,7 +267,7 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
         }, options) ?? Promise.reject(unavailable()));
         submitted = true;
         if (current.line_user_id !== item.line_user_id || current.subject_type !== item.subject_type) throw unavailable();
-        setRowNotice('選單同步已受理，請重新整理查看結果。');
+        setRowNotice('選單同步已受理。');
       } else {
         current = await readBinding(item, abort.signal, version);
       }
@@ -462,7 +493,11 @@ function ReviewPanel({ client, reload, onChanged }: { client: Client; reload: nu
   useEffect(()=>()=>controller.current?.abort(),[]);
   const load=async(id:number)=>{controller.current?.abort();const abort=new AbortController();controller.current=abort;setBusy(true);setError(null);try{const value=await(client.getReview?.(id,{signal:abort.signal})??Promise.reject(unavailable()));if(!abort.signal.aborted){if(value.request_id!==id||(minimumVersion.current!==null&&value.version<minimumVersion.current))throw unavailable();setDetail(value);setUncertain(false);minimumVersion.current=null;}}catch(error){if(!abort.signal.aborted)setError(errorText(error));}finally{if(!abort.signal.aborted)setBusy(false);}};
   const open=(id:number)=>{minimumVersion.current=null;setRequestId(id);setDetail(null);setDecision(null);setReason('');setNotice(null);setUncertain(false);void load(id);};
-  useEffect(()=>{const id=Number(new URLSearchParams(window.location.hash.split('?')[1]??'').get('review'));if(Number.isSafeInteger(id)&&id>0)open(id);},[]);
+  const openReviewFromLink = useEffectEvent((id: number) => open(id));
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('review'));
+    if (Number.isSafeInteger(id) && id > 0) openReviewFromLink(id);
+  }, []);
   const close=()=>{if(locked.current)return;controller.current?.abort();setRequestId(null);};
   const runPreview=async()=>{if(!detail||detail.status!=='pending'||!decision||busy||uncertain)return;const abort=new AbortController();controller.current=abort;setBusy(true);setError(null);try{const value=await(client.previewReviewDecision?.(detail.request_id,decision,{expected_version:detail.version,reason:reason.trim()},{signal:abort.signal})??Promise.reject(unavailable()));if(!abort.signal.aborted){if(value.request_id!==detail.request_id||value.decision!==decision)throw unavailable();key.current=identity();await apply(value);}}catch(error){if(!abort.signal.aborted)setError(errorText(error));}finally{if(!abort.signal.aborted)setBusy(false);}};
   const apply=async(preview:LineIdentityReviewPreviewView)=>{if(!key.current||locked.current||uncertain)return;locked.current=true;setBusy(true);setApplying(true);setError(null);const abort=new AbortController();controller.current=abort;try{const receipt=await(client.applyReviewDecision?.(preview.request_id,preview.decision,{expected_version:preview.expected_version,reason:reason.trim(),preview_fingerprint:preview.preview_fingerprint,idempotency_key:key.current},{signal:abort.signal})??Promise.reject(unavailable()));minimumVersion.current=receipt.version;setDetail(null);setNotice('審核決定已受理，請以最新查詢結果確認。');setUncertain(true);onChanged();await load(preview.request_id);}catch(error){if(!abort.signal.aborted){setError(errorText(error));if(error instanceof LineIdentityClientError&&error.outcomeUnknown){minimumVersion.current=preview.expected_version+1;setUncertain(true);}}}finally{locked.current=false;setBusy(false);setApplying(false);}};

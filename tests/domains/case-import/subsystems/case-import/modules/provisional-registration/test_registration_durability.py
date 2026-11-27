@@ -19,10 +19,15 @@ PREFIX = staging_module.PREFIX
 pytestmark = pytest.mark.skipif(os.getenv("REGISTRATION_REDIS_DURABILITY_TEST") != "1", reason="exact disposable Docker instance required")
 
 
-def container():
+def container() -> str:
     name = os.environ["REGISTRATION_REDIS_TEST_CONTAINER"]
-    assert name == "lu-test-registration-20261105"
-    identity = subprocess.check_output(["docker", "inspect", name, "--format", "{{.Id}}"], text=True).strip()
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        assert name == f"registration-receipt-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+    else:
+        assert name == "lu-test-registration-20261105"
+    identity = subprocess.check_output(
+        ["docker", "inspect", name, "--format", "{{.Id}}"], text=True, timeout=10,
+    ).strip()
     assert identity == os.environ["REGISTRATION_REDIS_TEST_CONTAINER_ID"]
     return name
 
@@ -42,14 +47,20 @@ def test_acknowledged_pending_and_high_water_survive_ungraceful_restart(stores):
     name = container()
     value, key = candidate(), str(uuid4())
     first = intake.submit(value, key)
-    subprocess.run(["docker", "kill", "--signal", "KILL", name], check=True, capture_output=True)
-    subprocess.run(["docker", "start", name], check=True, capture_output=True)
+    subprocess.run(["docker", "kill", "--signal", "KILL", name], check=True, capture_output=True, timeout=20)
+    subprocess.run(["docker", "start", name], check=True, capture_output=True, timeout=20)
     wait_ready(admin)
     after = admin.get(first.registration_id)
     assert after.status == "pending" and after.expires_at_utc == first.expires_at_utc
-    assert after.candidate.payload_fingerprint == value.payload_fingerprint
+    assert after.candidate is not None and after.candidate.payload_fingerprint == value.payload_fingerprint
     assert int(admin.client.get(PREFIX + "counter")) >= first.registration_id
+    saved = intake.status_for_submission(value.line_user_id, key)
+    assert saved is not None and saved.registration_id == first.registration_id and saved.status == "pending"
+    assert saved.submitted_at_utc == first.submitted_at_utc
     assert intake.submit(value, key).registration_id == first.registration_id
+    pending = admin.pending(after_id=first.registration_id - 1)
+    assert [item.registration_id for item in pending] == [first.registration_id]
+    assert pending[0].candidate == value
     admin.reject(first.registration_id, 1, "synthetic-admin")
 
 

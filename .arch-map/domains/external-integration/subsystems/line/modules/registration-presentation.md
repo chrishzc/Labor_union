@@ -18,19 +18,27 @@
   - `/api/v1/line/identity/registration/preview`
   - `/api/v1/line/identity/registration/apply`
 
-一般文字、按鈕與成功提示套用目前 LIFF 設定；正式結果狀態及申請編號由實際回執顯示。
+一般文字、按鈕與成功提示套用目前 LIFF 設定；正式結果狀態及申請編號由實際回執顯示。 客戶的送件結果不顯示內部待審到期時間；實際已到期時，仍顯示狀態與重新申請入口。 客戶提示只說明收件狀態和下一步，不顯示內部錯誤代碼或問卷清理狀態；結果未明仍先查原申請，同一筆確認未收到才重送。
 
 ## Dependencies
 - outbound: `case-import` — 只經既有 typed registration Preview／Apply contract 建立或讀取 provisional registration。
 - outbound: `external LINE LIFF runtime` — 已驗證身分的瀏覽器 transport；不得以 query string user ID 作身分證明。
 
+## Implementation status
+- 候選版本 `9dd304bc70b1922058b9bb5d854ca37b3bec5365` 已移除非市民正式頁與表單工作室唯讀預覽的存摺圖片控制項、本地圖片驗證及上傳動作。正式送件明傳 `registration_kind="non_citizen"` 並省略 `passbook_image_id`；銀行文字欄位與原驗證保留，一般市民維持圖片必填及原上傳流程。後端共用 schema、Preview／Apply 與核准收尾的實作見 [Case Import provisional-registration](../../../../case-import/subsystems/case-import/modules/provisional-registration.md#current-implementation)，驗收依 Case Import `NC-PASSBOOK-01～04`。
+
 ## Contracts
-- `.arch-map/requirements/20_LINE客服與月嫂自助服務正式規格.md` §2、§4 — LIFF 身分與需求調查的 transport boundary。
-- `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md` §4 — registration Preview 零正式寫入，Apply 交由 current owner contract。
-- Apply 成功呈現待工會核准及申請編號；未核准時 client／beclass IDs 為 null，不宣稱完成綁定或已建立正式客戶。
+- [LINE §5.2](../../../../../requirements/20_LINE客服與月嫂自助服務正式規格.md#52-手機審核中心db-版控-liff-設定與非市民入口契約) — LIFF 設定、非市民入口及正式頁／表單工作室預覽邊界。
+- [Case Import §3.1](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#31-非市民進件與配號nc-entrync-formnc-approvalnc-numbernc-stat) — `NC-FORM-01～02` 表單契約；[§5](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#5-驗收標準) 定義 `NC-PASSBOOK-01～04`。
+- 市民與非市民使用共用表單標示並阻擋漏填「訂單資訊 2」相關 BeClass 欄位與中藥補品題。公開收件 Preview／Apply 由 Case Import 規則判定新申請所需答案。
+- [服務閘道 §2](../../../../../requirements/29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 定義 Gateway 與非市民登記入口；送件及正式核准以 Case Import §§3.1–3.2 為權威，後端接線由 [provisional-registration](../../../../case-import/subsystems/case-import/modules/provisional-registration.md#handoff-boundaries) 承接，不引用知識庫 §4 作 registration 契約。
+- 非市民 LIFF 的服務方式只顯示「週休 1 日／週休 2 日」；後台手動新案保留「連續服務」。生產方式、居住型態及固定每日服務時段仍與後台對齊。多選問卷欄標示「可複選」，不改 Preview／Apply 的送件與正式核准責任。業務規則以 `.arch-map/requirements/17B_Case_Import與非市民Redis待審正式規格.md` §3.1 為準。
+- 收件成功、可離頁提示及原申請重送依 [Case Import §3.1](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#送件欄位與原申請查詢)。
 
 ## Verification
-- test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py` — 既有靜態案例核對初始化失敗分支會顯示錯誤，並停用表單所有控制項。
+- test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py` — Chromium 驗證非市民正式頁、工作室預覽及市民表單的實際 DOM 與送件序列；既有靜態案例保留初始化失敗時停用控制項等檢查。
+
+- 候選 `9dd304bc…` 的[專項 CI](https://github.com/chrishzc/Labor_union/actions/runs/45854012939/job/140027497325) 已執行並通過 41 個表單／API 案例及 1 個隔離 MySQL 案例，包含正式頁與工作室無圖片入口、非市民零上傳、市民圖片規則及銀行文字驗證。Chromium 使用合成 LIFF／API 回應；不代表正式環境已部署或真實 LINE provider 已驗收。
 
 ## Change triggers
 Reconcile when registration page、local input validation、Preview／Apply entrypoint、LIFF identity boundary 或 focused static contract test changes。

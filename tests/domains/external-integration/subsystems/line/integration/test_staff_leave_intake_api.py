@@ -2,7 +2,9 @@
 Description: 驗證月嫂請假 LIFF 的 Preview、Apply 與 staff-scoped readback 契約。
 """
 
+from contextlib import nullcontext
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -15,6 +17,7 @@ from api.schemas.line_staff_self_service import (
 )
 from domains.line.identities import LineUserId
 from domains.scheduling.staff_leave_intake import StaffLeaveRequestStatus
+from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.scheduling.staff_leave_intake_workflow import (
     StaffLeaveIntakeWorkflowError,
     StaffLeaveRequestSnapshot,
@@ -86,3 +89,63 @@ def test_readback_is_scoped_to_verified_staff_and_redacts_line_identity(monkeypa
     assert result.data["leave_reason"] == "返鄉"
     assert "line_user_id" not in result.data
     assert "request_fingerprint" not in result.data
+
+
+
+@pytest.mark.parametrize(
+    ("staff_id", "line_user", "accepted", "expected"),
+    [
+        (7, "U-original", False, "draft_saved"),
+        (7, "U-original", True, "group_received"),
+        (8, "U-original", True, "not_received"),
+        (7, "U-foreign", True, "not_received"),
+    ],
+)
+def test_postponement_receipt_uses_original_actor_and_group_event(monkeypatch, staff_id, line_user, accepted, expected):
+    case_no = "SYNTHETIC"
+    key = "91af7142-1111-4111-8111-fa1c00b1f00d"
+    unit = SimpleNamespace(_connection=object())
+    calls = []
+    draft = {
+        "staff_id": 7,
+        "assignment_id": 10,
+        "line_actor_fingerprint": fingerprint_payload({"line_user_id": "U-original"}).value,
+        "group_binding_version": 3,
+    }
+
+    def load(unit_of_work, family, case, proposal_ref):
+        assert unit_of_work is unit
+        assert family == staff_leave_intake.POSTPONEMENT_DRAFT_FAMILY
+        assert case == case_no
+        assert proposal_ref == staff_leave_intake.postponement_proposal_ref(case_no, key)
+        return draft
+
+    def require_assignment(_, case, staff, assignment, changes):
+        assert (case, staff, assignment, changes) == (case_no, 7, 10, ())
+        calls.append("assignment")
+
+    def observed_group(unit_of_work, case, proposal_ref):
+        assert unit_of_work is unit
+        assert case == case_no
+        assert proposal_ref == staff_leave_intake.postponement_proposal_ref(case_no, key)
+        calls.append("group")
+        return accepted
+
+    monkeypatch.setattr(staff_leave_intake, "_verified_staff_context", lambda _: (LineUserId(line_user), {"staff_id": staff_id}))
+    monkeypatch.setattr(staff_leave_intake, "open_line_unit_of_work", lambda: nullcontext(unit))
+    monkeypatch.setattr(staff_leave_intake, "load_group_helper_proposal", load)
+    monkeypatch.setattr(staff_leave_intake, "build_service_start_application", lambda _: object())
+    monkeypatch.setattr(staff_leave_intake, "postponement_group_binding", lambda *_: SimpleNamespace(version=SimpleNamespace(value=3)))
+    monkeypatch.setattr(staff_leave_intake, "require_postponement_assignment", require_assignment)
+    monkeypatch.setattr(staff_leave_intake, "postponement_group_received", observed_group)
+
+    result = staff_leave_intake.leave_defer_status(staff_leave_intake.StaffLeaveDeferStatusRequest(
+        case_no=case_no, assignment_id=10, idempotency_key=key,
+    )).data
+
+    if expected == "not_received":
+        assert result == {"status": "not_received"}
+        assert calls == []
+    else:
+        assert result == {"status": expected, "case_no": case_no, "assignment_id": 10, "idempotency_key": key}
+        assert calls == ["assignment", "group"]

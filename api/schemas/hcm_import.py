@@ -111,10 +111,12 @@ class HcmReviewSkipApplyBody(BaseModel):
 class HcmReviewFieldSkipPreviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     source_field: str = Field(min_length=1, max_length=191)
+    optional_only: bool = False
 
 
 class HcmReviewFieldSkipApplyBody(HcmReviewSkipApplyBody):
     source_field: str = Field(min_length=1, max_length=191)
+    optional_only: bool = False
 
 
 class HcmCurrentReviewView(BaseModel):

@@ -69,6 +69,12 @@
 
 ### 從銀行匯入到成功明細匯出 ^statement-export-admission
 
+```yaml archmap-impact
+- kind: implements_requirement
+  source: statement-export-admission
+  target: '.arch-map/requirements/22_銀行流水匯入與帳務異常處理正式規格.md#^bank-statement-export-admission'
+```
+
 - Finance Import 保存原始銀行流水及去重識別；預覽、202 受理和待核對都不是入帳。客戶與月嫂實際收付、政府整期入款，分別由原帳務模組重驗及提交。此工作台只組合讀回，不以畫面狀態補寫帳本。
 - 驗收：用同一筆合成銀行流水。僅匯入、預覽或留待核對時，「匯出對帳明細」沒有該筆；正式核銷且讀回原帳務模組的成功證據後，匯出恰有一筆原始流水。重新查詢同一筆不會重新入帳或增加匯出列。測試位置見下方 `test_statement_archive_mysql.py`。
 
@@ -95,10 +101,10 @@
 - 工作台 Query 投影期別、應繳、實收與方案來源。收付命令提交成功後重查同案。預檢及正式確認共用辨識規則，見下方「核銷後辨識補助方案」。
 - 逐案直付安排依 22A §3 重讀正式總額、有效實收、補助與銀行事實。後續出現衝突時保留原安排並投影原因。時間留 UTC ISO 及臺北顯示，沿原案件服務日與到期日。
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
-- 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。正式核銷資訊只來自原 owner 回讀；通知仍由 [LINE payment-overdue-reminders](../../../../external-integration/subsystems/line/modules/payment-overdue-reminders.md) owner 負責，各核銷工具保留原 writer。
+- 案件抽屜沿既有摘要、客戶期款、補助方案、月嫂應付及客戶退款／政府款檢視。單筆交易核對保存原來源與用途，案件檢視不重作一份交易明細；往返保留原交易、清單篩選與核對／明細入口，返回重查使舊預覽失效，不自動提交。待核對列使用「核對交易」；已核銷列使用「查看交易」，原始事實和正式核銷明細唯讀。台新出款判為退客戶先墊補助時，只在原流水核對同案客戶退款，不帶入月嫂義務或開「單筆人工核對」。該人工入口限台新月嫂補助出款，須由後端確認同案月嫂、正式應付與人工核對資格。任何不足以核對的列顯示原因；可確認案件時仍可查看本案帳務，查看不等於核銷。正式核銷資訊只來自原 owner 回讀；通知仍由 [LINE payment-overdue-reminders](../../../../external-integration/subsystems/line/modules/payment-overdue-reminders.md) owner 負責，各核銷工具保留原 writer。
 - 客戶收款面板的全案餘額同時消費既有 Receipt Query 與案件帳務 Query：只彙總版本一致、來源完整的客戶應收正式餘額；缺來源、缺列或未知餘額保留待確認，不從未清清單為空推定結清，也不加入月嫂應付或退款結清門檻。正式成功後依收據版本與回讀再次確認。
 
-### 結束服務後確認永豐入款（待實作） ^sinopac-late-receipt-routing
+### 結束服務後確認永豐入款 ^sinopac-late-receipt-routing
 
 ```yaml archmap-impact
 - kind: implements_requirement
@@ -106,12 +112,15 @@
   target: '.arch-map/requirements/04_Client_Finance_Domain.md#^sinopac-late-receipt-refund'
 ```
 
-- Finance Import 從原單筆核對入口帶入 `row_identity`、原永豐入款事實及已確認案件；Query／Preview 說明無法配對的原因，不寫帳。普通永豐入款仍沿原期款匹配；當已確認同案入款但因零服務取消或提前結束沒有可用期款時，移交 Client Finance 專責結算，不放寬一般無期款入款。提前結束讀 Orders 正式服務結果，不以取消事件為必要條件。
-- Client Finance 的 Apply 在同一外層交易重驗來源、案件、結算版本及既有收付，沿原收款與差額／退款 writer 保存可追溯的正式入款與待退款，回傳正式結果。以同一銀行流水及既有命令規則防重；失敗不留下單邊紀錄。既有出款核對仍只結清正式退款，不把這一路徑當退款出款。
+- Finance Import 從原單筆核對入口帶入 `row_identity`、原永豐入款事實及 `service_end_case_no`。款項仍是待核對；能由原流水唯一查回同案，不代表已正式收款。既有 `POST /api/v1/finance-import/corrections/preview` 說明可否配對及結算估算，不寫帳；同一入口確認走 `corrections/apply`，HTTP 202 只表示受理，須讀回原 correction outcome 才能判定正式結果。普通永豐入款仍沿原期款匹配；當已確認同案入款但因零服務取消或提前結束沒有可用期款時，移交 Client Finance 專責結算，不放寬一般無期款入款。提前結束讀 Orders 正式服務結果，不以取消事件為必要條件。
+- Client Finance 的 Apply 在同一外層交易重驗來源、案件、結算版本及既有收付，沿原收款與差額／退款 writer 保存可追溯的正式入款與待退款，回傳正式結果。以同一銀行流水與既有命令規則防重；同一操作鍵同內容回原收據，異內容回衝突。失敗不留下單邊紀錄。
+- 寫入定位：`FinanceImportCorrectionWorkflow.correct_and_post` 擁有外層交易；Client Finance 由 `client_service_end_receipt_preview.py` 核對歸屬及正式服務證據，再由 `client_service_end_receipt_writer.py` 寫原入款與待退款。現行 writer 重用超收退款投影 SQL，新增待退款的 `due_date` 寫 `NULL`；不把銀行交易日當退款到期日，也不據此宣稱出款配對已驗。既有出款核對仍只結清正式退款，不把這一路徑當退款出款。
 - 前端維持「核對交易」單一入口，預覽分列入款、服務應付、適用費用及待退款；確認後重讀原流水及案件帳務。後端驗匯入順序、重送及錯案拒絕；前端驗入款方向不變、待退款與已出款不混淆。業務計算先用替身測試，只對新增持久化行為補交易回滾與防重契約驗證。
 
 ## Verification
 - layout_status: `custom_current`
+- `integration_root`: `tests/domains/finance-import/subsystems/finance-import/integration/test_accounting_event_matrix_mysql.py`：`test_terminal_sinopac_receipt_cancels_without_inventing_receivable`、`test_terminal_sinopac_receipt_uses_formally_shortened_service_without_cancellation`，用隔離 MySQL 驗證取消與提前結束的兩種匯入順序、原入款／待退款落帳，以及不新增出款。
+- `test_root`: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/bank_reconciliation_workspace.test.tsx`：`keeps one terminal Sinopac review mounted from bank selection to a verified receipt`，以模擬 API 驗證單一表單、預覽與手動確認；不代表真實 Chrome 或正式部署驗收。
 - test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py` — 既有模擬案例核對現金無法跨統計範圍加總時，到期款查詢與匯出仍可使用。
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement.py`
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py` — 隔離 MySQL 驗證一般／歷史未確認補助計算、兩種台新受款方案、Preview 零寫入、原 Apply 建款核銷、同月唯一及多案選擇、原六碼備註入庫、提前確認、來源過期與失敗整筆回滾。

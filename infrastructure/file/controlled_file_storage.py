@@ -485,13 +485,6 @@ class FileSystemControlledFileStorage:
         )
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            from infrastructure.file.storage_layout import STAFF_DIRECTORY
-            if reference.parts[0] == STAFF_DIRECTORY and len(reference.parts) >= 4:
-                for section in ("resume", "certificates", "health_and_police"):
-                    sibling = root / reference.parts[0] / reference.parts[1] / section
-                    if sibling.is_symlink() or sibling.is_junction():
-                        raise ControlledFileStorageError("controlled_file_reference_invalid", "檔案識別超出受控儲存範圍", retryable=False)
-                    sibling.mkdir(exist_ok=True)
             if any(path.is_symlink() or path.is_junction() for path in _path_chain(root, target)):
                 raise ControlledFileStorageError(
                     "controlled_file_reference_invalid",

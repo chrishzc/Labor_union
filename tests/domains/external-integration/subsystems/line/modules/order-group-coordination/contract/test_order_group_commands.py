@@ -13,7 +13,13 @@ from shared_kernel.identities import ExpectedVersion
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.order_group_application import LineOrderGroupApplication
-from subsystems.line.order_group_contracts import LineOrderGroupInvitationSettings, OrderLineAudience
+from subsystems.line.order_group_contracts import (
+    GroupBindingPreviousReply,
+    GroupBindingReplyStage,
+    LineOrderGroupInvitationSettings,
+    OrderLineAudience,
+    group_binding_reply_key_prefix,
+)
 
 NOW = datetime(2026, 10, 22, tzinfo=timezone.utc)
 URL = 'https://line.me/R/ti/g/example'
@@ -74,6 +80,8 @@ class Uow:
     def __init__(self):
         self.order_groups = Groups()
         self.delivery_tasks = Deliveries()
+        self.events = {}
+        self.webhook_inbox = NS(latest_group_binding_reply=self.latest_group_binding_reply)
         self.audience = OrderLineAudience(CASE, LineUserId('U-customer'), (LineUserId('U-staff'),))
         self.order_audiences = NS(get=lambda case: self.audience)
         self.admins = NS(get_linked_admin=lambda user: NS(admin_user_id=7, role='line_agent'))
@@ -85,10 +93,18 @@ class Uow:
     def __exit__(self, *args): return False
     def commit(self): self.commits += 1
 
+    def latest_group_binding_reply(self, event):
+        prefix = group_binding_reply_key_prefix(event)
+        for key, request in reversed(self.delivery_tasks.requests.items()):
+            if key.startswith(prefix):
+                stage = GroupBindingReplyStage(key.rsplit(':', 1)[-1])
+                return GroupBindingPreviousReply(stage, self.events[request.source_aggregate_identity])
+        return None
+
 
 def inbox(text, event_id='event-1'):
     return NS(event=NS(source=NS(source_type=LineSourceType.GROUP, source_id='C-group', user_id=LineUserId('U-admin')),
-              event_id=NS(value=event_id), occurred_at=NOW,
+              destination_id=NS(value='U-destination'), event_id=NS(value=event_id), occurred_at=NOW,
               payload_json=json.dumps({'message': {'type': 'text', 'text': text}})))
 
 
@@ -103,6 +119,86 @@ def replies(uow):
 
 def invitations(uow):
     return [r for r in uow.delivery_tasks.requests.values() if r.source_aggregate_type == 'line_order_group_invitation']
+
+
+def guided_message(uow, text, seconds, *, group='C-group', sender='U-admin', inline=True, event_id=None):
+    message = inbox(text, event_id or f'guided-{group}-{sender}-{seconds}')
+    message.event.occurred_at = NOW + timedelta(seconds=seconds)
+    message.event.source.source_id = group
+    message.event.source.user_id = LineUserId(sender)
+    uow.events[message.event.event_id.value] = message.event
+    app = LineOrderGroupApplication(lambda: message.event.occurred_at)
+    handle = app.handle_reply if inline else app.handle_message
+    return handle(message, uow)
+
+
+def test_guided_binding_replies_at_each_step_then_queues_private_invitations_once():
+    uow = Uow()
+    assert guided_message(uow, '綁定群組', 1)
+    assert replies(uow) == ['請輸入要綁定的案號。']
+    assert guided_message(uow, CASE, 3, inline=False)
+    assert '右上角設定' in replies(uow)[-1] and '邀請網址' in replies(uow)[-1]
+    assert uow.order_groups.settings is None and invitations(uow) == []
+
+    assert guided_message(uow, URL, 5)
+    assert uow.order_groups.settings.invitation_url == URL
+    assert '排入發送' in replies(uow)[-1]
+    assert {request.recipient.identity.value for request in invitations(uow)} == {'U-customer', 'U-staff'}
+    assert all(request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+               for request in uow.delivery_tasks.requests.values() if request.recipient.recipient_type.value == 'group')
+    assert not guided_message(uow, URL, 5)
+    assert not guided_message(uow, URL, 6)
+    assert len(invitations(uow)) == 2
+
+
+def test_guided_binding_ignores_other_sources_and_expired_messages_and_retries_invalid_url():
+    uow = Uow()
+    assert guided_message(uow, '綁定群組', 1)
+    assert not guided_message(uow, CASE, 2, sender='U-other')
+    assert not guided_message(uow, CASE, 2, group='C-other')
+    assert guided_message(uow, CASE, 3)
+    assert not guided_message(uow, URL, 2)
+    for seconds, bad_url in enumerate(('https://example.com/invite', 'line.me/R/ti/g/example'), start=4):
+        assert guided_message(uow, bad_url, seconds)
+        assert '邀請連結格式不正確' in replies(uow)[-1]
+    assert not guided_message(uow, URL, 604)
+    assert uow.order_groups.settings is None and invitations(uow) == []
+
+
+def test_guided_binding_rechecks_permission_and_payment_before_writing():
+    uow = Uow()
+    assert guided_message(uow, '綁定群組', 1)
+    assert guided_message(uow, CASE, 3)
+    uow.admins.get_linked_admin = lambda user: None
+    assert guided_message(uow, URL, 4)
+    assert '工會人員' in replies(uow)[-1]
+    uow.admins.get_linked_admin = lambda user: NS(admin_user_id=7, role='line_agent')
+
+    def unpaid(case_no):
+        raise RuntimeError('settled_deposit_required_for_line_group')
+
+    uow.order_audiences.get = unpaid
+    assert guided_message(uow, URL, 5)
+    assert '訂金尚未確認入帳' in replies(uow)[-1]
+    assert uow.order_groups.settings is None and invitations(uow) == []
+
+
+def test_guided_second_invitation_failure_propagates_to_outer_transaction():
+    uow = Uow()
+    assert guided_message(uow, '綁定群組', 1)
+    assert guided_message(uow, CASE, 3)
+    enqueue = uow.delivery_tasks.enqueue
+
+    def fail_second_invitation(request):
+        if request.recipient.identity.value == 'U-staff':
+            raise KeyError('invitation enqueue failed')
+        enqueue(request)
+
+    uow.delivery_tasks.enqueue = fail_second_invitation
+    with pytest.raises(KeyError, match='invitation enqueue failed'):
+        guided_message(uow, URL, 5)
+    assert len(replies(uow)) == 2
+    assert uow.commits == 0
 
 
 @pytest.mark.parametrize('separator', [' ', '   ', '\u3000', '\n', '\r\n', '\t\n\u3000'])
