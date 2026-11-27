@@ -215,24 +215,24 @@ const list = descendants(card).find(node => node.tag === 'ol');
 assert(list, '群組綁定需要依序顯示三個步驟');
 const [start, number, url] = list.children;
 assert.equal(list.children.length, 3);
-assert.match(visibleText(start), /綁定群組/);
+assert.equal(descendants(start).find(node => node.tag === 'code')?.textContent, '綁定訂單');
 assert.match(visibleText(number), new RegExp(caseNo));
 assert.match(visibleText(url), /右上角.*設定.*邀請.*邀請網址/);
 assert.match(visibleText(url), /綁定成功後，系統會依資格將客戶與已綁定 LINE 的指派月嫂的私人邀請排入發送。/);
-assert.doesNotMatch(visibleText(card), /綁定訂單|複製設定格式|發送邀請/);
+assert.doesNotMatch(visibleText(card), /綁定群組|複製設定格式|發送邀請/);
 
 const copyButton = (step, label) => descendants(step).find(node => node.tag === 'button' && node.textContent === label);
-const copyStart = copyButton(start, '複製綁定群組');
+const copyStart = copyButton(start, '複製綁定訂單');
 const copyNumber = copyButton(number, '複製案件編號');
 assert(copyStart);
 assert(copyNumber);
 await copyStart.listeners.click();
 await copyNumber.listeners.click();
-assert.deepEqual(copied, ['綁定群組', caseNo]);
+assert.deepEqual(copied, ['綁定訂單', caseNo]);
 
 clipboardDenied = true;
 await copyNumber.listeners.click();
-assert.deepEqual(copied, ['綁定群組', caseNo]);
+assert.deepEqual(copied, ['綁定訂單', caseNo]);
 assert.match(get('status').textContent, /手動複製.*115000157/);
 assert.equal(get('status').className, 'error');
 '''

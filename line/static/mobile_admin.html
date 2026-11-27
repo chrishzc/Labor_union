@@ -1303,7 +1303,7 @@ function appendOrderGroupBindingSteps(root, caseNo, showCopyButtons = false) {
   const steps = document.createElement('ol');
   steps.className = 'group-binding-steps';
   const replies = [
-    {instruction:'在群組輸入', value:'綁定群組', copyLabel:'複製綁定群組'},
+    {instruction:'在群組輸入', value:'綁定訂單', copyLabel:'複製綁定訂單'},
     {instruction:'收到提示後，回覆案件編號', value:caseNo, copyLabel:'複製案件編號'},
   ];
   for (const {instruction, value, copyLabel} of replies) {

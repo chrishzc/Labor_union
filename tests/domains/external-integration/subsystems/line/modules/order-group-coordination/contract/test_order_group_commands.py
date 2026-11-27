@@ -132,17 +132,25 @@ def guided_message(uow, text, seconds, *, group='C-group', sender='U-admin', inl
     return handle(message, uow)
 
 
-def test_guided_binding_replies_at_each_step_then_queues_private_invitations_once():
+@pytest.mark.parametrize('start_command', ['綁定訂單', '綁定群組'])
+def test_guided_binding_replies_at_each_step_then_queues_private_invitations_once(start_command: str) -> None:
     uow = Uow()
-    assert guided_message(uow, '綁定群組', 1)
-    assert replies(uow) == ['請輸入要綁定的案號。']
+    assert guided_message(uow, start_command, 1)
+    case_prompt = '請輸入案件標號。'
+    assert replies(uow) == [case_prompt]
+    assert uow.order_groups.settings is None and invitations(uow) == []
     assert guided_message(uow, CASE, 3, inline=False)
-    assert '右上角設定' in replies(uow)[-1] and '邀請網址' in replies(uow)[-1]
+    url_prompt = '請輸入邀請連結。\n從右上角設定選擇「邀請」，再複製「邀請網址」。'
+    assert replies(uow) == [case_prompt, url_prompt]
     assert uow.order_groups.settings is None and invitations(uow) == []
 
     assert guided_message(uow, URL, 5)
     assert uow.order_groups.settings.invitation_url == URL
-    assert '排入發送' in replies(uow)[-1]
+    assert replies(uow) == [
+        case_prompt,
+        url_prompt,
+        f'已設定案件 {CASE} 的服務群組。\n已將客戶及月嫂的群組邀請連結排入發送。',
+    ]
     assert {request.recipient.identity.value for request in invitations(uow)} == {'U-customer', 'U-staff'}
     assert all(request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
                for request in uow.delivery_tasks.requests.values() if request.recipient.recipient_type.value == 'group')
@@ -153,7 +161,7 @@ def test_guided_binding_replies_at_each_step_then_queues_private_invitations_onc
 
 def test_guided_binding_ignores_other_sources_and_expired_messages_and_retries_invalid_url():
     uow = Uow()
-    assert guided_message(uow, '綁定群組', 1)
+    assert guided_message(uow, '綁定訂單', 1)
     assert not guided_message(uow, CASE, 2, sender='U-other')
     assert not guided_message(uow, CASE, 2, group='C-other')
     assert guided_message(uow, CASE, 3)
@@ -167,7 +175,7 @@ def test_guided_binding_ignores_other_sources_and_expired_messages_and_retries_i
 
 def test_guided_binding_rechecks_permission_and_payment_before_writing():
     uow = Uow()
-    assert guided_message(uow, '綁定群組', 1)
+    assert guided_message(uow, '綁定訂單', 1)
     assert guided_message(uow, CASE, 3)
     uow.admins.get_linked_admin = lambda user: None
     assert guided_message(uow, URL, 4)
@@ -185,7 +193,7 @@ def test_guided_binding_rechecks_permission_and_payment_before_writing():
 
 def test_guided_second_invitation_failure_propagates_to_outer_transaction():
     uow = Uow()
-    assert guided_message(uow, '綁定群組', 1)
+    assert guided_message(uow, '綁定訂單', 1)
     assert guided_message(uow, CASE, 3)
     enqueue = uow.delivery_tasks.enqueue
 
@@ -212,7 +220,6 @@ def test_setup_accepts_mobile_whitespace_and_saves_without_private_invitations(s
 
 
 @pytest.mark.parametrize(('text','hint'), [
-    ('綁定訂單', '請填寫案件編號與邀請網址'),
     (f'綁定訂單 {CASE}', '請貼上本群組邀請網址'),
     (f'綁定訂單 {URL}', '請填寫案件編號'),
     (f'綁定訂單{CASE} {URL}', '加空白或換行'),
@@ -327,7 +334,7 @@ def test_operator_feedback_ignores_saved_copy_and_is_reply_only_while_private_in
              'content':'不可顯示的舊設定', 'variables':[]}
             for key in ('group-bound','group-invitations-queued','group-format-empty')]}))
     uow.configurations = NS(get=settings)
-    command(uow, '綁定訂單', 'bad-input')
+    command(uow, f'綁定訂單 {CASE}', 'bad-input')
     command(uow, f'綁定訂單 {CASE} {URL}', 'setup')
     assert not reads
     command(uow, '發送邀請', 'send')
