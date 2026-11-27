@@ -77,7 +77,9 @@ function expectStale(id: string, stale: boolean): void {
     expect(row).not.toHaveAccessibleDescription(staleText);
     return;
   }
-  expect(within(row).queryByText(staleText), 'STALE_ROW_MARK_MISSING').toBeVisible();
+  const staleMark = within(row).queryByText(staleText);
+  if (!staleMark) throw new Error('STALE_ROW_MARK_MISSING');
+  expect(staleMark).toBeVisible();
   expect(row).toHaveAccessibleDescription(staleText);
   const descriptionIds = row.getAttribute('aria-describedby')?.split(/\s+/) ?? [];
   expect(descriptionIds.some(id => document.getElementById(id)?.textContent === staleText)).toBe(true);
