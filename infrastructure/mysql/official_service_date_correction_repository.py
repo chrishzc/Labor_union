@@ -469,8 +469,9 @@ class MySqlOfficialServiceDateCorrectionRepository:
             after = {str(result.assignment_resolution.assignment_id_by_candidate_key[a.candidate_key]):
                      [d.isoformat() for d in a.service_dates] for a in command.candidate.assignments}
             dates_changed = {d for dates in before.values() for d in dates} != {d for dates in after.values() for d in dates}
-            end = max(d for a in command.candidate.assignments for d in a.service_dates) if dates_changed else facts.actual_end_date
-            start = min(d for a in command.candidate.assignments for d in a.service_dates) if dates_changed else facts.actual_start_date
+            dates = tuple(day for assignment in command.candidate.assignments for day in assignment.service_dates)
+            end = max(dates) if dates_changed else facts.actual_end_date
+            start = min(dates)
             cursor.execute(
                 "INSERT INTO order_lifecycle_state_events "
                 "(case_no,trigger_event,before_status,after_status,actor,business_date,"
@@ -511,7 +512,7 @@ class MySqlOfficialServiceDateCorrectionRepository:
                 result.assignment_resolution.assignment_id_by_candidate_key[assignment.candidate_key],
                 assignment.service_dates,
             ) for assignment in command.candidate.assignments)
-            new_end = max(day for item in effective_dates for day in item.service_dates)
+            dates = tuple(day for item in effective_dates for day in item.service_dates)
             cursor.execute(
                 "INSERT INTO order_lifecycle_state_events "
                 "(case_no,trigger_event,before_status,after_status,actor,business_date,"
@@ -535,10 +536,10 @@ class MySqlOfficialServiceDateCorrectionRepository:
                 ),
             )
             cursor.execute(
-                "UPDATE orders SET actual_end_date=%s,lifecycle_version=%s "
+                "UPDATE orders SET actual_start_date=%s,actual_end_date=%s,lifecycle_version=%s "
                 "WHERE case_no=%s AND lifecycle_version=%s AND status='訂單完成'",
                 (
-                    new_end, preview.facts.order_version + 1,
+                    min(dates), max(dates), preview.facts.order_version + 1,
                     command.candidate.case_no, preview.facts.order_version,
                 ),
             )

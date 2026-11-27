@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from datetime import date
+import hashlib
+import json
 
 import pytest
 
+from infrastructure.mysql.order_lifecycle_impact_writer import persist_order_scheduled_date_projection
 from subsystems.orders.order_lifecycle_command_envelope import (
     lock_order_lifecycle_command_envelope,
 )
 from subsystems.orders.order_lifecycle_control_commands import (
+    ActualStartReconfirmationConfirmedCommand,
     CancellationControlCommand,
     OrderLifecycleControlConflict,
+    OrderLifecycleControlStateError,
     apply_order_lifecycle_control_command,
 )
 
@@ -60,3 +65,93 @@ def test_replay_requires_exact_payload_identity():
     assert result.outcome == "existing"
     with pytest.raises(OrderLifecycleControlConflict, match="actor"):
         apply_order_lifecycle_control_command(cursor, envelope, CancellationControlCommand("activate", "other", "requested", 3, "key-1"))
+
+
+_SETTLEMENT = "d" * 64
+_ORIGINAL_START = date(2026, 8, 1)
+_PROJECTED_START = date(2026, 8, 2)
+
+
+def _cleared_control_state():
+    return {
+        "control_type": "actual_start_reconfirmation", "control_key": "actual_start_reconfirmation",
+        "scope": "enter_service", "state": "cleared", "current_event_id": 12,
+        "release_policy": None, "expires_at_utc": None, "confirmed_start_date": _ORIGINAL_START,
+        "deposit_settlement_identity_hash": hashlib.sha256(_SETTLEMENT.encode()).hexdigest(),
+        "reason": "opening confirmed", "changed_by": "original-actor",
+    }
+
+
+def _move_scheduled_start(cursor):
+    persist_order_scheduled_date_projection(
+        cursor, case_no="C-1", previous_actual_start_date=_ORIGINAL_START,
+        actual_start_date=_PROJECTED_START, actual_end_date=date(2026, 8, 3),
+        expected_order_version=3, adjustment_receipt_id=41, actor="admin",
+    )
+
+
+def test_scheduled_start_reconfirmation_carries_existing_clear_with_audit_lineage():
+    source = {
+        "current_event_id": 12,
+        "confirmed_start_date": _ORIGINAL_START,
+        "original_actual_start_date": "2026-07-31",
+        "settlement_identity": _SETTLEMENT,
+        "source_matches_current_settlement": True,
+    }
+    cursor = _Cursor([source, _order(), [_cleared_control_state()], None, None])
+
+    _move_scheduled_start(cursor)
+
+    writes = [(sql, values) for sql, values in cursor.executions if sql.startswith(("INSERT", "UPDATE"))]
+    assert len(writes) == 3
+    event_values = writes[0][1]
+    assert event_values[4] == "clear"
+    assert json.loads(event_values[-1]) == {
+        "original_actual_start_date": "2026-07-31",
+        "new_actual_start_date": "2026-08-02",
+        "deposit_settlement_identity": _SETTLEMENT,
+        "prior_projected_start_date": "2026-08-01",
+        "source_reconfirmation_event_id": 12,
+        "schedule_adjustment_receipt_id": 41,
+    }
+    projection_values = writes[1][1]
+    assert projection_values[5:8] == ("cleared", 17, None)
+    assert projection_values[9:11] == ("2026-08-02", _cleared_control_state()["deposit_settlement_identity_hash"])
+    assert projection_values[-1] == 12
+    assert writes[2][1] == (_PROJECTED_START, date(2026, 8, 3), "C-1", 3)
+
+
+@pytest.mark.parametrize("source", [None, {
+    "confirmed_start_date": _ORIGINAL_START, "source_matches_current_settlement": False,
+}])
+def test_scheduled_start_leaves_active_or_different_settlement_control_unchanged(source):
+    cursor = _Cursor([source])
+
+    _move_scheduled_start(cursor)
+
+    assert "control.state = 'cleared'" in cursor.executions[0][0]
+    assert "control.deposit_settlement_identity_hash = SHA2(settlement.settlement_identity, 256)" in cursor.executions[0][0]
+    assert len(cursor.executions) == 2
+    assert cursor.executions[1][0].startswith("UPDATE orders SET")
+
+
+def test_scheduled_start_does_not_make_old_inconsistent_control_valid():
+    cursor = _Cursor([{ "confirmed_start_date": _PROJECTED_START, "source_matches_current_settlement": True }])
+
+    with pytest.raises(ValueError, match="service_date_adjustment_stale_source"):
+        _move_scheduled_start(cursor)
+
+    assert len(cursor.executions) == 1
+
+
+def test_ordinary_reconfirmation_clear_still_requires_active_control():
+    cursor = _Cursor([_order(), [_cleared_control_state()], None, None])
+    command = ActualStartReconfirmationConfirmedCommand(
+        "admin", "opening confirmed", 3, "key-1", _ORIGINAL_START, _PROJECTED_START,
+        _SETTLEMENT, "a" * 64, {"actual_start_event_id": 10},
+    )
+
+    with pytest.raises(OrderLifecycleControlStateError, match="control clear requires an active projection"):
+        apply_order_lifecycle_control_command(cursor, _envelope(cursor), command)
+
+    assert not any(sql.startswith("UPDATE order_lifecycle_control_state") for sql, _ in cursor.executions)

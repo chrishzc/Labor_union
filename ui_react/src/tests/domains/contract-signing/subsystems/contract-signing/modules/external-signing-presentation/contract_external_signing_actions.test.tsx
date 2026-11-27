@@ -18,6 +18,7 @@ vi.mock('../../../../../../../api/orders/contract_external_signing_client', asyn
     contractExternalSigningClient: {
       query: vi.fn(),
       querySignedArchive: vi.fn(),
+      querySignedArchiveResult: vi.fn(),
       archiveSignedFiles: vi.fn(),
       prepareStaffUnsignedPdf: vi.fn(),
       prepareClientUnsignedPdf: vi.fn(),
@@ -363,6 +364,7 @@ describe('ContractExternalSigningActions', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    window.sessionStorage.removeItem('orders:signed-archive:CASE-001');
     vi.mocked(openContractPrintView).mockResolvedValue();
     vi.mocked(previewContractFields).mockImplementation(async (caseNo, scope, segmentId) => ({ case_no: caseNo, scope, assignment_id: null, template_key: scope === 'client' ? 'contract_client_copy' : 'contract_staff_service', template_version: 'a'.repeat(64), owner_fingerprints: {}, field_labels: {}, field_keys: {}, field_values: scope === 'client' ? { B8: '測試客戶', B24: '2026-11-01', D24: '2026-11-10', F24: 10 } as Record<string, string | number> : { C4: `月嫂${segmentId}`, B7: '2026-11-01', D7: '2026-11-10', G7: 10 } as Record<string, string | number>, field_states: {}, warnings: [], blockers: [], preview_fingerprint: 'b'.repeat(64), ready_to_print: true }));
     vi.mocked(contractExternalSigningClient.previewSignedDocument).mockImplementation(async (_caseNo, input) => ({ ...staged, ...input, blockers: [], can_apply: true }));
@@ -625,21 +627,40 @@ describe('ContractExternalSigningActions', () => {
     expect(contractExternalSigningClient.previewFinalDocument).not.toHaveBeenCalled();
   });
 
-  it('retains the files and reuses the same archive command after a timeout', async () => {
+  it('keeps an absent or interrupted original result unresolved even with an unrelated archive', async () => {
+    const unrelated = [{ target: 'client', filename: 'unrelated.pdf', file_id: 'cf_' + 'b'.repeat(32) }];
     vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
-    vi.mocked(contractExternalSigningClient.querySignedArchive).mockResolvedValue({ staff_segments: [], files: null });
-    vi.mocked(contractExternalSigningClient.archiveSignedFiles)
-      .mockRejectedValueOnce(new ApiTimeoutError(10000))
-      .mockResolvedValue([{ target: 'client', filename: 'customer.pdf', file_id: 'cf_' + 'a'.repeat(32) }]);
-    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    vi.mocked(contractExternalSigningClient.querySignedArchive)
+      .mockResolvedValueOnce({ staff_segments: [], files: null })
+      .mockResolvedValue({ staff_segments: [], files: unrelated });
+    vi.mocked(contractExternalSigningClient.archiveSignedFiles).mockRejectedValueOnce(new ApiTimeoutError(10000));
+    vi.mocked(contractExternalSigningClient.querySignedArchiveResult)
+      .mockImplementationOnce(async (case_no, idempotency_key) => ({ case_no, idempotency_key, state: 'unresolved' }))
+      .mockRejectedValueOnce(new ApiTimeoutError(10000));
+    const first = render(<ContractExternalSigningActions caseNo="CASE-001" />);
     await screen.findByLabelText('客戶服務契約 PDF');
     await prepareSignedReturns();
     fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
-    fireEvent.click(await screen.findByRole('button', { name: '重新確認歸檔結果' }));
-    expect(await screen.findByText('簽約已完成')).toBeVisible();
-    const calls = vi.mocked(contractExternalSigningClient.archiveSignedFiles).mock.calls;
-    expect(calls).toHaveLength(2);
-    expect(calls[1]).toEqual(calls[0]);
+    await screen.findByRole('button', { name: '重新確認歸檔結果' });
+    first.unmount();
+
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(completedQuery);
+    const onCommitted = vi.fn();
+    render(<ContractExternalSigningActions caseNo="CASE-001" onCommitted={onCommitted} />);
+    const confirm = await screen.findByRole('button', { name: '重新確認歸檔結果' });
+    expect(screen.getByText('本次歸檔結果尚未確認，請重新查詢原操作。')).toBeVisible();
+    fireEvent.click(confirm);
+    expect(await screen.findByText(/連線暫時中斷/)).toBeVisible();
+    const [[, , , identity]] = vi.mocked(contractExternalSigningClient.archiveSignedFiles).mock.calls;
+    expect(contractExternalSigningClient.querySignedArchiveResult).toHaveBeenCalledTimes(2);
+    expect(contractExternalSigningClient.querySignedArchiveResult).toHaveBeenLastCalledWith('CASE-001', identity.idempotencyKey, expect.any(AbortSignal));
+    expect(contractExternalSigningClient.querySignedArchive).toHaveBeenCalledTimes(1);
+    expect(contractExternalSigningClient.archiveSignedFiles).toHaveBeenCalledOnce();
+    expect(screen.queryByText('unrelated.pdf')).not.toBeInTheDocument();
+    expect(screen.queryByText('簽約已完成')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('客戶服務契約 PDF')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存簽署文件' })).not.toBeInTheDocument();
+    expect(onCommitted).not.toHaveBeenCalled();
   });
 
   it('reads completed separate files without reopening historical signing recovery', async () => {
@@ -801,25 +822,174 @@ describe('ContractExternalSigningActions', () => {
     expect(contractExternalSigningClient.applyFinalDocument).not.toHaveBeenCalled();
   });
 
-  it('completes directly via querySignedArchive when an earlier timed-out archive actually succeeded', async () => {
-    const archived = [{ target: 'client', filename: 'customer.pdf', file_id: 'cf_' + 'a'.repeat(32) }];
+  it('reopens the case and confirms the original signed archive without a second upload', async () => {
+    const archived = [{ target: 'client', filename: 'original.pdf', file_id: 'cf_' + 'a'.repeat(32) }];
     const onCommitted = vi.fn();
     vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
-    vi.mocked(contractExternalSigningClient.querySignedArchive)
-      .mockResolvedValueOnce({ staff_segments: [], files: null })
-      .mockResolvedValueOnce({ staff_segments: [], files: archived });
+    vi.mocked(contractExternalSigningClient.querySignedArchive).mockResolvedValue({ staff_segments: [], files: null });
+    vi.mocked(contractExternalSigningClient.querySignedArchiveResult)
+      .mockImplementation(async (case_no, idempotency_key) => ({ case_no, idempotency_key, state: 'committed', files: archived }));
     vi.mocked(contractExternalSigningClient.archiveSignedFiles).mockRejectedValueOnce(new ApiTimeoutError(120000));
 
-    render(<ContractExternalSigningActions caseNo="CASE-001" onCommitted={onCommitted} />);
+    const first = render(<ContractExternalSigningActions caseNo="CASE-001" onCommitted={onCommitted} />);
     await screen.findByLabelText('客戶服務契約 PDF');
     await prepareSignedReturns();
     fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
-    fireEvent.click(await screen.findByRole('button', { name: '重新確認歸檔結果' }));
+    const storageKey = 'orders:signed-archive:CASE-001';
+    const [[, , , identity]] = vi.mocked(contractExternalSigningClient.archiveSignedFiles).mock.calls;
+    expect(window.sessionStorage.getItem(storageKey)).toBe(JSON.stringify({
+      caseNo: 'CASE-001', actorId: 1, idempotencyKey: identity.idempotencyKey,
+    }));
+    await screen.findByRole('button', { name: '重新確認歸檔結果' });
+    first.unmount();
+
+    render(<ContractExternalSigningActions caseNo="CASE-001" onCommitted={onCommitted} />);
 
     expect(await screen.findByText('簽約已完成')).toBeVisible();
-    expect(screen.getByText('customer.pdf')).toBeVisible();
+    expect(screen.getByText('original.pdf')).toBeVisible();
+    expect(contractExternalSigningClient.querySignedArchiveResult).toHaveBeenCalledWith('CASE-001', identity.idempotencyKey, expect.any(AbortSignal));
     expect(contractExternalSigningClient.archiveSignedFiles).toHaveBeenCalledTimes(1);
     expect(onCommitted).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it('recovers the original archive when the upload succeeds after leaving the case', async () => {
+    const caseNo = 'CASE-001';
+    const filename = 'original.pdf';
+    const storageKey = `orders:signed-archive:${caseNo}`;
+    type ArchivedFiles = Awaited<ReturnType<typeof contractExternalSigningClient.archiveSignedFiles>>;
+    type ArchiveResult = Awaited<ReturnType<typeof contractExternalSigningClient.querySignedArchiveResult>>;
+    const files: ArchivedFiles = [{ target: 'client', filename, file_id: 'cf_' + 'a'.repeat(32) }];
+    const pendingUpload = deferred<ArchivedFiles>();
+    const pendingReadback = deferred<ArchiveResult>();
+    const onOldCommitted = vi.fn();
+    const onReopenedCommitted = vi.fn();
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
+    vi.mocked(contractExternalSigningClient.querySignedArchive).mockResolvedValue({ staff_segments: [], files: null });
+    vi.mocked(contractExternalSigningClient.archiveSignedFiles).mockReturnValueOnce(pendingUpload.promise);
+    vi.mocked(contractExternalSigningClient.querySignedArchiveResult).mockReturnValueOnce(pendingReadback.promise);
+
+    const first = render(<ContractExternalSigningActions caseNo={caseNo} onCommitted={onOldCommitted} />);
+    const input = await screen.findByLabelText('客戶服務契約 PDF');
+    const file = new File(['%PDF-1.7\ncontract\n%%EOF'], filename, { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: fileList(file) } });
+    const save = screen.getByRole('button', { name: '儲存簽署文件' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(contractExternalSigningClient.archiveSignedFiles).toHaveBeenCalledOnce());
+    const [[, , , { idempotencyKey }]] = vi.mocked(contractExternalSigningClient.archiveSignedFiles).mock.calls;
+    const marker = JSON.stringify({ caseNo, actorId: 1, idempotencyKey });
+    expect(window.sessionStorage.getItem(storageKey)).toBe(marker);
+
+    first.unmount();
+    await act(async () => pendingUpload.resolve(files));
+    expect(window.sessionStorage.getItem(storageKey)).toBe(marker);
+    expect(onOldCommitted).not.toHaveBeenCalled();
+
+    render(<ContractExternalSigningActions caseNo={caseNo} onCommitted={onReopenedCommitted} />);
+    expect(await screen.findByText('正在查詢原歸檔結果…')).toBeVisible();
+    expect(contractExternalSigningClient.querySignedArchiveResult)
+      .toHaveBeenCalledWith(caseNo, idempotencyKey, expect.any(AbortSignal));
+    expect(window.sessionStorage.getItem(storageKey)).toBe(marker);
+    await act(async () => pendingReadback.resolve({
+      case_no: caseNo, idempotency_key: idempotencyKey, state: 'committed', files,
+    }));
+
+    expect(await screen.findByText('簽約已完成')).toBeVisible();
+    expect(screen.getByText(filename)).toBeVisible();
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect(contractExternalSigningClient.archiveSignedFiles).toHaveBeenCalledOnce();
+    expect(onOldCommitted).not.toHaveBeenCalled();
+    expect(onReopenedCommitted).toHaveBeenCalledOnce();
+  });
+
+  it('ignores a late original archive result after navigating to a different case', async () => {
+    const firstCase = 'CASE-001';
+    const secondCase = 'CASE-002';
+    const recoveryKey = `orders:signed-archive:${firstCase}`;
+    const key = `contract-external.signed-archive:${'a'.repeat(32)}`;
+    window.sessionStorage.setItem(recoveryKey, JSON.stringify({ caseNo: firstCase, actorId: 1, idempotencyKey: key }));
+    vi.mocked(contractExternalSigningClient.query).mockImplementation(async case_no => ({ ...preparing, case_no }));
+    vi.mocked(contractExternalSigningClient.querySignedArchive).mockResolvedValue({ staff_segments: [], files: null });
+    type Result = Awaited<ReturnType<typeof contractExternalSigningClient.querySignedArchiveResult>>;
+    let resolveResult: (result: Result) => void = () => {};
+    vi.mocked(contractExternalSigningClient.querySignedArchiveResult)
+      .mockReturnValueOnce(new Promise<Result>(resolve => { resolveResult = resolve; }));
+    const onCommitted = vi.fn();
+    const { rerender } = render(<ContractExternalSigningActions caseNo={firstCase} onCommitted={onCommitted} />);
+    expect(await screen.findByText('正在查詢原歸檔結果…')).toBeVisible();
+    rerender(<ContractExternalSigningActions caseNo={secondCase} onCommitted={onCommitted} />);
+    expect(await screen.findByLabelText('客戶服務契約 PDF')).toBeEnabled();
+    await act(async () => resolveResult({
+      case_no: firstCase, idempotency_key: key, state: 'committed',
+      files: [{ target: 'client', filename: 'late.pdf', file_id: 'cf_' + 'c'.repeat(32) }],
+    }));
+    expect(screen.queryByText('late.pdf')).not.toBeInTheDocument();
+    expect(screen.queryByText('簽約已完成')).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem(recoveryKey)).not.toBeNull();
+    expect(onCommitted).not.toHaveBeenCalled();
+    expect(contractExternalSigningClient.archiveSignedFiles).not.toHaveBeenCalled();
+  });
+
+  it('blocks signed archive upload when the original operation cannot be stored', async () => {
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
+    vi.mocked(contractExternalSigningClient.querySignedArchive).mockResolvedValue({ staff_segments: [], files: null });
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    await screen.findByLabelText('客戶服務契約 PDF');
+    await prepareSignedReturns();
+    const storage = window.sessionStorage;
+    const setItem = vi.fn<Storage['setItem']>(() => {
+      throw new DOMException('Storage unavailable', 'QuotaExceededError');
+    });
+    const storageGetter = vi.spyOn(window, 'sessionStorage', 'get').mockReturnValue({
+      get length() { return storage.length; },
+      clear: storage.clear.bind(storage),
+      getItem: storage.getItem.bind(storage),
+      key: storage.key.bind(storage),
+      removeItem: storage.removeItem.bind(storage),
+      setItem,
+    });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
+      expect(await screen.findByText(/暫停儲存簽署文件/)).toBeVisible();
+      expect(setItem).toHaveBeenCalledExactlyOnceWith('orders:signed-archive:CASE-001', expect.any(String));
+      expect(contractExternalSigningClient.archiveSignedFiles).not.toHaveBeenCalled();
+    } finally {
+      storageGetter.mockRestore();
+    }
+  });
+
+  it('preserves a pending archive marker without querying it as a different administrator', async () => {
+    const caseNo = 'CASE-001';
+    const recoveryKey = `orders:signed-archive:${caseNo}`;
+    const idempotencyKey = `contract-external.signed-archive:${'a'.repeat(32)}`;
+    const marker = JSON.stringify({ caseNo, actorId: 7, idempotencyKey });
+    window.sessionStorage.setItem(recoveryKey, marker);
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
+    render(<ContractExternalSigningActions caseNo={caseNo} />);
+
+    expect(await screen.findByText(/暫停儲存簽署文件/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: '重新確認歸檔結果' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存簽署文件' })).not.toBeInTheDocument();
+    expect(contractExternalSigningClient.querySignedArchiveResult).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(recoveryKey)).toBe(marker);
+  });
+
+  it('keeps selected PDFs after definite archive rejection and releases the local recovery marker', async () => {
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
+    vi.mocked(contractExternalSigningClient.querySignedArchive).mockResolvedValue({ staff_segments: [], files: null });
+    vi.mocked(contractExternalSigningClient.archiveSignedFiles)
+      .mockRejectedValueOnce(new ApiHttpError(422, 'invalid_pdf', 'PDF 檔案無效。'));
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    await screen.findByLabelText('客戶服務契約 PDF');
+    await prepareSignedReturns();
+    fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
+
+    expect(await screen.findByText(/PDF 檔案無效/)).toBeVisible();
+    expect(screen.getByText('signed.pdf')).toBeVisible();
+    expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeEnabled();
+    expect(window.sessionStorage.getItem('orders:signed-archive:CASE-001')).toBeNull();
+    expect(contractExternalSigningClient.querySignedArchiveResult).not.toHaveBeenCalled();
   });
 
   it('rejects an oversized signed PDF before uploading', async () => {

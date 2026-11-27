@@ -7,8 +7,15 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from typing import Any
 
 from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.orders.order_lifecycle_command_envelope import lock_order_lifecycle_command_envelope
+from subsystems.orders.order_lifecycle_control_commands import (
+    OrderLifecycleControlConcurrencyError,
+    ScheduledStartReconfirmationCarryCommand,
+    apply_order_lifecycle_control_command,
+)
 from subsystems.orders.terms_workflow import (
     LifecycleImpactPersistenceCommand,
 )
@@ -45,17 +52,79 @@ def persist_order_lifecycle_projection(cursor, command) -> None:
         raise RuntimeError("order_version_conflict")
 
 
-def persist_order_scheduled_end_projection(
-    cursor, *, case_no: str, actual_end_date: date, expected_order_version: int,
+def persist_order_scheduled_date_projection(
+    cursor: Any, *, case_no: str, previous_actual_start_date: date | None,
+    actual_start_date: date, actual_end_date: date,
+    expected_order_version: int, adjustment_receipt_id: int, actor: str,
 ) -> None:
-    """Synchronize a scheduling-only end without changing lifecycle or billing facts."""
+    """Synchronize formal service dates while preserving lifecycle events and billing facts."""
+    if previous_actual_start_date != actual_start_date:
+        _carry_formal_adjustment_reconfirmation(
+            cursor, case_no=case_no, previous_actual_start_date=previous_actual_start_date,
+            actual_start_date=actual_start_date, expected_order_version=expected_order_version,
+            adjustment_receipt_id=adjustment_receipt_id, actor=actor,
+        )
     cursor.execute(
-        "UPDATE orders SET actual_end_date=%s,lifecycle_version=lifecycle_version+1 "
+        "UPDATE orders SET actual_start_date=%s,actual_end_date=%s,lifecycle_version=lifecycle_version+1 "
         "WHERE case_no=%s AND lifecycle_version=%s",
-        (actual_end_date, case_no, expected_order_version),
+        (actual_start_date, actual_end_date, case_no, expected_order_version),
     )
     if cursor.rowcount != 1:
         raise RuntimeError("order_version_conflict")
+
+
+def _carry_formal_adjustment_reconfirmation(
+    cursor: Any, *, case_no: str, previous_actual_start_date: date | None,
+    actual_start_date: date, expected_order_version: int, adjustment_receipt_id: int,
+    actor: str,
+) -> None:
+    cursor.execute(_SELECT_ADJUSTMENT_RECONFIRMATION_SQL, (case_no,))
+    control = cursor.fetchone()
+    if control is None:
+        return
+    confirmed_start = control["confirmed_start_date"]
+    if confirmed_start == actual_start_date:
+        raise ValueError("service_date_adjustment_stale_source")
+    if confirmed_start != previous_actual_start_date or not control["source_matches_current_settlement"]:
+        return
+    key = f"service-date-adjustment-reconfirmation:{adjustment_receipt_id}"
+    envelope = lock_order_lifecycle_command_envelope(cursor, case_no, expected_order_version, key)
+    command = ScheduledStartReconfirmationCarryCommand(
+        actor=actor,
+        reason="沿用正式服務日期調整前的開工重新確認",
+        expected_version=expected_order_version,
+        idempotency_key=key,
+        prior_projected_start_date=confirmed_start,
+        projected_start_date=actual_start_date,
+        original_actual_start_date=control["original_actual_start_date"],
+        deposit_settlement_identity=control["settlement_identity"],
+        source_event_id=int(control["current_event_id"]),
+        schedule_adjustment_receipt_id=adjustment_receipt_id,
+    )
+    try:
+        apply_order_lifecycle_control_command(cursor, envelope, command)
+    except OrderLifecycleControlConcurrencyError as error:
+        raise RuntimeError("order_version_conflict") from error
+
+
+_SELECT_ADJUSTMENT_RECONFIRMATION_SQL = """
+    SELECT control.current_event_id, control.confirmed_start_date,
+           JSON_UNQUOTE(JSON_EXTRACT(event.payload_snapshot, '$.original_actual_start_date')) AS original_actual_start_date,
+           settlement.settlement_identity,
+           (event.action = 'clear'
+            AND JSON_UNQUOTE(JSON_EXTRACT(event.payload_snapshot, '$.new_actual_start_date')) = CAST(control.confirmed_start_date AS CHAR)
+            AND settlement.settlement_state = 'settled'
+            AND JSON_UNQUOTE(JSON_EXTRACT(event.payload_snapshot, '$.deposit_settlement_identity')) = settlement.settlement_identity
+            AND control.deposit_settlement_identity_hash = SHA2(settlement.settlement_identity, 256)) AS source_matches_current_settlement
+    FROM order_lifecycle_control_state AS control
+    JOIN order_lifecycle_control_events AS event
+      ON event.id = control.current_event_id AND event.case_no = control.case_no
+     AND event.control_type = control.control_type AND event.control_key = control.control_key
+    LEFT JOIN client_deposit_settlement_projection AS settlement ON settlement.case_no = control.case_no
+    WHERE control.case_no = %s AND control.control_type = 'actual_start_reconfirmation'
+      AND control.control_key = 'actual_start_reconfirmation' AND control.state = 'cleared'
+    FOR UPDATE
+"""
 
 
 def _append_lifecycle_event(cursor, command, snapshot):

@@ -30,7 +30,7 @@
 - inbound: `orders/historical-precision-restart` — 重啟後空 tombstone 的 HTTP Actual Start 為日期-only；歷史採納內部仍可使用 immutable source delegation，不代表一般入口自動建立 Scheduling。
 - outbound: `staff-payables/payroll` — source rate snapshot 唯讀驗證與 successor identity 原值搬移，不寫 Payroll root／obligation。
 
-管理 UI 對已有正式 assignment 的重排先顯示逐段 Preview，內部操作者最後確認才呼叫單一原子 Apply；此畫面不編輯請假、假日或正式服務日。重排只綁 Orders／Scheduling owner versions，且維持 fingerprint 與 idempotency 契約。
+管理 UI 對已有正式 assignment 的重排先顯示逐段 Preview 及將保存的實際開始日，內部操作者最後確認才呼叫單一原子 Apply。此畫面不編輯請假、假日或正式服務日。重排保留試算輸入與候選首日供確認及讀回，沿用 Orders／Scheduling owner versions、fingerprint 與 idempotency 契約。
 一般日期-only 分支綁 Orders version 與該次 Preview fingerprint；取消合併／分裂結果的日期-only 預覽另納入目前確認日期版本、Scheduling version 與正常日期候選。若 Apply fresh-read 發現正式 assignment 已形成，回 typed conflict 並要求重新 Preview。一般 Terms reader 不得只因日期存在便投影 `service_started`。
 
 ## Contracts

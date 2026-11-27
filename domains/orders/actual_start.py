@@ -208,6 +208,10 @@ class ActualStartCandidate:
     actual_end_date: date
     fingerprint: PreviewFingerprint
 
+    @property
+    def actual_start_date(self) -> date:
+        return self.official_service_dates[0]
+
 
 def build_actual_start_reconfirmation_candidate(
     facts: ActualStartReconfirmationFacts | None,

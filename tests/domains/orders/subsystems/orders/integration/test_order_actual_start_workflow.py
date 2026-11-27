@@ -668,9 +668,9 @@ def test_formal_actual_start_reset_restores_contract_distribution_and_replays() 
     repository.save_confirmed_adjustment_reset.assert_called_once()
 
 
-@pytest.mark.parametrize("conflict_during_apply", [False, True])
-def test_actual_start_checks_requested_date_with_real_scheduling_candidate(
-    monkeypatch, conflict_during_apply,
+@pytest.mark.parametrize("apply_change", ["none", "occupancy", "order_version"])
+def test_actual_start_uses_first_formal_day_after_a_rest_day(
+    monkeypatch, apply_change,
 ) -> None:
     import infrastructure.mysql.order_actual_start_repository as mysql_repository
 
@@ -727,37 +727,55 @@ def test_actual_start_checks_requested_date_with_real_scheduling_candidate(
     repository.preflight_impacted_staff_ids.return_value = (7,)
     repository.claim_actual_start_command.return_value = CommandClaimState.CREATED
     repository.find_actual_start_receipt.return_value = None
+    repository.replace_scheduling_generation.return_value = SimpleNamespace(scheduling_receipt_id=9)
     workflow = ActualStartWorkflow(
         repository, Mock(),
-        FixedBusinessClock(datetime(2026, 8, 1, tzinfo=TAIPEI_TIME_ZONE)),
+        FixedBusinessClock(datetime(2026, 8, 9, 12, tzinfo=TAIPEI_TIME_ZONE)),
     )
-    workflow._persist = Mock(side_effect=lambda _request, _preview, _fingerprint, receipt: receipt)
 
     preview = workflow.preview("CASE-1", requested_date)
 
-    assert not hasattr(preview.scheduling, "new_actual_start_date")
-    assert preview.after_actual_start_date == requested_date
+    assert preview.actual_start.new_actual_start_date == requested_date
+    assert preview.after_actual_start_date == new_dates[0]
     assert preview.scheduling.assignments[0].service_dates == new_dates
-    assert occupancy_calls == [(requested_date, False)]
-    workflow._persist.assert_not_called()
+    assert preview.lifecycle_impact.after_status is OrderLifecycleStatus.ESTABLISHED
+    assert occupancy_calls == [(new_dates[0], False)]
+    repository.update_actual_start.assert_not_called()
+    repository.replace_scheduling_generation.assert_not_called()
     request = replace(_request(), new_actual_start_date=requested_date, preview_fingerprint=preview.fingerprint)
-    if conflict_during_apply:
+    if apply_change == "occupancy":
         occupied.append(StaffOccupancyFact(
             7, new_dates[0], "OTHER", service_time, actual_start_date=new_dates[0],
         ))
+    elif apply_change == "order_version":
+        repository.load_for_apply.return_value = replace(
+            context, shared_facts=replace(facts, order=replace(facts.order, version=2)),
+        )
+
+    if apply_change != "none":
         with pytest.raises(HTTPException) as caught:
             _call_endpoint(
                 lambda: workflow.apply_in_current_unit_of_work(request),
                 "saved", request.correlation_id,
             )
         assert caught.value.status_code == 409
-        assert caught.value.detail["error"]["code"] == "actual_start_staff_schedule_conflict"
-        workflow._persist.assert_not_called()
+        assert caught.value.detail["error"]["code"] == (
+            "actual_start_staff_schedule_conflict" if apply_change == "occupancy" else "order_version_conflict"
+        )
+        repository.update_actual_start.assert_not_called()
+        repository.replace_scheduling_generation.assert_not_called()
+        repository.save_actual_start_receipt.assert_not_called()
     else:
         receipt = workflow.apply_in_current_unit_of_work(request)
         assert receipt.official_service_day_count == 3
-        workflow._persist.assert_called_once()
-    assert occupancy_calls == [(requested_date, False), (requested_date, True)]
+        assert receipt.preview_fingerprint == preview.fingerprint
+        assert repository.update_actual_start.call_args.args[0].actual_start_date == new_dates[0]
+        assert repository.persist_lifecycle_impact.call_args.args[0].actual_start_date == new_dates[0]
+        assert repository.replace_scheduling_generation.call_args.args[0].actual_start_date == new_dates[0]
+        assert repository.append_actual_start_event.call_args.args[1].after_actual_start_date == new_dates[0]
+    assert occupancy_calls == (
+        [(new_dates[0], False)] if apply_change == "order_version" else [(new_dates[0], False), (new_dates[0], True)]
+    )
 
 
 def test_actual_start_recalculates_each_segment_from_previous_end() -> None:

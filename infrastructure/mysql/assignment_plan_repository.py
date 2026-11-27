@@ -20,6 +20,7 @@ from domains.scheduling.assignment_plan import (
     AssignmentPlanFacts,
     AssignmentPlanIntent,
     EffectiveAssignmentFact,
+    StaffOccupancyFact,
 )
 from domains.scheduling.commitment_execution import (
     CommitmentExecutionMismatch,
@@ -29,7 +30,7 @@ from domains.scheduling.commitment_execution import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
-from subsystems.orders.terms_workflow import SchedulingReplacementCommand
+from subsystems.orders.terms_workflow import SchedulingReplacementCommand, TermsWorkflowFacts
 from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanApplyEvidence,
     AssignmentPlanApplyRequest,
@@ -57,6 +58,7 @@ from .order_terms_read_model import (
     _service_started,
 )
 from .scheduling_replacement_writer import persist_scheduling_replacement
+from .service_date_adjustment_repository import load_first_schedule_dates
 
 
 _COMMAND_FAMILY = "scheduling_assignment_plan"
@@ -250,8 +252,9 @@ class MySqlAssignmentPlanRepository:
                 staff_ids,
                 case_no,
                 lock=False,
+                actual_start_date=min((day for item in intent.segments for day in item.official_service_dates), default=None),
             )
-            facts = self._execution_facts(source, occupancy, lock_ids)
+            facts = self._execution_facts(cursor, source, occupancy, lock_ids, lock=False)
             if self._office_execution is not None or not facts.assignment_plan.effective_assignments:
                 _require_exact_commitment_days(cursor, case_no, tuple(
                     ExecutionServiceDay(segment.staff_id, service_date)
@@ -312,11 +315,17 @@ class MySqlAssignmentPlanRepository:
                 preflight_staff_ids,
                 request.case_no,
                 lock=True,
+                actual_start_date=min(
+                    (day for item in request.intent.segments for day in item.official_service_dates), default=None,
+                ),
             )
-        facts = self._execution_facts(source, occupancy, waiting_lock_ids)
+            facts = self._execution_facts(cursor, source, occupancy, waiting_lock_ids, lock=True)
         return AssignmentPlanApplyEvidence(facts, claim_state, stored_receipt)
 
-    def _execution_facts(self, source, occupancy, waiting_lock_ids):
+    def _execution_facts(
+        self, cursor: Any, source: TermsWorkflowFacts, occupancy: tuple[StaffOccupancyFact, ...],
+        waiting_lock_ids: tuple[int, ...], *, lock: bool,
+    ) -> AssignmentPlanWorkflowFacts:
         facts = build_assignment_plan_workflow_facts(source, occupancy, waiting_lock_ids)
         plan = replace(facts.assignment_plan, explicit_service_start_result=True)
         if self._office_execution is not None:
@@ -326,7 +335,10 @@ class MySqlAssignmentPlanRepository:
             plan = replace(plan, office_schedule=True, effective_assignments=tuple(
                 EffectiveAssignmentFact(row.assignment_id, row.staff_id, row.sequence) for row in assignments
             ))
-        return replace(facts, assignment_plan=plan)
+        adjusted_days = ()
+        if not any(item.official_service_dates for item in plan.effective_assignments):
+            _, adjusted_days = load_first_schedule_dates(cursor, plan.case_no, lock=lock)
+        return replace(facts, assignment_plan=plan, first_schedule_adjusted_days=adjusted_days)
 
     def claim_command(
         self,
@@ -367,6 +379,7 @@ class MySqlAssignmentPlanRepository:
             actor=context.actor,
             reason=context.reason,
             correlation_id=context.correlation_id,
+            actual_start_date=min((day for item in candidate.assignments for day in item.service_dates), default=None),
         )
         with self._connection.cursor() as cursor:
             commitment_id = _require_exact_commitment_execution(

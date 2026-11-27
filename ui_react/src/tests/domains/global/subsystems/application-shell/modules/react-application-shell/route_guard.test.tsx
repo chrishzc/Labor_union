@@ -175,6 +175,34 @@ describe('Route Guard & Shell Hash Navigation', () => {
     await waitFor(() => expect(workbenchNav).toHaveClass('active'));
   });
 
+  it('待辦看板跨頁保留篩選，權限版本變更後清除前一範圍的篩選', async () => {
+    const admin = {
+      id: 1,
+      username: 'admin',
+      display_name: '系統管理員',
+      role: 'system_admin',
+      capabilities: ['system.administration'],
+      access_control_version: 1,
+    } satisfies Parameters<typeof sessionClient.setSession>[1];
+    sessionClient.setSession('valid-token', admin);
+    window.history.replaceState(null, '', '#order-workbench-v2');
+    render(<App />);
+
+    const search = () => screen.getByRole('textbox', { name: '搜尋案件編號或姓名' });
+    fireEvent.change(search(), { target: { value: '先前的篩選' } });
+    fireEvent.click(screen.getByTitle('排班日曆'));
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox', { name: '搜尋案件編號或姓名' })).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('待辦看板'));
+    await waitFor(() => expect(search()).toHaveValue('先前的篩選'));
+
+    act(() => sessionClient.setSession('valid-token', {
+      ...admin, access_control_version: 2,
+    }));
+    await waitFor(() => expect(search()).toHaveValue(''));
+  });
+
   it('切換頂部主作業區分頁應切換側邊欄與頁面視圖', async () => {
     sessionClient.setSession('valid-token', {
       id: 1,

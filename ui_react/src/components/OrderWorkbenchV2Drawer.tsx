@@ -55,7 +55,7 @@ interface OrderWorkbenchV2DrawerProps {
   homeNavigationRequest?: number;
   openUpcomingStaffing?: boolean;
   onClose: () => void;
-  onObserved?: () => void;
+  onObserved?: (scope?: 'calendar') => void;
 }
 
 type ReadState<T> =
@@ -216,6 +216,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     setRefreshRevision((revision) => revision + 1);
     onObserved?.();
   }, [onObserved]);
+  const refreshSchedulingFacts = useCallback(() => {
+    setRefreshRevision((revision) => revision + 1);
+    onObserved?.('calendar');
+  }, [onObserved]);
   const { requestLeave, pending: leavePending } = useUnsavedNavigation();
   const guardedClose = useCallback(() => {
     if (!operationBusyRef.current) requestLeave(onClose);
@@ -343,7 +347,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       });
       openGroup('service');
       setServiceDatesCalculationRevision((revision) => revision + 1);
-      refreshFacts();
+      refreshSchedulingFacts();
     } catch (error) {
       setHistoricalRestart({ status: 'error', message: errorMessage(error) });
     }
@@ -448,7 +452,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         completed={completedService} upcomingOnly={!completedService && (intakeOrderStatus === '訂單成立' || openUpcomingStaffing)}
         onBusyChange={onOperationBusyChange} onSaved={() => {
           setAttributionOpenOverride(false);
-          refreshFacts();
+          refreshSchedulingFacts();
         }} />
     : null;
   const historicalAttribution = currentBranch === 'historical' && historicalAccounting.status === 'ready'
@@ -463,7 +467,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         </button>
         {attributionOpen && <HistoricalServiceAttributionPanel key={caseNo}
           facts={historicalAccounting.data} onBusyChange={onOperationBusyChange}
-          onSaved={() => { setAttributionOpenOverride(false); refreshFacts(); }} />}
+          onSaved={() => { setAttributionOpenOverride(false); refreshSchedulingFacts(); }} />}
       </div>
     : null;
 
@@ -501,7 +505,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       projectionRevision={refreshRevision}
       currentAssignmentPlan={assignmentPlan.status === 'ready' ? assignmentPlan.data : null}
       onBusyChange={onOperationBusyChange}
-      onObserved={refreshFacts}
+      onObserved={refreshSchedulingFacts}
     />
   </>;
 
@@ -581,7 +585,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             <p>請使用上方「查看相關資料與通知紀錄」查閱既有紀錄。</p>
           </section>}
           {!terminalStatus && (activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'} className="service-arrangement-deposit-slot"><fieldset disabled={operationBusy || factsRefreshing}>
-            <ServiceArrangementDepositGate caseNo={caseNo} revision={refreshRevision} onCommitted={refreshFacts} onBusyChange={setDepositBusy} />
+            <ServiceArrangementDepositGate caseNo={caseNo} revision={refreshRevision} onCommitted={refreshSchedulingFacts} onBusyChange={setDepositBusy} />
           </fieldset></div>}
           {activeGroup === 'intake' && <>
             {branchType === 'historical' && currentBranch !== 'cancelled' && intakeOrderStatus !== null && <OrderIntakeRepairPanel caseNo={caseNo} orderStatus={intakeOrderStatus} onChanged={refreshFacts} summaryHref={`#clients?case=${encodeURIComponent(caseNo)}&field=intake&from=workbench`} />}
@@ -647,7 +651,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   openReplacementRequest={replacementRequest}
                   onOpenCandidates={() => openGroup('matching')}
                   onEditStateChange={setRecommendationState}
-                  onObserved={refreshFacts}
+                  onObserved={refreshSchedulingFacts}
                   onOpenServiceDates={() => openGroup('service')}
                 />
                 </fieldset>
@@ -661,7 +665,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   {datesPending && <p role="status">請先完成上方服務日期的儲存或回讀。</p>}
                   <fieldset hidden={editingOfficialSchedule} disabled={datesPending}>
                     <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalBinding={historicalBinding}
-                      showScheduleActions={false} onObserved={refreshFacts} onEditStateChange={setServiceConfirmationState} />
+                      showScheduleActions={false} onObserved={refreshSchedulingFacts} onEditStateChange={setServiceConfirmationState} />
                   </fieldset>
                 </>}
 
@@ -745,9 +749,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               {canChangeActualStart && operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} autoLoad onObserved={(actualStartOperation) => {
                 openGroup('service');
                 if (actualStartOperation === 'date_only') setServiceDatesCalculationRevision((revision) => revision + 1);
-                refreshFacts();
+                refreshSchedulingFacts();
               }} onBusyChange={onOperationBusyChange} onLeavePending={() => requestLeave(onClose)} onOpenServiceDates={() => openGroup('service')} />}
-              {!showCompletion && <OrderAutomaticCompletionStatus caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} />}
+              {!showCompletion && <OrderAutomaticCompletionStatus caseNo={caseNo} revision={refreshRevision} onObserved={refreshSchedulingFacts} />}
               {currentBranch === 'normal' && !terminalStatus && assignmentPlan.status === 'ready' && (hasOfficialSchedule || assignmentPlan.data.service_started)
                 ? <>
                     {attributionPanel}
@@ -782,7 +786,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <button type="button" disabled={operationBusy} onClick={() => requestLeave(() => setOperation(null))}>返回案件處理</button>
         </header>
         {operationBusy && <p role="status">操作結果或正式回讀尚未確認，請先完成確認再返回案件。</p>}
-        {caseOperation && <OrderCancellationPanel key={`${caseNo}:${operation}`} caseNo={caseNo} historicalUnservedCorrection={operation === 'historical-unserved'} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
+        {caseOperation && <OrderCancellationPanel key={`${caseNo}:${operation}`} caseNo={caseNo} historicalUnservedCorrection={operation === 'historical-unserved'} onObserved={refreshSchedulingFacts} onBusyChange={onOperationBusyChange} />}
       </dialog>
     </div>
   );

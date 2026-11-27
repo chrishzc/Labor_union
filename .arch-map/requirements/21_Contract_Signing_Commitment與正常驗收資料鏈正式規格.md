@@ -79,6 +79,11 @@
   - 人員自行核對簽名與契約內容，確認完約後選擇已簽 PDF。回收區從頁面開啟即顯示。按客戶與案件目前可列出的月嫂分段歸檔，一個欄位一份 PDF。沒有可列出的月嫂分段時，仍可歸檔客戶 PDF。
   - 系統驗證案件存取權、檔案格式與大小，以及檔案能否完整保存。簽名與內容由人員核對。歸檔不要求送交記錄、LINE 綁定、未簽文件、內部契約版本、簽約工作、客戶接受推薦、檔期、服務時段、服務承諾、訂金或帳務就緒。
   - 歸檔命令在同一交易納管全部檔案、保存歸檔回執及記錄 Orders `contract_completed`。已有完約事實與契約識別時保留原值。歸檔失敗保留選檔，且不記錄完約。完約後列出已歸檔檔名。排班及帳務依各自規格判定是否可進行。
+- **原操作結果查核**：
+  - 已送出歸檔且結果未明時，以原案件及原 idempotency key 唯讀查核整次操作。只有該操作的 committed 歸檔回執可證明原操作成功；案件最近一次文件清單、檔名相同、暫存或 Orders 狀態均不能替代原回執。
+  - `GET /api/v1/orders/{case_no}/contract-external-signing/signed-archive/result` 沿用已登入 persisted admin 的案件讀取權限，必須提供原 `Idempotency-Key` header。成功回應以 `case_no`、`idempotency_key` 綁定查詢，`state=committed` 並列原回執的非空 `files`，每項包含 `target`、`filename`、`file_id`；查無原回執回 `state=unresolved`，不帶 `files`。
+  - 查無回執不表示原請求不會稍後提交。查核失敗或 unresolved 均保持結果未明，只允許再次唯讀查核，不自動重送或建立另一筆歸檔。原操作查核不要求目前推薦分段仍與送出時相同，亦不寫暫存、正式檔案、完約或回執。
+  - 管理端在送出前於同一分頁保存案件、操作人及原命令識別，以支援重開案件及重新整理後查核；不保存 PDF bytes 或檔名，保存失敗不送出。結果未明時鎖住新選檔及歸檔，原回執確認成功後才解除。沒有原 key 的案件檔案查詢只表示案件已歸檔，不宣稱原操作結果；不以時間經過解除未明狀態。
 - **手工證明（`manual_attested`）**：線下紙本／現場簽回時，管理員可透過獨立人工認證 Preview／Apply 上傳真實簽回證據並填寫 `confirmation_method` 與必填 `reason`，形成 `staff_signed_received`／`client_signed_received` 與完約（不宣稱 LINE 送達）。
 - **本機受控測試跳過（`testing_skip_allowed`）**：以 `APP_ENV=development|dev|local|test`、loopback MySQL 與無 deployment profile 判定。符合條件的本機資料庫（含還原庫）共用相同操作。呼叫 `final-document/testing-skip` 產生完整目標 `TEST-ONLY-` 占位 PDF（明示未驗真實簽署），並搭配互斥 `testing_skip_confirmed=true` 完成完約（若案件既有 `contract_identity` 或 `commitment` 則予以沿用不覆蓋）。
 
@@ -103,6 +108,8 @@
 
 | 驗收 ID | S：情境與前提 | T：使用者任務 | A：可重現操作 | R：可觀察結果 |
 |---|---|---|---|---|
+| CONTRACT-ARCHIVE-RECOVERY-01 | 已簽 PDF 歸檔已提交，但回應逾時或斷線；同分頁仍持有原操作識別。 | 重開案件或重新整理後確認原歸檔。 | 用原案件與 key 查核原回執。 | 顯示原回執的檔名及成功，查核沒有 POST、暫存、完約或回執寫入。 |
+| CONTRACT-ARCHIVE-RECOVERY-02 | 原回執查無、查核失敗，或案件已有另一操作的歸檔。 | 避免將未知結果當成失敗或別次成功。 | 重開案件並查核原 key，再次查核。 | 維持原操作結果未明；另一操作的檔案不使原操作成功；不開放新歸檔或自動重送。 |
 | CONTRACT-OFFICE-FIRST-01 | 正常案有現行已接受方案及完整確認日期，已直接歸檔現行所需文件，訂金已核銷或依原規則人工放行，尚無服務承諾。 | 儲存首份正式班表。 | 核對服務日及人員後提交首排 Apply，重新查詢承諾、正式排班、訂單與帳務。 | 同交易建立一份精確承諾及正式班表，回讀人日與提交內容一致；不補造簽回事件或更動原期款、已核銷金額，人工放行仍不等於實際收款。 |
 | CONTRACT-OFFICE-FIRST-02 | 缺必要文件、合法已接受方案或完整確認日期，或 Apply 時版本／檔期已變。 | 判斷是否能完成首排。 | 查詢或 Preview，再以原候選提交。 | Preview 零寫入；Apply 回 typed blocker／conflict 並指出原因，不留下新承諾、assignment、排班或帳務部分寫入。 |
 | CONTRACT-OFFICE-FIRST-03 | 首排已有承諾或同一命令已成功。 | 重查或重送同一首排命令。 | 使用相同冪等鍵及內容提交並重新查詢。 | 原承諾不可覆寫，同鍵同內容回原結果，不重複建立承諾、人日、排班或收付款。 |

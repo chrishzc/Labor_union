@@ -315,6 +315,24 @@ it.each(inconclusiveCases)('DS-02 $name：仍待確認，不顯示旁人金額�
   expect(result).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20/);
 });
 
+it.each([
+  ['not_established', false], ['not_established', true],
+  ['needs_review', false], ['needs_review', true],
+] as const)('DS-02 同一位月嫂有正式與 %s 指派（正式在前：%s）仍待確認', async (status, formalFirst) => {
+  const otherAssignment: StaffAvailability = {
+    ...sameNameUnconfirmed, staff_id: selectedAssignment.staff_id, status,
+  };
+  const availability = formalFirst
+    ? [selectedAssignment, otherAssignment]
+    : [otherAssignment, selectedAssignment];
+  const result = await recheckAfterSyncTimeout(pending, {
+    ...sameNameAccounting, staff_accounting_availability: availability,
+  });
+
+  expect(result).toHaveTextContent('同一位月嫂有多筆歷史指派');
+  expect(result).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20/);
+});
+
 it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且查回乙自己的正式金額', async () => {
   vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-contract-token');
   const secondRow: HistoricalPayableAuditItem = {

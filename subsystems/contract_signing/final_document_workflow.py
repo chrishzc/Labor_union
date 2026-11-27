@@ -8,7 +8,9 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
-from typing import Callable, Protocol
+from typing import Callable, Literal, Mapping, Protocol
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,
@@ -223,12 +225,48 @@ class FinalDocumentWorkflowError(RuntimeError):
         super().__init__(code)
 
 
+class SignedArchiveFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target: str = Field(pattern=r"^(client|staff:[1-9][0-9]*)$")
+    filename: str = Field(min_length=1)
+    file_id: str = Field(pattern=r"^cf_[0-9a-f]{32}$")
+
+
+class _SignedArchiveSnapshot(BaseModel):
+    files: tuple[SignedArchiveFile, ...] = Field(min_length=1)
+
+
+@dataclass(frozen=True, slots=True)
+class SignedArchiveCommitted:
+    case_no: str
+    idempotency_key: str
+    files: tuple[SignedArchiveFile, ...]
+    state: Literal["committed"] = "committed"
+
+
+@dataclass(frozen=True, slots=True)
+class SignedArchiveUnresolved:
+    case_no: str
+    idempotency_key: str
+    state: Literal["unresolved"] = "unresolved"
+
+
+SignedArchiveResult = SignedArchiveCommitted | SignedArchiveUnresolved
+
+
+def _signed_archive_receipt_key(idempotency_key: IdempotencyKey) -> str:
+    return "signed-archive:" + hashlib.sha256(idempotency_key.value.encode()).hexdigest()
+
+
 class FinalDocumentRepository(Protocol):
     def lock_case(self, case_no: str) -> bool: ...
 
     def signed_archive_segments(self, case_no: str, *, for_update: bool = False): ...
 
-    def signed_archive(self, case_no: str, key: str | None = None, *, for_update: bool = False): ...
+    def signed_archive(
+        self, case_no: str, key: str | None = None, *, for_update: bool = False
+    ) -> tuple[str, Mapping[str, object]] | None: ...
 
     def save_signed_archive(self, case_no, key, fingerprint, files, correlation_id) -> None: ...
 
@@ -360,13 +398,25 @@ class FinalSignedContractWorkflow:
             "files": None if stored is None else stored[1]["files"],
         }
 
+    def signed_archive_result(self, case_no: str, idempotency_key: IdempotencyKey) -> SignedArchiveResult:
+        if self._repository.signed_archive_segments(case_no) is None:
+            raise FinalDocumentWorkflowError("contract_signing_case_not_found", category="not_found")
+        stored = self._repository.signed_archive(case_no, _signed_archive_receipt_key(idempotency_key))
+        if stored is None:
+            return SignedArchiveUnresolved(case_no, idempotency_key.value)
+        try:
+            snapshot = _SignedArchiveSnapshot.model_validate(stored[1])
+        except ValidationError:
+            raise RuntimeError("signed_archive_receipt_invalid") from None
+        return SignedArchiveCommitted(case_no, idempotency_key.value, snapshot.files)
+
     def archive_signed_files(
         self, case_no, files, *, actor, idempotency_key, correlation_id
     ):
         """Archive the PDFs selected by the operator, without issuing unsigned contracts."""
         if self._archive_orders is None:
             raise RuntimeError("signed_archive_orders_port_missing")
-        key = "signed-archive:" + hashlib.sha256(idempotency_key.value.encode()).hexdigest()
+        key = _signed_archive_receipt_key(idempotency_key)
         fingerprint = fingerprint_payload({
             "actor": actor.actor_id,
             "case_no": case_no,

@@ -59,10 +59,10 @@ from subsystems.line.navigation_catalog import route_aliases
 _BIND_FORMAT = "格式：綁定訂單 案件編號 邀請網址\n例如：綁定訂單 115000157 https://line.me/R/ti/g/xxxxx\n各項之間可用空白或換行，網址請完整貼上。"
 _INVITE_COMMAND_FORMAT = "邀請指令只需輸入「發送邀請」。\n首次設定或更新網址請使用：\n" + _BIND_FORMAT
 _INVITATION_URL_REQUIRED = "請先設定本群組邀請網址。\n" + _BIND_FORMAT
-_START_BINDING = "綁定群組"
+_START_BINDING_COMMANDS = ("綁定訂單", "綁定群組")
 _CASE_NO = re.compile(r"[A-Za-z0-9_-]{1,50}")
-_CASE_PROMPT = "請輸入要綁定的案號。"
-_URL_PROMPT = "請貼上本群組的邀請連結。\n從右上角設定選擇「邀請」，再複製「邀請網址」。"
+_CASE_PROMPT = "請輸入案件標號。"
+_URL_PROMPT = "請輸入邀請連結。\n從右上角設定選擇「邀請」，再複製「邀請網址」。"
 
 
 def _group_command_aliases() -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -118,7 +118,7 @@ class LineOrderGroupApplication:
         if text == _ALERT_TARGET_COMMAND:
             return True  # Retired command: no registration, reply or delivery intent.
         try:
-            if text == _START_BINDING:
+            if text in _START_BINDING_COMMANDS:
                 _linked_actor(inbox, unit_of_work, LineCapability.ORDER_GROUP_BIND)
                 previous = unit_of_work.webhook_inbox.latest_group_binding_reply(event)
                 if previous is None or previous.event.occurred_at < event.occurred_at:

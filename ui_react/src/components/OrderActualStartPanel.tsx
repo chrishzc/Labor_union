@@ -10,7 +10,7 @@ import { orderActualStartClient, type ActualStartPreview } from '../api/orders/o
 import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore, type ActualStartCommand } from '../adapters/orders/order_mutation_flow_store';
-import { saveServiceDateReset } from '../adapters/orders/service_date_start_flow';
+import { actualStartPreviewInputDate, saveServiceDateReset } from '../adapters/orders/service_date_start_flow';
 
 interface Props {
   caseNo: string;
@@ -123,7 +123,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     try {
       const data = await orderActualStartClient.preview(caseNo, { new_actual_start_date: date });
       const previewCaseNo = data.operation === 'date_only' ? data.case_no : data.actual_start.case_no;
-      if (previewCaseNo !== caseNo || data.after_actual_start_date !== date) throw new Error('實際開始日預覽識別資訊不一致。');
+      if (previewCaseNo !== caseNo || actualStartPreviewInputDate(data) !== date) throw new Error('實際開始日預覽識別資訊不一致。');
       if (!isActive(request, caseNo)) return;
       if (data.service_date_adjustment_reset || data.operation === 'reschedule') {
         setPreview(data);
@@ -137,6 +137,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
           expected_order_version: data.order_version,
           preview_fingerprint: data.preview_fingerprint,
         },
+        expectedActualStartDate: data.after_actual_start_date,
         idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
       }, request, false);
     } catch (caught) {
@@ -154,21 +155,22 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
 
   const applyPreview = async () => {
     if (!query || query.service_data_locked || busy || preview?.operation !== 'reschedule'
-      || preview.after_actual_start_date !== date) return;
+      || actualStartPreviewInputDate(preview) !== date) return;
     const request = ++sequence.current;
     await execute({
       payload: {
-        operation: 'reschedule', new_actual_start_date: preview.after_actual_start_date,
+        operation: 'reschedule', new_actual_start_date: preview.actual_start.new_actual_start_date,
         expected_order_version: preview.order_version, expected_scheduling_version: preview.scheduling_version,
         preview_fingerprint: preview.preview_fingerprint, reason: reason.trim(),
       },
+      expectedActualStartDate: preview.after_actual_start_date,
       idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
     }, request, false);
   };
 
   const applyReset = async (candidate?: ActualStartPreview) => {
     if (inFlight.current.has(caseNo) || (candidate && (busy || query?.service_data_locked
-      || candidate.after_actual_start_date !== date))) return;
+      || actualStartPreviewInputDate(candidate) !== date))) return;
     const request = ++sequence.current;
     inFlight.current.add(caseNo);
     setPhase('applying'); setError(null);
@@ -208,7 +210,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     if (observation !== observationSequence.current) return;
     const schedulingNotObserved = receipt.operation === 'reschedule'
       && (data.scheduling_version === null || data.scheduling_version < receipt.scheduling_version);
-    if (data.case_no !== caseNo || data.current_actual_start_date !== command.payload.new_actual_start_date
+    if (data.case_no !== caseNo || data.current_actual_start_date !== command.expectedActualStartDate
       || data.order_version < receipt.order_version || schedulingNotObserved) {
       throw new Error('實際開始日已回傳收據，但正式回讀尚未觀察到該版本與日期。');
     }
@@ -313,7 +315,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     busy: requestPending,
     save: query && !unresolved && !query.service_data_locked && !reset
       ? query.has_formal_assignments
-        ? preview?.operation === 'reschedule' && preview.after_actual_start_date === date ? applyPreview : undefined
+        ? preview?.operation === 'reschedule' && actualStartPreviewInputDate(preview) === date ? applyPreview : undefined
         : confirm
       : undefined,
   });

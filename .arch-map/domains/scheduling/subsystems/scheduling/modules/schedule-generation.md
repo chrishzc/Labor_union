@@ -5,7 +5,7 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-純日期合併、分裂及復原在原交易透過 Orders writer 同步最後正式服務日及 Orders version；首排承接協調日期時亦同步，完工時點由 [Orders owner](../../../../orders/subsystems/orders/modules/lifecycle-authoritative-facts.md) 判斷，不以帳務天數限制實際日期筆數。
+純日期合併、分裂及復原在原交易透過 Orders writer 同步正式服務起訖日及 Orders version。首排承接協調日期時亦同步。完工時點由 [Orders owner](../../../../orders/subsystems/orders/modules/lifecycle-authoritative-facts.md) 判斷，實際日期筆數可隨服務日期調整改變。
 從 current Scheduling generation facts 產生版本化 assignment／buffer candidate。Orders Terms caller 必須先比對 candidate 與 current effective assignment 的 identity／人員／日期／區間形狀；形狀未變時 candidate 只供 Finance／Payroll 計算與真實 assignment identity mapping，不得持久化新 generation。尚無 assignment／buffer 時，開始日／服務天數 candidate 不虛構 segment；已有服務日期或排班事實時仍 fail closed，分別要求替換日期或正式重新分配。
 
 服務中 Orders Terms 使用每個既有指派的明確服務日，Scheduling 核對其合計恰為完整正式日期，再產生同一 generation candidate。

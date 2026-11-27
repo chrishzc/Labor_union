@@ -37,6 +37,8 @@ from subsystems.contract_signing.final_document_workflow import (
     FinalDocumentWorkflowError,
     FinalSignedContractWorkflow,
     PreviewFinalSignedContractUpload,
+    SignedArchiveCommitted,
+    SignedArchiveUnresolved,
     SignedContractDocumentUpload,
     signed_contract_intent,
 )
@@ -750,3 +752,43 @@ def test_archive_storage_failure_rolls_back_without_recording_completion():
         )
     assert units.instances[0].commits == 0
     assert units.instances[0].rollbacks == 1
+
+
+def test_signed_archive_result_reads_only_the_case_and_original_receipt():
+    key = IdempotencyKey("archive-1")
+    expected_key = "signed-archive:" + hashlib.sha256(key.value.encode()).hexdigest()
+    members = [{"target": "client", "filename": "original.pdf", "file_id": "cf_" + "a" * 32}]
+    receipts = {("CASE-001", expected_key): ("saved-command-fingerprint", {"files": members})}
+    reads = []
+
+    def signed_archive(case_no, receipt_key, *, for_update=False):
+        assert not for_update
+        reads.append((case_no, receipt_key))
+        return receipts.get((case_no, receipt_key))
+
+    repository = SimpleNamespace(
+        signed_archive_segments=lambda case_no: None if case_no == "MISSING-CASE" else (),
+        signed_archive=signed_archive,
+    )
+    workflow = FinalSignedContractWorkflow(
+        repository, None, None, None,
+        lambda: pytest.fail("signed archive query opened a unit of work"), None, None,
+    )
+    committed = workflow.signed_archive_result("CASE-001", key)
+    assert isinstance(committed, SignedArchiveCommitted)
+    assert [item.model_dump() for item in committed.files] == members
+    assert committed.case_no == "CASE-001"
+    assert committed.idempotency_key == key.value
+    assert workflow.signed_archive_result("CASE-002", key) == SignedArchiveUnresolved("CASE-002", key.value)
+    other_key = IdempotencyKey("other")
+    assert workflow.signed_archive_result("CASE-001", other_key) == SignedArchiveUnresolved("CASE-001", other_key.value)
+    with pytest.raises(FinalDocumentWorkflowError, match="contract_signing_case_not_found"):
+        workflow.signed_archive_result("MISSING-CASE", key)
+    assert reads == [
+        ("CASE-001", expected_key),
+        ("CASE-002", expected_key),
+        ("CASE-001", "signed-archive:" + hashlib.sha256(other_key.value.encode()).hexdigest()),
+    ]
+    receipts[("CASE-001", expected_key)] = ("saved-command-fingerprint", {"files": []})
+    with pytest.raises(RuntimeError, match="signed_archive_receipt_invalid"):
+        workflow.signed_archive_result("CASE-001", key)

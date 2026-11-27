@@ -79,7 +79,7 @@
   - **普通保存（`requires_formal_apply=false`）**：不影響 Scheduling／confirmed dates／Finance／Payroll／lifecycle 時，僅更新 Orders Terms 與 version（無須 reason／idempotency key 或永久 receipt；結果未明由 Query 比對版本）。
   - **正式 Apply（`requires_formal_apply=true`）**：沿用正式變更的原因欄，且須附 idempotency key。開工後「解除鎖定並修改」仍走正式 Apply，但原因可留白，適用條件見下段。依實際影響委派 Client Finance／Payroll／Scheduling。僅金額／計薪時數／下廚等變更且排班形狀相同時，保留現行 generation 與 assignment identity，`scheduling_command_receipt_id = NULL`。已有確認日期或排班而改總天數時，同一 Apply 須附完整 `replacement_service_dates`，已有排班時亦須附逐段 `replacement_allocations.service_days`。
 - **開工後的服務條件鎖定與單次解除**。一般「服務中」案件已有實際開始日與正式排班時，預設鎖定總服務天數、每日服務時數、每日時段及全案日期替換。Terms Query 以 `service_quantity_lock_reason` 回傳 `service_started`（一般服務中）、`service_started_replacement_blocked`（其他已開始分支維持原日期替換限制）或 null。一般服務中、無完工服務資料鎖且無有效取消的案件，具有既有 Terms 管理權限者可選「解除鎖定並修改」。Preview 與 Apply 均須帶 `allow_started_service_change=true`，變更原因選填，並以正式 Preview／確認／Apply 保存。此選擇限本次變更，存檔後恢復鎖定。約定開始日、下廚、樓層費及人員名單不納入此解鎖操作，完工資料鎖與其他權限及衝突檢查仍適用。
-- **開工後全案影響**。畫面在解除與確認前顯示，新條件會套用到全案，包含已服務日期的有效排班及統計，並可能重算客戶應付與月嫂薪資。由承辦人先核對影響並選擇是否儲存。Query 提供已確認的 `actual_start_date`，新班表首日須與原實際開始日相同。沿用 [Scheduling 世代](02_Assignments_Scheduling_Domain.md#2-核心不變量與資料模型ssot) 及既有 Finance／Payroll 差額規則，保留舊排班及收付紀錄。日期或時段改變時才依排班形狀重建。未提供解鎖、資料或檔期衝突、版本過期、帳務阻擋均不得留下部分寫入。
+- **開工後全案影響**。畫面在解除與確認前顯示，新條件會套用到全案，包含已服務日期的有效排班及統計，並可能重算客戶應付與月嫂薪資。由承辦人先核對影響並選擇是否儲存。新班表須保留異動前的首個正式服務日，實際開始日依 [§3.5](#35-actual-start-previewapply) 保存。沿用 [Scheduling 世代](02_Assignments_Scheduling_Domain.md#2-核心不變量與資料模型ssot) 及既有 Finance／Payroll 差額規則，保留舊排班及收付紀錄。日期或時段改變時才依排班形狀重建。未提供解鎖、資料或檔期衝突、版本過期、帳務阻擋均不得留下部分寫入。
 - **月曆分配**。解鎖後可開啟重新排班，改總天數時必須完成。直接在月曆選取新班表日期，保留原實際開工日。初始沿用現行正式日期，縮減天數時預先取原班表最早的對應天數，增加天數時由承辦人補選。畫面顯示首日、末日與已選天數，每個既有指派以一張月曆顯示負責日期，並預填仍在新班表中的現行分配。點選可將日期分配給該指派，包含把已分配的日期轉給另一既有指派。單一指派承接全部日期。解鎖替換須在每筆 `replacement_allocations` 帶入 `service_dates`，每個替代服務日恰分配一次、每段至少一日，筆數與該段服務天數一致。未啟用解鎖的既有按天數分配契約可繼續使用。解鎖後未選擇替換日期時，沿用各指派的現行正式服務日。
 - **已結案漏填樓層費更正**：具完工服務資料鎖（`order_service_data_locks`）或符合 [規格 27 §6.3](27_歷史訂單生命週期與服務天數帳務正式規格.md#63-人工發起服務天數更正與已結案樓層費個案計價更正) 的已完成案件，可發起樓層費更正（`floor_fee_correction=true`；Query 回報 `floor_fee_correction_available`）。正式儲存後保留服務鎖、服務日期與原排班 generation。適用規格 27 的歷史案件，由 Orders 與 Client Finance 在同一交易把樓層費差額反映到客戶訂金應收；儲存後，承辦人可在客戶名冊查到更正後的正式訂金應收總額，原收款與核銷紀錄仍保留。一般訂單結案後的樓層費更正，由 Finance 與 Payroll 在同一交易承接各自差額。
 - **每日服務時間與下廚需求**：每日服務時段由開始時間、結束時間與是否跨日三欄共同表示。三欄可全空或全有；修改時段須一次填齊。新案進入等待鎖定（waiting lock）或訂金核銷前，三欄必須完整。每日服務時數可直接輸入，以 0.5 小時為單位且不得超過 24 小時。調整起訖時段只更新畫面的建議時數，承辦人可採用建議或保留輸入值，畫面同時顯示兩者。選取常用班次時明確填入時段與時數。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
@@ -92,7 +92,7 @@
 
 #### 服務中提前結束的處理路徑 ^order-early-finish
 
-已有實際服務、其餘服務不再執行時，人員沿用本節「解除鎖定並修改」，一次確認實際保留的正整數服務天數及完整替代班表，保留原實際開工日，由 Scheduling、Client Finance 與 Payroll 各自承接影響。不得只刪未來排班而保留不一致的訂單天數。儲存不建立取消事件，也不接受直接指定完成狀態；依 [過期完工補抓](#order-completion-catchup) 交由唯一完工入口評估，最終顯示「訂單完成」，不設「服務提前結束」狀態。完全沒有服務者依 [零服務取消](#order-zero-service-termination) 辦理。
+已有實際服務、其餘服務不再執行時，人員沿用本節「解除鎖定並修改」，一次確認實際保留的正整數服務天數及完整替代班表，保留異動前的首個正式服務日。實際開始日依 [§3.5](#35-actual-start-previewapply) 保存，由 Scheduling、Client Finance 與 Payroll 各自承接影響。不得只刪未來排班而保留不一致的訂單天數。儲存不建立取消事件，也不接受直接指定完成狀態；依 [過期完工補抓](#order-completion-catchup) 交由唯一完工入口評估，最終顯示「訂單完成」，不設「服務提前結束」狀態。完全沒有服務者依 [零服務取消](#order-zero-service-termination) 辦理。
 
 ### 3.5 Actual Start Preview／Apply
 
@@ -103,7 +103,8 @@
 - **已有有效正式 assignment**：須顯示逐段重建預覽，單一 Apply 同交易重建 assignments、正式服務日、`actual_end_date` 與 lifecycle，並由 Payroll adapter 一對一原值搬移 source assignment rate snapshot（source 缺漏回 integrity blocker）；過期日期與新確認日間不補造服務日；歷史重啟案依 [規格 27 §8](27_歷史訂單生命週期與服務天數帳務正式規格.md#8-重啟正常流程) 免除訂金／簽約前置直接進入服務中。
   - **正例**：案件已有 8 月 1 至 3 日的舊排班，尚未確認實際開始日。承辦人首次確認 8 月 8 日。若重算後逐段預覽列出 8 月 8、11、12 日，其他檢查通過並確認儲存後，正式服務日依預覽重建，實際結束日為 8 月 12 日。
   - **反例**：同一案件不能僅憑舊排班，把 8 月 1 至 7 日補成已服務。這些日期不列入本次預覽或重建的正式服務日。
-- **更正日期的檔期基準**：Preview 與 Apply 的檔期檢查均使用本次送交 Orders 的新實際開始日。假日或排休可能使第一個正式服務日晚於該日期，不得改以首個服務日、原開始日或預定開始日推定檔期基準。Scheduling 候選只承載其既有排班事實；跨 owner 檢查由 Actual Start 流程明確提供當次日期。
+- **正式服務首日**。案件的正式排班首次建立或異動成功時，Orders 在同一交易保存 `actual_start_date`，取全案目前生效的正式工作班次中最早的服務日期。等待訂金保留、緩衝、排休及已失效班次均排除。尚無有效正式工作班次時，沿用日期確認流程。
+- **重排輸入與確認結果**。送交的新日期是排班試算起點。假日或排休使候選的首個正式服務日延後時，Preview 顯示實際將保存的首日。Preview 與 Apply 的檔期檢查及 Orders 生命週期使用該首日。Apply 核對同一候選後，保存正式班表與實際開始日，讀回與預覽一致。
 
 <a id="order-zero-service-termination"></a>
 
@@ -143,6 +144,7 @@
 | ORDER-EARLY-END-02 | 已有實際服務，卻從取消入口嘗試結束案件。 | 選擇正確處理入口。 | 送出非零實際服務量的取消請求。 | 回傳可判讀的拒絕與 Terms 修改引導，不保存取消狀態或部分帳務。 |
 | ORDER-CATCHUP-01 | 原班表尚有未來服務；昨日其實已是最後服務日，背景完工工作正常運行且無 blocker。 | 今日補登提前結束，接續完工及結算。 | 今日由 Terms 同步縮短天數與班表至昨日，執行一輪既有到期發現及完工處理，再讀回看板。 | 依昨日實際班次結束時刻辦理「訂單完成」與第 11 步，接續未完成的第 12／13 步；無須改成今日、重存或取消，未收付項目不假稱結清。 |
 | ORDER-CATCHUP-02 | 回填後班次尚未結束、服務量不一致，或存在有效完工 blocker。 | 檢查能否完工。 | 查詢完工狀態並執行相同完工評估。 | 不提前完工；明示未到時間或阻擋原因，不建立完工事件或服務資料鎖。 |
-| ACTUAL-START-REPLAN-01 | 已有正式排班、人員有效且新日期無檔期衝突；新開始日可為排休日。 | 更正實際開始日並核對逐段排班。 | 送出新日期 Preview，核對後 Apply，再重新讀取本案日期與正式排班。 | Preview 零寫入，檔期檢查使用送交日期；Apply 原子更新日期及排班，讀回與預覽一致，人員順序、服務日數及原費率快照保持既有契約。 |
+| ACTUAL-START-REPLAN-01 | 已有正式排班、人員有效，輸入 12/1 且當天排休。重算的正式首日為 12/2，無檔期衝突。 | 更正實際開始日並核對逐段排班。 | 預覽 12/1 的重排結果，確認後重新讀取本案日期與正式班表。 | Preview 顯示實際開始日為 12/2 且零寫入。Apply 同交易保存正式班表與 12/2，讀回一致，人員順序、服務日數及原費率快照沿既有契約。 |
+| ACTUAL-START-SCHEDULE-01 | 案件符合正式首排或正式日期異動的條件，候選有生效工作班次。 | 保存班表並核對全案實際服務開始日。 | 分別提交首次排班、移動首個服務日的合法異動，以及服務日期相同的換人，再讀回訂單與全案班次。 | 每次成功後，實際開始日等於全案最早生效的正式工作班次日期。版本或檔期衝突時兩者均無部分寫入。 |
 | ACTUAL-START-REPLAN-02 | 更正後的月嫂日期與其他案件的有效占用衝突。 | 確認更正是否可辦理。 | 送出 Preview，另驗證 Apply 提交前新增衝突的情境。 | 回傳可辨識的檔期衝突，無日期、排班或帳務部分寫入；畫面顯示拒絕原因。 |
 | ACTUAL-START-REPLAN-03 | Preview 完成後 Orders 或 Scheduling owner version 已變更。 | 提交先前核對的更正。 | 使用原 Preview 與版本 Apply，再重新查詢。 | 回傳 typed version／stale conflict，保留最新 owner 事實並要求重新核對；不得以重試或 generic 500 掩蓋衝突。 |

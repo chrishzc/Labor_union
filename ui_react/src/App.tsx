@@ -2,7 +2,7 @@
  * File: App.tsx
  * Description: 應用程式根元件，實作 Hash 路由、認證守衛、頁面切換與低頻頁面動態載入。
  */
-import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { UnsavedChangesProvider, useUnsavedNavigation } from './components/UnsavedChanges';
 import './styles/design-tokens.css';
 import {
@@ -16,7 +16,8 @@ import {
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { StaffIdentityProvider } from './components/StaffIdentityProvider';
 import { LoginPage } from './pages/LoginPage';
-import { sessionClient } from './api/auth/session_client';
+import { getAdminSessionScopeRevision, sessionClient, subscribeAdminSessionScope } from './api/auth/session_client';
+import { AdminOperationsViewProvider } from './pages/admin_operations_view_cache';
 import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
 import { OrderWorkbenchV2Page } from './pages/OrderWorkbenchV2Page';
 import { SchedulingPage } from './pages/SchedulingPage';
@@ -113,6 +114,7 @@ const AppContent: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
   const committedHash = useRef(window.location.hash);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
+  const sessionScope = useSyncExternalStore(subscribeAdminSessionScope, getAdminSessionScopeRevision);
   const [requestedPage, setRequestedPage] = useState<PageType>(getPageFromHash);
   const [notificationNavigation, setNotificationNavigation] = useState(0);
   const [workbenchHomeRequest, setWorkbenchHomeRequest] = useState(0);
@@ -210,7 +212,7 @@ const AppContent: React.FC = () => {
     });
   };
 
-  if (!isLoggedIn) {
+  if (!isLoggedIn || !sessionClient.isAuthenticated()) {
     return (
       <ErrorBoundary>
         <LoginPage onLoginSuccess={handleLoginSuccess} />
@@ -227,6 +229,7 @@ const AppContent: React.FC = () => {
         onSelectPage={handleSelectPage}
         onLogout={handleLogout}
       >
+        <AdminOperationsViewProvider key={sessionScope}>
         <ErrorBoundary key={currentPage}>
         <StaffIdentityProvider key={currentPage} enabled={['order-workbench-v2', 'clients', 'finance', 'payment-reminder-settings', 'line-management', 'line-notifications', 'line-interface'].includes(currentPage)}>
         <Suspense fallback={<div className="app-route-loading" role="status" aria-live="polite">載入頁面中…</div>}>
@@ -257,6 +260,7 @@ const AppContent: React.FC = () => {
         </Suspense>
         </StaffIdentityProvider>
         </ErrorBoundary>
+        </AdminOperationsViewProvider>
       </MasterLayout>
     </ErrorBoundary>
   );

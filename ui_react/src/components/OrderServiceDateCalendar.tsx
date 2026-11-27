@@ -3,6 +3,7 @@ import { buildCalendarMonth, calendarOccupancyDetailsByDate, calendarWeekdays, s
 import '../../../line/static/service-date-calendar.css';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { schedulingCurrentClient, type SchedulingCurrentQuery } from '../api/scheduling/scheduling_current_client';
+import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 
 export const coordinatedServiceTime = '月嫂跟客戶自行協調';
 
@@ -22,7 +23,9 @@ interface Props {
 }
 
 type StaffScheduleRequest = SchedulingCurrentQuery & { caseNo: string; actualStartDate?: string | null; firstDate: string };
-type StaffScheduleResult = { request: StaffScheduleRequest; days: Map<string, CalendarOccupancyDetail[]> | null };
+type StaffScheduleResult =
+  | { request: StaffScheduleRequest; status: 'loaded'; days: Map<string, CalendarOccupancyDetail[]> }
+  | { request: StaffScheduleRequest; status: 'failed'; message: string };
 
 // The same case calendar is used before service and for audited corrections after completion.
 export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, selectedDates, isDateDisabled, onToggle, hint, showHolidaySelectionHint, showHolidays = true, monthRange, dayLabel, dayDetails, staffSchedule }) => {
@@ -41,9 +44,10 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
     caseNo, staffId, actualStartDate, firstDate, rangeStart: shiftCalendarDate(firstDate, -1), rangeEnd: lastDate,
   } : null, [actualStartDate, caseNo, firstDate, lastDate, staffId]);
   const visibleSchedule = scheduleRequest === scheduleResult?.request ? scheduleResult : null;
+  const occupancyDays = visibleSchedule?.status === 'loaded' ? visibleSchedule.days : undefined;
   const detailDate = activeDetail && activeDetail.request === scheduleRequest ? activeDetail.date : null;
-  const detailItems = detailDate ? visibleSchedule?.days?.get(detailDate) : undefined;
-  const hasOccupancy = Boolean(visibleSchedule?.days?.size);
+  const detailItems = detailDate ? occupancyDays?.get(detailDate) : undefined;
+  const hasOccupancy = Boolean(occupancyDays?.size);
 
   useEffect(() => {
     if (!scheduleRequest) return;
@@ -56,9 +60,15 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
         actualStartDate: entry.actual_start_date, serviceStartAt: entry.service_start_at, serviceEndAt: entry.service_end_at,
         serviceHoursOverride: entry.service_hours_override,
       }))), { caseNo, actualStartDate, firstDate, lastDate: query.rangeEnd });
-      setScheduleResult({ request: scheduleRequest, days });
-    }).catch(() => {
-      if (!controller.signal.aborted) setScheduleResult({ request: scheduleRequest, days: null });
+      setScheduleResult({ request: scheduleRequest, status: 'loaded', days });
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      const hasConflict = error instanceof SchedulingCurrentError
+        && error.status === 409 && error.publicCode === 'staff_occupancy_conflict';
+      const message = hasConflict
+        ? '月嫂檔期有衝突，請核對既有排班與不可服務時段。'
+        : '無法讀取月嫂檔期。';
+      setScheduleResult({ request: scheduleRequest, status: 'failed', message });
     });
     return () => controller.abort();
   }, [scheduleRequest]);
@@ -91,7 +101,7 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
       {showHolidays && holidayLoading && <small role="status">正在讀取當月國定假日…</small>}
       {showHolidays && holidayError && <div role="alert">國定假日標示載入失敗：{holidayError} <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button></div>}
       {scheduleRequest && !visibleSchedule && <small role="status">正在讀取月嫂檔期…</small>}
-      {visibleSchedule?.days === null && <small role="alert">無法讀取月嫂檔期。</small>}
+      {visibleSchedule?.status === 'failed' && <small role="alert">{visibleSchedule.message}</small>}
       {hasOccupancy && <p className="service-date-scroll-hint">可橫向捲動月曆查看各日檔期。</p>}
       {hasOccupancy && <p className="service-date-mobile-hint">點選檔期筆數查看案號與時段</p>}
       <div className={hasOccupancy ? 'service-date-calendar-scroll' : undefined}>
@@ -102,7 +112,7 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
           const selected = selectedDates.includes(date);
           const details = dayDetails?.(date);
           const holidayName = showHolidays ? holidayNames[date] : undefined;
-          const occupancy = visibleSchedule?.days?.get(date);
+          const occupancy = occupancyDays?.get(date);
           const occupancyText = occupancy ? `，${[...new Set(occupancy.map(item => item.label))].join('、')}` : '';
           const label = dayLabel?.(date);
           const occupied = occupancy && scheduleRequest;

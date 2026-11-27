@@ -61,6 +61,45 @@ def test_no_assignment_does_not_invent_payment_date():
     assert _staff_payment_due_date(facts, replace(scheduling, assignments=()), finance) is None
 
 
+def test_existing_assignment_save_aligns_order_and_finance_to_first_workday():
+    from datetime import datetime, time
+
+    from domains.client_finance.obligation_planning import ClientFinanceTermsSourceFacts, ClientPaymentTerms
+    from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
+    from domains.scheduling.assignment_plan import EffectiveAssignmentFact
+    from shared_kernel.clock import TAIPEI_TIME_ZONE
+    from subsystems.scheduling.assignment_plan_impacts import (
+        build_client_finance_assignment_impact,
+        build_orders_assignment_impact,
+    )
+    from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanWorkflowFacts
+
+    inputs, scheduling, _ = _inputs('一般市民', 4800)
+    previous_start = date(2026, 12, 29)
+    first_workday = date(2026, 12, 30)
+    existing = EffectiveAssignmentFact(
+        1, 1, 1, previous_start, date(2027, 1, 2), (first_workday, date(2027, 1, 2)),
+    )
+    terms = ClientPaymentTerms(1, MoneyNTD(300), date(2026, 12, 20), previous_start, None)
+    facts = AssignmentPlanWorkflowFacts(
+        SimpleNamespace(current_waiting_lock_ids=(), effective_assignments=(existing,), order_version=7, office_schedule=False),
+        replace(inputs.order_terms, service_time=ServiceTimeTerms(time(9), time(17), 0)),
+        ClientFinanceTermsSourceFacts(
+            'CASE-DATE', 0, terms, (), (),
+            identity_status=inputs.client_finance.identity_status,
+            effective_start_date=previous_start,
+        ),
+        inputs.payroll,
+        OrderLifecycleRootFacts('CASE-DATE', OrderLifecycleStatus.ESTABLISHED, True, previous_start, True, False, False),
+    )
+
+    finance = build_client_finance_assignment_impact(facts, scheduling)
+    orders = build_orders_assignment_impact(facts, scheduling, finance, datetime(2027, 1, 3, tzinfo=TAIPEI_TIME_ZONE))
+
+    assert finance.payload.payment_terms.first_payment_due_date == first_workday
+    assert orders.payload.actual_start_date == first_workday
+
+
 @pytest.mark.parametrize('payment_terms_changed,expected_status,expected_blockers', [
     (False, '服務中', ()),
     (True, '洽談中', ('waiting_lock_conversion.deposit_required',)),

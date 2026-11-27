@@ -179,7 +179,7 @@ def test_formal_adjustment_pairs_exclude_retired_receipts_even_when_dates_match(
 
 
 @pytest.mark.parametrize("restore", [False, True])
-def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restore, monkeypatch):
+def test_formal_adjustment_and_restore_persist_the_service_dates_through_orders(restore, monkeypatch):
     from subsystems.scheduling.holiday_maintenance import HolidayCaseRepricingResult
 
     accounting_calls: list[tuple[str, str]] = []
@@ -191,7 +191,10 @@ def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restor
         def prepare_case(self, case_no: str) -> None:
             accounting_calls.append(("prepare", case_no))
 
-        def reprice_case(self, case_no: str, key: str, actor: str) -> HolidayCaseRepricingResult:
+        def reprice_case(
+            self, case_no: str, key: str, actor: str, *, preserve_payment_due_dates: bool,
+        ) -> HolidayCaseRepricingResult:
+            assert preserve_payment_due_dates is True
             accounting_calls.append(("reprice", case_no))
             return HolidayCaseRepricingResult(case_no, "unchanged", reason_code="pricing_amounts_unchanged")
 
@@ -209,6 +212,7 @@ def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restor
     planning_repository.load.return_value = facts
     preview = ServiceDateAdjustmentWorkflow(planning_repository, Mock()).preview("CASE-1", intent)
     cursor = Mock(rowcount=1, lastrowid=42)
+    cursor.fetchone.return_value = None
     connection = Mock()
     connection.cursor.return_value.__enter__ = Mock(return_value=cursor)
     connection.cursor.return_value.__exit__ = Mock(return_value=False)
@@ -221,45 +225,64 @@ def test_formal_adjustment_and_restore_persist_the_new_end_through_orders(restor
     order_writes = [call.args for call in cursor.execute.call_args_list if call.args[0].startswith("UPDATE orders ")]
     assert len(order_writes) == 1
     sql, values = order_writes[0]
-    assert values == (second if restore else target, "CASE-1", 3)
-    assert "actual_end_date=%s,lifecycle_version=lifecycle_version+1" in sql
+    assert values == (first if restore else target, second if restore else target, "CASE-1", 3)
+    assert "actual_start_date=%s,actual_end_date=%s,lifecycle_version=lifecycle_version+1" in sql
     assert receipt.scheduling_version == 5
     assert accounting_calls == [("prepare", "CASE-1"), ("reprice", "CASE-1")]
     assert receipt.case_result == HolidayCaseRepricingResult(
         "CASE-1", "unchanged", reason_code="pricing_amounts_unchanged",
     )
-    assert all(token not in sql for token in ("status=", "actual_start_date=", "staff_payment_due_date="))
+    assert all(token not in sql for token in ("status=", "staff_payment_due_date="))
 
 
-def test_first_assignment_orders_impact_uses_the_adjusted_end(monkeypatch):
+def test_first_assignment_orders_impact_uses_the_adjusted_bounds():
+    from datetime import datetime, time
+    from domains.client_finance.obligation_planning import ClientFinanceTermsSourceFacts, ClientPaymentTerms
+    from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
+    from domains.orders.terms import OrderTerms, ServiceTimeTerms
+    from domains.scheduling.assignment_plan import AssignmentPlanFacts
+    from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
     from infrastructure.mysql.assignment_plan_impact_ports import MySqlOrdersAssignmentImpactPort
+    from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+    from shared_kernel.money import MoneyNTD
+    from subsystems.payroll.terms_impact import PayrollTermsSourceFacts
+    from subsystems.scheduling.assignment_plan_impacts import build_client_finance_assignment_impact
+    from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanWorkflowFacts
 
-    original = (ServiceDay(date(2026, 11, 1), 3, None), ServiceDay(date(2026, 11, 2), 3, None))
-    adjusted = (ServiceDay(date(2026, 12, 3), 3, 8),)
-    monkeypatch.setattr("infrastructure.mysql.service_date_adjustment_repository.load_first_schedule_dates",
-                        Mock(return_value=(original, adjusted)))
-    builder = Mock()
-    monkeypatch.setattr("infrastructure.mysql.assignment_plan_impact_ports.build_orders_assignment_impact", builder)
-    facts = SimpleNamespace(assignment_plan=SimpleNamespace(effective_assignments=(), office_schedule=True))
-    connection = Mock()
-    connection.cursor.return_value.__enter__ = Mock(return_value=Mock())
-    connection.cursor.return_value.__exit__ = Mock(return_value=False)
-
-    MySqlOrdersAssignmentImpactPort(connection, Mock()).preview_assignment_plan(
-        facts, SimpleNamespace(case_no="CASE-1"), Mock(),
+    case_no = "CASE-1"
+    original = (date(2026, 11, 1), date(2026, 11, 2))
+    adjusted_date = date(2026, 12, 3)
+    facts = AssignmentPlanWorkflowFacts(
+        AssignmentPlanFacts(case_no, 1, 1, 1, 1, 1, 2, 4, False, explicit_service_start_result=True),
+        OrderTerms(original[0], 2, 4, MoneyNTD(0), ServiceTimeTerms(time(9), time(13), 0)),
+        ClientFinanceTermsSourceFacts(
+            case_no, 1, ClientPaymentTerms(0, MoneyNTD(300), original[0], original[0], None), (), (),
+        ),
+        PayrollTermsSourceFacts(case_no, 1, (), (), adjusted_date),
+        OrderLifecycleRootFacts(case_no, OrderLifecycleStatus.ESTABLISHED, True, original[0], True, False, False),
+        first_schedule_adjusted_days=(ServiceDay(adjusted_date, 3, 8),),
     )
+    scheduling = SchedulingGenerationCandidate(case_no, 2, 1, 2, (), (
+        AssignmentCandidate("CASE-1:g2:a1", None, 3, 1, original[0], original[-1], original, 8),
+    ), ())
+    finance = build_client_finance_assignment_impact(facts, scheduling)
+    clock = FixedBusinessClock(datetime(2026, 12, 4, 10, tzinfo=TAIPEI_TIME_ZONE))
+    impact = MySqlOrdersAssignmentImpactPort(Mock(), clock).preview_assignment_plan(facts, scheduling, finance)
 
-    assert builder.call_args.kwargs == {
-        "effective_service_end": date(2026, 12, 3), "coordinated_final_day": True,
-    }
+    assert impact.payload.actual_start_date == adjusted_date
+    assert impact.payload.lifecycle.actual_end_date == adjusted_date
+    assert impact.payload.lifecycle.completion_instant == datetime.combine(adjusted_date, time.max, TAIPEI_TIME_ZONE)
+    assert finance.payload.stage_plans[1].due_date == adjusted_date
 
 
-def test_scheduled_end_projection_rejects_stale_order_version():
-    from infrastructure.mysql.order_lifecycle_impact_writer import persist_order_scheduled_end_projection
+def test_scheduled_date_projection_rejects_stale_order_version():
+    from infrastructure.mysql.order_lifecycle_impact_writer import persist_order_scheduled_date_projection
 
     with pytest.raises(RuntimeError, match="order_version_conflict"):
-        persist_order_scheduled_end_projection(
-            Mock(rowcount=0), case_no="CASE-1", actual_end_date=date(2026, 12, 3), expected_order_version=3,
+        persist_order_scheduled_date_projection(
+            Mock(rowcount=0), case_no="CASE-1", previous_actual_start_date=date(2026, 12, 3),
+            actual_start_date=date(2026, 12, 3), actual_end_date=date(2026, 12, 3),
+            expected_order_version=3, adjustment_receipt_id=41, actor="admin",
         )
 
 

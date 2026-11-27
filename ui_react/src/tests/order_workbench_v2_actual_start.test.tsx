@@ -18,10 +18,10 @@ function query(): ActualStart {
     has_formal_assignments: true };
 }
 // Component doubles; existing typed-client tests own HTTP/schema validation.
-function preview() {
+function preview(requestedDate = '2026-09-02') {
   return { operation: 'reschedule' as const, before_actual_start_date: null, after_actual_start_date: '2026-09-02', actual_end_date: '2026-09-03',
     order_version: 2, scheduling_version: 3, scheduling_generation: 1,
-    actual_start: { case_no: CASE, official_service_dates: ['2026-09-02', '2026-09-03'] },
+    actual_start: { case_no: CASE, new_actual_start_date: requestedDate, official_service_dates: ['2026-09-02', '2026-09-03'] },
     scheduling: { assignments: [{ candidate_key: 'new:1', staff_id: 7, assigned_start_date: '2026-09-02',
       assigned_end_date: '2026-09-03', service_dates: ['2026-09-02', '2026-09-03'] }] },
     lifecycle_impact: { before_status: '訂單成立', after_status: '服務中' }, preview_fingerprint: fingerprint };
@@ -36,8 +36,8 @@ async function open() {
   fireEvent.click(screen.getByRole('button', { name: '讀取實際開始日' }));
   await screen.findByLabelText('更正實際開始日期');
 }
-async function save(confirmPreview = true) {
-  fireEvent.change(screen.getByLabelText('更正實際開始日期'), { target: { value: '2026-09-02' } });
+async function save(confirmPreview = true, requestedDate = '2026-09-02') {
+  fireEvent.change(screen.getByLabelText('更正實際開始日期'), { target: { value: requestedDate } });
   const button = screen.getByRole('button', { name: '預覽日期與逐段排班' });
   await waitFor(() => expect(button).toBeEnabled());
   fireEvent.click(button);
@@ -58,16 +58,17 @@ describe('Beta 實際開始日正式操作', () => {
     mocks.apply.mockImplementation(async () => { commitFacts(); return receipt(); });
   });
 
-  it('逐段預覽零寫入，由人員確認後才套用同一候選並正式回讀', async () => {
+  it('輸入排休日後預覽正式首日，以原輸入確認並讀回正式首日', async () => {
     let finishPreview!: (value: ReturnType<typeof preview>) => void;
     mocks.preview.mockImplementation(() => new Promise<ReturnType<typeof preview>>((resolve) => { finishPreview = resolve; }));
     const onObserved = vi.fn(); render(<OrderActualStartPanel caseNo={CASE} onObserved={onObserved} />);
-    await open(); await save(false);
-    expect(mocks.preview).toHaveBeenCalledWith(CASE, { new_actual_start_date: '2026-09-02' });
+    await open(); await save(false, '2026-09-01');
+    expect(mocks.preview).toHaveBeenCalledWith(CASE, { new_actual_start_date: '2026-09-01' });
     expect(mocks.apply).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '預覽日期與逐段排班' })).toBeDisabled();
     expect(onObserved).not.toHaveBeenCalled();
-    await act(async () => { finishPreview(preview()); });
+    await act(async () => { finishPreview(preview('2026-09-01')); });
+    expect(screen.getByText('實際開始：未確認 → 2026-09-02')).toBeInTheDocument();
     const calendar = within(screen.getByRole('group', { name: '服務日期月曆' }));
     expect(calendar.getByRole('button', { name: '服務日期 2026-09-02', pressed: true })).toBeDisabled();
     expect(calendar.getByRole('button', { name: '服務日期 2026-09-03', pressed: true })).toBeDisabled();
@@ -78,7 +79,7 @@ describe('Beta 實際開始日正式操作', () => {
     await screen.findByText('實際開始日已完成正式回讀：2026-09-02');
     expect(mocks.apply).toHaveBeenCalledTimes(1);
     expect(mocks.apply).toHaveBeenCalledWith(CASE, {
-      operation: 'reschedule', new_actual_start_date: '2026-09-02', expected_order_version: 2, expected_scheduling_version: 3,
+      operation: 'reschedule', new_actual_start_date: '2026-09-01', expected_order_version: 2, expected_scheduling_version: 3,
       preview_fingerprint: fingerprint, reason: '',
     }, { idempotencyKey: expect.any(String) });
     expect(mocks.query).toHaveBeenCalledTimes(2);
@@ -165,7 +166,7 @@ describe('Beta 實際開始日正式操作', () => {
     fireEvent.change(screen.getByLabelText('原因（選填）'), { target: { value: '  客戶確認日期  ' } });
     expect(mocks.preview).not.toHaveBeenCalled();
     expect(mocks.apply).not.toHaveBeenCalled();
-    const candidate = preview();
+    const candidate = preview('2026-09-04');
     candidate.after_actual_start_date = '2026-09-04';
     candidate.actual_end_date = '2026-09-05';
     candidate.actual_start.official_service_dates = ['2026-09-04', '2026-09-05'];

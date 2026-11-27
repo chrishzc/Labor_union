@@ -151,6 +151,97 @@ assert.equal(get('reviewTotal').textContent,'0');
     subprocess.run(['node', '--input-type=module', '-e', script], cwd=ROOT, check=True, capture_output=True, text=True, timeout=20)
 
 
+def test_mobile_group_todo_guides_binding_and_copies_each_reply() -> None:
+    import subprocess
+
+    script = r'''
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+class Element {
+  constructor(tag) {
+    this.tag = tag;
+    this.children = [];
+    this.dataset = {};
+    this.listeners = {};
+    this.textContent = '';
+    this.isConnected = true;
+  }
+  append(...children) {
+    this.children.push(...children.map(child => typeof child === 'string'
+      ? {tag: '#text', children: [], textContent: child}
+      : child));
+  }
+  appendChild(child) { this.append(child); return child; }
+  replaceChildren(...children) { this.children = children; }
+  addEventListener(event, listener) { this.listeners[event] = listener; }
+}
+
+const nodes = new Map();
+const get = id => {
+  if (!nodes.has(id)) nodes.set(id, new Element('div'));
+  return nodes.get(id);
+};
+const caseNo = '115000157';
+const copied = [];
+let clipboardDenied = false;
+const context = vm.createContext({
+  document: {getElementById: get, createElement: tag => new Element(tag), querySelectorAll: () => []},
+  location: {search: ''},
+  URLSearchParams,
+  navigator: {clipboard: {writeText: async value => {
+    if (clipboardDenied) throw new Error('clipboard denied');
+    copied.push(value);
+  }}},
+  fetch: async (url) => {
+    assert.equal(url, '/api/v1/line/mobile-admin/order-group-todos');
+    return {ok: true, json: async () => ({data: {
+      items: [{case_no: caseNo, deposit_amount_ntd: 3000}], total: 1, total_pages: 1, page: 1,
+    }})};
+  },
+});
+const html = fs.readFileSync('line/static/mobile_admin.html', 'utf8');
+const source = html.split('<script>')[1].split('</script>')[0];
+vm.runInContext(source.replace(/^init\(\);$/m, ''), context);
+await vm.runInContext('loadGroupTodos()', context);
+
+const descendants = node => [node, ...node.children.flatMap(descendants)];
+const visibleText = node => descendants(node).map(child => child.textContent).join(' ');
+const card = get('groupTodos').children[0];
+assert(card);
+assert.match(visibleText(card), /同一位.*同一個.*群組/);
+const list = descendants(card).find(node => node.tag === 'ol');
+assert(list, '群組綁定需要依序顯示三個步驟');
+const [start, number, url] = list.children;
+assert.equal(list.children.length, 3);
+assert.equal(descendants(start).find(node => node.tag === 'code')?.textContent, '綁定訂單');
+assert.match(visibleText(number), new RegExp(caseNo));
+assert.match(visibleText(url), /右上角.*設定.*邀請.*邀請網址/);
+assert.match(visibleText(url), /綁定成功後，系統會依資格將客戶與已綁定 LINE 的指派月嫂的私人邀請排入發送。/);
+assert.doesNotMatch(visibleText(card), /綁定群組|複製設定格式|發送邀請/);
+
+const copyButton = (step, label) => descendants(step).find(node => node.tag === 'button' && node.textContent === label);
+const copyStart = copyButton(start, '複製綁定訂單');
+const copyNumber = copyButton(number, '複製案件編號');
+assert(copyStart);
+assert(copyNumber);
+await copyStart.listeners.click();
+await copyNumber.listeners.click();
+assert.deepEqual(copied, ['綁定訂單', caseNo]);
+
+clipboardDenied = true;
+await copyNumber.listeners.click();
+assert.deepEqual(copied, ['綁定訂單', caseNo]);
+assert.match(get('status').textContent, /手動複製.*115000157/);
+assert.equal(get('status').className, 'error');
+'''
+    subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=ROOT, check=True, capture_output=True, text=True, timeout=20,
+    )
+
+
 def test_mobile_substitute_todo_opens_management_schedule_for_the_same_case():
     import subprocess
 
