@@ -456,7 +456,8 @@ def test_registration_page_uses_only_canonical_identity_endpoints() -> None:
     assert "function canUseDevelopmentIdentityFallback(error)" not in source
     assert 'development_line_user_id: ""' in source
     assert "developmentLineUserId" not in source
-    assert "const code = detail?.code || detail?.error?.code || result?.error?.code;" in source
+    assert "/api/v1/line/identity/registration/status" in source
+    assert "errorCode === 'registration_conflict'" in source
     assert "/api/line/register" not in source
     assert "/api/line/config" not in source
 

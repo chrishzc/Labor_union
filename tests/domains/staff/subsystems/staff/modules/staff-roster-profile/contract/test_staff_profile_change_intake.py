@@ -228,7 +228,7 @@ def test_liff_submission_recovery_in_browser(scenario):
             recovery.click()
 
         if scenario == "absent-reopen":
-            expect(status).to_contain_text("原填寫資料已無法復原")
+            expect(status).to_contain_text("這頁也沒有剛才填的資料")
             expect(page.locator("#form")).to_be_hidden()
             expect(page.locator("#send")).to_be_disabled()
             expect(recovery).to_have_text("查詢原申請")

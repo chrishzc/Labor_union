@@ -406,7 +406,7 @@ async function submitForm(event, definition, button, previewBox) {
     if (applySubmitted) {
       event.target.reset?.();
       showBindingLookup(definition, previewBox);
-      showMessage("還不知道 LINE 有沒有連結成功。請按「查詢原綁定」，不要再送一次。", true);
+      showMessage("還不能確認 LINE 有沒有連結。請按「查詢原綁定」，不要再送一次。", true);
       return;
     }
     const staffMismatch = definition.endpoint === "staff"
