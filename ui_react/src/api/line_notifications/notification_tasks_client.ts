@@ -34,6 +34,7 @@ const catalogSchema = z.array(z.object({
   source:sourceSchema,label:z.string(),group:groupSchema,
   category_id:z.string().min(1).optional(),category_label:z.string().min(1).optional(),
 }).strict());
+const dismissReceiptSchema = z.object({dismissed:z.literal(true),replayed:z.boolean()}).strict();
 export type NotificationItem = z.infer<typeof itemSchema>;
 export type NotificationPage = z.infer<typeof pageSchema>;
 export type NotificationCatalog = z.infer<typeof catalogSchema>;
@@ -53,9 +54,17 @@ export const notificationTasksClient = {
     const raw=await transport.post<{data:unknown}>('/api/v1/line/notification-task-actions/customer-binding-reminder/dismiss',{
       subject_reference:item.reference_id,case_no:item.case_no,reason,idempotency_key:key,
     },notificationOptions());
-    const result=z.object({dismissed:z.literal(true),replayed:z.boolean()}).strict().parse(raw.data);
+    const result=dismissReceiptSchema.parse(raw.data);
     notifyNotificationTasksChanged();
     return result;
+  },
+  async dismissReminder(item: Pick<NotificationItem, 'source' | 'id'>, key: string) {
+    const raw = await transport.post<{data: unknown}>('/api/v1/line/notification-task-actions/reminders/dismiss', {
+      source: item.source,
+      item_id: item.id,
+      idempotency_key: key,
+    }, notificationOptions());
+    return dismissReceiptSchema.parse(raw.data);
   },
   async pendingCount(signal?:AbortSignal):Promise<number> {
     const sources = await notificationTasksClient.catalog(signal);

@@ -300,6 +300,7 @@ class CustomerRecommendationFollowup:
     reminder_due_at: datetime | None
     ticket_id: int | None
     failure_reason: str | None = None
+    signing_reminder_occurrence: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

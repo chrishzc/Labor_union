@@ -21,8 +21,9 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 - `import_fields` 只列於桌面「通知事項」，以 `data_browser.read` 查詢 Case Import 的 bounded current field issues。每案一筆，逐欄連到客戶名冊的正式修正入口，讀回後依目前問題更新。
 - `api/routes/notification_task_actions.py` — session／LINE capability 薄轉接原訂金、登記與 delivery command；runtime/query 改為 authenticated 唯讀系統摘要，舊 target command 由原 owner 回退役錯誤；原 owner 擁有 fresh check、冪等、receipt 及 outer commit。LIFF 不接受桌面 Session。
 - `architecture_declared`：此路由以桌面 Session 或 server-verified LINE token 辨識操作人，驗證同一 `IDENTITY_BINDING_MANAGE` 權限，將客戶、案號、#20 §5.1.1 的固定原因與冪等鍵交給既有 LINE Identity 單案移除命令。UI 提供單次點擊操作並呈現讀回結果。
+- `subsystems/line/signing_reminder_dismissal.py` — 桌面與 LIFF 共用待簽約提醒的移除命令。重新核對媒合查閱與管理權限及當次提醒，於同一 LINE 交易保存收據及移除事件。`infrastructure/mysql/matching_notification_repository.py` 以 Orders 現行契約完約事實及該筆移除事件，共同過濾清單與計數。
 - `ui_react/src/pages/NotificationTasksPreviewPage.tsx`、`ui_react/src/pages/NotificationTasksPreviewPage.css`、`ui_react/src/api/line_notifications/notification_tasks_client.ts` — 正式通知事項查詢、來源分頁、同案工作區入口及缺綁定修復入口；沒有範例資料 fallback。
-- `ui_react/src/components/NotificationTaskActions.tsx` — 桌面正式作業深連結、月嫂綁定及人工建群指引。服務登記、資料異動、服務中換人、寄送異常及通知建立異常攜帶單筆 identity 連到原工作面。推薦待辦連到本案推薦或簽約工作區。客戶綁定卡只顯示適用的單案移除操作，沿本模組的管理命令轉接設計。
+- `ui_react/src/components/NotificationTaskActions.tsx` — 桌面正式作業深連結、月嫂綁定及人工建群指引。服務登記、資料異動、服務中換人、寄送異常及通知建立異常攜帶單筆 identity 連到原工作面。推薦待辦連到本案推薦或簽約工作區。後端確認可移除時，待簽約與客戶綁定卡提供各自的單筆移除操作。
 - `ui_react/src/components/TaskOperation.css` — 通知人工指引與正式作業面沿用相同按鈕／表單樣式，無流程邏輯。
 - `ui_react/src/components/RegistrationApplications.tsx` — notification initial ID 與原核准後 readback callback。
 - `ui_react/src/components/LineIdentityWorkbench.tsx` — notification review deep link 讀取同一審核申請。

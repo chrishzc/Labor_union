@@ -22,15 +22,15 @@ export function notificationHref(item:NotificationItem):string | null {
   }
 }
 
-export function NotificationTaskActions({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>;sourceReadError?:string}) {
-  if(item.source==='customer_binding') {
-    return item.can_dismiss && item.reference_id && item.case_no
-      ? <CustomerBindingReminder key={item.id} item={item} onCommitted={onCommitted} />
-      : null;
-  }
-  if(item.source==='staff_binding') return <StaffBindingReminder key={item.id} item={item} />;
-  if(item.source==='group') return <section aria-label="案件建群方式"><h3>建立與綁定案件群組</h3><pre style={{whiteSpace:'pre-wrap',font:'inherit'}}>{item.message}</pre><a className="np-button" href={`#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no!)}`}>查看本案群組設定</a></section>;
-  return null;
+export function NotificationTaskActions({ item, onCommitted, expanded }: {
+  item: NotificationItem; onCommitted: () => Promise<void>; expanded: boolean;
+}) {
+  const canDismiss = item.can_dismiss && (item.source !== 'customer_binding' || Boolean(item.reference_id && item.case_no));
+  return <>
+    {canDismiss && <ReminderDismissal key={item.id} item={item} onCommitted={onCommitted} />}
+    {item.source === 'staff_binding' && <StaffBindingReminder key={item.id} item={item} />}
+    {item.source === 'group' && expanded && <section aria-label="案件建群方式"><h3>建立與綁定案件群組</h3><pre style={{whiteSpace:'pre-wrap',font:'inherit'}}>{item.message}</pre><a className="np-button" href={`#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no!)}`}>查看本案群組設定</a></section>}
+  </>;
 }
 
 export function OptionalImportFieldSkip({ caseNo, reviewIdentity, sourceField, onCommitted }: {
@@ -73,20 +73,33 @@ export function OptionalImportFieldSkip({ caseNo, reviewIdentity, sourceField, o
   </div>;
 }
 
-function CustomerBindingReminder({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>}) {
-  const [notice,setNotice]=useState('');
-  const [busy,setBusy]=useState(false);
-  const key=useRef<string|null>(null);
-  const locked=useRef(false);
-  const dismiss=async()=>{
-    if(locked.current)return;
-    locked.current=true;setBusy(true);
+function ReminderDismissal({ item, onCommitted }: { item: NotificationItem; onCommitted: () => Promise<void> }) {
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const key = useRef<string | null>(null);
+  const locked = useRef(false);
+  const customerBinding = item.source === 'customer_binding';
+  const dismiss = async () => {
+    if (locked.current) return;
+    locked.current = true;
+    setBusy(true);
     key.current ??= crypto.randomUUID();
-    try {await notificationTasksClient.dismissCustomerBinding(item,'使用者移除提醒',key.current);setNotice('本案綁定提醒已移除。');await onCommitted();}
-    catch(error){setNotice(notificationFailure(error));}
-    finally{locked.current=false;setBusy(false);}
+    try {
+      if (customerBinding) {
+        await notificationTasksClient.dismissCustomerBinding(item, '使用者移除提醒', key.current);
+      } else {
+        await notificationTasksClient.dismissReminder(item, key.current);
+      }
+      setNotice(customerBinding ? '本案綁定提醒已移除。' : '本筆提醒已移除。');
+      await onCommitted();
+    } catch (error) {
+      setNotice(notificationFailure(error));
+    } finally {
+      locked.current = false;
+      setBusy(false);
+    }
   };
-  return <section aria-label="客戶綁定提醒">
+  return <section aria-label={customerBinding ? '客戶綁定提醒' : '提醒處置'}>
     <button type="button" className="np-button" disabled={busy} onClick={()=>void dismiss()}>{busy?'處理中…':'移除提醒'}</button>
     {notice && <p role="status">{notice}</p>}
   </section>;

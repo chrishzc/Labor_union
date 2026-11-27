@@ -207,9 +207,12 @@ def _read_source(source, cursor, principal):
             total = unit.matching_notifications.customer_recommendation_followup_count(now)
             rows = unit.matching_notifications.customer_recommendation_followups(now, limit=SIZE, offset=cursor*SIZE)
         titles = {'awaiting_signing':'客戶已接受配對，待辦簽約', 'reply_reminder':'推薦確認待跟進', 'response_failed':'客戶回覆待工會處理'}
-        items = [_item(source, f'{r.plan_id}:{r.status}', titles[r.status], r.failure_reason or '請接續本案原有工作流程。',
+        can_manage = has_required_capability(principal, str(Cap.MATCHING_OVERRIDE))
+        items = [_item(source, (f'{r.plan_id}:{r.status}:{r.signing_reminder_occurrence}' if r.signing_reminder_occurrence
+                               else f'{r.plan_id}:{r.status}'), titles[r.status], r.failure_reason or '請接續本案原有工作流程。',
                        '7 天只作內部提醒，仍可接受配對；簽約與訂金付款可先後發生。', case_no=r.case_no,
                        tag='待簽約' if r.status=='awaiting_signing' else '待跟進',
+                       can_dismiss=can_manage and r.signing_reminder_occurrence is not None,
                        time=str(r.reminder_due_at or '')) for r in rows]
     elif source == Source.SERVICE_START:
         dependency = get_service_start_application()

@@ -1083,6 +1083,7 @@ async function loadReviewWorkbench(preserveOperation=false) {
   if(sequence===notificationSequence && target==='staff_review'){
     updateNotificationCards(root);
     showStatus(failed?'部分通知事項未能載入，其他分類仍可使用。':'通知事項已更新',failed>0 && failed===sources.length);
+    return failed===0;
   }
 }
 
@@ -1100,6 +1101,27 @@ async function openNotificationItem(item,cursor) {
     const fresh=page.items.find(row=>row.id===item.id);
     if(!fresh){changed();return;}
     item=fresh;
+  }
+  const customerBinding = item.source === 'customer_binding';
+  if (item.can_dismiss && (!customerBinding || (item.reference_id && item.case_no))) {
+    let idempotencyKey;
+    root.appendChild(notificationButton('移除提醒', async () => {
+      idempotencyKey ??= crypto.randomUUID();
+      const command = customerBinding ? 'customer-binding-reminder/dismiss' : 'reminders/dismiss';
+      const body = customerBinding
+        ? { subject_reference: item.reference_id, case_no: item.case_no, reason: '使用者移除提醒' }
+        : { source: item.source, item_id: item.id };
+      const receipt = await postJson(`/api/v1/line/mobile-admin/notification-task-actions/${command}`, {
+        ...body, idempotency_key: idempotencyKey,
+      });
+      if (receipt?.dismissed !== true) throw new Error('尚未確認移除，請查詢原事項。');
+      if (!current()) return;
+      const refresh = loadReviewWorkbench();
+      const refreshSequence = notificationSequence;
+      if (await refresh && refreshSequence === notificationSequence && target === 'staff_review') {
+        showStatus(customerBinding ? '本案綁定提醒已移除。' : '本筆提醒已移除。');
+      }
+    }));
   }
   notificationSelection={item,cursor,matched:false};
   const original={
@@ -1135,22 +1157,6 @@ async function openNotificationItem(item,cursor) {
     }else root.appendChild(notificationText('p','尚無可用電話，請先核對聯絡資料。'));
     root.append(notificationButton('複製綁定提醒',async()=>{await navigator.clipboard.writeText(item.message || '');if(current())showStatus('已複製，請由您透過既有聯絡方式轉達。');}),
       notificationText('p','聯絡後仍保留此事項；完成綁定、月嫂停用或退役後，返回通知事項即重新查詢。'));
-  }else if(item.source==='customer_binding') {
-    if(item.can_dismiss && item.reference_id && item.case_no) {
-      let idempotencyKey;
-      root.appendChild(notificationButton('移除提醒',async()=>{
-        idempotencyKey ??= crypto.randomUUID();
-        const receipt=await postJson('/api/v1/line/mobile-admin/notification-task-actions/customer-binding-reminder/dismiss',{
-          subject_reference:item.reference_id,case_no:item.case_no,reason:'使用者移除提醒',idempotency_key:idempotencyKey,
-        });
-        if(receipt?.dismissed!==true)throw new Error('尚未確認移除，請查詢原事項。');
-        if(!current())return;
-        const refresh=loadReviewWorkbench();
-        const refreshSequence=notificationSequence;
-        await refresh;
-        if(refreshSequence===notificationSequence && target==='staff_review')showStatus('本案綁定提醒已移除。');
-      }));
-    }
   }else if(item.source==='registration') {
     const base=`/api/v1/line/mobile-admin/notification-task-actions/registrations/${item.reference_id}`;
     const view=await postJson(base+'/query',{});
