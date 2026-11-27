@@ -127,6 +127,7 @@ from subsystems.line.outbox_contracts import (
 )
 from subsystems.line.feedback_contracts import LineFeedbackRepository
 from subsystems.line.order_group_contracts import (
+    GroupBindingPreviousReply,
     OpeningGreetingSkipPage,
     PaidOrderGroupTodoPage,
     LineOrderGroupInvitationSettings,
@@ -384,6 +385,8 @@ class LineWebhookInboxRepositoryPort(Protocol):
     ) -> AcceptLineWebhookEventResult: ...
 
     def get(self, event_id: LineWebhookEventId) -> LineWebhookInboxSnapshot | None: ...
+
+    def latest_group_binding_reply(self, event: CanonicalLineWebhookEvent) -> GroupBindingPreviousReply | None: ...
 
     def claim_registered(self, event_id: LineWebhookEventId, query: ClaimLineWebhookEventsQuery) -> LineWebhookInboxSnapshot: ...
 
