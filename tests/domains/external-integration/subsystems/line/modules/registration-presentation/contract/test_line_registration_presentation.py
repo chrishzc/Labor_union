@@ -24,6 +24,23 @@ ROOT = next(
 )
 
 
+CARE_ANSWERS = (
+    ("#bf1", "哺乳方式：", "母乳"),
+    ('[data-survey-array="洗澡水準備："][value="不需另外準備"]', "洗澡水準備：", "不需另外準備"),
+    ('[data-survey="5媽咪有無過敏體質："]', "5媽咪有無過敏體質：", "無"),
+    ('[data-survey="特殊照護時應注意事項："]', "特殊照護時應注意事項：", "無"),
+    ("#dt3", "月子餐點調理喜好/飲食習慣：", "不用料理/訂月餐"),
+    ("#vs1", "呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？", "可接受"),
+    ("#hm4", "可以接受中藥補品：□茶飲 □藥飲 □藥膳", "無法接受中藥補品"),
+    ("#al4", "2．餐飲含酒比例：", "無酒料理"),
+    ('[data-survey-array="3．料理用油：(可接受種類)"][value="不適用"]', "3．料理用油：(可接受種類)", "不適用"),
+    ('[data-survey="餐點喜忌備註："]', "餐點喜忌備註：", "無"),
+    ('[data-survey-array="烹煮工具"][value="無上述設備"]', "烹煮工具", "無上述設備"),
+    ('input[name="floor_fee"][value="大樓公寓無樓層問題"]', "透天服務樓層方式(會加收樓層費)", "大樓公寓無樓層問題"),
+    ('input[name="parking"][value="有"]', "提供服務人員轎車停車位", "有"),
+)
+
+
 @pytest.mark.parametrize(
     ("path", "kind", "studio", "interruption"),
     [
@@ -161,6 +178,21 @@ def test_registration_passbook_controls_and_submission_in_browser(
         page.locator('label[for="agree1"]').click()
         page.locator("#refundPolicyAccept").click()
 
+        if interruption is None:
+            submit.click()
+            for selector, _, _ in CARE_ANSWERS:
+                group = page.locator(".form-group").filter(has=page.locator(selector))
+                expect(group.locator(".form-label.required")).to_be_visible()
+                expect(group.locator(".field-error")).to_be_visible()
+            assert requests == []
+
+        for selector, _, answer in CARE_ANSWERS:
+            control = page.locator(selector)
+            if control.evaluate("input => input.type === 'textarea'"):
+                control.fill(answer)
+            else:
+                control.check()
+
         if kind == "non_citizen":
             for field, value in {"city": "新竹市", "birth_date": "1990-01-01",
                                  "service_start_date": today, "notes": "無"}.items():
@@ -193,6 +225,27 @@ def test_registration_passbook_controls_and_submission_in_browser(
                 ),
             })
             expect(page.locator("#passbookPreviewImg")).to_be_visible()
+
+        if interruption is None:
+            herb_choice = page.locator("#hm1")
+            no_herbs = page.locator("#hm4")
+            herb_choice.check()
+            expect(no_herbs).not_to_be_checked()
+            herb_choice.uncheck()
+            submit.click()
+            expect(page.locator("#statusMessage")).to_contain_text("可以接受中藥補品")
+            assert requests == []
+            herb_choice.check()
+            no_herbs.check()
+            expect(herb_choice).not_to_be_checked()
+
+            diet = page.locator("#dt1")
+            diet.check()
+            submit.click()
+            diet_group = page.locator(".form-group").filter(has=diet)
+            expect(diet_group.locator(".field-error")).to_be_visible()
+            assert requests == []
+            page.locator("#dt3").check()
 
         submit.click()
         retry = page.locator("#registrationStatusButton")
@@ -290,6 +343,8 @@ def test_registration_passbook_controls_and_submission_in_browser(
                 assert payload["passbook_image_id"] == "pbk_synthetic_cover"
             assert payload["survey_details"]["補助款退款:銀行代號+分行代號"] == "0000000"
             assert payload["survey_details"]["銀行帳號"] == "0000000000"
+            for _, key, answer in CARE_ANSWERS:
+                assert payload["survey_details"][key] == answer
 
 
 def test_non_citizen_service_choices_match_manual_case_form():
@@ -709,7 +764,7 @@ console.log('missing dom system field safely skipped');
 def test_multi_select_survey_labels_display_multi_choice_hint() -> None:
     source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
     groups = re.findall(
-        r'<div class="form-group">\s*<label class="form-label[^"]*">([^<]+)</label>(.*?)</div>\s*(?=<div class="form-group">|<div id="customFieldsSection"|<!-- Section)',
+        r'<div class="form-group"[^>]*>\s*<label class="form-label[^"]*">([^<]+)</label>(.*?)</div>\s*(?=<div class="form-group"|<div id="customFieldsSection"|<!-- Section)',
         source,
         re.S,
     )
