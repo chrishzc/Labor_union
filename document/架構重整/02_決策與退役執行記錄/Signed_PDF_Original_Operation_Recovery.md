@@ -66,6 +66,7 @@ Feature 採預設 Balanced，直接 how High，architect Low。How 已由獨立 
 - `skills/architect/SKILL.md` 及 `references/runner-prompt.md`、`design-red-flags.md`、`rationale-template.md`。
 - `skills/principle-model-the-domain/SKILL.md`、`skills/principle-type-system-discipline/SKILL.md`、`skills/typescript-best-practices/SKILL.md`、`skills/principle-prove-it-works/SKILL.md`。
 - `skills/technical-writing/SKILL.md`、`skills/unslop/SKILL.md`、`skills/no-comments/SKILL.md`。
+- CI lint 訊號後讀 `skills/correct/SKILL.md` 及 `skills/correct/references/lint-capture.md`。
 - 實作者另讀 `agents/poteto-agent.md`；註解審閱讀 `agents/comment-sicko.md`。
 - `skills/principle-prove-it-works/references/architecture-closure.md`。
 - 同一來源 repository 根的 `governance/pstack-models.md`。宿主 `<CODEX_HOME>/pstack-models.md` 不存在，未複製該設定；當次派工依已讀 owner profile 明示指定。
@@ -96,3 +97,9 @@ Archmap entry 未列於宿主技能清單，按專案允許的 filename-only fal
 專案未配置 Pyright／Ruff 等 Python strict type／lint 入口。沿原 CI 做 Python 語法與 pytest，這不等於 Python strict type／lint 通過。前端沿既有 `npm run lint` 與 `npm run build` 的 TypeScript 檢查，結果以正式 CI 為準。
 
 非作者獨立語意審閱為 no findings，檢視的 tracked diff SHA-256 為 `0f3ba0f9ca5655ff92576b0b58077b1a9800e5eb2a96f1071370210ee5fc4801`，未追蹤 adapter SHA-256 為 `b3de1794cb6130d0ee7751e846621a43d6869d34002a2253e36420672ef3240a`。後續只補上傳尚 pending 就離頁的 UI regression，由 coordinator 讀回該新增案例；production source 沒有改動。CI 預設檢查 PR merge checkout，報告保留實際 head、event base 與 checkout，不能將 merge SHA 寫成 head SHA。
+
+Lint capture 沿既有 `ui_react/.oxlintrc.json` 與 `npm run lint`，沒有另造 Markdown 規則清單或調低 severities。第一輪 CI 發現元件初始 effect 讀取 `revision` 而 dependency 未列出的既有 warning；固定基準已有相同 effect。該規則已由 ordinary lint 入口報告，無需新增設定。本案保留既有 revision／受保護操作的重讀契約，未擴張為相鄰 effect 重構；不把 exit 0 寫成零 warning，也未宣稱額外負向 lint mutation 驗證通過。
+
+## 範圍例外
+
+修測試代理首次 shell 盤點忘記設定 workdir，在初始 `/workspace/scratch/7f3a2434cb56` 執行 AGENTS 檔名 inventory，輸出其他路徑名稱。沒有開啟那些檔案內容或取得其他任務契約；該盤點沒有延續，後續來源讀寫均限定專用 /tmp。此項不算完整隔離執行通過，亦不影響本案未存取 #439 分支、未改正式資料與未部署／合併的事實。

@@ -937,13 +937,25 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     await screen.findByLabelText('客戶服務契約 PDF');
     await prepareSignedReturns();
-    const store = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => { throw new Error('Storage unavailable'); });
+    const storage = window.sessionStorage;
+    const setItem = vi.fn<Storage['setItem']>(() => {
+      throw new DOMException('Storage unavailable', 'QuotaExceededError');
+    });
+    const storageGetter = vi.spyOn(window, 'sessionStorage', 'get').mockReturnValue({
+      get length() { return storage.length; },
+      clear: storage.clear.bind(storage),
+      getItem: storage.getItem.bind(storage),
+      key: storage.key.bind(storage),
+      removeItem: storage.removeItem.bind(storage),
+      setItem,
+    });
     try {
       fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
       expect(await screen.findByText(/暫停儲存簽署文件/)).toBeVisible();
+      expect(setItem).toHaveBeenCalledExactlyOnceWith('orders:signed-archive:CASE-001', expect.any(String));
       expect(contractExternalSigningClient.archiveSignedFiles).not.toHaveBeenCalled();
     } finally {
-      store.mockRestore();
+      storageGetter.mockRestore();
     }
   });
 
