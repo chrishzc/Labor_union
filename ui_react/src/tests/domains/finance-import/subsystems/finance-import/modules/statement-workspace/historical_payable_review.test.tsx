@@ -1,11 +1,19 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
 import type { HistoricalPayableAuditItem } from '../../../../../../../api/accounts_payable/accounts_payable_query_schemas';
 import { financeAccountingClient, type CaseAccounting } from '../../../../../../../api/finance_import/finance_accounting_client';
+import { monthlyAccountingClient } from '../../../../../../../api/finance_import/monthly_accounting_client';
 import { transport } from '../../../../../../../api/shared/transport';
+import { ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
 import { HistoricalPayableEditor, HistoricalPayableLookup } from '../../../../../../../components/HistoricalPayableReview';
+
+import { FinancePage } from '../../../../../../../pages/FinancePage';
+
+vi.mock('../../../../../../../components/FinanceCaseAccounting', () => ({
+  FinanceCaseAccounting: () => null,
+}));
 
 const pending: HistoricalPayableAuditItem = {
   case_no: 'CASE-OLD-1', staff_id: 42, recipient_name: '合成月嫂甲',
@@ -131,4 +139,169 @@ it.each([17, 99])('同步回執逐人讀回應付，驗證指派 %s 與另一人
     expect(status).not.toHaveTextContent('NT$ 48,000');
   }
   expect(onSaved).toHaveBeenCalledOnce();
+});
+
+type StaffAvailability = NonNullable<CaseAccounting['staff_accounting_availability']>[number];
+
+const selectedAssignment: StaffAvailability = {
+  assignment_id: 17, staff_id: 42, party: '合成月嫂甲', obligation_identities: ['original-42'],
+  status: 'formal', estimated_self_pay_date: '2026-10-20', estimated_subsidy_date: null,
+  estimated_amount_ntd: 39000, pending_reasons: ['historical_payroll_funding_pending'],
+};
+const sameNameUnconfirmed: StaffAvailability = {
+  assignment_id: 18, staff_id: 43, party: selectedAssignment.party, obligation_identities: [],
+  status: 'needs_review', estimated_self_pay_date: '2026-10-20', estimated_subsidy_date: null,
+  estimated_amount_ntd: 27000, pending_reasons: ['payroll_rate_policy_not_found'],
+};
+const sameNameAccounting: CaseAccounting = {
+  ...formalPayroll,
+  staff_accounting_availability: [sameNameUnconfirmed, selectedAssignment],
+};
+
+async function recheckAfterSyncTimeout(item: HistoricalPayableAuditItem, accounting?: CaseAccounting) {
+  const post = vi.spyOn(transport, 'post').mockRejectedValue(new ApiTimeoutError(10_000));
+  const get = vi.spyOn(transport, 'get');
+  if (accounting) {
+    get.mockResolvedValue({ success: true, message: '已查詢', data: accounting });
+  } else {
+    get.mockRejectedValue(new ApiTimeoutError(10_000));
+  }
+
+  const { container } = render(<HistoricalPayableEditor item={item} onSaved={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '同步月嫂應付' }));
+  const recheck = await screen.findByRole('button', { name: '重新查核' });
+  expect(post).toHaveBeenCalledExactlyOnceWith(
+    '/api/v1/orders/CASE-OLD-1/payroll/sync-historical-baseline-obligations',
+    undefined,
+    expect.any(Object),
+  );
+
+  const callsBeforeRecheck = get.mock.calls.length;
+  await act(async () => { fireEvent.click(recheck); });
+
+  const recheckCalls = get.mock.calls.slice(callsBeforeRecheck);
+  if (item.staff_id !== null || recheckCalls.length > 0) {
+    expect(recheckCalls).toEqual([
+      ['/api/v1/finance-import/cases/CASE-OLD-1/accounting', expect.any(Object)],
+    ]);
+  }
+  expect(post).toHaveBeenCalledTimes(1);
+  expect(container).not.toHaveTextContent(/同步成功|同步完成/);
+  return container;
+}
+
+it('DS-02 同案同名依原選取月嫂查回正式金額，原付款日未定且不重送同步', async () => {
+  const result = await recheckAfterSyncTimeout(pending, sameNameAccounting);
+
+  expect(result).toHaveTextContent(/正式應付[^\d]*48,000/);
+  expect(result).toHaveTextContent(/付款日[^\d]*待確認/);
+  expect(result).not.toHaveTextContent(/39,000|27,000|2026-10-20/);
+});
+
+const inconclusiveCases: {
+  name: string;
+  staffId: HistoricalPayableAuditItem['staff_id'];
+  accounting?: CaseAccounting;
+}[] = [
+  { name: '選到同名但無正式證據的另一位月嫂', staffId: 43, accounting: sameNameAccounting },
+  { name: '原選取列無人員 ID', staffId: null, accounting: sameNameAccounting },
+  {
+    name: '同一人有多筆無法區分的指派',
+    staffId: 42,
+    accounting: {
+      ...sameNameAccounting,
+      staff_accounting_availability: [
+        sameNameUnconfirmed, selectedAssignment, { ...selectedAssignment, assignment_id: 19 },
+      ],
+    },
+  },
+  {
+    name: '同一義務出現在多筆關聯',
+    staffId: 42,
+    accounting: {
+      ...sameNameAccounting,
+      staff_accounting_availability: [
+        selectedAssignment, { ...sameNameUnconfirmed, obligation_identities: ['original-42'] },
+      ],
+    },
+  },
+  {
+    name: '帳務回應為他案',
+    staffId: 42,
+    accounting: { ...sameNameAccounting, case_no: 'CASE-OLD-2' },
+  },
+  { name: '帳務 GET 失敗', staffId: 42 },
+];
+
+it.each(inconclusiveCases)('DS-02 $name：仍待確認，不顯示旁人金額或估算', async ({ staffId, accounting }) => {
+  const result = await recheckAfterSyncTimeout({ ...pending, staff_id: staffId }, accounting);
+
+  expect(result).toHaveTextContent('待確認');
+  expect(result).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20/);
+});
+
+it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只讀取乙的結果', async () => {
+  const secondRow: HistoricalPayableAuditItem = {
+    ...pending, staff_id: 43, reason: '第二位同名月嫂的原列待確認。',
+  };
+  vi.spyOn(accountsPayableQueryClient, 'lookupHistorical').mockResolvedValue([pending, secondRow]);
+  vi.spyOn(monthlyAccountingClient, 'query').mockResolvedValue({
+    start_month: '2026-10', end_month: '2026-10', category: 'all', as_of: '2026-10-31',
+    excluded_cases: [], undated_item_count: 0, rows: [],
+  });
+  const post = vi.spyOn(transport, 'post').mockRejectedValue(new ApiTimeoutError(10_000));
+  const get = vi.spyOn(transport, 'get').mockResolvedValue({
+    success: true, message: '已查詢', data: sameNameAccounting,
+  });
+  const previousUrl = window.location.href;
+  window.history.replaceState(null, '', '#finance?tab=monthly');
+  try {
+    render(<FinancePage />);
+
+    fireEvent.click(screen.getByText('查未列入原因'));
+    fireEvent.change(screen.getByLabelText('案號、月嫂完整姓名或公會編號'), {
+      target: { value: pending.recipient_name },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '查核歷史月嫂款' }));
+    const [first] = await screen.findAllByRole('button', { name: '查看本案帳務' });
+    fireEvent.click(first);
+
+    const firstReview = within(screen.getByRole('region', { name: '歷史月嫂款查核' }));
+    fireEvent.click(firstReview.getByRole('button', { name: '同步月嫂應付' }));
+    const firstRecheck = await firstReview.findByRole('button', { name: '重新查核' });
+    await act(async () => { fireEvent.click(firstRecheck); });
+
+    const firstResult = firstReview.getByRole('status');
+    expect(firstResult).toHaveTextContent(/正式應付[^\d]*48,000/);
+    expect(firstResult).toHaveTextContent(/付款日[^\d]*待確認/);
+    expect(firstResult).not.toHaveTextContent(/同步成功|同步完成|39,000|27,000|2026-10-20/);
+    expect(firstReview.queryByText(pending.reason)).not.toBeInTheDocument();
+    expect(get).toHaveBeenCalledTimes(1);
+
+    const drawer = screen.getByRole('dialog', { name: '案件帳務 · CASE-OLD-1' });
+    fireEvent.click(within(drawer).getByText('關閉案件', { selector: 'button' }));
+    expect(screen.queryByRole('dialog', { name: '案件帳務 · CASE-OLD-1' })).not.toBeInTheDocument();
+
+    const [, second] = await screen.findAllByRole('button', { name: '查看本案帳務' });
+    fireEvent.click(second);
+    const secondRegion = screen.getByRole('region', { name: '歷史月嫂款查核' });
+    const secondReview = within(secondRegion);
+    expect(secondRegion).not.toHaveTextContent(/48,000/);
+    const secondRecheck = await secondReview.findByRole('button', { name: '重新查核' });
+    await act(async () => { fireEvent.click(secondRecheck); });
+
+    expect(secondReview.getByRole('status')).toHaveTextContent('待確認');
+    expect(secondRegion).not.toHaveTextContent(/48,000|39,000|27,000|2026-10-20|同步成功|同步完成/);
+    expect(get.mock.calls).toEqual([
+      ['/api/v1/finance-import/cases/CASE-OLD-1/accounting', expect.any(Object)],
+      ['/api/v1/finance-import/cases/CASE-OLD-1/accounting', expect.any(Object)],
+    ]);
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      '/api/v1/orders/CASE-OLD-1/payroll/sync-historical-baseline-obligations',
+      undefined,
+      expect.any(Object),
+    );
+  } finally {
+    window.history.replaceState(null, '', previousUrl);
+  }
 });
