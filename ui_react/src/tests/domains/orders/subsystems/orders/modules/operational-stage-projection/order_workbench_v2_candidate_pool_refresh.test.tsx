@@ -183,7 +183,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     expect(screen.getByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
     expect(screen.getByText('T003 回讀後測試月嫂')).toBeInTheDocument();
     expect(screen.queryByText('回讀前測試客戶')).not.toBeInTheDocument();
-    expect(mocks.loadSummaries).toHaveBeenCalledTimes(3);
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
     expect(originalSignal.aborted).toBe(true);
     expect(mocks.loadSummaries).toHaveBeenLastCalledWith(
       expect.any(Function),
@@ -204,25 +204,34 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
     expect(await screen.findByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
-    expect(mocks.loadSummaries).toHaveBeenCalledTimes(3);
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
     expect(mocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
       expect.objectContaining({ stage: 'confirmed_service_dates' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
-  it('離開工作 Drawer 後回讀正式摘要與階段，不要求整頁重新載入', async () => {
+  it('唯讀返回重用仍有效的正式摘要與階段，手動重新整理再回讀', async () => {
+    mocks.getCoreStageTimelines.mockResolvedValue(page(undefined, [timeline('matching_pool')]));
     mocks.loadSummaries.mockResolvedValueOnce(summaries()).mockResolvedValue(summaries(true));
     render(<OrderWorkbenchV2Page />);
     await screen.findByText('回讀前測試客戶');
-    fireEvent.click(screen.getByRole('button', { name: '開啟案件 CASE-READBACK 案件處理' }));
+    const row = screen.getByRole('row', { name: '開啟案件 CASE-READBACK 案件處理' });
+    expect(row).toHaveAttribute('aria-disabled', 'false');
+    fireEvent.click(row);
     const before = mocks.getCoreStageTimelines.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
 
+    expect(screen.getByText('回讀前測試客戶')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '關閉測試工作 Drawer' })).not.toBeInTheDocument();
+    await act(async () => {});
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(1);
+    expect(mocks.getCoreStageTimelines).toHaveBeenCalledTimes(before);
+
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
     expect(await screen.findByText('回讀後測試客戶')).toBeInTheDocument();
     expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
-    expect(mocks.getCoreStageTimelines.mock.calls.length).toBeGreaterThan(before);
-    expect(screen.queryByRole('button', { name: '關閉測試工作 Drawer' })).not.toBeInTheDocument();
+    expect(mocks.getCoreStageTimelines).toHaveBeenCalledTimes(before + 1);
   });
 
   it('舊摘要請求晚到時不覆蓋操作後回讀的新資料', async () => {

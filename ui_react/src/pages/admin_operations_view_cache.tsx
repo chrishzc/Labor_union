@@ -6,6 +6,7 @@ import type { ImportFieldIssueCase } from '../api/case_import/import_field_issue
 import type { CoreStageCode } from '../api/orders/order_core_stage_projection_schemas';
 import type { CaseStatisticsData } from '../api/reports/weekly_operations_report_schemas';
 import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
+import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
 import type { HolidayRow } from '../adapters/scheduling/holiday_flow_adapter';
 import type { CalendarMonthCacheEntry, CalendarCaseOptions, SchedulingViewSelection } from './SchedulingPage';
 
@@ -74,6 +75,9 @@ export function viewTimestamp(updatedAt: number): string {
 export type StatisticsPeriod = Pick<CaseStatisticsData, 'year'> & { quarter: number; month: number };
 
 class AdminOperationsViews {
+  private workbenchRevision = 0;
+  private readonly workbenchListeners = new Set<() => void>();
+
   readonly workbench = {
     selection: { stage: null as CoreStageCode | null, search: '' },
     core: new ViewCache<OrderCoreStageWorkbenchViewModel>(14),
@@ -91,11 +95,22 @@ class AdminOperationsViews {
   };
   readonly scroll = new Map<'order-workbench-v2' | 'scheduling', number>();
 
-  invalidateWorkbench(): void {
+  readonly getWorkbenchRevision = (): number => this.workbenchRevision;
+
+  readonly subscribeWorkbench = (listener: () => void): (() => void) => {
+    this.workbenchListeners.add(listener);
+    return () => { this.workbenchListeners.delete(listener); };
+  };
+
+  invalidateWorkbench(scope: 'all' | 'actual-start-date' = 'all'): void {
     this.workbench.core.invalidate();
     this.workbench.summaries.invalidate();
-    this.workbench.intake.invalidate();
-    this.workbench.statistics.invalidate();
+    if (scope === 'all') {
+      this.workbench.intake.invalidate();
+      this.workbench.statistics.invalidate();
+    }
+    this.workbenchRevision += 1;
+    this.workbenchListeners.forEach(listener => listener());
   }
 
   invalidateSchedulingMonths(staffId?: number): void {
@@ -113,6 +128,7 @@ const AdminOperationsViewContext = createContext<AdminOperationsViews | null>(nu
 export function AdminOperationsViewProvider({ children }: { children: ReactNode }) {
   const [views] = useState(() => new AdminOperationsViews());
   useEffect(() => subscribeStaffAvailabilityChanges(staffId => views.invalidateSchedulingMonths(staffId)), [views]);
+  useEffect(() => subscribeCaseAccountingChanges(() => views.invalidateWorkbench()), [views]);
   return <AdminOperationsViewContext.Provider value={views}>{children}</AdminOperationsViewContext.Provider>;
 }
 

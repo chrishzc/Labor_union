@@ -45,6 +45,28 @@ jobs:
           npm test -- --reporter=verbose
           src/tests/order_workbench_v2_candidate_query.test.tsx
           src/tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/candidate_single_add.test.tsx
+      - name: Verify workbench navigation and freshness
+        run: >-
+          npm test -- --reporter=verbose --reporter=junit --outputFile=workbench-refresh-frontend.xml
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_mutation_refresh.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_candidate_pool_refresh.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_historical.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/actual-start/order_actual_start_panel.test.tsx
+          src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_page.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_drawer.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_lifecycle_drawer.test.tsx
+          src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_roster_page.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_historical_drawer.test.tsx
+          src/tests/session_client_two_step_auth.test.ts
+      - name: Preserve workbench freshness cases
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: workbench-refresh-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ui_react/workbench-refresh-frontend.xml
+          if-no-files-found: error
       - name: Verify signed PDF original operation recovery
         run: >-
           npm test -- --reporter=verbose --reporter=junit --outputFile=signed-pdf-frontend.xml
@@ -82,6 +104,20 @@ jobs:
           src/adapters/orders/signed_archive_recovery.ts
           src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx
           src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts
+          src/pages/OrderWorkbenchV2Page.tsx
+          src/pages/admin_operations_view_cache.tsx
+          src/pages/ClientRosterPage.tsx
+          src/components/OrderWorkbenchV2Drawer.tsx
+          src/components/ClientRegistryDetailEditor.tsx
+          src/components/ClientRegistryServiceStaff.tsx
+          src/components/FinanceCaseAccounting.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_mutation_refresh.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_candidate_pool_refresh.test.tsx
+          src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_page.test.tsx
+          src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_roster_page.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_historical_drawer.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_drawer.test.tsx
       - name: Typecheck and build frontend
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run build

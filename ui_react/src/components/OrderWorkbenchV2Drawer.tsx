@@ -47,6 +47,8 @@ import { isCancellationTerminalStatus, OrderCancellationPanel } from './OrderCan
 import { OrderActualStartPanel } from './OrderActualStartPanel';
 import { CandidateInquiryDialog } from './CandidateInquiryDialog';
 
+export type WorkbenchCaseReadbackScope = 'calendar' | 'actual-start-date';
+
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
   branchType: CoreStageBranchType;
@@ -54,8 +56,8 @@ interface OrderWorkbenchV2DrawerProps {
   workbenchScope?: OrderWorkbenchScope;
   homeNavigationRequest?: number;
   openUpcomingStaffing?: boolean;
-  onClose: () => void;
-  onObserved?: (scope?: 'calendar') => void;
+  onClose: (reason?: 'unconfirmed-operation') => void;
+  onObserved?: (scope?: WorkbenchCaseReadbackScope) => void;
 }
 
 type ReadState<T> =
@@ -222,8 +224,22 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   }, [onObserved]);
   const { requestLeave, pending: leavePending } = useUnsavedNavigation();
   const guardedClose = useCallback(() => {
-    if (!operationBusyRef.current) requestLeave(onClose);
-  }, [onClose, requestLeave]);
+    if (operationBusyRef.current) return;
+    requestLeave(() => {
+      const outcomes = [
+        orderMutationFlowStore.getActualStart(caseNo)?.status,
+        orderMutationFlowStore.getFormalManualResponse(caseNo)?.status,
+        orderMutationFlowStore.getExternalSigningHandoff(caseNo)?.status,
+        orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNo)?.status,
+      ];
+      if (historicalRestart.status === 'error'
+        || outcomes.some(status => status === 'outcome_unknown' || status === 'observation_failed')) {
+        onClose('unconfirmed-operation');
+      } else {
+        onClose();
+      }
+    });
+  }, [caseNo, historicalRestart.status, onClose, requestLeave]);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
@@ -748,9 +764,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 : '操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。'}</p>}
               {canChangeActualStart && operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} autoLoad onObserved={(actualStartOperation) => {
                 openGroup('service');
-                if (actualStartOperation === 'date_only') setServiceDatesCalculationRevision((revision) => revision + 1);
-                refreshSchedulingFacts();
-              }} onBusyChange={onOperationBusyChange} onLeavePending={() => requestLeave(onClose)} onOpenServiceDates={() => openGroup('service')} />}
+                if (actualStartOperation === 'date_only') {
+                  setServiceDatesCalculationRevision((revision) => revision + 1);
+                  setRefreshRevision((revision) => revision + 1);
+                  onObserved?.('actual-start-date');
+                } else {
+                  refreshSchedulingFacts();
+                }
+              }} onBusyChange={onOperationBusyChange} onLeavePending={() => requestLeave(() => onClose('unconfirmed-operation'))} onOpenServiceDates={() => openGroup('service')} />}
               {!showCompletion && <OrderAutomaticCompletionStatus caseNo={caseNo} revision={refreshRevision} onObserved={refreshSchedulingFacts} />}
               {currentBranch === 'normal' && !terminalStatus && assignmentPlan.status === 'ready' && (hasOfficialSchedule || assignmentPlan.data.service_started)
                 ? <>

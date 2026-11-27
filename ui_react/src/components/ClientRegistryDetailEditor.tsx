@@ -13,6 +13,7 @@ import { ClientRegistryAccountingSummary } from './ClientRegistryAccountingSumma
 import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import { HistoricalServiceAccountingWorkbench } from './HistoricalServiceAccountingWorkbench';
 import { HistoricalAccountingPending, HistoricalCorrectionAccounting } from './HistoricalCorrectionAccounting';
+import { useAdminOperationsViews } from '../pages/admin_operations_view_cache';
 import '../pages/ClientRegistryPage.css';
 
 const profileLabels: Record<string, string> = { identity_status: '補助身分', name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', notes: '客戶備註（主檔）', admin_notes: '行政註記（客戶主檔）', service_type: '服務方式（排班參考）' };
@@ -107,6 +108,7 @@ interface Props {
 }
 
 export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField = '', onRefresh, onStateChange, onOpenServiceArrangement }) => {
+  const views = useAdminOperationsViews();
   const [drafts, setDrafts] = useState<Record<Section, Draft>>(() => ({ profile: { ...source(detail, 'profile') }, identity: { ...source(detail, 'identity') }, beclass: { ...source(detail, 'beclass') }, care: { ...source(detail, 'care') } }));
   const [actions, setActions] = useState<Record<Section, Action>>({ profile: idle(), identity: idle(), beclass: idle(), care: idle() });
   const [confirmedBlankRefunds, setConfirmedBlankRefunds] = useState<RefundField[]>([]);
@@ -128,6 +130,12 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   useEffect(() => {
     const old = previous.current;
     previous.current = detail;
+    const profileUpdated = old.client.client_id === detail.client.client_id && detail.client.version > old.client.version;
+    const registrationUpdated = old.beclass.record_id === detail.beclass.record_id
+      && (detail.beclass.version ?? -1) > (old.beclass.version ?? -1);
+    if (old.case_no === detail.case_no && (profileUpdated || registrationUpdated)) {
+      views.invalidateWorkbench();
+    }
     if (old.case_no !== detail.case_no || old.beclass.record_id !== detail.beclass.record_id ||
       (old.beclass.version !== detail.beclass.version && !actions.beclass.loading && !actions.beclass.applied && !actions.beclass.unknown)) setConfirmedBlankRefunds([]);
     else if (!actions.beclass.loading && !actions.beclass.applied && !actions.beclass.unknown) setConfirmedBlankRefunds(current => current.filter(field => canConfirmRefundBlank(detail, field, drafts.beclass[field])));
@@ -147,7 +155,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       beclass: old.beclass.version === detail.beclass.version ? current.beclass : invalidate(current.beclass),
       care: old.beclass.version === detail.beclass.version ? current.care : invalidate(current.care),
     }));
-  }, [detail]);
+  }, [detail, views]);
   useEffect(() => {
     if (focusField === 'requires_cooking') {
       document.getElementById('registry-order-terms')?.focus();
@@ -327,6 +335,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     catch (error) { setRefreshError(`最新案件資料讀取失敗：${errorText(error)}`); }
   };
   const refreshIntake = async () => {
+    views.invalidateWorkbench();
     await onRefresh();
     setRefreshError('');
   };
@@ -343,7 +352,11 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       <fieldset disabled={pending && !intakeState.busy} className="registry-terms-fieldset">{intakeOpened ? <OrderIntakeRepairPanel caseNo={detail.case_no} repairServiceTime registry issues={orderTermsIssues} focusMissing={focusField === 'intake'} onChanged={refreshIntake} onEditStateChange={setIntakeState} onNeedsRepair={setIntakeNeeded} /> : editableTerms
         ? <OrderTermsMutationPanel caseNo={detail.case_no} query={editableTerms} cookingIssue={cookingIssue} fromRegistry onObserved={refreshRelated} onEditStateChange={setTermsState} />
         : <OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} />}
-      </fieldset>{bootstrapRequired && (!intakeOpened || !intakeNeeded) && <fieldset disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || intakeState.busy || accountState.busy || pricingState.busy} className="registry-terms-fieldset"><CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={async () => { await onRefresh(); }} onEditStateChange={setRepairState} /></fieldset>}
+      </fieldset>{bootstrapRequired && (!intakeOpened || !intakeNeeded) && <fieldset disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || intakeState.busy || accountState.busy || pricingState.busy} className="registry-terms-fieldset"><CaseArchitectureBootstrapRepairPanel caseNo={detail.case_no} onCompleted={async () => {
+        views.invalidateWorkbench();
+        views.invalidateSchedulingMonths();
+        await onRefresh();
+      }} onEditStateChange={setRepairState} /></fieldset>}
       {intakeOpened && !intakeNeeded && detail.order_terms.status === 'ready' && <button type="button" disabled={pending || intakeState.dirty} onClick={() => setIntakeOpened(false)}>編輯完整服務條件</button>}
     </section>
     <ClientRegistryVirtualAccount caseNo={detail.case_no} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy || intakeState.busy || pricingState.busy} onRefresh={onRefresh} onStateChange={setAccountState} />

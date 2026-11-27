@@ -12,6 +12,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type FC,
 } from 'react';
@@ -19,7 +20,7 @@ import { ArrowRight, Search } from 'lucide-react';
 import './OrdersPage.css';
 import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
-import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
+import { OrderWorkbenchV2Drawer, type WorkbenchCaseReadbackScope } from '../components/OrderWorkbenchV2Drawer';
 import { isViewAccessDenied, useAdminOperationsViews, useOperationsQuery, useOperationsScroll, viewTimestamp } from './admin_operations_view_cache';
 import { WorkbenchCaseStatistics } from '../components/WorkbenchCaseStatistics';
 import { loadCurrentImportFieldIssuesForCases, importFieldIssueHref, type ImportFieldIssueCase } from '../api/case_import/import_field_issues';
@@ -65,10 +66,11 @@ function coreQueryErrorMessage(error: unknown): string {
 
 export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ homeNavigationRequest = 0 }) => {
   const views = useAdminOperationsViews();
+  useSyncExternalStore(views.subscribeWorkbench, views.getWorkbenchRevision);
   const cache = views.workbench;
   const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(() => cache.selection.stage);
   const [search, setSearch] = useState(() => cache.selection.search);
-  const [projectionRefreshKey, setProjectionRefreshKey] = useState(0);
+  const [returnCheck, setReturnCheck] = useState(0);
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
     branchType: CoreStageBranchType;
@@ -89,22 +91,22 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
 
   const refreshProjection = useCallback(() => {
     views.invalidateWorkbench();
-    setProjectionRefreshKey(current => current + 1);
   }, [views]);
-  const observeChanged = useCallback((scope?: 'calendar') => {
-    if (scope === 'calendar') views.invalidateSchedulingMonths();
+  const observeChanged = useCallback((scope?: WorkbenchCaseReadbackScope) => {
+    if (scope === 'calendar' || scope === 'actual-start-date') views.invalidateSchedulingMonths();
     else views.scheduling.options.invalidate();
-    refreshProjection();
-  }, [views, refreshProjection]);
+    views.invalidateWorkbench(scope === 'actual-start-date' ? scope : 'all');
+  }, [views]);
   const clearDrawer = useCallback(() => {
     setSelectedDrawer(null);
     setCaseLink('');
     setCaseLinkError(null);
     if (new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('case')) window.history.replaceState(null, '', '#order-workbench-v2');
   }, []);
-  const closeDrawer = useCallback(() => {
+  const closeDrawer = useCallback((reason?: 'unconfirmed-operation') => {
     clearDrawer();
-    refreshProjection();
+    if (reason === 'unconfirmed-operation') refreshProjection();
+    else setReturnCheck(current => current + 1);
   }, [clearDrawer, refreshProjection]);
   useEffect(() => {
     const readCaseLink = () => {
@@ -173,7 +175,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
     };
     return adaptOrderCoreStageTimelinePage(await loadAllCoreStageTimelines(query, { signal }), query);
   }, [selectedStage]);
-  const core = useOperationsQuery({ cache: cache.core, queryKey, read: readCore, refreshKey: projectionRefreshKey });
+  const core = useOperationsQuery({ cache: cache.core, queryKey, read: readCore, refreshKey: cache.core.revision + returnCheck });
   const view = core.snapshot?.data ?? null;
   const loading = view === null && core.status.kind === 'loading';
   const refreshing = view !== null && core.status.kind === 'loading';
@@ -193,7 +195,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
     return new Map(summaries.map(item => [item.id, item]));
   }, []);
   const summaries = useOperationsQuery({
-    cache: cache.summaries, queryKey: 'all', read: readSummaries, refreshKey: projectionRefreshKey,
+    cache: cache.summaries, queryKey: 'all', read: readSummaries, refreshKey: cache.summaries.revision + returnCheck,
   });
   const summaryIndex = summaries.snapshot?.data ?? EMPTY_SUMMARIES;
   const summaryLoading = summaries.status.kind === 'loading';
@@ -205,7 +207,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
     return new Map(reviews.map(review => [review.case_no, review]));
   }, [view]);
   const intake = useOperationsQuery({
-    cache: cache.intake, queryKey: intakeKey, read: readIntake, refreshKey: projectionRefreshKey,
+    cache: cache.intake, queryKey: intakeKey, read: readIntake, refreshKey: cache.intake.revision + returnCheck,
     enabled: view !== null && core.status.kind === 'ready',
   });
   const intakeReviews = intake.snapshot?.data ?? EMPTY_INTAKE;
@@ -254,8 +256,8 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
 
       <details className="order-v2-overview-details">
         <summary>案件受理統計</summary>
-        <WorkbenchCaseStatistics viewCache={cache} refreshKey={projectionRefreshKey} />
-        <WorkbenchCaseStatistics viewCache={cache} refreshKey={projectionRefreshKey} caseCategory="non_citizen" />
+        <WorkbenchCaseStatistics viewCache={cache} refreshKey={cache.statistics.revision + returnCheck} />
+        <WorkbenchCaseStatistics viewCache={cache} refreshKey={cache.statistics.revision + returnCheck} caseCategory="non_citizen" />
       </details>
 
       <div className="order-v2-overview-details order-v2-stage-overview">

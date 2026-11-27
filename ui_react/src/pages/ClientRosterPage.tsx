@@ -29,6 +29,7 @@ import { isCancellationTerminalStatus, OrderCancellationPanel } from '../compone
 import { OrderControlledReopenPanel } from '../components/OrderControlledReopenPanel';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { sessionClient } from '../api/auth/session_client';
+import { useAdminOperationsViews } from './admin_operations_view_cache';
 import './ClientRosterPage.css';
 
 type RosterFilters = {
@@ -82,6 +83,7 @@ export interface ClientRosterPageProps {
 }
 
 export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = false, initialCaseNo = '', focusField = '', onEditStateChange, onReturnToCase, onOpenServiceArrangement }) => {
+  const views = useAdminOperationsViews();
   const staffIdentity = useStaffIdentityLabels();
   const [filters, setFilters] = useState<RosterFilters>(defaultFilters);
   const tableTitleId = useId();
@@ -341,6 +343,12 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     catch { if (detailRequest.current === request) setOrderRefreshError(true); }
     finally { setOrderRefreshing(false); }
   };
+  const observedOrderOperation = () => {
+    views.invalidateWorkbench();
+    views.invalidateSchedulingMonths();
+    if (orderOperation === 'reopen') setReopenObserved(true);
+    void refreshAfterOrderOperation();
+  };
   const exportWorkbook = async (kind: 'order-accounting' | 'case-inspection') => {
     const label = kind === 'case-inspection' ? '案件資料檢查' : '訂單帳務';
     setExporting(true); setExportMessage(null); setExportError(null);
@@ -443,10 +451,10 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         </div>
         {orderOperation === 'reopen'
           ? <OrderControlledReopenPanel key={selectedCaseNo} caseNo={selectedCaseNo} startDisabled={reopenObserved}
-              onObserved={() => { setReopenObserved(true); void refreshAfterOrderOperation(); }} onBusyChange={setOrderOperationBusy} />
+              onObserved={observedOrderOperation} onBusyChange={setOrderOperationBusy} />
           : <OrderCancellationPanel key={selectedCaseNo} caseNo={selectedCaseNo} allowHistoricalRepair={false}
               historicalUnservedCorrection={orderOperation === 'historical-unserved'}
-              onObserved={() => void refreshAfterOrderOperation()} onBusyChange={setOrderOperationBusy} />}
+              onObserved={observedOrderOperation} onBusyChange={setOrderOperationBusy} />}
       </> : <>
       {canManageOrder && detail?.case_no === selectedCaseNo && <div className="registry-return-row">
         <button type="button" disabled={editState.busy || deletionBusy} onClick={() => requestLeave(() => {

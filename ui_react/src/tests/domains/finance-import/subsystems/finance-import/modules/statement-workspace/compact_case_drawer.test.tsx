@@ -3,6 +3,7 @@
  * Description: 案件精簡抽屜之帳務呈現、方案確認、退款沖抵與核對整合測試。
  */
 import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import { useSyncExternalStore } from 'react';
 import {readFileSync} from 'node:fs';
 import {z} from 'zod';
 import {transport} from '../../../../../../../api/shared/transport';
@@ -43,6 +44,12 @@ vi.mock('../../../../../../../api/client_finance/difference_resolution_client',(
 vi.mock('../../../../../../../api/client_finance/accounting_pricing_client',async importOriginal=>{const actual=await importOriginal<typeof import('../../../../../../../api/client_finance/accounting_pricing_client')>();return {...actual,accountingPricingClient:{...actual.accountingPricingClient,queryCase:vi.fn()}};});
 vi.mock('../../../../../../../api/government_subsidy/period_reconciliation_client',()=>({subsidyPeriodClient:{caseCoverage:vi.fn()}}));
 vi.mock('../../../../../../../components/StaffOverpaymentRecoveryActions',()=>({StaffOverpaymentRecoveryActions:({recoveryIdentity}:{recoveryIdentity:string})=><section aria-label="月嫂追償核對">{recoveryIdentity}</section>}));
+import { AdminOperationsViewProvider, useAdminOperationsViews } from '../../../../../../../pages/admin_operations_view_cache';
+function WorkbenchRevision() {
+  const views = useAdminOperationsViews();
+  const revision = useSyncExternalStore(views.subscribeWorkbench, views.getWorkbenchRevision);
+  return <output aria-label="待辦快取版本">{revision}</output>;
+}
 const caseNo='115000701';
 const plan={case_no:caseNo,version:0,events:[]};
 it.each([['taishin','台新銀行'],['sinopac','永豐銀行']])('退款回讀分開顯示 %s 實付與內扣手續費，不計為月嫂已核銷',async(bank,bankLabel)=>{
@@ -409,9 +416,13 @@ describe('精簡案件抽屜',()=>{
   vi.mocked(clientReceiptReconciliationClient.preview).mockImplementation(async()=>({account_version:version,preview_fingerprint:String(version).repeat(64),candidate:{status:'exact',payment_stage:null,bank_total:{amount:1000},obligation_total:{amount:1000},overage_amount:{amount:0},allocations:[],blockers:[],settlement_identity:'a'.repeat(64)}}));
   vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:caseNo,account_version:3,status:'exact',settlement_identity:'a'.repeat(64),ledger_entry_count:1,allocation_count:1,blockers:[]});
   const posted=vi.fn();
-  wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{row:bank(),onPosted:posted,onBusyChange:vi.fn()}}/>);
+  wrapper(<AdminOperationsViewProvider>
+    <WorkbenchRevision />
+    <FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{row:bank(),onPosted:posted,onBusyChange:vi.fn()}}/>
+  </AdminOperationsViewProvider>);
   fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
   await screen.findByRole('button',{name:'確認核銷本次收款'});
+  expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
   version=2;identity='corrected-adjustment';await act(async()=>notifyCaseAccountingChanged(caseNo));
   await waitFor(()=>expect(financeImportQueryClient.listBankTransactions).toHaveBeenCalledTimes(2));
   await screen.findByRole('checkbox',{name:/第一期/});
@@ -420,6 +431,7 @@ describe('精簡案件抽屜',()=>{
   fireEvent.click(screen.getByRole('button',{name:'核對本案入款'}));
   fireEvent.click(await screen.findByRole('button',{name:'確認核銷本次收款'}));
   await waitFor(()=>expect(posted).toHaveBeenCalledTimes(1));
+  expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('2');
   expect(clientReceiptReconciliationClient.apply).toHaveBeenCalledWith(caseNo,expect.objectContaining({expected_account_version:2,
    selection:{payment_stage:null,finance_import_row_ids:[7],obligation_identities:['corrected-adjustment']}}));
  });
@@ -432,12 +444,15 @@ describe('精簡案件抽屜',()=>{
   const saved={case_no:caseNo,version:1,events:[{version:1,scheme:'split' as const,actor:'合成人員',created_at:'2026-11-09T00:00:00Z'}]};
   vi.mocked(financeAccountingClient.query).mockResolvedValueOnce(original).mockResolvedValue({...original,subsidy_plan:saved});
   vi.mocked(financeAccountingClient.saveSubsidyPlan).mockResolvedValue({case_no:caseNo,applied_version:1,plan:saved});
-  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  wrapper(<AdminOperationsViewProvider>
+    <WorkbenchRevision /><FinanceCaseAccounting initialCase={caseNo} embedded/>
+  </AdminOperationsViewProvider>);
   expect(await screen.findByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
   expect(screen.getByText('ＨＣ１１５０９３雇主補助款')).toBeVisible();
   expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button',{name:'設定補助退款方案'}));
   expect(within(screen.getByRole('region',{name:'設定補助退款方案'})).getByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
+  expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
   for(const radio of screen.getAllByRole('radio'))expect(radio).not.toBeChecked();
   fireEvent.click(screen.getByRole('radio',{name:/客戶與政府分別入款/}));
   await waitFor(()=>expect(screen.getByRole('button',{name:'儲存方案'})).toBeEnabled());
@@ -445,6 +460,7 @@ describe('精簡案件抽屜',()=>{
   await waitFor(()=>expect(financeAccountingClient.saveSubsidyPlan).toHaveBeenCalledOnce());
   expect(vi.mocked(financeAccountingClient.saveSubsidyPlan).mock.calls[0][1]).toEqual({scheme:'split',expected_version:0,preview_fingerprint:'b'.repeat(64)});
   expect(await screen.findByRole('button',{name:'修改補助退款方案'})).toBeVisible();
+  expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('1');
   expect(screen.getByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
   expect(screen.getByText('ＨＣ１１５０９３雇主補助款')).toBeVisible();
  });
