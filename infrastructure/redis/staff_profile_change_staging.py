@@ -115,11 +115,17 @@ class StaffProfileChangeStaging:
         return saved
 
     def find_submission(self, staff_id, submission_id, submitted):
+        saved = self.status_for_submission(staff_id, submission_id)
+        if saved is not None and saved["digest"] != fingerprint_payload(submitted).value:
+            raise StaffProfileStagingConflict
+        return saved
+
+    def status_for_submission(self, staff_id, submission_id):
         previous = self._call("get", f"{PREFIX}submission:{staff_id}:{submission_id}")
         if previous is None:
             return None
         saved = self.get(int(previous), include_content=False)
-        if saved["staff_id"] != staff_id or saved["digest"] != fingerprint_payload(submitted).value:
+        if saved["staff_id"] != staff_id:
             raise StaffProfileStagingConflict
         return saved
 

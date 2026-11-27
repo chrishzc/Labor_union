@@ -51,6 +51,8 @@ bound
 2. 同時具有 active `customer` 與 `staff` binding 時，request 必須明確選定角色；未選定時 fail closed 並要求選擇，不得依訂單或排班猜測。若只剩單一 active 角色，後續操作使用該唯一角色並產生對應 menu intent。
 3. 一對一聊天室使用「切換客戶／切換月嫂」或「切換選單」進行選擇，於 webhook outer UoW fresh-read、驗版本、保存 selected role／audit／receipt 及 menu intent；重播冪等，工會管理員切選單視角不取得客戶／月嫂業務授權。
 4. 綁定成功須驗合法 status、非空 receipt identity 與相同 preview fingerprint。新連結優先於過期暫存，保留 15 分鐘有效期與一次性限制。
+5. LIFF 綁定 Apply 的操作識別為本次產生的 UUID。原綁定交易同時保存精簡回執。若 Apply 結果不明，以已驗證的同一 LINE 身分、角色、原 flow_id 及操作識別唯讀查回。只顯示原交易回執，查無回執或查詢故障保持未確認。查詢不重開或重送綁定。瀏覽器工作階段只保留必要識別，不保存帳密、身分憑證或衍生自驗證資料的指紋。
+6. 驗收以客戶、月嫂、工會三種身分各提交一次綁定。交易已提交但 Apply 回應遺失時，重開同一頁可查到原結果而不再送 Apply。不同 LINE 身分、不同角色、不同操作識別不得取得該回執。
 
 ### 4.3 綁定失敗與人工協助
 

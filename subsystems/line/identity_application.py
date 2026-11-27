@@ -8,7 +8,8 @@ from __future__ import annotations
 from subsystems.line.message_copy import IDENTITY_SUCCESS_DEFAULTS, IDENTITY_SUCCESS_TEMPLATES, configured_text
 
 from datetime import datetime, timedelta
-from typing import Callable
+from typing import Callable, Literal
+from uuid import UUID
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.case_import.provisional_registration import (
@@ -38,6 +39,7 @@ from shared_kernel.identities import (
     CorrelationId,
     ExpectedVersion,
     IdempotencyKey,
+    IdempotencyReceipt,
 )
 from subsystems.line.identity_contracts import (
     AdminCredentialProof,
@@ -126,6 +128,20 @@ class LineIdentityApplication:
                 self._now(),
             )
 
+    def binding_result(
+        self, flow_id: LineIdentityFlowId, purpose: LineIdentityFlowPurpose,
+        line_user_id: LineUserId, attempt_id: UUID,
+    ) -> tuple[Literal["bound", "existing"], str] | None:
+        key, fingerprint = _binding_attempt_identity(flow_id, purpose, line_user_id, attempt_id)
+        with self._unit_of_work_factory() as unit_of_work:
+            receipt = unit_of_work.receipts.get(key)
+        if receipt is None or receipt.payload_fingerprint != fingerprint:
+            return None
+        status, separator, version = receipt.result_reference.partition(":")
+        if status not in {"bound", "existing"} or not separator or not version.isdecimal():
+            return None
+        return ("bound" if status == "bound" else "existing"), f"line-binding:{line_user_id.value}:{version}"
+
     def preview_customer(self, flow_id, line_user_id, proof):
         with self._unit_of_work_factory() as unit_of_work:
             _require_flow(
@@ -153,6 +169,7 @@ class LineIdentityApplication:
         expected_version,
         preview_fingerprint,
         correlation_id,
+        attempt_id: UUID | None = None,
     ):
         try:
             with self._unit_of_work_factory() as unit_of_work:
@@ -185,6 +202,10 @@ class LineIdentityApplication:
                     correlation_id,
                 )
                 unit_of_work.identities.reset_failure_streak(line_user_id, flow_id)
+                _append_binding_attempt(
+                    unit_of_work, flow_id, LineIdentityFlowPurpose.CUSTOMER_BINDING,
+                    line_user_id, attempt_id, result,
+                )
                 unit_of_work.commit()
         except LineIdentityNotFoundError:
             self._record_binding_failure(
@@ -408,6 +429,7 @@ class LineIdentityApplication:
         expected_version,
         preview_fingerprint,
         correlation_id,
+        attempt_id: UUID | None = None,
     ):
         try:
             with self._unit_of_work_factory() as unit_of_work:
@@ -445,6 +467,10 @@ class LineIdentityApplication:
                 unit_of_work.identities.reset_failure_streak(
                     line_user_id,
                     flow_id,
+                )
+                _append_binding_attempt(
+                    unit_of_work, flow_id, LineIdentityFlowPurpose.STAFF_VERIFICATION,
+                    line_user_id, attempt_id, result,
                 )
                 unit_of_work.commit()
         except LineIdentityNotFoundError:
@@ -523,6 +549,7 @@ class LineIdentityApplication:
         expected_version,
         preview_fingerprint,
         correlation_id,
+        attempt_id: UUID | None = None,
     ):
         candidate = self._authenticated_admin_candidate(flow_id, line_user_id, proof)
         with self._unit_of_work_factory() as unit_of_work:
@@ -582,6 +609,10 @@ class LineIdentityApplication:
             unit_of_work.admins.bind_admin(candidate.subject_reference, line_user_id, previous_line_user_id)
             result = _bind_result(unit_of_work, line_user_id, candidate, correlation_id)
             _enqueue_result_message(unit_of_work, result, correlation_id, self._now())
+            _append_binding_attempt(
+                unit_of_work, flow_id, LineIdentityFlowPurpose.ADMIN_BINDING,
+                line_user_id, attempt_id, result,
+            )
             unit_of_work.commit()
         return result
 
@@ -838,6 +869,26 @@ def _bind_result(unit_of_work, line_user_id, candidate, correlation_id):
         receipt_identity=(
             f"line-binding:{line_user_id.value}:{snapshot.version.value}"
         ),
+    )
+
+
+def _binding_attempt_identity(flow_id, purpose, line_user_id, attempt_id):
+    fingerprint = fingerprint_payload({
+        "flow_id": flow_id.value,
+        "purpose": purpose.value,
+        "line_user_id": line_user_id.value,
+        "attempt_id": str(attempt_id),
+    })
+    return IdempotencyKey(f"line-binding-result:{fingerprint.value}"), fingerprint
+
+
+def _append_binding_attempt(unit_of_work, flow_id, purpose, line_user_id, attempt_id, result):
+    if attempt_id is None:
+        return
+    key, fingerprint = _binding_attempt_identity(flow_id, purpose, line_user_id, attempt_id)
+    version = result.receipt_identity.rsplit(":", 1)[-1]
+    unit_of_work.receipts.append(
+        IdempotencyReceipt(key, fingerprint, f"{result.status.value}:{version}")
     )
 
 

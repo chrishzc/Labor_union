@@ -189,6 +189,10 @@ def load_group_helper_proposal(
     return json.loads(raw) if isinstance(raw, str) else raw
 
 
+def postponement_group_received(unit_of_work: Any, case_no: str, proposal_ref: str) -> bool:
+    return load_group_helper_proposal(unit_of_work, _FAMILY_POSTPONE_CARD, case_no, proposal_ref) is not None
+
+
 def save_group_helper_proposal(
     unit_of_work: Any,
     family: str,
