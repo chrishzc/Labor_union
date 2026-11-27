@@ -97,6 +97,9 @@
 
 ### 3.2 核准前問卷不得進 MySQL 與獨立 Redis 7 架構（`REG-BOUNDARY`、`REG-REDIS`、`REG-EXPIRY`）
 
+<a id="registration-review-readback"></a>
+
+- **待審清單及原申請讀回**。原審核清單以 Case Import 的 Redis 待審 Query 按 `registration_id` 分頁，只列正式收件且仍為 `pending` 的一般與非市民申請。Preview 不入列，同鍵重送只讀回原申請。`approving`、`approved`、`rejected`、`expired` 均不在待審清單內。申請轉入 `approving` 後，已開啟的原申請明細仍可憑同一 `registration_id` 查詢處理結果。明細以 `status` 區分處理中與可審核，只有 `pending` 且有原審核權限才提供核准操作。待審 Query 不可用時回傳查詢失敗，不能用空清單代替。
 - **`REG-BOUNDARY-01～06`（儲存與邊界隔離）**：
   - 查到待審申請只表示收件，不表示已建正式案件。核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
   - 對外收件容器 `registration-intake` 僅持 LIFF token 驗證與專用 `registration-redis` 受限 ACL（僅可讀寫待審內容與計數器命名空間，完全不配置 MySQL 憑證、網路路徑或審核決策權限）；瀏覽器僅呼叫 bounded API。
