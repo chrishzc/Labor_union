@@ -1268,7 +1268,13 @@ def test_ds02_same_name_returns_both_formal_payables_by_assignment_mysql(mysql_c
         applied = client.post(f"/api/v1/orders/{case_no}/payroll/sync-historical-baseline-obligations")
         assert applied.status_code == 200, applied.text
         receipt = applied.json()["data"]["details"][0]
-        assert receipt["created_count"] == 2
+        assert receipt["case_no"] == case_no
+        receipt_rows = receipt["items"]
+        assert len(receipt_rows) == 2
+        assert {(row["staff_id"], row["assignment_id"]) for row in receipt_rows} == {
+            (person["staff_id"], person["assignment_id"]) for person in caregivers
+        }
+        assert all(row["action"] == "created" and row["obligation_identity"] for row in receipt_rows), receipt_rows
         query = f"/api/v1/finance-import/cases/{case_no}/accounting"
         response = client.get(query)
         assert response.status_code == 200, response.text
