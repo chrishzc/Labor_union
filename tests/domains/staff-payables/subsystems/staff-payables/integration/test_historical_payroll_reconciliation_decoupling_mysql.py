@@ -30,6 +30,7 @@ from api.dependencies.finance_import import get_finance_import_query_service
 from api.dependencies.staff_payout import build_staff_payout_application
 from api.routes.accounting_differences import router as accounting_differences_router
 from api.routes.finance_import import router as finance_import_router
+from domains.payroll.calculation import DEFAULT_PAYROLL_POLICY_VERSION, PayrollPolicyKind
 from domains.staff_payables.historical_payout import (
     HistoricalStaffConfirmationKind,
     HistoricalStaffPayoutIntent,
@@ -212,11 +213,13 @@ def _seed_historical_case(
         assignment_id = int(cursor.lastrowid)
         rate = int(spec.get("hourly_rate", hourly_rate))
         if spec.get("with_rate_snapshot", True):
+            snapshot_version = str(spec.get("policy_version", policy_version))
+            snapshot_kind = PayrollPolicyKind(str(spec.get("policy_kind", PayrollPolicyKind.CITIZEN)))
             cursor.execute(
                 "INSERT INTO assignment_payroll_rate_snapshots("
                 "assignment_id,policy_version,policy_kind,hourly_rate_ntd,source_identity_status"
-                ") VALUES(%s,%s,'citizen',%s,%s)",
-                (assignment_id, policy_version, rate, identity_status),
+                ") VALUES(%s,%s,%s,%s,%s)",
+                (assignment_id, snapshot_version, snapshot_kind.value, rate, identity_status),
             )
         cursor.execute(
             "INSERT INTO historical_order_pairing_evidence("
@@ -1261,9 +1264,17 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
             staff_specs=(
                 {"name": "August caregiver", "identity_card": "F223456046", "with_bank_account": False,
                  "end_date": august_end, "schedule_days": 3, "hourly_rate": 300},
-                {"name": "September caregiver", "identity_card": "F223456047", "with_bank_account": False,
-                 "start_date": date(2026, 9, 1), "end_date": september_end,
-                 "schedule_days": 2, "hourly_rate": 350},
+                {
+                    "name": "September caregiver",
+                    "identity_card": "F223456047",
+                    "with_bank_account": False,
+                    "start_date": date(2026, 9, 1),
+                    "end_date": september_end,
+                    "schedule_days": 2,
+                    "hourly_rate": 350,
+                    "policy_version": DEFAULT_PAYROLL_POLICY_VERSION,
+                    "policy_kind": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
+                },
             ),
         )
         pricing_rates = {"covered": 350, "excess": 300}
@@ -1314,11 +1325,11 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
         receipt = sync.json()["data"]
         assert receipt["scanned_orders"] == receipt["created_count"] == 1, receipt
         items = receipt["details"][0]["items"]
-        assert len(items) == 2
+        assert len(items) == 2, receipt
+        assert all(item["action"] == "created" for item in items), receipt
         assert {(item["assignment_id"], item["staff_id"]): item["amount_ntd"] for item in items} == {
             pair: amount for pair, (amount, _) in expected.items()
         }, receipt
-        assert all(item["action"] == "created" for item in items), receipt
 
         readback = client.get(accounting_url)
         assert readback.status_code == 200, readback.text
