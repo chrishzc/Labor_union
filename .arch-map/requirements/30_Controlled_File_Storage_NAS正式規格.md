@@ -113,9 +113,7 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 ├── 02_客戶存摺封面 (passbooks)/{客戶姓名}_{客戶編號}/
 │   └── 存摺封面_{客戶姓名}_{客戶編號}_v{版本號}_{短Hash}.{副檔名}
 ├── 03_月嫂檔案與資格 (staff)/{月嫂編號}_{姓名}/
-│   ├── resume/月嫂履歷_{月嫂編號}_{月嫂姓名}_v{版本號}_{短Hash}.pdf
-│   ├── certificates/證照_{月嫂編號}_{證照名稱}_{短Hash}.pdf
-│   └── health_and_police/{體檢報告|良民證}_{月嫂編號}_{年份}_{短Hash}.pdf
+│   └── web_profile/{物件識別}_v{版本號}_{短Hash}.{副檔名}
 ├── 04_LINE選單資源 (media)/rich_menus/
 │   └── {預設選單底圖|月嫂專用選單底圖}_{發布日期}.png
 ├── 05_資料庫冷備份 (db_backups)/{YYYY-MM}/
@@ -127,6 +125,7 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 
 - Windows 正式環境單一設定 `.env` 之 `CONTROLLED_FILE_STORAGE_ROOT` 為唯一受控根目錄設定（須為明確絕對本機路徑，未設定時不得默默改存專案暫存目錄），優先於 `APP_ENV=development` 等啟動標記。
 - 根目錄由維運人員於主機磁碟預先建立並設定適當存取權限；程式於首次寫入時自動建立 `01`～`05`（含 `04_LINE選單資源 (media)/rich_menus`）與 `_staging`（唯讀 Query 與 dry run 不建立資料夾）；未填 `union_no` 之月嫂以 `ID{staff.id}` 命名快照（後續更名不搬移原有檔案）；不合法路徑字元轉底線且嚴防 root escape。
+- 月嫂正式檔案歸檔只在需要寫入時建立該檔案的目標目錄。履歷網頁發布寫入 `web_profile/`，不預建 `resume/`、`certificates/`、`health_and_police/`。既有受控舊用途確有文件寫入時，仍用其對應位置；既存檔案按原紀錄查閱，不因發布照片而搬移或刪除。
 - 新正式受控附件於原 outer transaction 保存 finalize intent，commit 後由 bounded finalize runner 歸檔至 `01`～`04` 新 locator；未綁定 LINE 原始媒體位於 `_staging/line_media`。
 - 明確設定本機絕對儲存路徑時，新上傳的客戶服務契約及月嫂委任契約歸檔至 `01`，客戶審核／建檔時確認的存摺封面歸檔至 `02`，月嫂履歷、證照及體檢文件歸檔至 `03`。登錄時建立 finalize intent，由背景工作歸檔並維持原檔案識別的下載能力。新上傳的 LINE 選單素材由既有媒體資產流程直接寫入 `04/rich_menus/`，以資產識別讀取。既有檔案位置照原紀錄讀取。
 - **備份目錄不等於附件根目錄**：使用共用根時，資料庫備份位於 `CONTROLLED_FILE_STORAGE_ROOT/05_資料庫冷備份 (db_backups)/YYYY-MM/`，但仍由資料庫維護入口管理。`NAS_BACKUP_DIR` 是既有備份路徑設定名稱，不要求另部署 NAS，也不會改變契約、存摺等附件的受控根目錄。維護入口擇定備份路徑的優先序及未設定時的行為只見 [單機 Docker MySQL 初始化與維護復原 §5](10A_NAS_Fresh初始化與維護復原規格.md)。異地備份與跨磁碟保存由維護人員另行設定複寫。
