@@ -37,7 +37,8 @@
 
 ## 3. 服務群組綁定、待辦與代班邀請
 
-- **觀察與待辦（`GET /api/v1/line/order-groups/numbered`、`GET /api/v1/line/order-groups/{case_no}/events/numbered`、`GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`、`GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`）**：依真實分頁顯示加入／離開事件與狀態；「尚未建群」待辦端點 `POST /api/v1/line/mobile-admin/order-group-todos` 預設僅列正常未結案、正式訂金 `settlement_state='settled'` 且金額 `> 0` 尚無服務群組之案號；提供一鍵複製 `綁定訂單 {case_no} 〈本群組邀請網址〉` 格式而不暴露真實 `group_id` 或邀請網址於管理 Query。
+- **觀察與待辦（`GET /api/v1/line/order-groups/numbered`、`GET /api/v1/line/order-groups/{case_no}/events/numbered`、`GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`、`GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`）**：依真實分頁顯示加入／離開事件與狀態。經 `POST /api/v1/line/mobile-admin/order-group-todos` 查詢的「尚未建群」待辦，預設僅列正常未結案、正式訂金 `settlement_state='settled'` 且金額 `> 0` 尚無服務群組之案號。管理 Query 不暴露真實 `group_id` 或邀請網址。
+- **工會 LINE 工作台的群組綁定指引**。尚未建群、通知失敗及尾款提醒的群組綁定指引，依下列群組指令說明三步操作與有效網址送出後的私人邀請排入發送結果。尚未建群待辦可分別複製 `綁定群組` 與本案案號。複製只寫入剪貼簿。
 - **開工問候未送出紀錄**。工會 LINE 工作台「通知事項 → 訂金已付尚未建群 → 開工問候未送出紀錄」沿用同一端點的 `view=opening_greeting_skips`，依時間由新至舊分頁顯示因未綁定有效案件服務群組而略過開工問候的案號、紀錄時間與原因。僅已驗證且具 `ORDER_GROUP_READ` 的工會人員可查看。紀錄取自既有稽核事件，獨立於訂金待辦及其件數，既有紀錄仍可在建群後查閱。查詢不建立投遞工作。
 - **群組指令**：
   - `綁定群組`：具 `ORDER_GROUP_BIND` 且已綁定 LINE 的工會人員在服務群組輸入指令後，系統用 Reply 詢問案號。輸入符合綁定資格的案號後，系統用 Reply 提示從群組右上角設定選擇「邀請」，再複製「邀請網址」。同一官方帳號、群組及操作人員才能接續，每一步的輸入期限為 10 分鐘。
@@ -53,6 +54,7 @@
 
 | 情境（S） | 任務（T） | 操作（A） | 可驗收結果（R） |
 | --- | --- | --- | --- |
+| 工會 LINE 工作台有尚未建群的案件 | 從待辦取得可逐則貼到群組的指令與案號 | 開啟該案待辦，依序使用複製指令與複製案號 | 工作台顯示三步操作及邀請排入發送的時點。兩次複製各自只取得 `綁定群組` 和本案案號。工作台不要求手動發送邀請。 |
 | 工會人員有群組綁定權限，案件符合綁定及邀請資格 | 綁定服務群組並邀請客戶與月嫂 | 在同一群組依序傳送 `綁定群組`、案號、群組邀請網址 | 前兩則 Reply 分別提示案號及邀請網址的取得位置，尚未寫入綁定或排入邀請。第三則訊息儲存綁定和網址，排入私人邀請並用 Reply 確認。 |
 | 群組正等候邀請網址 | 避免誤綁定或誤發送 | 換另一位成員或另一個群組貼網址，或用原帳號貼錯誤網址、超過 10 分鐘再貼網址 | 其他來源與過期訊息無法完成流程。原操作人在期限內貼錯誤網址會收到重貼提示。各情況均未寫入綁定或排入私人邀請。 |
 | 案件有現行綁定，操作者有群組綁定權限 | 解除綁定 | 在清單該案的操作欄送出解除 | 現行群組及邀請網址清除，後台仍可查看歷程，舊群組無法再操作本案小幫手。 |

@@ -8,7 +8,7 @@
 以已驗證的 LINE 管理員身分綁定訂單群組、同步 Orders 提供的客戶與月嫂 audience，並以 durable LINE delivery intent 轉送群組邀請；不得以客戶／月嫂資料表中的投影取代 canonical LINE role binding。
 管理端「案件群組」以 server 分頁／案件搜尋、目前客戶與指派月嫂、綁定後 membership 事件及可展開歷程呈現。具群組綁定權限者可手動解除現有綁定，再永久刪除已解除案件的群組歷程。群組解散不觸發刪除。
 工會 LINE 工作台另以正式已核銷的未結案案件與現有群組綁定差集呈現「尚未建群」，server 分頁、
-零寫入，僅提供案號、已核銷金額及複製綁定指令；不要求客戶簽約或推進案件。
+零寫入，提供案號、已核銷金額及三步綁定指引，指令與案號可分別複製；不要求客戶簽約或推進案件。
 工會 LINE 工作台「訂金已付尚未建群」另提供「開工問候未送出紀錄」，以唯讀分頁呈現無有效案件群組的略過紀錄，獨立於訂金待辦與件數。
 
 操作人員的 18 項群組設定完成、邀請排入、資格／設定與格式錯誤均使用既有純函式的固定中文；新提示只建立原群組、原事件的 Reply-only 工作，不讀通知文案設定，缺少或失敗 Reply 不補 Push。客戶／月嫂私人邀請卡仍沿原發送與可編輯文案契約，歷史設定不刪改。
@@ -22,7 +22,7 @@
 - persistence adapter: `infrastructure/mysql/line_media_order_group_repository.py`
 - transport: `api/routes/line_order_groups.py`, `api/schemas/line_order_groups.py`
 - staff todo transport: `api/routes/line_mobile_admin.py` — `/order-group-todos`，verified Admin／ORDER_GROUP_READ；`view=opening_greeting_skips` 查閱略過紀錄。
-- staff todo presentation: `line/static/mobile_admin.html` — 尚未建群分組、開工問候略過紀錄，複製指令無外部效果。
+- staff todo presentation: `line/static/mobile_admin.html` — 尚未建群分組、開工問候略過紀錄及三步綁定指引。
 - presentation: `ui_react/src/components/LineOrderGroupWorkbench.tsx`, `ui_react/src/components/LineOrderGroupWorkbench.css`
 - composition: `ui_react/src/pages/LineManagementPage.tsx` — order_groups branch only
 - typed client: `ui_react/src/api/line_order_groups/`
