@@ -74,6 +74,7 @@ function reply(url: URL): unknown {
 }
 async function syntheticFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://synthetic.invalid');
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
   if (init?.method && init.method !== 'GET') throw new Error('Synthetic fixture is read-only');
   const trace: RequestTrace = { path: url.pathname + url.search, started: performance.now() };
   traces.push(trace);
@@ -85,6 +86,10 @@ async function syntheticFetch(input: RequestInfo | URL, init?: RequestInit): Pro
       init?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Synthetic abort', 'AbortError')); }, { once: true });
       if (init?.signal?.aborted) { clearTimeout(timer); reject(new DOMException('Synthetic abort', 'AbortError')); }
     });
+    if (headers.get('Authorization') !== 'Bearer synthetic-session') {
+      trace.outcome = 'failure';
+      return new Response(JSON.stringify({ detail: 'Synthetic unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
     if (denied.has(url.pathname)) {
       trace.outcome = 'failure';
       return new Response(JSON.stringify({ detail: 'Synthetic denied' }), { status: 403, headers: { 'Content-Type': 'application/json' } });

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from '../../../../../../pages/FinancePage';
 import { monthlyAccountingClient, type AccountingRange, type MonthlyAccountingReport } from '../../../../../../api/finance_import/monthly_accounting_client';
@@ -13,6 +13,12 @@ import { differenceResolutionClient } from '../../../../../../api/client_finance
 import { weeklyOperationsReportQueryClient } from '../../../../../../api/reports/weekly_operations_report_query_client';
 import { transport } from '../../../../../../api/shared/transport';
 import { WEEKLY_OPERATIONS_REPORT } from '../../../../../fixtures/reports/weekly_operations_report_contract_fixtures';
+import { ordersQueryClient } from '../../../../../../api/orders/order_query_client';
+import { orderCoreStageProjectionClient } from '../../../../../../api/orders/order_core_stage_projection_client';
+import { CORE_STAGE_CODES, OrderCoreStageTimelinePageSchema, SUBSTATUS_BY_STAGE_STATUS, type OrderCoreStageTimeline } from '../../../../../../api/orders/order_core_stage_projection_schemas';
+import { paymentOverdueReminderClient } from '../../../../../../api/line_order_groups/payment_overdue_reminder_client';
+import { notifyCaseAccountingChanged } from '../../../../../../api/shared/case_accounting_changes';
+import { ApiHttpError } from '../../../../../../api/shared/typed_errors';
 
 const caseNo = 'CASE-RPT-001';
 const now = new Date();
@@ -119,7 +125,121 @@ function changeCategory(category: AccountingRange['category']) {
   fireEvent.click(screen.getByRole('button', { name: '查詢' }));
 }
 
+function caseListFixture() {
+  const selected = 'SYN-RETURN-001';
+  const timeline: OrderCoreStageTimeline = {
+    case_no: selected, base_revision: 1, lifecycle_status: '訂單成立', branch_type: 'normal',
+    current_core_stage_code: 'deposit_settlement', current_core_stage_ordinal: 8,
+    historical_current_owner_stage_code: null, historical_current_owner_stage_ordinal: null,
+    source_projection_digest: 'a'.repeat(64),
+    core_stages: CORE_STAGE_CODES.map((code, index) => {
+      const status = index < 7 ? 'completed' : index === 7 ? 'in_progress' : 'not_started';
+      return {
+        ordinal: index + 1, code, label: code, owner: 'Synthetic owner', status,
+        substatus_code: SUBSTATUS_BY_STAGE_STATUS[code][status],
+        source: { owner: 'Synthetic owner', identity: selected, version: 1 },
+        occurred_at: null, blockers: [], warnings: [], available_read_actions: [], availability_reason: null,
+      };
+    }),
+  };
+  const summaries = vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({
+    items: [{ case_no: selected, client_name: '合成返回客戶', order_status: '訂單成立', staff_name: '合成人員',
+      identity_status: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null,
+      service_days: null, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'a'.repeat(64),
+  });
+  const timelines = vi.spyOn(orderCoreStageProjectionClient, 'getCoreStageTimelines').mockResolvedValue(OrderCoreStageTimelinePageSchema.parse({
+    items: [timeline], next_cursor: null, etag: 'a'.repeat(64),
+    stage_counts: Object.fromEntries(CORE_STAGE_CODES.map(code => [code, 0])), substatus_counts: {},
+    historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: 0, accounting_completed: 0 },
+  }));
+  vi.spyOn(paymentOverdueReminderClient, 'case').mockResolvedValue([]);
+  let accounting = detail(selected, {
+    staff_receivable_ntd: 10000, ongoing_completed: false,
+    collection_progress: { stage: 'deposit', sources_complete: true, expected_ntd: 5000,
+      received_ntd: 1000, remaining_ntd: 4000, due_date: '2000-01-01' },
+  });
+  vi.mocked(financeAccountingClient.query).mockImplementation(async () => accounting);
+  return { selected, summaries, timelines, update: (changes: Partial<CaseAccounting>) => { accounting = { ...accounting, ...changes }; } };
+}
+
+async function filteredCaseList() {
+  openFinance('case-accounting');
+  await waitFor(() => expect(screen.getByRole('button', { name: '查詢案件' })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('搜尋案件或對象'), { target: { value: 'SYN-RETURN' } });
+  fireEvent.change(screen.getByLabelText('目前階段'), { target: { value: 'deposit' } });
+  fireEvent.change(screen.getByLabelText('時效篩選'), { target: { value: 'action' } });
+  fireEvent.click(screen.getByRole('button', { name: '查詢案件' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '查詢案件' })).toBeEnabled());
+  return within(screen.getByRole('region', { name: '進行中案件清單' }));
+}
+
+async function caseListDrawer(scope: ReturnType<typeof within>, selected: string) {
+  fireEvent.click(scope.getByRole('button', { name: '查看案件' }));
+  const drawer = within(await screen.findByRole('dialog', { name: `案件帳務 · ${selected}` }));
+  await drawer.findByRole('heading', { name: `${selected} · ${selected}` });
+  return drawer;
+}
+
+function expectCaseListFilters() {
+  expect(screen.getByLabelText('搜尋案件或對象')).toHaveValue('SYN-RETURN');
+  expect(screen.getByLabelText('目前階段')).toHaveValue('deposit');
+  expect(screen.getByLabelText('時效篩選')).toHaveValue('action');
+}
+
 describe('current finance workspaces', () => {
+  it('returns from the real case drawer with filters and rows intact without reloading the list', async () => {
+    const fixture = caseListFixture();
+    const list = await filteredCaseList();
+    expect(list.getByRole('row', { name: /SYN-RETURN-001/ })).toHaveTextContent('NT$ 10,000');
+    const before = { summaries: fixture.summaries.mock.calls.length, timelines: fixture.timelines.mock.calls.length };
+    const drawer = await caseListDrawer(list, fixture.selected);
+    const accountingReads = vi.mocked(financeAccountingClient.query).mock.calls.length;
+    fireEvent.click(drawer.getAllByRole('button', { name: '關閉案件' })[0]);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: `案件帳務 · ${fixture.selected}` })).not.toBeInTheDocument());
+    expectCaseListFilters();
+    expect(list.getByRole('row', { name: /SYN-RETURN-001/ })).toHaveTextContent('NT$ 10,000');
+    expect(fixture.summaries).toHaveBeenCalledTimes(before.summaries);
+    expect(fixture.timelines).toHaveBeenCalledTimes(before.timelines);
+    expect(financeAccountingClient.query).toHaveBeenCalledTimes(accountingReads);
+    expect(fixture.summaries).toHaveBeenLastCalledWith(expect.objectContaining({ query_text: 'SYN-RETURN' }), expect.anything());
+  });
+
+  it('refreshes owner changes while the real drawer is open and excludes a newly completed case on return', async () => {
+    const fixture = caseListFixture();
+    const list = await filteredCaseList();
+    const drawer = await caseListDrawer(list, fixture.selected);
+    fixture.update({ staff_receivable_ntd: 22000 });
+    act(() => notifyCaseAccountingChanged(fixture.selected));
+    await waitFor(() => expect(list.getByRole('row', { name: /SYN-RETURN-001/ })).toHaveTextContent('NT$ 22,000'));
+    fireEvent.click(drawer.getAllByRole('button', { name: '關閉案件' })[0]);
+    expectCaseListFilters();
+    expect(list.getByRole('row', { name: /SYN-RETURN-001/ })).not.toHaveTextContent('NT$ 10,000');
+    const reopened = await caseListDrawer(list, fixture.selected);
+    fixture.update({ ongoing_completed: true });
+    act(() => notifyCaseAccountingChanged(fixture.selected));
+    await waitFor(() => expect(list.queryByRole('row', { name: /SYN-RETURN-001/ })).not.toBeInTheDocument());
+    fireEvent.click(reopened.getAllByRole('button', { name: '關閉案件' })[0]);
+    expectCaseListFilters();
+    expect(list.getByText('目前沒有符合條件的進行中案件。')).toBeVisible();
+  });
+
+  it('does not present the previous successful accounting after a denied refresh and drawer return', async () => {
+    const fixture = caseListFixture();
+    const list = await filteredCaseList();
+    const drawer = await caseListDrawer(list, fixture.selected);
+    vi.mocked(financeAccountingClient.query).mockRejectedValue(new ApiHttpError(403, 'FORBIDDEN', 'Synthetic denied'));
+    act(() => notifyCaseAccountingChanged(fixture.selected));
+    await waitFor(() => expect(drawer.getByRole('alert')).toHaveTextContent('目前沒有查閱帳務的權限。'));
+    fireEvent.click(drawer.getAllByRole('button', { name: '關閉案件' })[0]);
+    expectCaseListFilters();
+    fireEvent.change(screen.getByLabelText('目前階段'), { target: { value: 'all' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '查詢案件' })).toBeEnabled());
+    const row = list.getByRole('row', { name: /SYN-RETURN-001/ });
+    expect(row).toHaveTextContent('帳務來源待確認');
+    expect(row).not.toHaveTextContent('NT$ 10,000');
+    expect(row).not.toHaveTextContent('待收 NT$ 4,000');
+  });
+
   it('redirects the retired payment destination link to monthly accounting', async () => {
     openFinance('payment-destination');
     await screen.findByRole('heading', { name: '每月帳務狀況' });
