@@ -52,6 +52,7 @@ export function HistoricalPayableLookup({ month, revision, onCase, caseNo }: {
     {result.items?.length === 0 && <p role="status">找不到相符的歷史月嫂款。</p>}
     {result.items?.map(item => <div key={`${item.case_no}:${item.staff_id}:${item.obligation_identity}:${item.effective_due_date}`}>
       <strong>{item.case_no} · {item.recipient_name ?? '月嫂待確認'}</strong>
+      <p>月嫂編號 {item.staff_id ?? '待確認'}</p>
       <p>{missingData(item) ? '待確認 · ' : ''}{item.reason}
         {' '}付款日 {item.effective_due_date ?? '待確認'} · 待付 {financeMoney(item.balance_ntd)}
         {' '}· {item.source === 'formal_obligation' ? '正式應付' : '案件來源'}</p>
@@ -63,10 +64,78 @@ export function HistoricalPayableLookup({ month, revision, onCase, caseNo }: {
 }
 
 export function HistoricalPayableEditor({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {
-  if (item.disposition !== 'paid_or_settled' && (!item.obligation_identity || item.effective_due_date === null)) {
-    return <HistoricalPayableSync item={item} onSaved={onSaved} />;
+  const needsSync = item.disposition !== 'paid_or_settled' && (!item.obligation_identity || item.effective_due_date === null);
+  return <>
+    {needsSync ? <HistoricalPayableSync item={item} onSaved={onSaved} />
+      : <HistoricalPayableCorrection item={item} onSaved={onSaved} />}
+    <HistoricalPayableReadback key={JSON.stringify([item.case_no, item.staff_id, item.obligation_identity])} item={item} />
+  </>;
+}
+
+type HistoricalPayableReadbackState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'result'; message: string }
+  | { kind: 'error'; message: string };
+
+function HistoricalPayableReadback({ item }: { item: HistoricalPayableAuditItem }) {
+  const [state, setState] = useState<HistoricalPayableReadbackState>({ kind: 'idle' });
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
+
+  async function readback(): Promise<void> {
+    if (request.current || item.staff_id === null) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setState({ kind: 'loading' });
+    try {
+      const accounting = await financeAccountingClient.query(item.case_no, controller.signal);
+      if (!controller.signal.aborted) setState({ kind: 'result', message: selectedHistoricalPayable({ item, accounting }) });
+    } catch {
+      if (!controller.signal.aborted) setState({ kind: 'error', message: '尚未查回目前正式應付，請重新查核。' });
+    } finally {
+      if (request.current === controller) request.current = null;
+    }
   }
-  return <HistoricalPayableCorrection item={item} onSaved={onSaved} />;
+
+  return <section className="case-accounting-card" aria-label="正式應付唯讀查核">
+    <p>{item.case_no} · {item.recipient_name ?? '月嫂待確認'} · 月嫂編號 {item.staff_id ?? '待確認'}</p>
+    <p>查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。</p>
+    <button type="button" className="finance-btn-secondary" disabled={state.kind === 'loading' || item.staff_id === null}
+      onClick={() => void readback()}>重新查核正式應付</button>
+    {item.staff_id === null && <p>所選月嫂識別待確認，請回清冊核對人員。</p>}
+    {state.kind === 'loading' && <p role="status">正在查回正式應付…</p>}
+    {state.kind === 'result' && <p role="status">{state.message}</p>}
+    {state.kind === 'error' && <p role="alert">{state.message}</p>}
+  </section>;
+}
+
+function selectedHistoricalPayable({ item, accounting }: {
+  item: HistoricalPayableAuditItem; accounting: CaseAccounting;
+}): string {
+  if (accounting.case_no !== item.case_no || item.staff_id === null) {
+    return '案件或所選月嫂識別不一致，請核對原清冊選取列。';
+  }
+  const people = accounting.staff_accounting_availability ?? [];
+  const selectedAssignments = people.filter(person => person.staff_id === item.staff_id);
+  const person = selectedAssignments[0];
+  if (selectedAssignments.length !== 1 || !person || person.status !== 'formal' || person.assignment_id === null ||
+    !Number.isInteger(person.assignment_id) || person.assignment_id <= 0 ||
+    people.filter(row => row.assignment_id === person.assignment_id).length !== 1) {
+    return '尚未查回所選月嫂唯一可辨認的正式指派，請核對本案指派。';
+  }
+  const identity = person.obligation_identities[0];
+  if (person.obligation_identities.length !== 1 || !identity ||
+    (item.obligation_identity !== null && item.obligation_identity !== identity) ||
+    people.flatMap(row => row.obligation_identities).filter(value => value === identity).length !== 1) {
+    return '所選月嫂的正式指派與款項對應不唯一或不一致，請核對本案指派及款項。';
+  }
+  const payables = accounting.staff_items.filter(row => row.identity === identity);
+  const payable = payables[0];
+  if (payables.length !== 1 || !payable || payable.direction !== 'payable') {
+    return '尚未查回所選指派唯一對應的正式應付，請核對本案指派及款項。';
+  }
+  return `月嫂編號 ${item.staff_id} · 正式應付 ${financeMoney(payable.expected_ntd)} · 付款日 ${payable.due_date ?? '待確認'}`;
 }
 
 function HistoricalPayableSync({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {

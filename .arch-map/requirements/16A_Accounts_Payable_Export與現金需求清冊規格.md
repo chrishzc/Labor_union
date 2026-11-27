@@ -42,6 +42,16 @@
   3. 月嫂部分付款（`partially_paid`）屬正常可匯出狀態（取正數 `remaining`）。
 - **歷史月嫂款未列入清冊查核（每月帳務 → 應付清冊「查未列入原因」）**：依案號或月嫂查詢，將缺應付或日期的案件帶回同案查核 [Payroll 計算來源與同步結果](03_Payroll_Domain.md#32-未核銷重建與已核銷追加rebuildpayrollforcase)。收款資料缺項由原 owner 補齊。已有已付線索但未關聯時走 [手動補登 §6](22_銀行流水匯入與帳務異常處理正式規格.md#case-manual-accounting-supplement) 或 [Staff Payables 歷史付款契約](05_Staff_Payables_Export_Domain.md)。條件俱全的未清應付進入對應月份清冊。
 
+<a id="historical-payable-readback"></a>
+
+#### 歷史月嫂款同步結果不明：唯讀重查
+
+同步回應遺失或結果不明時，以原清冊選取列的 `case_no` 和 `staff_id` 開啟查核，不依賴同步回執才能辨認人員。不重新同步、不寫入。
+
+使用既有 `GET /api/v1/finance-import/cases/{case_no}/accounting`，核對回應案號、所選人員及唯一可辨認的正式 `assignment_id`，再核對該指派的 `obligation_identities` 唯一連到 `staff_items` 中方向為 `payable` 的正式項目。只顯示該筆 `expected_ntd`，不拿同名、估算或案件總額補位。沒有指派編號或對應不唯一時，不顯示正式金額，指出需核對的指派；只有付款日為空時，仍顯示正式金額和付款日待確認。讀到正式應付不能宣稱剛才的同步成功。
+
+正例：同案兩位同名，依各自指派查回自己的正式金額。反例：去掉所選人的 `assignment_id`，即使仍有一筆同人正式應付，也不顯示金額；查核全程不發 POST。此唯讀流程不變更 Payroll 建帳或 DB。
+
 ### 3.3 三方案映射與十欄會計 Excel 規範（`APX-SOURCE-01～08`）
 
 | 規範 ID | 核心契約 |
