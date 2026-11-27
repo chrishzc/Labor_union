@@ -18,7 +18,7 @@
   - `/api/v1/line/identity/registration/preview`
   - `/api/v1/line/identity/registration/apply`
 
-一般文字、按鈕與成功提示套用目前 LIFF 設定；正式結果狀態及申請編號由實際回執顯示。
+一般文字、按鈕與成功提示套用目前 LIFF 設定；正式結果狀態及申請編號由實際回執顯示。 客戶的送件結果不顯示內部待審到期時間；實際已到期時，仍顯示狀態與重新申請入口。 客戶提示只說明收件狀態和下一步，不顯示內部錯誤代碼或問卷清理狀態；結果未明仍先查原申請，同一筆確認未收到才重送。
 
 ## Dependencies
 - outbound: `case-import` — 只經既有 typed registration Preview／Apply contract 建立或讀取 provisional registration。
@@ -30,6 +30,7 @@
 ## Contracts
 - [LINE §5.2](../../../../../requirements/20_LINE客服與月嫂自助服務正式規格.md#52-手機審核中心db-版控-liff-設定與非市民入口契約) — LIFF 設定、非市民入口及正式頁／表單工作室預覽邊界。
 - [Case Import §3.1](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#31-非市民進件與配號nc-entrync-formnc-approvalnc-numbernc-stat) — `NC-FORM-01～02` 表單契約；[§5](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#5-驗收標準) 定義 `NC-PASSBOOK-01～04`。
+- 市民與非市民使用共用表單標示並阻擋漏填「訂單資訊 2」相關 BeClass 欄位與中藥補品題。公開收件 Preview／Apply 由 Case Import 規則判定新申請所需答案。
 - [服務閘道 §2](../../../../../requirements/29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 定義 Gateway 與非市民登記入口；送件及正式核准以 Case Import §§3.1–3.2 為權威，後端接線由 [provisional-registration](../../../../case-import/subsystems/case-import/modules/provisional-registration.md#handoff-boundaries) 承接，不引用知識庫 §4 作 registration 契約。
 - 非市民 LIFF 的服務方式只顯示「週休 1 日／週休 2 日」；後台手動新案保留「連續服務」。生產方式、居住型態及固定每日服務時段仍與後台對齊。多選問卷欄標示「可複選」，不改 Preview／Apply 的送件與正式核准責任。業務規則以 `.arch-map/requirements/17B_Case_Import與非市民Redis待審正式規格.md` §3.1 為準。
 - 收件成功、可離頁提示及原申請重送依 [Case Import §3.1](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#送件欄位與原申請查詢)。

@@ -1546,7 +1546,7 @@ function postponeSelectionKey() {
 }
 
 function sentPostponeState() {
-  return {status: 'sent', message: '原群組已受理延期提案。可繼續調整日期，或回群組查看確認卡。'};
+  return {status: 'sent', message: '延期提案已送到 LINE 群組。請回群組查看。客戶同意後，班表才會改。'};
 }
 
 function markPostponeScheduleStale(code) {
@@ -1637,7 +1637,7 @@ function readPendingPostponeGroup() {
 async function queryPostponeGroup() {
   const pending = postponeGroupPending;
   if (!pending || postponeCheck.status === 'submitting') return;
-  postponeCheck = {status: 'submitting', message: '正在確認原提案是否已由群組受理…'};
+  postponeCheck = {status: 'submitting', message: '正在查 LINE 群組有沒有收到提案…'};
   renderPostponeCheck();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -1656,10 +1656,10 @@ async function queryPostponeGroup() {
       updatePostponePairs();
       return;
     }
-    postponeCheck = {status: 'awaiting-group', message: '提案草稿已儲存，尚未確認原群組受理。請查詢原提案或回群組確認。'};
+    postponeCheck = {status: 'awaiting-group', message: '日期已先存好，還不確定 LINE 群組有沒有收到。請按「查詢原提案」，不要再送一次。客戶同意後，班表才會改。'};
   } catch (error) {
     postponeCheck = {status: 'awaiting-group', submitFailed: true,
-      message: error.code === 'leave_result_group_unavailable' ? error.message : '目前無法確認原群組是否受理，請稍後查詢原提案。'};
+      message: error.code === 'leave_result_group_unavailable' ? error.message : '還不知道 LINE 群組有沒有收到。請稍後按「查詢原提案」，不要再送一次。'};
   } finally {
     clearTimeout(timeout);
     renderPostponeCheck();
@@ -1670,7 +1670,7 @@ async function queryPostponeGroup() {
 async function sendPostponeMessage(groupMessage, intent, idempotencyKey) {
   if (!canSendPostponeToGroup()) {
     postponeCheck = {status: 'ready', intent, idempotencyKey, submitFailed: true,
-      message: '提案草稿已儲存。請從原 LINE 案件群組開啟延期頁面確認。'};
+      message: '日期已先存好，還沒送到群組。請回原本的 LINE 案件群組打開延期頁。'};
     renderPostponeCheck();
     return;
   }
@@ -1679,7 +1679,7 @@ async function sendPostponeMessage(groupMessage, intent, idempotencyKey) {
     sessionStorage.setItem(postponeGroupStorageKey(), JSON.stringify(pending));
   } catch {
     postponeCheck = {status: 'ready', intent, idempotencyKey, submitFailed: true,
-      message: '無法保留原提案識別，群組訊息尚未送出。請聯絡工會。'};
+      message: '這次沒有把延期提案送到 LINE 群組。請聯絡工會。'};
     renderPostponeCheck();
     return;
   }
@@ -2029,7 +2029,7 @@ async function submitUnavailability() {
     await loadSchedule();
   } catch (error) {
     if (pendingUnavailability?.receipt) {
-      show("unavailStatus", "已收到登記收據，目前無法確認正式紀錄。請按「查詢登記結果」。", true);
+      show("unavailStatus", "已收到這次登記，但還沒在班表上查到。請按「查詢登記結果」，不用再登記一次。", true);
     } else if (pendingUnavailability &&
         ([409, 422].includes(error.status) && Object.hasOwn(unavailabilityErrors, error.code) ||
          error.status === 409 && error.code === "staff_availability_idempotency_conflict")) {

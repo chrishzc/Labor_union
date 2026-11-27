@@ -16,12 +16,13 @@ import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { formatTaipeiDateTime } from '../shared/taipeiTime';
 import './NotificationTasksPreviewPage.css';
 
-type Group = 'review' | 'reminder' | 'support';
-const TASK_GROUPS = [
-  { id: 'all', label: '全部事項', icon: Inbox },
-  { id: 'review', label: '審核與協調', icon: ClipboardCheck },
-  { id: 'reminder', label: '款項與群組', icon: Wallet },
-] as const;
+const ALL_TASKS = { id: 'all', label: '全部事項', icon: Inbox };
+const LEGACY_GROUP_LABELS = { review: '審核與協調', reminder: '款項與群組', support: '支援' };
+const CATEGORY_ICONS = new Map([
+  ['applications', ClipboardCheck], ['identity', ShieldCheck], ['coordination', Clock3],
+  ['payments', Wallet], ['groups', MessageCircle], ['review', ClipboardCheck], ['reminder', Wallet],
+]);
+const categoryId = (source: NotificationCatalog[number]) => source.category_id ?? source.group;
 const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
 const PRIMARY:Record<NotificationSource,string> = {
   registration:'查看申請',identity:'審核身分綁定',
@@ -34,7 +35,9 @@ const PRIMARY:Record<NotificationSource,string> = {
 };
 type Row = NotificationItem & {caseLabel:string;personLabel:string;primary:string;secondary?:string;tone?:'attention'|'danger'};
 function row(item:NotificationItem):Row {
-  return {...item,time:formatTaipeiDateTime(item.time),caseLabel:item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項'),
+  const caseLabel = item.source==='registration' ? `申請編號：${item.reference_id ?? '未提供'}`
+    : item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項');
+  return {...item,time:formatTaipeiDateTime(item.time),caseLabel,
     personLabel:'相關對象',
     primary:item.source==='deposit' && item.tag==='已核銷待通知' ? '查看訂金資料' : PRIMARY[item.source],
     secondary:item.source==='payment_receipt' && item.receipt?.amount_ntd != null && item.receipt.source_version != null && item.receipt.source_reference != null
@@ -45,7 +48,7 @@ function row(item:NotificationItem):Row {
 const PAGE_SIZE = 6;
 export function NotificationTasksPage() {
   const {requestLeave}=useUnsavedNavigation();
-  const [group,setGroup]=useState<Group|'all'>('all');
+  const [group,setGroup]=useState('all');
   const [search,setSearch]=useState('');
   const [page,setPage]=useState(1);const [selectedId,setSelectedId]=useState('');const [notice,setNotice]=useState('');
   const [catalog,setCatalog]=useState<NotificationCatalog>([]);
@@ -61,7 +64,9 @@ export function NotificationTasksPage() {
     importFieldReads.current = { loadedPages: 1, version: 0 };
     setLoading(true);setQueryError('');setFailures({});setPools({});setExpanded('');
     void client.catalog(abort.signal).then(async sources=>{
-      if(abort.signal.aborted)return;setCatalog(sources);
+      if(abort.signal.aborted)return;
+      setCatalog(sources);
+      setGroup(previous=>previous==='all' || sources.some(source=>categoryId(source)===previous) ? previous : 'all');
       await Promise.all(sources.map(async source=>{
         try {const result=await client.list(source.source,0,abort.signal);if(!abort.signal.aborted && generation.current===version)setPools(old=>({...old,[source.source]:result}));}
         catch(error){if(!abort.signal.aborted && generation.current===version)setFailures(old=>({...old,[source.source]:notificationFailure(error)}));}
@@ -108,13 +113,26 @@ export function NotificationTasksPage() {
   const loaded=catalog.flatMap(source=>pools[source.source]?.items ?? []);
   const coveredTasks=new Set(loaded.flatMap(item=>item.failure?.related_task_ids ?? []));
   const allItems=[...new Map(loaded.filter(item=>item.source!=='delivery' || !coveredTasks.has(item.reference_id!)).map(value=>row(value)).map(item=>[item.id,item])).values()];
-  const filtered=allItems.filter(item=>(group==='all'||item.group===group) && [item.title,item.caseLabel,item.person,item.summary].join(' ').includes(search.trim()));
+  const sourceCategories=new Map(catalog.map(source=>[source.source,categoryId(source)]));
+  const categories=new Map(catalog.map(source=>{
+    const id=categoryId(source);
+    return [id,{id,label:source.category_label ?? LEGACY_GROUP_LABELS[source.group],icon:CATEGORY_ICONS.get(id) ?? ClipboardCheck}];
+  }));
+  const groupOptions=[ALL_TASKS,...categories.values()];
+  const matchesGroup=(source:NotificationSource,id:string)=>id==='all' || sourceCategories.get(source)===id;
+  const groupCount=(id:string)=>{
+    const sources=catalog.filter(source=>matchesGroup(source.source,id));
+    if(loading || queryError || sources.some(({source})=>failures[source] || !pools[source]))return '—';
+    const count=allItems.filter(item=>matchesGroup(item.source,id)).length;
+    return sources.some(({source})=>pools[source]?.next_cursor!=null) ? `${count}+` : count;
+  };
+  const filtered=allItems.filter(item=>matchesGroup(item.source,group) && [item.title,item.caseLabel,item.person,item.summary].join(' ').includes(search.trim()));
   const pages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
   const currentPage=Math.min(page,pages);
   const visible=filtered.slice((currentPage-1)*PAGE_SIZE,currentPage*PAGE_SIZE);
   const selected=visible.find(item=>item.id===selectedId) ?? visible[0];
   const selectedCaseNo=selected?.case_no;
-  const scopedSources=catalog.filter(s=>group==='all'||s.group===group);
+  const scopedSources=catalog.filter(s=>matchesGroup(s.source,group));
   const pendingMore=scopedSources.filter(s=>pools[s.source]?.next_cursor!=null);
   const failedSources=scopedSources.filter(s=>failures[s.source]);
   const emptyLoading=loading;
@@ -178,7 +196,7 @@ export function NotificationTasksPage() {
     {(queryError || failedSources.length>0) && <div className="notification-preview-banner" role="alert"><strong>{queryError || failedSources.length===scopedSources.length?'目前無法讀取事項':'部分事項未能載入'}</strong>{queryError && <p>{queryError}</p>}{failedSources.map(s=><p key={s.source}>{s.label}：{failures[s.source]} <button type="button" className="np-button" onClick={()=>void refreshSource(s.source)}>重試{s.label}</button></p>)}</div>}
     {loading && <p role="status">正在讀取待處理事項…</p>}
     <div className="notification-preview-toolbar">
-      <div className="notification-preview-groups" role="group" aria-label="事項分類">{TASK_GROUPS.map(({ id, label, icon: Icon }) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'active' : ''} onClick={() => requestLeave(() => { setGroup(id); setPage(1); setNotice(''); })}><Icon size={15} aria-hidden="true" />{label}<span>{allItems.filter(item => id === 'all' || item.group === id).length}</span></button>)}</div>
+      <div className="notification-preview-groups" role="group" aria-label="事項分類">{groupOptions.map(({ id, label, icon: Icon }) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'active' : ''} onClick={() => requestLeave(() => { setGroup(id); setPage(1); setNotice(''); })}><Icon size={15} aria-hidden="true" />{label}<span>{groupCount(id)}</span></button>)}</div>
       <div className="notification-preview-searches"><label className="notification-preview-search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="搜尋通知事項" placeholder="搜尋已載入的事項" value={search} onChange={event => { const value=event.target.value;requestLeave(() => { setSearch(value); setPage(1); setNotice(''); }); }} /></label>
       </div>
     </div>
@@ -190,7 +208,7 @@ export function NotificationTasksPage() {
           const Icon = item.tone === 'danger' ? TriangleAlert : item.group === 'review' ? ClipboardCheck : item.group === 'reminder' ? Bell : MessageCircle;
           return <button type="button" key={item.id} data-notification-id={item.id} className={`notification-preview-row${selected?.id === item.id ? ' selected' : ''}`} aria-pressed={selected?.id === item.id} onClick={() => select(item)}>
             <span className={`notification-preview-item-icon ${item.tone ?? ''}`}><Icon size={19} aria-hidden="true" /></span>
-            <span className="notification-preview-row-content"><span className="notification-preview-row-title"><strong>{item.title}</strong><span className={`np-tag ${item.tone ?? ''}`}>{item.tag}</span></span><span className="notification-preview-row-subject">{item.caseLabel}{item.person && <><span>·</span>{item.person}</>}</span><span className="notification-preview-row-summary">{item.summary}</span>{item.time && <span className="notification-preview-row-time"><Clock3 size={12} aria-hidden="true" />{item.time}</span>}</span>
+            <span className="notification-preview-row-content"><span className="notification-preview-row-title"><strong>{item.title}</strong>{item.source!=='registration' && <span className={`np-tag ${item.tone ?? ''}`}>{item.tag}</span>}</span><span className="notification-preview-row-subject">{item.caseLabel}{item.source!=='registration' && item.person && <><span>·</span>{item.person}</>}</span>{item.source!=='registration' && <span className="notification-preview-row-summary">{item.summary}</span>}{item.time && <span className="notification-preview-row-time"><Clock3 size={12} aria-hidden="true" />{item.time}</span>}</span>
             <ChevronRight className="notification-preview-row-arrow" size={17} aria-hidden="true" />
           </button>;
         })}</div> : <div className="notification-preview-empty"><Inbox size={34} aria-hidden="true" /><h2>{emptyTitle}</h2><p>{emptyMessage}</p>
@@ -202,11 +220,13 @@ export function NotificationTasksPage() {
 
       <aside ref={detailRef} className="notification-preview-detail" aria-label="事項詳細內容">
         {selected ? <>
-          <div className="notification-preview-detail-heading"><span>事項詳細內容</span><span className={`np-tag ${selected.tone ?? ''}`}>{selected.tag}</span></div>
+          <div className="notification-preview-detail-heading"><span>事項詳細內容</span>{selected.source!=='registration' && <span className={`np-tag ${selected.tone ?? ''}`}>{selected.tag}</span>}</div>
           <h2>{selected.title}</h2>
-          <p className="notification-preview-detail-summary">{selected.summary}</p>
-          <dl className="notification-preview-facts"><div><dt>案件／申請</dt><dd>{selected.caseLabel}</dd></div>{selected.source !== 'import_fields' && <><div><dt>{selected.personLabel}</dt><dd>{selected.person}</dd></div><div><dt>時間</dt><dd>{selected.time || '未提供'}</dd></div></>}</dl>
-          <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />處理原因</h3><p>{selected.reason}</p></section>
+          {selected.source!=='registration' && <p className="notification-preview-detail-summary">{selected.summary}</p>}
+          <dl className="notification-preview-facts">{selected.source==='registration'
+            ? <><div><dt>申請編號</dt><dd>{selected.reference_id ?? '未提供'}</dd></div><div><dt>收件時間</dt><dd>{selected.time || '未提供'}</dd></div></>
+            : <><div><dt>案件／申請</dt><dd>{selected.caseLabel}</dd></div>{selected.source !== 'import_fields' && <><div><dt>{selected.personLabel}</dt><dd>{selected.person}</dd></div><div><dt>時間</dt><dd>{selected.time || '未提供'}</dd></div></>}</>}</dl>
+          {selected.source!=='registration' && <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />處理原因</h3><p>{selected.reason}</p></section>}
           {selected.source === 'import_fields' && selectedCaseNo && <section className="notification-preview-reason">
             <h3>待修正欄位</h3>
             <ul>{selected.import_field_issues?.map(issue => <li key={JSON.stringify([issue.source, issue.owner, issue.field, issue.source_field, issue.code, issue.optional_skip_review_identity])}>
@@ -214,17 +234,17 @@ export function NotificationTasksPage() {
               {issue.optional_skip_review_identity && !failures.import_fields && <OptionalImportFieldSkip caseNo={selectedCaseNo} reviewIdentity={issue.optional_skip_review_identity} sourceField={issue.source_field} onCommitted={refreshAfterCommit} />}
             </li>)}</ul>
           </section>}
-          {selected.recipient && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>
+          {selected.recipient && selected.source!=='customer_binding' && selected.source!=='registration' && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>
             <div className="notification-preview-message-bubble">{selected.message ?? '請在下方原流程查看通知內容與寄送結果。'}</div>
           </section>}
-          {selected.unavailable_reason && <div className="notification-preview-blocker" role="note"><p>{selected.unavailable_reason}</p>
+          {selected.unavailable_reason && selected.source!=='customer_binding' && selected.source!=='registration' && <div className="notification-preview-blocker" role="note"><p>{selected.unavailable_reason}</p>
             <p>{selected.payment && selected.payment.payment_stage!=='deposit'?'請先核對本案案件群組，完成綁定後按重新整理。':selected.source==='deposit'?'請依下方入口補齊綁定與繳費資料，再按重新整理。':'請先聯絡客戶完成 LINE 綁定，再按重新核對；仍可接續其他可用操作。'}</p>
             <a href={selected.payment && selected.payment.payment_stage!=='deposit' ? `#line-management?tab=order_groups&group_q=${encodeURIComponent(selected.case_no ?? '')}`:'#line-management?tab=binding'}>{selected.payment && selected.payment.payment_stage!=='deposit'?'前往案件群組設定':'前往 LINE 身分綁定'}</a>
             {selected.source==='deposit' && <><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(selected.case_no ?? '')}`}>核對繳費資料與到期日</a><a href="#line-management?tab=push_queue">核對通知及繳費頁面設定</a><p>銀行代碼需由系統設定補齊；案件專屬虛擬帳號沿原規則產生。</p></>}
           </div>}
           {selected.delivery_status && <p>最近寄送狀態：{DELIVERY_LABELS[selected.delivery_status] ?? selected.delivery_status}</p>}
           <div className="notification-preview-actions">{!['customer_binding','staff_binding'].includes(selected.source) && <button type="button" className="np-button primary" disabled={busy || loading || (!!selected.unavailable_reason && selected.primary.includes('發送'))} onClick={()=>void act(selected)}>{selected.primary.includes('發送')?<Send size={16} aria-hidden="true" />:<ExternalLink size={16} aria-hidden="true" />}{busy?'處理中…':selected.primary}</button>}
-            {selected.secondary && <button type="button" className="np-button" disabled={busy} onClick={()=>void secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
+            {selected.secondary && selected.source!=='customer_binding' && selected.source!=='registration' && <button type="button" className="np-button" disabled={busy} onClick={()=>void secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
           </div>
           {(expanded===selected.id || ['customer_binding','staff_binding'].includes(selected.source)) && <div className="notification-task-operation" key={selected.id}><NotificationTaskActions item={selected} sourceReadError={failures[selected.source]} onCommitted={refreshAfterCommit} /></div>}
           <p className="notification-preview-footnote"><ShieldCheck size={14} aria-hidden="true" />處理完成後，待辦會自動更新。</p>

@@ -26,8 +26,11 @@ it('正式頁完成後返回通知，重新查詢推薦來源',async()=>{
  expect(client.list).toHaveBeenCalledTimes(2);
 });
 it('切換待辦分類不查詢歷史寄送紀錄',async()=>{
- render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'目前沒有待辦事項'});
- fireEvent.click(screen.getByRole('button',{name:/款項與群組/}));
+ vi.mocked(client.catalog).mockResolvedValue([{source:'payment_receipt',label:'入帳待確認',group:'reminder',category_id:'payments',category_label:'款項'}]);
+ render(<NotificationTasksPage/>);
+ const payments=await screen.findByRole('button',{name:/^款項/});
+ fireEvent.click(payments);
+ expect(payments).toHaveAttribute('aria-pressed','true');
  expect(screen.queryByRole('button',{name:/寄送紀錄/})).not.toBeInTheDocument();
  expect(delivery.list).not.toHaveBeenCalled();
 });

@@ -285,7 +285,7 @@ def test_update_only_the_gateway_and_restore_legacy_revision(context):
     assert {action['label']: action['path'] for action in runtime['page']['actions']} == {
         '已在市府平台登記': '/line-bind',
         '尚未在市府平台登記': 'https://hsinchu-nanny.hccg.gov.tw/home',
-        '工會已建案，綁定 LINE': '/line-bind?entry=existing_case',
+        '工會已幫我登記，我要連結 LINE': '/line-bind?entry=existing_case',
         '尚未申請': '/line-non-citizen-registration',
     }
     assert runtime['page']['actions'][1]['description'] == '請先完成市府補助申請。'

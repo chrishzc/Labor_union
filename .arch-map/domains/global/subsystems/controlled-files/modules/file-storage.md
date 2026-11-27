@@ -11,7 +11,7 @@
 ## Implementation
 - primary: `infrastructure/file/controlled_file_storage.py`
 - shared layout: `infrastructure/file/storage_layout.py` — one production `CONTROLLED_FILE_STORAGE_ROOT`, fixed 01–05 and `_staging`, write-time child creation, no missing-root creation or local fallback. Explicit development archive/media roots remain unchanged.
-- New staging uses `_staging`; the legacy hidden staging directory is read/replayed without migration, and both staging namespaces plus the SQL backup area are excluded from business discovery/direct reads. Finalized staff files create resume/certificates/health_and_police siblings.
+- New staging uses `_staging`; the legacy hidden staging directory is read/replayed without migration, and both staging namespaces plus the SQL backup area are excluded from business discovery/direct reads. Finalizing a staff file creates only its target parent path. Publishing a staff web image does not pre-create resume, certificates, or health_and_police directories; existing registered locations remain readable.
 - `DATABASE_BACKUP_DIRECTORY` is defined by storage_layout and re-exported by the storage adapter for `scripts/nas_database_maintenance.py`.
 - For compatibility, explicit Windows UNC roots also enable the unified layout in the manager's source-mode APP_ENV=development process. Explicit local absolute roots archive new returned signed contracts in 01, confirmed client passbook covers in 02 as specified by the storage contract, Staff documents in 03 and uploaded Rich Menu assets in 04. Legacy reads retain their existing roots.
 

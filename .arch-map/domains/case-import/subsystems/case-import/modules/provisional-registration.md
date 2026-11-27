@@ -8,7 +8,7 @@
 擁有 LINE provisional registration candidate 的共用欄位規格（含 `特殊計費:胎數` 強制僅收 `單胞胎` 或 `雙胞胎`、非市民 `baby_info` 同步限值驗證與 `line_id` 選填保留 DB 欄位）及申請保存／核准建檔；非空身分證值在進入 persistence 前正規化為 ASCII 大寫字母加九碼數字，空值維持 optional。外部 Apply 只保存申請，工會核准才建立 Client／BeClass；LINE binding coordination 沿用同一 outer transaction。
 
 ## Implementation
-- `subsystems/case_import/registration_staging.py` — Redis 待審、核准／拒絕／到期與原正式 writer 協調。
+- `subsystems/case_import/registration_staging.py` — Redis 待審、核准／拒絕／到期與原正式 writer 協調。`RegistrationReviewApplication.pending_registrations` 提供原審核清單使用的待審 Query，`registration_application` 依原申請編號讀回明細與處理結果。
 - `subsystems/case_import/passbook_image_validation.py` — 待審申請接收存摺封面時共用的圖片格式與內容驗證。
 - `infrastructure/redis/registration_staging_repository.py`、`infrastructure/redis/registration_connection.py`、`infrastructure/redis/registration_maintenance.py` — 正式環境要求專用 Redis 與分角色憑證；明確的本機開發與測試可用共用 Redis。提供命名空間隔離、原子狀態及 AOF 維護。
 - `api/registration_intake.py`、`api/registration_contracts.py`、`api/registration_token_verification.py`、`infrastructure/line/registration_token_verifier.py` — 無 SQL 公開接收與固定 LINE 驗證 transport。

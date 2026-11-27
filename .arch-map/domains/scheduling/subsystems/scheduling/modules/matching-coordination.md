@@ -19,7 +19,7 @@
   - `ui_react/src/components/CandidateInquiryDialog.tsx` — 候選新增與共用資訊的 native modal；保留焦點與操作期間保護。接案意願改在月嫂卡片內展開填寫。
   - `ui_react/src/components/OrderCandidateInformationPanel.tsx` — case-only 共用文件預覽與逐人整包寄送確認，三張資料圖及共用回覆卡；Orders 日期未保存時禁止整包寄送。
   - `ui_react/src/components/CandidatePlannedServiceDates.tsx` — 尋找月嫂工作區先設定共用每週服務說明，沿既有 Orders 日期 writer 保存後才可選收件人。試算零寫入。
-  - `ui_react/src/components/OrderCandidateContactStatusPanel.tsx`、`ui_react/src/components/OrderCandidateInformationPanel.tsx` — 工作台先顯示案件共用預覽，之後從指定月嫂卡片確認寄送，沿用該收件人的 preview fingerprint、原寄送 writer 與 receipt 回讀。
+  - `ui_react/src/components/OrderCandidateContactStatusPanel.tsx`、`ui_react/src/components/OrderCandidateInformationPanel.tsx` — 工作台先提供案件唯讀共用預覽，候選卡片（含工作台與客戶名冊接任流程）一律只保留單一「寄送通知」按鈕，直接以最新已儲存資料建立投遞任務與回讀，跨狀態皆可點擊。
   - `db/schema_parts/232_candidate_weekly_information.sql` — fresh supplemental `info_3_sent` 事件，不重新啟動資訊-1／2 的意願期限與全池完成 gate。
   - `db/schema_parts/1051_candidate_weekly_information.sql` — byte-equivalent preserve-only enum widening；保留歷史事件與 ordinal。
   - `domains/scheduling/matching_coordination.py`
@@ -33,7 +33,7 @@
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/matching_recommendation_application.py` — 以有效班次及需求時段協調候選檔期判定。
   - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；以需求班次對應的日期投影 actual conflict、待確認與 buffer，分時比較由 query 使用 Scheduling 的占用規則。
-  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；整包寄送使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史。再次寄送從指定月嫂卡片直接以最新資料建立新任務，沿用既有日期或呈現缺值，不依賴上一筆投遞狀態。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
+  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；整包寄送使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，保留歷史。UI 卡片的單一「寄送通知」按鈕一律從指定月嫂卡片直接以最新已儲存資料建立新任務，沿用既有日期或呈現缺值，不依賴預覽展開或上一筆投遞狀態。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
   - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。
