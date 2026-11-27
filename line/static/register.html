@@ -1607,7 +1607,6 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         successDescription.textContent = [...new Set([
             lifecycle[receipt.identity_status],
             receipt.identity_status === 'pending_approval' ? runtimePage?.success_description : '',
-            receipt.expires_at_utc ? `待審到期：${new Date(receipt.expires_at_utc).toLocaleString('zh-TW', {timeZone:'Asia/Taipei'})}（台北時間）` : '',
             `申請編號：${receipt.registration_id}`,
         ])].filter(Boolean).join('\n');
         document.querySelector('.success-title').textContent = terminal ? (receipt.identity_status === 'expired' ? '申請已到期' : '申請已拒絕') : receipt.identity_status === 'approved' ? '申請已核准' : '申請已收到';

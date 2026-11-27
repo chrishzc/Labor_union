@@ -383,7 +383,7 @@ let pendingRegistrationApply = {body:'synthetic'};
 const preview={status:'ready',expected_binding_version:0,payload_fingerprint:'a'.repeat(64),preview_fingerprint:'b'.repeat(64)};
 assert.equal(requireRegistrationPreview(preview),preview);
 assert.throws(()=>requireRegistrationPreview({...preview,status:'pending'}),/預覽回應格式不完整/);
-const pending={registration_id:42,status:'pending',identity_status:'pending_approval',client_id:null,beclass_record_id:null,case_no:null};
+const pending={registration_id:42,status:'pending',identity_status:'pending_approval',client_id:null,beclass_record_id:null,case_no:null,expires_at_utc:'2026-12-10T03:00:00Z'};
 renderRegistrationSuccess(pending);
 assert.equal(element('.success-desc').textContent,'您可以關閉頁面，後續由工會審核。\n申請編號：42');
 assert.equal(element('.success-title').textContent,'申請已收到');
