@@ -1250,7 +1250,45 @@ def test_star_case3_multi_caregiver_partial_sync_and_preserve_paid_mysql(mysql_c
 def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_due_dates(
     mysql_connection: pymysql.connections.Connection,
 ) -> None:
-    case_no = "115000436"
+    _assert_historical_sync_with_confirmed_advance(
+        mysql_connection, case_no="115000436", identity_cards=("F223456046", "F223456047"), paid_first=False,
+    )
+
+
+def test_historical_sync_two_caregivers_with_confirmed_advance_preserves_paid_caregiver(
+    mysql_connection: pymysql.connections.Connection,
+) -> None:
+    _assert_historical_sync_with_confirmed_advance(
+        mysql_connection, case_no="115000437", identity_cards=("F223456048", "F223456049"), paid_first=True,
+    )
+
+
+def _paid_caregiver_rows(
+    connection: pymysql.connections.Connection, identity: str, staff_id: int,
+) -> dict[str, list[dict[str, object]]]:
+    queries = (
+        ("staff_obligations", "obligation_identity", identity, "obligation_identity"),
+        ("staff_obligation_events", "obligation_identity", identity, "id"),
+        ("staff_obligation_installments", "obligation_identity", identity, "funding_kind"),
+        ("staff_payout_events", "staff_id", staff_id, "id"),
+        ("staff_payout_obligation_links", "obligation_identity", identity, "id"),
+        ("staff_payable_projections", "obligation_identity", identity, "obligation_identity"),
+    )
+    with connection.cursor() as cursor:
+        records: dict[str, list[dict[str, object]]] = {}
+        for table, key, value, order_by in queries:
+            cursor.execute(f"SELECT * FROM {table} WHERE {key}=%s ORDER BY {order_by}", (value,))
+            records[table] = list(cursor.fetchall())
+        return records
+
+
+def _assert_historical_sync_with_confirmed_advance(
+    mysql_connection: pymysql.connections.Connection,
+    *,
+    case_no: str,
+    identity_cards: tuple[str, str],
+    paid_first: bool,
+) -> None:
     august_end = date(2026, 8, 31)
     september_end = date(2026, 9, 2)
     with mysql_connection.cursor() as cursor:
@@ -1262,11 +1300,11 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
             start_day=date(2026, 8, 29),
             end_day=september_end,
             staff_specs=(
-                {"name": "August caregiver", "identity_card": "F223456046", "with_bank_account": False,
+                {"name": "August caregiver", "identity_card": identity_cards[0], "with_bank_account": False,
                  "end_date": august_end, "schedule_days": 3, "hourly_rate": 300},
                 {
                     "name": "September caregiver",
-                    "identity_card": "F223456047",
+                    "identity_card": identity_cards[1],
                     "with_bank_account": False,
                     "start_date": date(2026, 9, 1),
                     "end_date": september_end,
@@ -1298,6 +1336,50 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
             "INSERT INTO finance_case_subsidy_plan_events(case_no,version,scheme,actor,operation_key) "
             "VALUES(%s,1,'advance','synthetic',%s)", (case_no, f"manual-advance:{case_no}"),
         )
+        first_assignment = staff[0]["assignment_id"]
+        first_staff = staff[0]["staff_id"]
+        paid_identity = f"legacy:service:{case_no}:staff:{first_staff}"
+        if paid_first:
+            cursor.execute(
+                "INSERT INTO staff_obligation_events("
+                "obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,event_type,"
+                "before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,"
+                "resulting_payroll_version,idempotency_key,actor,reason"
+                ") VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff','established',"
+                "0,7200,'2026-09-15',%s,0,1,%s,'synthetic','original obligation')",
+                (paid_identity, first_assignment, case_no, first_staff,
+                 _fingerprint(paid_identity), f"obligation:{paid_identity}"),
+            )
+            cursor.execute(
+                "INSERT INTO staff_obligations("
+                "obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,"
+                "amount_due_ntd,due_date,status,current_event_id,payroll_version,payout_history_exists"
+                ") VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',7200,'2026-09-15','open',%s,1,1)",
+                (paid_identity, first_assignment, case_no, first_staff, cursor.lastrowid),
+            )
+            cursor.execute(
+                "INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) "
+                "VALUES(%s,'client',7200,'2026-09-15')", (paid_identity,),
+            )
+            cursor.execute(
+                "INSERT INTO staff_payout_events("
+                "staff_id,finance_import_row_id,event_type,amount_ntd,occurred_on,bank_account_identity_hash,"
+                "reconciliation_reference,idempotency_key,actor,reason"
+                ") VALUES(%s,NULL,'payout',7200,'2026-09-15',%s,'PAID-ORIG',%s,'synthetic','already paid')",
+                (first_staff, _fingerprint(f"account:{paid_identity}"), f"payout:{paid_identity}"),
+            )
+            payout_event_id = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO staff_payout_obligation_links("
+                "payout_event_id,obligation_identity,allocated_amount_ntd,allocation_ordinal"
+                ") VALUES(%s,%s,7200,1)", (payout_event_id, paid_identity),
+            )
+            cursor.execute(
+                "INSERT INTO staff_payable_projections("
+                "obligation_identity,staff_id,obligation_amount_ntd,net_paid_ntd,balance_ntd,status,"
+                "aggregate_version,current_event_id"
+                ") VALUES(%s,%s,7200,7200,0,'completed',1,%s)", (paid_identity, first_staff, payout_event_id),
+            )
     mysql_connection.commit()
 
     snapshot_scope = {"case_nos": (case_no,), "staff_ids": tuple(row["staff_id"] for row in staff)}
@@ -1308,6 +1390,7 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
     accounting_url = f"/api/v1/finance-import/cases/{case_no}/accounting"
     sync_url = f"/api/v1/orders/{case_no}/payroll/sync-historical-baseline-obligations"
     before = _snapshot_tables(mysql_connection, **snapshot_scope)
+    paid_before = _paid_caregiver_rows(mysql_connection, paid_identity, first_staff) if paid_first else {}
     mysql_connection.commit()
 
     with _bank_api_client(mysql_connection) as client:
@@ -1316,7 +1399,18 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
         initial = check.json()["data"]
         assert initial["scheme"] == "advance" and not initial["scheme_conflict"], initial
         assert initial["case_total_ntd"] == 12800 and initial["subsidy_ntd"] == 5600, initial
-        assert initial["staff_items"] == []
+        initial_payables = initial["staff_items"]
+        if paid_first:
+            assert len(initial_payables) == 1, initial
+            old_payable = initial_payables[0]
+            assert (old_payable["identity"], old_payable["expected_ntd"], old_payable["due_date"],
+                    old_payable["actual_ntd"], old_payable["has_payment"]) == (
+                paid_identity, 7200, "2026-09-15", 7200, True,
+            ), old_payable
+            assert all(len(rows) == 1 for rows in paid_before.values()), paid_before
+            assert _paid_caregiver_rows(mysql_connection, paid_identity, first_staff) == paid_before
+        else:
+            assert initial_payables == []
         assert _snapshot_tables(mysql_connection, **snapshot_scope) == before
         mysql_connection.commit()
 
@@ -1326,7 +1420,12 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
         assert receipt["scanned_orders"] == receipt["created_count"] == 1, receipt
         items = receipt["details"][0]["items"]
         assert len(items) == 2, receipt
-        assert all(item["action"] == "created" for item in items), receipt
+        if paid_first:
+            old_item = next(item for item in items if item["staff_id"] == first_staff)
+            assert (old_item["action"], old_item["obligation_identity"]) == ("skipped", paid_identity), receipt
+            assert next(item for item in items if item["staff_id"] == staff[1]["staff_id"])["action"] == "created", receipt
+        else:
+            assert all(item["action"] == "created" for item in items), receipt
         assert {(item["assignment_id"], item["staff_id"]): item["amount_ntd"] for item in items} == {
             pair: amount for pair, (amount, _) in expected.items()
         }, receipt
@@ -1337,10 +1436,17 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
         assert {item["identity"]: item["expected_ntd"] for item in payables} == {
             item["obligation_identity"]: item["amount_ntd"] for item in items
         }
-        assert all(not item["has_payment"] and not item["actual_ntd"] for item in payables)
+        assert {item["identity"]: item["actual_ntd"] for item in payables if item["has_payment"]} == (
+            {paid_identity: 7200} if paid_first else {}
+        )
+        assert all(not item["actual_ntd"] for item in payables if not item["has_payment"])
+        if paid_first:
+            assert next(item for item in payables if item["identity"] == paid_identity) == initial_payables[0]
 
         with closing(mysql_adapter.get_connection()) as read_connection:
             after_sync = _snapshot_tables(read_connection, **snapshot_scope)
+            if paid_first:
+                assert _paid_caregiver_rows(read_connection, paid_identity, first_staff) == paid_before
         assert len(after_sync["staff_obligations"]) == len(after_sync["staff_obligation_events"]) == 2
         assert {row["obligation_identity"]: (row["staff_id"], row["amount_due_ntd"])
                 for row in after_sync["staff_obligations"]} == {
@@ -1363,6 +1469,8 @@ def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_
         assert replay["created_count"] == replay["updated_count"] == 0, replay
         with closing(mysql_adapter.get_connection()) as read_connection:
             assert _snapshot_tables(read_connection, **snapshot_scope) == after_sync
+            if paid_first:
+                assert _paid_caregiver_rows(read_connection, paid_identity, first_staff) == paid_before
 
 
 def test_star_case5_ap_export_guardrails_for_undated_and_missing_account_mysql(mysql_connection):
