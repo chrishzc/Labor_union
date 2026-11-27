@@ -218,7 +218,7 @@ export function FaqChatLayoutPanel() {
       if (await readOperation(operation)) return;
     } catch { /* Keep the original reference if readback is incomplete. */ }
     finally { setBusy(false); }
-    setError('尚無法確認原操作結果。你可離開此頁，稍後再查；系統不會重送。');
+    setError('尚無法確認原操作結果。可先離開此頁，稍後再回來查詢原操作。');
   }
 
   async function submit(command: Command) {
@@ -226,7 +226,7 @@ export function FaqChatLayoutPanel() {
     try {
       window.sessionStorage.setItem(storageKey(), JSON.stringify(operation));
     } catch {
-      setError('此瀏覽器無法保留操作鍵，尚未送出。請先啟用工作階段儲存。');
+      setError('此瀏覽器無法保留操作紀錄，變更尚未送出。請允許此網站儲存資料後再試。');
       return;
     }
     setPending(operation);

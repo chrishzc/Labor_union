@@ -144,7 +144,7 @@ async function addImage(slider, item, path, request, signal) {
     if (signal.aborted) return;
     const message = document.createElement("p");
     message.className = "unavailable";
-    message.textContent = "無法載入圖片";
+    message.textContent = "這張照片無法載入。請重新整理後再查看。";
     figure.prepend(message);
   }
 }
@@ -155,8 +155,8 @@ function loadLiff() {
     liffScript = new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = "https://static.line-scdn.net/liff/edge/2/sdk.js";
-      script.onload = () => window.liff ? resolve(window.liff) : reject(new Error("LINE 登入暫時無法使用。"));
-      script.onerror = () => reject(new Error("LINE 登入暫時無法使用。"));
+      script.onload = () => window.liff ? resolve(window.liff) : reject(new Error("暫時無法使用 LINE 登入。請稍後從 LINE 推薦訊息重新開啟。"));
+      script.onerror = () => reject(new Error("暫時無法使用 LINE 登入。請稍後從 LINE 推薦訊息重新開啟。"));
       document.head.append(script);
     });
   }
@@ -166,7 +166,7 @@ function loadLiff() {
 async function customerRequest(interaction, signal) {
   const config = await fetch("./api/v1/line/identity/runtime-config", { cache: "no-store", signal });
   const { data } = await config.json();
-  if (!config.ok || !data?.liff_id) throw new Error("LINE 登入暫時無法使用。");
+  if (!config.ok || !data?.liff_id) throw new Error("暫時無法使用 LINE 登入。請稍後從 LINE 推薦訊息重新開啟。");
   const liff = await loadLiff();
   if (signal.aborted) return null;
   await liff.init({ liffId: data.liff_id });
@@ -213,7 +213,7 @@ async function openProfile() {
     const { data: profile } = await response.json();
     if (signal.aborted) return;
     if (!profile || typeof profile.name !== "string" || !Array.isArray(profile.groups)) {
-      throw new Error("無法讀取月嫂資料。");
+      throw new Error("無法讀取月嫂個人網頁的資料。請重新整理後再查看。");
     }
     nameHeading.textContent = profile.name;
     nameHeading.hidden = false;

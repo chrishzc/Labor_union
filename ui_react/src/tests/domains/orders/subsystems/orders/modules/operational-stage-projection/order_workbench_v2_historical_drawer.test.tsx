@@ -12,6 +12,7 @@ import { HistoricalOrderAdoptionEvidenceSchema } from '../../../../../../../api/
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import type { CustomerConfirmationPreview } from '../../../../../../../api/scheduling/matching_plan_communication_client';
 
 const mocks = vi.hoisted(() => ({
   core: vi.fn(),
@@ -562,12 +563,14 @@ describe('historical Drawer immutable evidence boundary', () => {
       case_no: 'CASE-FUTURE', plan_id: 51, expected_version: 4,
       order_information_1_ready: true, order_information_2_ready: true, weekly_service_ready: true,
       weekly_service_row_count: 1,
-      order_information_1: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', text: '訂單資訊－1' }],
-      order_information_2: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', text: '訂單資訊－2' }],
+      order_information_1: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', text: '訂單資訊－1',
+        line_sections: [{ title: '服務安排', rows: [['約定開始日', '2026-09-03']] }] }],
+      order_information_2: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', text: '訂單資訊－2',
+        line_sections: [{ title: '照護需求', rows: [['每日服務時數', '9 小時']] }] }],
       weekly_service_rows: [{ serial_number: 1, staff_name: '陳月嫂', week_start_date: '2026-09-03', week_end_date: '2026-09-09', service_hours_per_day: 9, weekly_work_days: 5, weekly_hours: 45 }],
-      caregiver_resumes: [{ staff_id: 42, staff_name: '陳月嫂', ready: true, filename: 'resume.pdf', version: 1, blocker: null }],
+      caregiver_web_profiles: [{ staff_id: 42, staff_name: '陳月嫂', admin_preview_url: '/api/v1/admin/staff-web-profile/42/preview' }],
       blockers: [], send_allowed: true,
-    });
+    } satisfies CustomerConfirmationPreview);
     mocks.candidatePool.mockResolvedValue({
       case_no: 'CASE-FUTURE', candidates: [{
         id: 2, staff_id: 43, staff_name: '候選月嫂乙', status: 'active', willingness: 'willing',

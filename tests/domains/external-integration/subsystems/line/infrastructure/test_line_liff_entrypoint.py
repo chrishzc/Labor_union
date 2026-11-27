@@ -279,7 +279,7 @@ def test_staff_schedule_page_uses_mutual_postponement_without_legacy_leave_submi
     assert 'liff.login({redirectUri: redirect.toString()})' in source
 
 
-@pytest.mark.parametrize("fail_send", [False, True], ids=["one-tap", "retry-same-message"])
+@pytest.mark.parametrize("fail_send", [False, True], ids=["one-tap", "read-original-after-ambiguous-send"])
 def test_staff_schedule_postpone_can_send_revised_proposal_from_same_page(fail_send: bool) -> None:
     source = (ROOT / "line/static/staff_schedule.html").read_text(encoding="utf-8")
     script = source.split("<script>", 1)[1].split(
@@ -293,8 +293,8 @@ const node = () => ({ style: {}, append() {}, appendChild() {}, replaceChildren(
 const messages = [];
 let lineContext = 'external';
 let writeScope = true;
-const expectRetry = FAIL_SEND;
-let failSend = expectRetry;
+let failSend = FAIL_SEND;
+const storage = new Map();
 const context = vm.createContext({
   document: {
     createElement: node,
@@ -303,7 +303,12 @@ const context = vm.createContext({
       return nodes.get(id);
     },
   },
-  AbortController, crypto,
+  AbortController, crypto, setTimeout, clearTimeout,
+  sessionStorage: {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+    removeItem: key => storage.delete(key),
+  },
   liff: {
     isInClient: () => lineContext !== 'external',
     getContext: () => ({type: lineContext, scope: writeScope ? ['chat_message.write'] : []}),
@@ -318,6 +323,7 @@ const context = vm.createContext({
 const evaluate = (script) => vm.runInContext(script, context);
 evaluate(SOURCE);
 evaluate(`
+  focusCaseNo = 'TEST';
   postponeCase = {case_no: 'TEST', assignment_id: 12, service_dates: ['2027-01-05', '2027-01-08']};
   requirePostponeGroupReply = true;
   postponeSelectedDates = new Set(postponeCase.service_dates);
@@ -326,8 +332,15 @@ evaluate(`
   let closeCount = 0;
   closeLiffWindow = () => { closeCount++; };
   const calls = [];
-  leaveResultPost = (path, payload, signal) =>
-    new Promise((resolve, reject) => calls.push({path, payload, signal, resolve, reject}));
+  const statusCalls = [];
+  let groupReceived = ${!failSend};
+  leaveResultPost = (path, payload, signal) => {
+    if (path === 'proposal-status') {
+      statusCalls.push(payload);
+      return Promise.resolve({status: groupReceived ? 'group_received' : 'draft_saved', ...payload});
+    }
+    return new Promise((resolve, reject) => calls.push({path, payload, signal, resolve, reject}));
+  };
   handlePostponeDateClick('2027-01-06');
 `);
 const settle = () => new Promise(setImmediate);
@@ -381,23 +394,39 @@ const settle = () => new Promise(setImmediate);
   evaluate("calls[2].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: '延期提案通知'})");
   await settle();
   assert.deepEqual(messages, ['延期提案通知']);
-  if (expectRetry) {
+  const originalStatusQuery = JSON.parse(evaluate('JSON.stringify(statusCalls[0])'));
+  assert.deepEqual(originalStatusQuery, {
+    case_no: 'TEST', assignment_id: 12, idempotency_key: evaluate('calls[2].payload.idempotency_key'),
+  });
+  if (failSend) {
     assert.equal(nodes.get('postponeSubmitBtn').disabled, false);
-    assert.equal(nodes.get('postponeSubmitBtn').textContent, '重試送出延期申請');
+    assert.equal(nodes.get('postponeSubmitBtn').textContent, '查詢原提案');
+    assert.equal(nodes.get('postponeReturnToGroup').hidden, true);
     assert.equal(evaluate('closeCount'), 0);
-    assert.equal(nodes.get('postponeActionNotice').textContent, '日期已儲存，LINE 尚未確認送出。請重試送出同一筆申請。');
+    assert.match(nodes.get('postponeActionNotice').textContent, /還不確定.*查詢原提案.*不要再送一次/);
+    assert.deepEqual(JSON.parse(storage.get('line-postpone-awaiting-group:TEST')), {
+      assignment_id: 12, idempotency_key: originalStatusQuery.idempotency_key,
+    });
     evaluate("handlePostponeDateClick('2027-01-07')");
     assert.equal(evaluate("postponeSelectedDates.has('2027-01-07')"), true);
 
-    failSend = false;
     await evaluate('Promise.all([submitPostponeProposal(), submitPostponeProposal()])');
-    assert.deepEqual(messages, ['延期提案通知', '延期提案通知']);
+    assert.equal(nodes.get('postponeSubmitBtn').textContent, '查詢原提案');
+    assert.match(nodes.get('postponeActionNotice').textContent, /還不確定/);
+    evaluate('groupReceived = true');
+    await evaluate('submitPostponeProposal()');
+    assert.deepEqual(JSON.parse(evaluate('JSON.stringify(statusCalls)')), [
+      originalStatusQuery, originalStatusQuery, originalStatusQuery,
+    ]);
+    assert.deepEqual(messages, ['延期提案通知']);
+    failSend = false;
   }
+  assert.equal(storage.size, 0);
   assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview,propose');
   assert.equal(evaluate('closeCount'), 0);
   assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
   assert.equal(nodes.get('postponeReturnToGroup').hidden, false);
-  assert.equal(nodes.get('postponeActionNotice').textContent, '延期申請已送出。可繼續調整日期，或回群組查看確認卡。');
+  assert.equal(nodes.get('postponeActionNotice').textContent, '延期提案已送到 LINE 群組。請回群組查看。客戶同意後，班表才會改。');
   assert.equal(evaluate("postponeSelectedDates.has('2027-01-07')"), true);
   await evaluate('submitPostponeProposal()');
   evaluate("handlePostponeDateClick('2027-01-07'); handlePostponeDateClick('2027-01-07');");
@@ -419,7 +448,7 @@ const settle = () => new Promise(setImmediate);
   assert.equal(evaluate('closeCount'), 0);
 
   evaluate("handlePostponeDateClick('2027-01-09'); handlePostponeDateClick('2027-01-10');");
-  const staleCode = expectRetry ? 'leave_result_forbidden' : 'leave_result_dates_changed';
+  const staleCode = FAIL_SEND ? 'leave_result_forbidden' : 'leave_result_dates_changed';
   evaluate(`calls[5].reject({httpStatus: 409, code: '${staleCode}'})`);
   await settle();
   assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
@@ -444,7 +473,7 @@ const settle = () => new Promise(setImmediate);
   await settle();
   assert.equal(evaluate('closeCount'), 0);
   assert.equal(messages.at(-1), '舊入口的新提案');
-  assert.equal(nodes.get('postponeActionNotice').textContent, '延期申請已送出。可繼續調整日期，或回群組查看確認卡。');
+  assert.match(nodes.get('postponeActionNotice').textContent, /延期提案已送到 LINE 群組/);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """.replace("FAIL_SEND", json.dumps(fail_send)).replace("SOURCE", json.dumps(script))
     subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
@@ -516,6 +545,7 @@ def test_postponement_page_switches_formal_assignments_before_submit() -> None:
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const nodes = new Map();
+const storage = new Map();
 const node = () => ({
   style: {},
   append() {},
@@ -523,7 +553,12 @@ const node = () => ({
   replaceChildren(...children) { this.children = children; },
 });
 const context = vm.createContext({
-  AbortController, crypto,
+  AbortController, crypto, setTimeout, clearTimeout,
+  sessionStorage: {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+    removeItem: key => storage.delete(key),
+  },
   document: {
     createElement: node,
     getElementById(id) {
@@ -552,9 +587,14 @@ evaluate(`
     {case_no: 'TEST-ORDER', assignment_id: 27, service_dates: ['2027-01-12']},
   ];
   const calls = [];
-  leaveResultPost = (path, payload, signal) => path === 'cases'
-    ? Promise.resolve({items: assignments})
-    : new Promise(resolve => calls.push({path, payload, signal, resolve}));
+  leaveResultPost = (path, payload, signal) => {
+    if (path === 'cases') return Promise.resolve({items: assignments});
+    if (path === 'proposal-status') {
+      calls.push({path, payload, signal});
+      return Promise.resolve({status: 'group_received', ...payload});
+    }
+    return new Promise(resolve => calls.push({path, payload, signal, resolve}));
+  };
 `);
 const settle = () => new Promise(setImmediate);
 
@@ -590,6 +630,9 @@ const settle = () => new Promise(setImmediate);
   assert.equal(evaluate('calls[2].payload.assignment_id'), 27);
   evaluate("calls[2].resolve({conflict: false, case_no: 'TEST-ORDER', assignment_id: 27, group_message: '延期提案'})");
   await settle();
+  assert.equal(evaluate('calls[3].path'), 'proposal-status');
+  assert.equal(evaluate('calls[3].payload.assignment_id'), 27);
+  assert.equal(evaluate('calls[3].payload.idempotency_key'), evaluate('calls[2].payload.idempotency_key'));
   assert.equal(selector.disabled, false);
   assert.equal(nodes.get('postponeReturnToGroup').hidden, false);
 
@@ -953,6 +996,14 @@ def test_all_active_liff_pages_reference_existing_routes_and_static_assets() -> 
         base_prefixes = {ref for _, ref in base_var_re.findall(text)}
         for _, ref in literal_re.findall(text):
             if ref.endswith("/static/") or ref.endswith("/api/"):
+                continue
+            if ref == "/api/v1/line/mobile-admin/notification-task-actions/${command}":
+                commands = re.search(r"const command = customerBinding \? '([^']+)' : '([^']+)';", text)
+                assert commands is not None, f"{asset.name}: cannot resolve {ref}"
+                for command in commands.groups():
+                    concrete_ref = ref.replace("${command}", command)
+                    if not _route_exists(concrete_ref):
+                        missing.append(f"{asset.name}: {concrete_ref}")
                 continue
             if not _route_exists(ref, allow_prefix=(ref in base_prefixes)):
                 missing.append(f"{asset.name}: {ref}")

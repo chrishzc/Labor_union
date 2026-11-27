@@ -301,6 +301,23 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+const availabilityConflictLabels = new Map([
+  ['assignment', '正式排班'],
+  ['historical_reservation', '歷史服務保留'],
+  ['waiting_lock', '待訂金保留檔期'],
+  ['buffer', '排班緩衝期'],
+  ['unavailability', '既有不可服務期間'],
+]);
+
+function availabilityConflictLabel(blocker: string): string {
+  const conflict = /^([^:]+):.+:(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/.exec(blocker);
+  if (!conflict) return '其他檔期';
+  const [, kind, start, end] = conflict;
+  const label = availabilityConflictLabels.get(kind) ?? '既有檔期';
+  if (end === '9999-12-31') return `${label}（${start} 起）`;
+  return `${label}（${start === end ? start : `${start} 至 ${end}`}）`;
+}
+
 const MANUAL_RELATION_KEYS = ['service_regions', 'service_periods', 'cooking_skills', 'holiday_availability', 'rest_schedule', 'baby_types'] as const;
 const PREFERENCE_RELATION_KEYS = ['service_regions', 'rest_schedule'] as const;
 const IMPORTED_SERVICE_KEYS = ['service_periods', 'cooking_skills', 'holiday_availability', 'baby_types'] as const;
@@ -861,8 +878,8 @@ const StaffRosterPage: React.FC = () => {
           message: invalidEndPausePreview
             ? '預覽結果中沒有同一筆可結束的暫停接案期間。'
             : preview.blockers.length > 0
-              ? `預覽判定目前不可套用：${preview.blockers.join('、')}`
-              : '預覽判定目前不可套用。',
+              ? `所選期間與${[...new Set(preview.blockers.map(availabilityConflictLabel))].join('、')}衝突。請在「排班日曆與調度」核對檔期，或在這裡調整日期後再儲存。`
+              : '這筆變更暫時無法儲存。請重新開啟月嫂詳情，在「接案狀態管理」核對目前紀錄。',
         });
         return;
       }
@@ -911,15 +928,15 @@ const StaffRosterPage: React.FC = () => {
             ...current,
             phase: observedClosedPause ? 'observed' : 'observation_failed',
             message: observedClosedPause
-              ? '已觀察 server 封閉暫停期間'
-              : '已受理，尚未確認暫停接案已結束。',
+              ? null
+              : '已受理恢復日期。最新紀錄尚未確認這筆變更，請點選「重新載入紀錄」。',
           }));
           return;
         }
-        setAvailabilityAction((current) => ({ ...current, phase: 'observed', message: '已觀察最新不可服務期間' }));
-      } catch (error) {
+        setAvailabilityAction((current) => ({ ...current, phase: 'observed', message: null }));
+      } catch {
         if (!isCurrentSlice(generation, controller.signal)) return;
-        setAvailabilityAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '不可服務期間查詢失敗。')}` }));
+        setAvailabilityAction((current) => ({ ...current, phase: 'observation_failed', message: '變更已受理，無法查詢最新暫停紀錄。請點選「重新載入紀錄」。' }));
       }
     } catch (error) {
       if (!isCurrentSlice(actionGeneration)) return;
@@ -1012,9 +1029,9 @@ const StaffRosterPage: React.FC = () => {
         const updated = await requeryLifecycle(currentStaffId, controller.signal, generation);
         if (!updated || !isCurrentSlice(generation, controller.signal)) return;
         setLifecycleAction((current) => ({ ...current, phase: 'observed', message: '已確認最新任職狀態' }));
-      } catch (error) {
+      } catch {
         if (!isCurrentSlice(generation, controller.signal)) return;
-        setLifecycleAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '任職狀態查詢失敗。')}` }));
+        setLifecycleAction((current) => ({ ...current, phase: 'observation_failed', message: '變更已受理，無法查詢最新任職狀態。請點選「重新查詢任職狀態」。' }));
       }
     } catch (error) {
       if (!isCurrentSlice(actionGeneration)) return;
@@ -1218,9 +1235,9 @@ const StaffRosterPage: React.FC = () => {
         {(currentPauses.length > 0 || upcomingPauses.length > 0) && <details className="staff-availability-cancel-note"><summary>取消紀錄備註（選填）</summary><label className="staff-op-field">備註（選填）<input aria-label="取消暫停備註（選填）" value={cancelReason} maxLength={500} disabled={interactionLocked} onChange={event => { invalidateSlice(); setCancelReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label></details>}
       </>}
       {availabilityAction.preview && ['preview_ready', 'apply_pending', 'receipt_received', 'requery_loading'].includes(availabilityAction.phase) && <div className="staff-action-status">正在儲存並更新暫停紀錄…</div>}
-      {availabilityAction.receipt && <div className="staff-action-status" role="status" aria-label="不可服務期間變更結果">{availabilityAction.receipt.action === 'cancel' ? '這筆暫停紀錄已取消，不再影響接案。' : availabilityAction.receipt.action === 'end_pause' ? `已設定 ${availabilityAction.payload?.resume_date} 起恢復接案。` : '暫停紀錄已儲存。'}</div>}
+      {availabilityAction.phase === 'observed' && availabilityAction.receipt && <div className="staff-action-status" role="status" aria-label="不可服務期間變更結果">{availabilityAction.receipt.action === 'cancel' ? '這筆暫停紀錄已取消，不再影響接案。' : availabilityAction.receipt.action === 'end_pause' ? `已設定 ${availabilityAction.payload?.resume_date} 起恢復接案。` : '暫停紀錄已儲存。'}</div>}
       {availabilityAction.message && availabilityAction.phase !== 'observed' && <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status">{availabilityAction.message}</div>}
-      {availabilityAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void queryAvailability()}>重新載入紀錄</button>}
+      {(availabilityAction.phase === 'stale' || availabilityAction.phase === 'observation_failed') && <button type="button" className="staff-next-btn" onClick={() => void queryAvailability()}>重新載入紀錄</button>}
       {availabilityAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitAvailability(true)}>以相同內容重試</button>}
       {selectedEndPauseBlock && <section className="staff-holiday-op-card" data-surface-id="staff.availability.end-pause" aria-label="恢復接案設定">
         <h3 className="staff-op-title">恢復接案</h3>
@@ -1556,7 +1573,7 @@ const StaffRosterPage: React.FC = () => {
                           <span className="staff-item-date-badge">📅 {lifecycle.data.displayEffectiveAt} 起生效</span>
                           <span className="staff-item-title">{staffDisplayLabel(selectedStaff.unionNo, selectedStaff.displayName)}任職狀態</span>
                           <span className={`staff-item-tag ${lifecycle.data.state === 'retired' ? 'retired' : ''}`}>
-                            {lifecycle.data.state === 'retired' ? '⚪ 已辦理退役（暫停派工）' : '🟢 正常在職中'}
+                            {lifecycle.data.state === 'retired' ? '⚪ 已退役' : '🟢 正常在職中'}
                           </span>
                         </div>
                         <div>
@@ -1678,7 +1695,7 @@ const StaffRosterPage: React.FC = () => {
                         </>
                       )}
 
-                      {lifecycleAction.phase === 'stale' && (
+                      {(lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'observation_failed') && (
                         <button type="button" className="staff-secondary-btn" onClick={() => void refreshLifecycleAfterStale()}>
                           重新查詢任職狀態
                         </button>

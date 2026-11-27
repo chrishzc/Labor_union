@@ -376,12 +376,12 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       <span className="client-roster-filter-help">點欄名旁的 ▾ 可篩選、隱藏或凍結；拖曳欄位右緣調整寬度（雙擊自動貼齊）。不同欄位的條件會同時套用。</span>
       {appliedFilters.query.trim() && <span className="client-roster-filter-chip">搜尋：{appliedFilters.query}<button type="button" disabled={loading} aria-label="清除搜尋條件" onClick={() => { const next = { ...appliedFilters, query: '' }; setFilters(next); void load(next); }}>×</button></span>}
       {appliedFilters.columnFilters.map((predicate) => <span className="client-roster-filter-chip" key={predicate.field}>{rosterFilterSummary(predicate)}<button type="button" disabled={loading} aria-label={`清除${rosterFilterColumns.find((item) => item.field === predicate.field)!.label}篩選`} onClick={() => applyColumn(predicate.field)}>×</button></span>)}
-      {filters.query !== appliedFilters.query && <span role="status">搜尋文字已變更，尚未套用。</span>}
+      {filters.query !== appliedFilters.query && <span role="status">搜尋文字已變更，請按「搜尋」更新清單。</span>}
     </div>
     {exportMessage && <p role="status" className="client-roster-message">{exportMessage}</p>}
     {exportError && <p role="alert" className="client-roster-message">{exportError}</p>}
-    {error && <p role="alert" className="client-roster-message">{error}</p>}
-    {listIssuesError && <p role="alert" className="client-roster-message">進件欄位問題讀取失敗，請重新整理名冊。</p>}
+    {error && <p role="alert" className="client-roster-message">{error} 請按「搜尋」重新讀取清單。</p>}
+    {listIssuesError && <p role="alert" className="client-roster-message">暫時無法確認哪些案件有進件欄位問題。請按「搜尋」重新讀取名冊。</p>}
     {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
     {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
     {(page || error) && <div className="client-roster-table-frame">
@@ -469,7 +469,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           onClick={() => requestLeave(() => { setReopenObserved(false); setOrderOperation('cancel'); })}>取消訂單</button>}
       </div>}
       {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
-      {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
+      {detailError && <p role="alert" className="client-roster-message">{detailError} 請關閉明細，再從名冊開啟同一筆案件。</p>}
       <div inert={deletionBusy}>
       {detail?.case_no === selectedCaseNo && <ClientRegistryDetailEditor key={detail.case_no} detail={detail} focusField={focusField} onRefresh={refreshDetail} onStateChange={setEditState} onOpenServiceArrangement={recalculateDates => {
         if (editState.busy) return;

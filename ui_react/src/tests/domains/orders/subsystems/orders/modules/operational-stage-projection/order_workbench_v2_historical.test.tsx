@@ -152,7 +152,9 @@ describe('待辦看板依目前狀態整合歷史訂單', () => {
   it('拒絕伺服器把歷史已完成案件回傳到進行中清單，避免錯誤分類冒充成功', async () => {
     mocks.core.mockResolvedValue(page([historical('CASE-WRONG', '歷史訂單－服務完成')]));
     render(<OrderWorkbenchV2Page />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('不符合所選分類');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('暫時無法讀取案件清單。請按「重試」。');
+    expect(alert).not.toHaveTextContent('不符合所選分類');
     expect(screen.queryByText('CASE-WRONG')).not.toBeInTheDocument();
   });
 
@@ -160,7 +162,9 @@ describe('待辦看板依目前狀態整合歷史訂單', () => {
     mocks.core.mockResolvedValueOnce({ ...page([historical('CASE-A', '歷史訂單－未服務')]), next_cursor: 'CASE-A' })
       .mockRejectedValueOnce(new Error('第二頁查詢失敗'));
     render(<OrderWorkbenchV2Page />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('第二頁查詢失敗');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('暫時無法讀取案件清單。請按「重試」。');
+    expect(alert).not.toHaveTextContent('第二頁查詢失敗');
     expect(screen.queryByText('CASE-A')).not.toBeInTheDocument();
   });
 

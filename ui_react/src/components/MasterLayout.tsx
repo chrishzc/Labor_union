@@ -321,7 +321,9 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
           <div
             className="system-status-indicator"
             data-testid="system-status-indicator"
-            title={systemOnline === null ? '正在查詢後端 API 狀態' : systemOnline ? `後端 API 運作正常 (${latencyText})` : '後端 API 離線或無法連線'}
+            title={systemOnline === null ? '正在確認系統連線，請稍候。'
+              : systemOnline ? (isDegraded ? '系統已連線，回應較慢，請等候處理結果。' : '系統連線正常。')
+              : '目前無法連線。若剛送出操作，連線恢復後請先核對原操作結果。'}
           >
             <span
               className={`status-dot ${systemOnline === null ? 'pending' : systemOnline ? (isDegraded ? 'degraded' : 'online') : 'offline'}`}

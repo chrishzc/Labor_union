@@ -40,7 +40,7 @@ function errorText(error: unknown) {
   if (error instanceof LineIdentityClientError) {
     if (error.outcomeUnknown) return '操作結果尚未確認，請重新查詢最新狀態，避免重複提交。';
     if (error.code === 'UNAUTHENTICATED') return '登入已失效，請重新登入。';
-    if (error.code === 'FORBIDDEN') return '目前帳號沒有執行這項操作的權限。';
+    if (error.code === 'FORBIDDEN') return '目前帳號沒有執行這項操作的權限。請聯絡具權限的管理員處理。';
     if (error.domainCode === 'line_identity_menu_role_not_active') return '這個帳號目前未使用此身分，請先在 LINE 選擇要使用的身分。';
     if (error.domainCode === 'line_identity_binding_not_revoked') return '請先解除綁定，再永久刪除。';
     if (error.domainCode === 'line_identity_menu_operation_in_progress') return 'LINE 正在處理這筆選單工作，請稍後再刪除。';

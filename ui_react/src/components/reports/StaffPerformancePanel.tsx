@@ -80,7 +80,7 @@ export function StaffPerformancePanel({ initialStaffId }: { initialStaffId?: num
     const controller = new AbortController(), request = ++sequence.current;
     void staffPerformanceClient.query(filters, controller.signal).then(value => {
       if (!controller.signal.aborted && request === sequence.current) { setReport(value); setOptions(value.staff_options); setYears(value.available_years); }
-    }).catch(reason => { if (!controller.signal.aborted && request === sequence.current) setError(reason instanceof Error ? reason.message : '月嫂表現分析載入失敗。'); });
+    }).catch(() => { if (!controller.signal.aborted && request === sequence.current) setError('暫時無法讀取月嫂表現分析。請按「重新查詢」。'); });
     return () => controller.abort();
   }, [filters, reload]);
   useEffect(() => () => exportController.current?.abort(), []);
@@ -99,7 +99,7 @@ export function StaffPerformancePanel({ initialStaffId }: { initialStaffId?: num
     setExporting(true); setExportMessage('');
     try { const result = await staffPerformanceClient.download(filters, metric, controller.signal); if (controller.signal.aborted) return;
       const url = URL.createObjectURL(result.blob), link = document.createElement('a'); link.href = url; link.download = result.filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setExportMessage('XLSX 已開始下載。');
-    } catch (reason) { if (!controller.signal.aborted) setExportMessage(reason instanceof Error ? reason.message : '匯出失敗，請重試。'); }
+    } catch { if (!controller.signal.aborted) setExportMessage('月嫂表現分析匯出失敗。請核對所選期間，再按「匯出 XLSX」重試。'); }
     finally { if (!controller.signal.aborted) setExporting(false); }
   };
   const periodLabel = `${filters.year}年${filters.period === 'month' ? `${filters.month}月` : filters.period === 'quarter' ? `第${filters.quarter}季` : '全年'}`;

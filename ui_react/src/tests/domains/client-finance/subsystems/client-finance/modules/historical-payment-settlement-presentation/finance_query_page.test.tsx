@@ -430,7 +430,7 @@ describe('Finance import preview and replay boundary', () => {
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await importWorkbook();
-    await screen.findByText('匯入結果與原批次預覽不一致；請勿重新提交，請重新查詢結果。');
+    await screen.findByText('查到的結果和原批次預覽不一致。請用本次匯入的結果查詢按鈕重查，避免重複提交。');
     expect(screen.queryByText(/本次自動核銷 3 筆/)).not.toBeInTheDocument();
   });
 

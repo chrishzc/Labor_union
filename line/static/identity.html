@@ -187,7 +187,7 @@ function showIdentityEntry(definition, purpose) {
 async function ensureLineIdToken() {
   idToken = liff.getIDToken() || "";
   if (!idToken) {
-    throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid 權限後重新開啟此頁。");
+    throw new Error("無法確認您的 LINE 身分。請關閉此頁，再從原本的 LINE 選單或訊息開啟。");
   }
   return idToken;
 }
@@ -243,7 +243,7 @@ function configureCustomerChoice(definition) {
         await openIdentityFlow("customer_binding");
         location.assign(`/line-bind?flow_id=${encodeURIComponent(flowId)}`);
       } catch (error) {
-        showIdentityError(error, "目前無法開啟需求調查表單。");
+        showIdentityError(error, "目前無法開啟需求調查表單。請稍後回 LINE 從原入口重新開啟。");
       }
     });
   }
@@ -460,7 +460,7 @@ async function loadLiffId() {
   const response = await fetch("/api/v1/line/identity/runtime-config");
   const result = await response.json();
   if (!response.ok || !result.data?.liff_id) {
-    throw new Error("LIFF 尚未完成設定，請聯絡工會人員。");
+    throw new Error("目前無法使用 LINE 登入。請回 LINE 官方帳號聊天室聯絡工會。");
   }
   return result.data.liff_id;
 }
@@ -649,7 +649,7 @@ document.getElementById('edit-binding').addEventListener('click', () => {
   showMessage('請確認資料後重新送出。');
   document.querySelector('#form input')?.focus();
 });
-initialize().catch(error => showIdentityError(error, "頁面初始化失敗。"));
+initialize().catch(error => showIdentityError(error, "無法開啟身分驗證。請從原本的 LINE 選單或訊息重新開啟。"));
 </script>
 </body>
 </html>

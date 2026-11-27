@@ -121,7 +121,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     await findFlowMessage('編輯訂金確認通知內容');
     expect(vi.mocked(templates.get).mock.calls.map(([id]) => id)).toEqual(['deposit_notice']);
     fireEvent.change(screen.getByRole('searchbox', { name: '搜尋通知名稱或內容' }), { target: { value: '告警' } });
-    expect(await screen.findByText('沒有符合條件的通知')).toBeInTheDocument();
+    expect(await screen.findByText('沒有符合條件的通知。請調整搜尋文字。')).toBeInTheDocument();
   });
 
 

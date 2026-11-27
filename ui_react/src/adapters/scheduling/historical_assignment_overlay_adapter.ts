@@ -1,7 +1,10 @@
 import type { StaffMonthlySchedule } from '../../api/scheduling/staff_monthly_schedule_client';
-import type { SchedulingCurrentProjection } from '../../api/scheduling/scheduling_current_schemas';
+import type { SchedulingAssignmentStatus, SchedulingCurrentProjection } from '../../api/scheduling/scheduling_current_schemas';
 
-type CalendarDay = StaffMonthlySchedule['days'][number];
+type CalendarDay = StaffMonthlySchedule['days'][number] & {
+  assignment_status?: SchedulingAssignmentStatus | null;
+};
+type MergedStaffCalendar = Omit<StaffMonthlySchedule, 'days'> & { days: CalendarDay[] };
 
 /** Merge read projections by provenance and service interval, never by person/day alone. */
 export function mergeStaffCalendarDays(
@@ -10,7 +13,7 @@ export function mergeStaffCalendarDays(
   staffId: number,
   year: number,
   month: number,
-): StaffMonthlySchedule {
+): MergedStaffCalendar {
   const statuses = {
     official_workday: 'working', assignment_rest: 'resting',
     historical_reservation: 'historical_reservation', assignment_buffer: 'buffer',
@@ -24,6 +27,7 @@ export function mergeStaffCalendarDays(
         work_date: day.calendar_date, staff_id: staffId,
         status: statuses[entry.occupancy_kind],
         assignment_id: entry.assignment_id, case_no: entry.case_no,
+        assignment_status: entry.assignment_status,
         lock_id: entry.lock_id, unavailability_block_id: entry.availability_block_id,
         unavailability_reason: entry.unavailability_reason,
         unavailability_kind: entry.unavailability_kind === 'long_leave' || entry.unavailability_kind === 'paused_service'

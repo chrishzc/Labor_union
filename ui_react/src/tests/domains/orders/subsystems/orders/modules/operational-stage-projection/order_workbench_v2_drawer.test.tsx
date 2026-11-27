@@ -403,7 +403,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
   it.each(['Enter', ' '])('案件列可用 %s 開啟案件處理', async (key) => {
     const caseNo = 'CASE-CARD-KEYBOARD';
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([
-      timeline(caseNo, 'intake_validation', { lifecycle: '洽談中' }),
+      timeline(caseNo, 'matching_pool', { lifecycle: '洽談中' }),
     ]));
     setOwnerFacts(caseNo);
     render(<OrderWorkbenchV2Page />);
@@ -470,7 +470,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
   });
 
   it('由案件列開啟／關閉，並只用正式 GET owner facts 與 core-stage projection 呈現案件、服務、派案、13 階、notice 與 lineage', async () => {
-    const row = timeline('CASE-DRAWER', 'intake_validation', {
+    const row = timeline('CASE-DRAWER', 'confirmed_service_dates', {
       currentStatus: 'blocked',
       blockers: [{ code: 'service_blocked', message: '排班尚未完成' }],
       warnings: [{ code: 'service_warning', message: '確認服務開始資訊' }],
@@ -611,7 +611,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
   });
 
   it('typed query 失敗時只在對應區顯示明確錯誤，仍保留正式 core-stage；Escape 關閉後晚到 response 不會重開 Drawer', async () => {
-    const row = timeline('CASE-STRICT', 'intake_validation');
+    const row = timeline('CASE-STRICT', 'matching_pool');
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => (
       params.case_no_search === 'CASE-STRICT'
         ? page([row])
@@ -635,6 +635,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     const caseContext = dialog.querySelector('.order-case-context');
     expect(caseContext).toHaveTextContent('約定服務開始日1999-01-01');
     expect(caseContext).toHaveTextContent('服務量20 日 · 每日 9 小時');
+    fireEvent.click(within(dialog).getByRole('button', { name: /確認客戶與服務需求/ }));
     expect(await within(dialog).findByRole('region', { name: '正式補件入口' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: /確認客戶與服務需求/ })).toHaveAttribute('aria-current', 'page');
     expect(within(dialog).queryByRole('button', { name: '案件異動' })).not.toBeInTheDocument();

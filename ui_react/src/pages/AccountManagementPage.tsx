@@ -27,6 +27,13 @@ interface QueryState<T> {
 
 const initialUsersState: QueryState<AccountDirectoryRow[]> = { status: 'idle', data: null, error: null };
 const initialCommandState: QueryState<AccountMutationReceipt> = { status: 'idle', data: null, error: null };
+const accountReceiptMessages: Record<AccountMutationReceipt['operation'], string> = {
+  'account-create': '工作人員帳號已建立。',
+  'account-enabled': '帳號啟用狀態已更新。',
+  'account-password-reset': '帳號密碼已重設。',
+  'account-mfa-reset': '帳號驗證器已重設。',
+  'account-sessions-revoke': '已強制登出此帳號。',
+};
 
 function errorMessage(error: unknown, fallback: string): string {
   const code = String((error as { code?: unknown })?.code ?? (error instanceof Error ? error.message : '')).toUpperCase();
@@ -119,7 +126,7 @@ export const AccountManagementPage: React.FC = () => {
       setCommandState({ status: 'ready', data: receipt, error: null });
       setCommandTarget(null);
     } catch (error) {
-      setCommandState({ status: 'error', data: null, error: errorMessage(error, '帳號操作未完成，請確認資料後再試。') });
+      setCommandState({ status: 'error', data: null, error: errorMessage(error, '無法確認帳號操作結果。請核對帳號與操作項目，再重試原操作。') });
     }
   }, [loadUsers]);
 
@@ -302,7 +309,7 @@ export const AccountManagementPage: React.FC = () => {
           )}
           {commandState.status === 'ready' && commandState.data && (
             <div className="account-query-panel" data-surface-id="account.command.receipt">
-              帳號已更新。
+              {accountReceiptMessages[commandState.data.operation]}
             </div>
           )}
           {usersState.status === 'loading' && (
@@ -317,7 +324,7 @@ export const AccountManagementPage: React.FC = () => {
           )}
           {usersState.status === 'empty' && (
             <div className="account-query-state" data-surface-id="account.users.empty">
-              目前沒有可顯示的帳號列表。
+              目前沒有工作人員帳號。可按「建立工作人員帳號」新增。
             </div>
           )}
           {usersState.status === 'ready' && (

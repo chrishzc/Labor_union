@@ -87,7 +87,7 @@ function previewControlGuidance(
 ): string {
   if (selectedWorkbook === null) return '請先選擇 .xlsx 工作簿。';
   if (previewState.kind === 'reading' || previewState.kind === 'loading') return '正在檢查檔案，請稍候。';
-  if (previewState.kind === 'error') return '預覽未通過：請修正檔案或連線問題後重試。';
+  if (previewState.kind === 'error') return '檔案檢查未完成，請看下方提示。若有欄位問題，請修正原工作簿後重新選檔。';
   if (previewState.kind === 'ready') return '正在處理匯入。';
   return '檔案已選擇，可以匯入。';
 }
@@ -100,7 +100,7 @@ function applyControlGuidance(
   if (applyState.kind === 'loading') return '正在匯入：請勿換檔、離頁或重新整理。';
   if (applyState.kind === 'ready') return '本次檔案已處理完成。';
   if (applyState.kind === 'error' && applyState.outcomeUnknown) return '匯入結果尚未確認，可稍後查詢；離開匯入頁後需重新選取原檔案。';
-  if (applyState.kind === 'error') return '匯入未完成：請依錯誤訊息修正後重試。';
+  if (applyState.kind === 'error') return '匯入未完成。請依下方提示核對原因。若有修改工作簿，請重新選檔。';
   return '可以開始匯入；完成後會顯示結果。';
 }
 

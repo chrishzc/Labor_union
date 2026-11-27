@@ -286,7 +286,7 @@ describe('Finance #finance entry static subgate', () => {
     authenticate();
     const unavailableRequests = installFetchStub({ stageUnavailable: true });
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('案件帳務或營運階段暫時無法取得，請重新查詢。'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('暫時無法讀取案件帳務或案件進度。請按「查詢案件」重試。'));
     expect(screen.queryByText(/HTTP 503|correlation_id|finance-secret-detail/)).not.toBeInTheDocument();
     expect(screen.queryByText('目前沒有符合條件的進行中案件。')).not.toBeInTheDocument();
     expect(screen.queryByText('CASE-FIN-001')).not.toBeInTheDocument();

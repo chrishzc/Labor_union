@@ -426,7 +426,7 @@ export const FinancePage: React.FC = () => {
                 || outcome.receipt.preview_fingerprint !== expected.previewFingerprint
               )))
           ) {
-            setBatchOutcome({ kind: 'error', message: '匯入結果與原批次預覽不一致；請勿重新提交，請重新查詢結果。' });
+            setBatchOutcome({ kind: 'error', message: '查到的結果和原批次預覽不一致。請用本次匯入的結果查詢按鈕重查，避免重複提交。' });
             return;
           }
           if (expected && outcome.status !== 'succeeded') {
@@ -445,7 +445,7 @@ export const FinancePage: React.FC = () => {
         await new Promise((resolve) => setTimeout(resolve, FINANCE_OUTCOME_POLL_DELAY_MS));
       }
       if (current('batch-outcome', request.sequence, request.controller)) {
-        setBatchOutcome({ kind: 'error', message: '核銷中，請稍後查詢結果。請勿重複上傳。' });
+        setBatchOutcome({ kind: 'error', message: '系統尚未回報核銷結果。請稍後用本次操作的結果查詢按鈕重查，避免重複上傳。' });
         if (reviewRowIdentity === null) setReload(value => value + 1);
       }
     } catch (error) {

@@ -637,9 +637,9 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     render(<OrderWorkbenchV2Page />);
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('正式十三階段查詢失敗');
-    expect(alert).toHaveTextContent('不會改用舊投影或前端推導');
-    expect(alert).toHaveTextContent('503 core-stage source unavailable');
+    expect(alert).toHaveTextContent('暫時無法讀取案件清單。請按「重試」。');
+    expect(alert).not.toHaveTextContent('503 core-stage source unavailable');
+    expect(within(alert).getByRole('button', { name: '重試' })).toBeVisible();
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
   });
 });

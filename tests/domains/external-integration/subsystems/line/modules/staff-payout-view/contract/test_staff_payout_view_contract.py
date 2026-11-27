@@ -91,7 +91,7 @@ def test_staff_payout_page_is_safe_and_shows_required_payment_fields() -> None:
     assert "預計付款日" in source
     assert "實際付款日" in source
     assert "已付金額" in source
-    assert "剩餘待付金額" in source
+    assert 'detailRow(details, "還沒付的金額", money(item.amount_remaining))' in source
     assert 'partially_paid: "部分付款"' in source
     assert "payment_status" in source
     assert "replaceChildren" in source

@@ -29,7 +29,7 @@ export function DatabaseBackupPage() {
       const data = await client.save(time, status.version);
       setStatus(data); setTime(data.time); setNotice(`已設定每天 ${data.time} 自動備份。`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '備份時間未儲存，請稍後重試。');
+      setError(cause instanceof Error ? cause.message : '無法確認備份時間是否已儲存，請重新開啟此頁核對排程。');
     } finally { setBusy(false); }
   }
 
@@ -45,6 +45,7 @@ export function DatabaseBackupPage() {
         <dl><div><dt>每日自動備份</dt><dd>{status.enabled ? `每天 ${status.time}` : '尚未啟用'}</dd></div>
           <div><dt>最近成功備份</dt><dd>{localDate(status.last_backup)}</dd></div></dl>
         <p className={status.storage_ready ? '' : 'backup-message backup-error'} role={status.storage_ready ? undefined : 'alert'}>{status.storage_message}</p>
+        {!status.storage_ready && <p>請維護人員確認 NAS 備份區可連線後，再重新開啟此頁設定備份時間。</p>}
         <p>正式備份依月份存放在 NAS「05_資料庫冷備份」區，採壓縮與校驗格式。NAS 無法使用時會停止，不會改存本機。</p>
         <p>新版每日排程備份採滾動保存：最近 14 天全部保留，最近 8 週每週保留最新一份，最近 12 個月每月保留最新一份。同一份符合多項時只存一份，取最長期限。</p>
         <p>每週以週一開始，月份依臺灣日曆，當週及當月包含在保存期間內。只有新備份成功並通過檢查後，才清理過期的排程備份；既有備份、手動及升級前備份不自動刪除。</p>

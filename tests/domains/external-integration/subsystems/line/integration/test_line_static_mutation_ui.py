@@ -24,10 +24,11 @@ def test_identity_ui_previews_every_binding_kind_before_apply() -> None:
     )[0]
 
     assert "`/api/v1/line/identity/${definition.endpoint}/preview`" in submit
-    assert "`/api/v1/line/identity/${definition.endpoint}/apply`" in submit
-    assert submit.index("/${definition.endpoint}/preview") < submit.index(
-        "/${definition.endpoint}/apply"
-    )
+    apply_path = '"/api/v1/line/identity/" + definition.endpoint + "/apply"'
+    assert submit.index("/${definition.endpoint}/preview") < submit.index(apply_path)
+    assert "expected_version: preview.expected_version" in submit
+    assert "preview_fingerprint: preview.preview_fingerprint" in submit
+    assert "requireIdentityApply(applyResult, preview)" in submit
     assert "目前版本：" not in source
     assert "expected_version" in source
     assert "確認送出身分驗證" in source
@@ -49,7 +50,10 @@ def test_staff_identity_ui_reports_direct_binding_without_claiming_menu_delivery
     assert "資料核對成功後會立即完成綁定" in source
     assert "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員" in submit
     assert "我們已為您切換專屬圖文選單" not in submit
-    assert "系統會稍後更新${menu}" in submit
+    receipt = submit.split("function showBindingReceipt", 1)[1].split("function isBindingReceipt", 1)[0]
+    assert 'endpoint === "staff" ? "月嫂選單"' in receipt
+    assert "系統會稍後更新" in receipt
+    assert "同時綁定客戶與月嫂身分" in receipt
 
 
 def test_mobile_review_ui_uses_preview_apply_and_safe_readback() -> None:
@@ -92,26 +96,32 @@ def test_mobile_review_terminal_states_are_explicitly_read_only() -> None:
 
 def test_registration_ui_uses_preview_confirmation_apply_and_typed_readback() -> None:
     source = _source("register.html")
-    submit = source.split('document.getElementById("registerForm").addEventListener("submit"', 1)[1]
+    submit = source.split('document.getElementById("registerForm").addEventListener("submit"', 1)[1].split(
+        "function showRegistrationMessage", 1
+    )[0]
+    apply = source.split("async function applyRegistration", 1)[1].split(
+        "function renderRegistrationSuccess", 1
+    )[0]
     success_fn = source.split("function renderRegistrationSuccess(receipt) {", 1)[1].split(
         "async function queryRegistrationStatus()", 1
     )[0]
     success_render = success_fn.split("successDescription.textContent = [", 1)[1].split(
-        "].join('\\n')", 1
+        "].filter(Boolean).join('\\n')", 1
     )[0]
 
     assert "/api/v1/line/identity/registration/preview" in submit
-    assert "/api/v1/line/identity/registration/apply" in submit
-    assert submit.index("/registration/preview") < submit.index("/registration/apply")
+    assert submit.index("/registration/preview") < submit.index("await applyRegistration(pendingRegistrationApply);")
+    assert "/api/v1/line/identity/registration/apply" in apply
     assert "expected_binding_version" in submit
     assert "preview_fingerprint" in submit
-    assert "identity_status" in submit
+    assert "receipt.identity_status" in success_fn
     assert "登記編號：" not in success_fn
     assert "客戶識別：" not in success_fn
-    assert "pending_approval: '申請已送出，待工會核准。'" in success_fn
+    assert "pending_approval: '您可以關閉頁面，後續由工會審核。'" in success_fn
+    assert "'申請已收到'" in success_fn
     assert "lifecycle[receipt.identity_status]" in success_render
     assert "申請編號：" in success_render
-    assert "renderRegistrationSuccess(applyResult.data)" in submit
+    assert "renderRegistrationSuccess(result.data)" in apply
 
 
 def test_mobile_ui_safely_extracts_errors_and_renders_server_text_as_text() -> None:
@@ -119,8 +129,8 @@ def test_mobile_ui_safely_extracts_errors_and_renders_server_text_as_text() -> N
     helper = source.split("function safeErrorMessage", 1)[1].split(
         "async function postJson", 1
     )[0]
-    ticket_card = source.split("function ticketCard", 1)[1].split(
-        "async function loadTicketDetail", 1
+    notification_text = source.split("function notificationText", 1)[1].split(
+        "function updateNotificationCards", 1
     )[0]
     review_card = source.split("function reviewCard", 1)[1].split(
         "async function previewReviewDecision", 1
@@ -130,32 +140,26 @@ def test_mobile_ui_safely_extracts_errors_and_renders_server_text_as_text() -> N
     assert "result?.error?.message" in helper
     assert "JSON.stringify" not in helper
     assert ".innerHTML" not in source
-    assert ".innerHTML" not in ticket_card
-    assert ".innerHTML" not in review_card
-    assert "textContent" in ticket_card
+    assert "textContent" in notification_text
     assert "textContent" in review_card
-    assert "處理紀錄載入失敗，請重試。" in source
-    assert "重新載入處理紀錄" in source
 
 
-def test_mobile_customer_reply_uses_preview_confirmation_apply_and_readback() -> None:
-    source = _source("mobile_admin.html")
-    reply = source.split("async function previewTicketReply", 1)[1].split(
-        "async function loadReviews", 1
-    )[0]
+def test_mobile_customer_reply_routes_only_use_the_retired_handler() -> None:
+    from fastapi.routing import APIRoute
 
-    assert "/reply/preview`" in reply
-    assert "/reply/apply`" in reply
-    assert "/reply`," not in reply
-    assert reply.index("/reply/preview") < reply.index("/reply/apply")
-    assert "preview_fingerprint" in reply
-    assert "expected_version" in reply
-    assert "delivery_enqueued" in reply
-    assert "delivery_delivered" in reply
-    assert "readback" in reply
-    assert "確認套用此客服回覆預覽" not in source
-    assert "await applyTicketReply(ticket)" in reply
-    assert "尚未送達" in reply
+    from api.routes.line_mobile_admin import retired_mobile_customer_service, router
+
+    prefix = "/api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply"
+    routes = {
+        route.path: route
+        for route in router.routes
+        if isinstance(route, APIRoute) and route.path.startswith(prefix)
+    }
+    assert routes.keys() == {prefix, f"{prefix}/preview", f"{prefix}/apply"}
+    for route in routes.values():
+        assert route.methods == {"POST"}
+        assert route.endpoint is retired_mobile_customer_service
+        assert not route.include_in_schema
 
 
 def test_all_active_line_pages_reject_query_string_user_identity() -> None:
@@ -177,21 +181,15 @@ def test_mobile_admin_hides_internal_identity_and_concurrency_metadata() -> None
     initialize = source.split("async function init()", 1)[1].split(
         "function switchPane", 1
     )[0]
-    ticket_detail = source.split("async function loadTicketDetail", 1)[1].split(
-        "function invalidateTicketReplyPreview", 1
-    )[0]
-    review_apply = source.split("async function applyReviewDecision", 1)[1]
-    reply_apply = source.split("async function applyTicketReply", 1)[1].split(
-        "async function loadReviews", 1
-    )[0]
+    review_apply = source.split("async function applyReviewDecision", 1)[1].split("function validDateTime", 1)[0]
+    visible_receipt = review_apply.split("showStatus([", 1)[1].split("].join", 1)[0]
 
     assert "profile.role" not in initialize
-    assert "event.actor_id" not in ticket_detail
-    assert "收據 ${data.receipt_identity}" not in review_apply
-    assert "版本 ${data.version}" not in review_apply
-    assert "版本 ${data.resulting_version}" not in reply_apply
-    assert "delivery_enqueued=${data.delivery_enqueued}" not in reply_apply
-    assert "LINE 訊息已排入可靠發送佇列" in reply_apply
+    assert "receipt_identity" not in visible_receipt
+    assert "data.version" not in visible_receipt
+    assert "data.resulting_version" not in visible_receipt
+    assert "delivery_enqueued" not in visible_receipt
+    assert "通知僅排入可靠佇列，尚未證明送達。" in visible_receipt
 
 
 def test_mobile_admin_studio_preview_is_zero_data_and_keeps_formal_auth() -> None:
@@ -223,14 +221,13 @@ def test_mobile_admin_studio_preview_is_zero_data_and_keeps_formal_auth() -> Non
 
 def test_mobile_admin_heading_is_target_specific_in_preview_and_formal_modes() -> None:
     source = _source("mobile_admin.html")
-    heading = source.split("function applySurfaceHeading", 1)[1].split(
-        "function requireCustomerPage", 1
-    )[0]
+    heading = source.split("function applySurfaceHeading", 1)[1].split("\n}", 1)[0]
+    surface_copy = source.split("const surfaceCopy", 1)[1].split("function liffStateParams", 1)[0]
     preview = source.split("function renderStudioPreview", 1)[1].split(
         "function switchPane", 1
     )[0]
     formal = source.split("function switchPane", 1)[1].split(
-        "async function loadTickets", 1
+        "function businessLabel", 1
     )[0]
 
     assert 'document.getElementById("title").textContent = copy[0]' in heading
@@ -240,8 +237,9 @@ def test_mobile_admin_heading_is_target_specific_in_preview_and_formal_modes() -
     assert ".section-heading > div { flex:1 1 0; min-width:0; }" in source
     assert "select,input,textarea { width:100%; min-width:0;" in source
     assert ".toolbar > input, .toolbar > select { flex:1 1 0; width:auto; }" in source
-    for label in ("待辦工作台", "客服中心", "狀態追蹤", "營運摘要"):
-        assert label in source
+    for label in ("待辦工作台", "正式排班重建工具", "狀態追蹤", "營運摘要"):
+        assert label in surface_copy
+    assert "客服中心" not in surface_copy
 
 
 def test_mobile_admin_query_routes_use_closed_typed_response_models() -> None:
@@ -250,9 +248,9 @@ def test_mobile_admin_query_routes_use_closed_typed_response_models() -> None:
     assert "response_model=BaseResponse[dict]" not in source
     for model in (
         "_MobileAdminProfileView",
-        "CustomerServiceSummaryView",
-        "CustomerServicePageView",
-        "CustomerServiceDetailView",
+        "_MobileOrderTrackingPageView",
+        "_MobileOperationsSummaryView",
+        "_MobileMatchingFollowupPageView",
         "CanonicalLineReviewNumberedPageResponse",
         "CanonicalLineReviewDecisionPreviewResponse",
         "CanonicalLineReviewResponse",
@@ -299,11 +297,8 @@ def test_mobile_scheduling_review_uses_line_binding_and_discards_late_forms() ->
     assert "formRevision !== schedulingFormRevision" in source
 
 
-def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> None:
+def test_mobile_admin_review_pagination_uses_server_metadata() -> None:
     source = _source("mobile_admin.html")
-    customer = source.split("async function loadTickets", 1)[1].split(
-        "const ticketStatusLabels", 1
-    )[0]
     pagination = source.split("function renderPagination", 1)[1].split(
         "function safeErrorMessage", 1
     )[0]
@@ -314,11 +309,6 @@ def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> No
         "function reviewCard", 1
     )[0]
 
-    assert "page: requestedPage" in customer
-    assert "requireCustomerPage(data, requestedPage)" in customer
-    assert "querySequence !== ticketQuerySequence" in customer
-    assert "requestedPage !== ticketPageState.page" in customer
-    assert 'ticketPageState.page = 1' in source
     assert "顯示 ${first}-${last} / ${pageData.total} 件" in pagination
     assert 'previous.disabled = pageData.page <= 1' in pagination
     assert 'next.disabled = pageData.page >= pageData.totalPages' in pagination

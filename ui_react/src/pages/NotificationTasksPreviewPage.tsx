@@ -23,7 +23,14 @@ const CATEGORY_ICONS = new Map([
   ['payments', Wallet], ['groups', MessageCircle], ['review', ClipboardCheck], ['reminder', Wallet],
 ]);
 const categoryId = (source: NotificationCatalog[number]) => source.category_id ?? source.group;
-const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
+const DELIVERY_LABELS: Record<string, string> = {
+  pending: '待寄送。請等待系統處理。',
+  processing: '寄送中。請等待系統回報結果。',
+  retryable_failed: '等待重試。請到「通知與寄送」查看後續進度。',
+  sent: '已送出。',
+  failed: '寄送失敗。請到「通知與寄送」核對失敗原因。',
+  cancelled: '已取消。請到「通知與寄送」查看原寄送紀錄。',
+};
 const PRIMARY:Record<NotificationSource,string> = {
   registration:'查看申請',identity:'審核身分綁定',
   staff_profile:'審核月嫂資料異動',import_fields:'前往客戶名冊修正',
@@ -242,7 +249,8 @@ export function NotificationTasksPage() {
             <a href={selected.payment && selected.payment.payment_stage!=='deposit' ? `#line-management?tab=order_groups&group_q=${encodeURIComponent(selected.case_no ?? '')}`:'#line-management?tab=binding'}>{selected.payment && selected.payment.payment_stage!=='deposit'?'前往案件群組設定':'前往 LINE 身分綁定'}</a>
             {selected.source==='deposit' && <><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(selected.case_no ?? '')}`}>核對繳費資料與到期日</a><a href="#line-management?tab=push_queue">核對通知及繳費頁面設定</a><p>銀行代碼需由系統設定補齊；案件專屬虛擬帳號沿原規則產生。</p></>}
           </div>}
-          {selected.delivery_status && <p>最近寄送狀態：{DELIVERY_LABELS[selected.delivery_status] ?? selected.delivery_status}</p>}
+          {selected.delivery_status && <p>最近寄送狀態：{Object.hasOwn(DELIVERY_LABELS, selected.delivery_status)
+            ? DELIVERY_LABELS[selected.delivery_status] : '目前無法判讀。請到「通知與寄送」核對最新紀錄。'}</p>}
           <div className="notification-preview-actions">{!['customer_binding','staff_binding'].includes(selected.source) && <button type="button" className="np-button primary" disabled={busy || loading || (!!selected.unavailable_reason && selected.primary.includes('發送'))} onClick={()=>void act(selected)}>{selected.primary.includes('發送')?<Send size={16} aria-hidden="true" />:<ExternalLink size={16} aria-hidden="true" />}{busy?'處理中…':selected.primary}</button>}
             {selected.secondary && selected.source!=='customer_binding' && selected.source!=='registration' && <button type="button" className="np-button" disabled={busy} onClick={()=>void secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
           </div>

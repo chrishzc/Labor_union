@@ -483,7 +483,7 @@
             }
 
             const runtimeRes = await fetch('/api/config/liff/runtime?page=bind');
-            if (!runtimeRes.ok) throw new Error('目前無法讀取 LIFF 設定，請稍後重試。');
+            if (!runtimeRes.ok) throw new Error('目前無法開啟綁定頁面。請稍後從 LINE 重新開啟。');
             const runtime = await runtimeRes.json();
             runtimePage = runtime.page;
             applyRuntime(runtime);
@@ -681,9 +681,9 @@
                 renderBindingReceipt(result.data);
                 return;
             }
-            showBindingLookup('尚未確認綁定結果。請稍後查詢原綁定或聯絡工會。');
+            showBindingLookup('還不能確認 LINE 是否已綁定。請稍後按「查詢原綁定」，或聯絡工會。');
         } catch {
-            showBindingLookup('暫時無法確認綁定結果，請稍後查詢原綁定。');
+            showBindingLookup('暫時無法確認綁定結果。請稍後按「查詢原綁定」。');
         } finally {
             lookup.disabled = false;
         }

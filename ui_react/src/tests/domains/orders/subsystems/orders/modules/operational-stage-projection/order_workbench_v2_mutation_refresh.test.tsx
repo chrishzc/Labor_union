@@ -65,13 +65,14 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     mocks.core.mockReset(); mocks.summaries.mockReset();
     mocks.summaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     mocks.core.mockImplementation(async (query: OrderCoreStageProjectionQueryParams) => {
-      const result = page(query.stage ?? 'intake_validation');
+      const result = page(query.stage ?? 'matching_pool');
       if (query.stage === undefined) result.substatus_counts = {};
       return result;
     });
   });
 
   it('同一登入範圍返回保留篩選，過期時顯示舊清單至新查詢完成', async () => {
+    mocks.core.mockResolvedValue({ ...page('intake_validation'), substatus_counts: {} });
     const now = vi.spyOn(Date, 'now');
     const start = now();
     now.mockReturnValue(start);
@@ -114,7 +115,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
       mocks.core.mockRejectedValueOnce(new ApiHttpError(403, 'forbidden', '權限不足'));
       fireEvent.click(screen.getByRole('button', { name: '重試' }));
       await waitFor(() => expect(screen.queryByText('CASE-REFRESH')).not.toBeInTheDocument());
-      expect(screen.getByRole('alert')).toHaveTextContent('權限不足');
+      expect(screen.getByRole('alert')).toHaveTextContent('目前帳號無法查看案件清單。請聯絡系統管理員確認權限。');
       fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
       await screen.findByText('CASE-REFRESH');
 
@@ -191,7 +192,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     await selectStage('formal_recommendation');
     mocks.core.mockRejectedValueOnce(new ApiHttpError(403, 'forbidden', '權限不足'));
     fireEvent.click(screen.getByRole('button', { name: '模擬正式 owner 回讀完成' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('權限不足');
+    expect(await screen.findByRole('alert')).toHaveTextContent('目前帳號無法查看案件清單。請聯絡系統管理員確認權限。');
     expect(screen.queryByLabelText('整合測試面板草稿')).not.toBeInTheDocument();
     expect(screen.queryByText('CASE-REFRESH')).not.toBeInTheDocument();
 

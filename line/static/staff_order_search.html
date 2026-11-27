@@ -108,7 +108,7 @@ function renderResults(items) {
     showStatus("找不到你可以看的案件。請核對案件編號或客戶姓名；如果還是找不到，請問工會。", true);
     return;
   }
-  showStatus(`共找到 ${items.length} 筆訂單。`);
+  showStatus(`共找到 ${items.length} 筆訂單。請在下方查看案件資料。`);
   for (const item of items) {
     const rows = [
       ["案件編號", item.case_no],
@@ -167,7 +167,7 @@ async function init() {
       showStatus("無法取得 LINE 身分，請關閉此頁後從 LINE 圖文選單重新開啟。", true);
     }
   } catch (err) {
-    showStatus("LIFF 初始化失敗，請重新開啟頁面。", true);
+    showStatus("無法確認 LINE 身分。請關閉此頁，再從 LINE 圖文選單重新開啟。", true);
   } finally {
     searchButton.disabled = false;
     searchButton.textContent = "篩選訂單";
@@ -181,23 +181,23 @@ async function loadOrders(keyword = "") {
     return;
   }
   showStatus("查詢中...");
-  const response = await fetch("/api/v1/line/staff-self-service/orders", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ keyword, flow_id: flowId, line_id_token: lineIdToken })
-  });
-  const data = await response.json();
-  if (!response.ok || !data.success) {
-    showStatus(data.message || data.detail?.message || data.detail?.error?.message || "查詢失敗", true);
-    document.getElementById("reauthenticate").hidden = !responseErrorCode(data).startsWith("liff_");
-    document.getElementById("results").replaceChildren();
-    return;
-  }
   try {
+    const response = await fetch("/api/v1/line/staff-self-service/orders", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ keyword, flow_id: flowId, line_id_token: lineIdToken })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      showStatus(data.message || data.detail?.message || data.detail?.error?.message || "無法查詢訂單。請稍後再按「篩選訂單」。", true);
+      document.getElementById("reauthenticate").hidden = !responseErrorCode(data).startsWith("liff_");
+      document.getElementById("results").replaceChildren();
+      return;
+    }
     renderResults(requireStaffOrderPage(data.data).items);
   } catch (_) {
     document.getElementById("results").replaceChildren();
-    showStatus("目前查不到案件資料，請聯絡工會。", true);
+    showStatus("無法讀取查詢結果。請再按一次「篩選訂單」。若仍無法查看，請聯絡工會。", true);
   }
 }
 
