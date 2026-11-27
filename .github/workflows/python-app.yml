@@ -351,15 +351,17 @@ jobs:
               environment.write(f'LABOR_UNION_TEST_MYSQL_PASSWORD={password}\n')
           PY
       - name: Run weekly report contracts with real imports
+        id: weekly_contracts
         run: >-
-          python -m pytest -v
+          python -m pytest -v --junitxml="${RUNNER_TEMP}/lu-weekly-contracts.xml"
           tests/test_weekly_operations_report_contract.py
           tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/test_subsidy_reconciliation_register.py
           tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py
           tests/test_weekly_operations_report_api_versions.py
       - name: Run session-authenticated API and export against MySQL
+        id: weekly_mysql
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
-        run: python -m pytest -q tests/test_weekly_operations_report_mysql.py
+        run: python -m pytest -q --junitxml="${RUNNER_TEMP}/lu-weekly-mysql.xml" tests/test_weekly_operations_report_mysql.py
       - name: Run canonical scheduling to weekly report MySQL regression
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
         run: >-
@@ -376,6 +378,184 @@ jobs:
           python -m pytest -q
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
           -k holiday
+      - name: Summarize weekly report acceptance evidence (pilot)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          CONTRACTS_OUTCOME: ${{ steps.weekly_contracts.outcome }}
+          MYSQL_OUTCOME: ${{ steps.weekly_mysql.outcome }}
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          def sha(value):
+              return value if isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) else "UNKNOWN"
+
+          def git(*args):
+              result = subprocess.run(["git", *args], capture_output=True, text=True)
+              return result.stdout.strip() if result.returncode == 0 else ""
+
+          def case_status(case):
+              if case.find("failure") is not None or case.find("error") is not None:
+                  return "failed"
+              return "not_run" if case.find("skipped") is not None else "passed"
+
+          def evidence(filename, outcome, module, name):
+              if outcome == "skipped":
+                  return "not_run", "step skipped"
+              try:
+                  root = ET.parse(Path(os.environ["RUNNER_TEMP"]) / filename).getroot()
+              except (OSError, ET.ParseError):
+                  return "UNKNOWN", "no readable JUnit"
+              cases = list(root.iter("testcase"))
+              counts = Counter(case_status(case) for case in cases)
+              totals = f"{counts['passed']} passed / {counts['failed']} failed / {counts['not_run']} skipped"
+              matches = [
+                  case for case in cases
+                  if case.get("classname", "").rsplit(".", 1)[-1] == module
+                  and case.get("name") == name
+              ]
+              if len(matches) > 1 or not cases or outcome not in {"success", "failure"}:
+                  return "UNKNOWN", totals
+              if not matches:
+                  return ("not_run" if outcome == "success" else "UNKNOWN"), totals
+              return case_status(matches[0]), totals
+
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+          pr = event.get("pull_request") or {}
+          actual = sha(git("rev-parse", "HEAD"))
+          expected = sha(os.environ["GITHUB_SHA"])
+          head = sha(pr.get("head", {}).get("sha")) if pr else expected
+          base = sha(pr.get("base", {}).get("sha"))
+          headers = git("cat-file", "-p", "HEAD").partition("\n\n")[0]
+          parents = [line[7:] for line in headers.splitlines() if line.startswith("parent ")]
+          provenance = "UNKNOWN"
+          if actual != "UNKNOWN" and actual == expected:
+              if actual == head:
+                  provenance = "head"
+              elif pr and base != "UNKNOWN" and head != "UNKNOWN" and parents == [base, head]:
+                  provenance = "pull-request merge"
+          rows = [
+              ("contract / fake DB", "lu-weekly-contracts.xml", "CONTRACTS_OUTCOME",
+               "test_subsidy_reconciliation_register",
+               "test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim"),
+              ("API / isolated MySQL", "lu-weekly-mysql.xml", "MYSQL_OUTCOME",
+               "test_weekly_operations_report_mysql",
+               "test_real_export_matches_api_totals_without_mutating_business_rows"),
+          ]
+          lines = [
+              "### Weekly report acceptance evidence (pilot)",
+              "",
+              f"Run: {os.environ['GITHUB_RUN_ID']} · attempt {os.environ['GITHUB_RUN_ATTEMPT']}",
+              f"Checkout: `{actual}` ({provenance}); expected: `{expected}`",
+              f"Source head: `{head}`; PR base: `{base}`",
+              "",
+              "| Scope | Case | Case result | Suite counts / evidence |",
+              "| --- | --- | --- | --- |",
+          ]
+          for scope, filename, variable, module, name in rows:
+              result, note = evidence(filename, os.environ.get(variable), module, name)
+              lines.append(f"| {scope} | `{module}::{name}` | {result} | {note} |")
+          lines += [
+              "",
+              "The isolated MySQL case covers export/API parity. It does not establish the unserved-order exclusion in MySQL.",
+              "An unverified checkout or UNKNOWN case needs follow-up evidence. This summary does not change the job result.",
+          ]
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Compare weekly report test selection and verify a missing-case rejection
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.weekly_contracts.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+          import xml.etree.ElementTree as ET
+
+          # Trial mapping for this one boundary, not a general change selector.
+          module = "test_subsidy_reconciliation_register"
+          source = (
+              "tests/domains/government-subsidy/subsystems/government-subsidy/"
+              f"modules/reconciliation-register-query/{module}.py"
+          )
+          required = (
+              "test_established_unserved_is_zero_without_registered_volume_or_missing_rate_fallback",
+              "test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim",
+              "test_order_accounting_projection_reuses_operations_report_amount_by_case",
+          )
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def read_receipt(path):
+              root = ET.parse(path).getroot()
+              cases = list(root.iter("testcase"))
+              suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+              if not cases or not suites:
+                  raise ValueError("empty test evidence")
+              seconds = round(sum(float(suite.attrib["time"]) for suite in suites), 3)
+              matches = {}
+              for case in cases:
+                  name = case.get("name")
+                  if case.get("classname", "").rsplit(".", 1)[-1] != module or name not in required:
+                      continue
+                  status = "passed"
+                  if name in matches:
+                      status = "ambiguous"
+                  elif case.find("failure") is not None or case.find("error") is not None:
+                      status = "failed"
+                  elif case.find("skipped") is not None:
+                      status = "skipped"
+                  matches[name] = status
+              rejected = {
+                  name: matches.get(name, "not_run")
+                  for name in required
+                  if matches.get(name) != "passed"
+              }
+              return {"cases": len(cases), "suite_seconds": seconds, "rejected": rejected}
+
+          def run_trial(label, names):
+              report = temp / f"lu-weekly-trial-{label}.xml"
+              start = time.monotonic()
+              subprocess.run(
+                  [sys.executable, "-m", "pytest", "-q", f"--junitxml={report}",
+                   *(f"{source}::{name}" for name in names)], check=True, timeout=120,
+              )
+              return {**read_receipt(report), "process_seconds": round(time.monotonic() - start, 3)}
+
+          baseline = read_receipt(temp / "lu-weekly-contracts.xml")
+          selected = run_trial("selected", required)
+          omitted = required[1]
+          probe = run_trial("omission", (required[0], required[2]))
+          probe_ok = probe["rejected"] == {omitted: "not_run"} and probe["cases"] == 2
+          comparison_ok = not baseline["rejected"] and not selected["rejected"] and selected["cases"] == 3
+          checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          result = {
+              "trial": "weekly-report-selection-v1",
+              "run": os.environ["GITHUB_RUN_ID"],
+              "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "checkout": checkout,
+              "runner_expected_checkout": os.environ["GITHUB_SHA"],
+              "baseline": baseline,
+              "selected": selected,
+              "omission_probe": probe,
+              "omission_rejected_as_expected": probe_ok,
+              "passed": comparison_ok and probe_ok and checkout == os.environ["GITHUB_SHA"],
+          }
+          print("WEEKLY_SELECTION_TRIAL " + json.dumps(result, sort_keys=True))
+          if not result["passed"]:
+              raise SystemExit("Weekly report selection trial did not satisfy its evidence checks.")
+          PY
 
   weekly-report-frontend:
     name: Weekly report frontend
@@ -431,8 +611,9 @@ jobs:
           ruff check --select E9,F63,F7,F82 domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py subsystems/client_finance/pricing_configuration.py
           pyright domains/client_finance/pricing_policy.py infrastructure/mysql/holiday_repricing.py infrastructure/mysql/holiday_accounting_results.py
       - name: Verify holiday pricing and historical exclusions
+        id: holiday_contracts
         run: >-
-          python -m pytest -q
+          python -m pytest -q --junitxml=${{ runner.temp }}/lu-holiday-baseline.xml
           tests/domains/scheduling/subsystems/scheduling/integration/test_holiday_router.py
           tests/domains/scheduling/subsystems/scheduling/modules/schedule-generation/test_service_date_adjustment.py
           tests/domains/payroll/subsystems/payroll/modules/tiered-payroll/test_tiered_payroll.py
@@ -441,6 +622,87 @@ jobs:
           tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/
           tests/domains/payroll/subsystems/payroll/integration/test_terms_impact.py
           tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py
+      - name: Compare holiday evidence selection without changing the gate
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.holiday_contracts.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+
+          module = "test_holiday_router"
+          source = f"tests/domains/scheduling/subsystems/scheduling/integration/{module}.py"
+          required = (
+              "test_holiday_toggle_reprices_once_and_omitted_import_preserves_manual_setting",
+              "test_transaction_failure_before_flag_change_never_commits_setting_or_receipt",
+              "test_holiday_accounting_results_failure_is_not_an_empty_success",
+          )
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def evidence(path):
+              cases = list(ET.parse(path).getroot().iter("testcase"))
+              scoped = [case for case in cases if case.get("classname", "").rsplit(".", 1)[-1] == module]
+              if not scoped:
+                  raise ValueError("holiday router results missing")
+              results = {}
+              for case in scoped:
+                  name = case.get("name")
+                  if name not in required:
+                      continue
+                  if name in results:
+                      results[name] = "ambiguous"
+                  elif case.find("failure") is not None or case.find("error") is not None:
+                      results[name] = "failed"
+                  elif case.find("skipped") is not None:
+                      results[name] = "skipped"
+                  else:
+                      results[name] = "passed"
+              return {
+                  "job_cases": len(cases),
+                  "holiday_router_cases": len(scoped),
+                  "case_seconds": round(sum(float(case.get("time", "0")) for case in scoped), 3),
+                  "required": {name: results.get(name, "not_run") for name in required},
+              }
+
+          def run_trial(label, names):
+              report = temp / f"lu-holiday-{label}.xml"
+              subprocess.run(
+                  [sys.executable, "-m", "pytest", "-q", f"--junitxml={report}",
+                   *(f"{source}::{name}" for name in names)], check=True, timeout=120,
+              )
+              return evidence(report)
+
+          checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          parents = subprocess.check_output(["git", "show", "-s", "--format=%P", "HEAD"], text=True).split()
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))["pull_request"]
+          event_base, head = event["base"]["sha"], event["head"]["sha"]
+          expected_ref = f"refs/pull/{event['number']}/merge"
+          version_ok = (checkout == os.environ["GITHUB_SHA"] and os.environ["GITHUB_REF"] == expected_ref
+                        and len(parents) == 2 and parents[1] == head)
+          tested_base = parents[0] if version_ok else None
+          baseline = evidence(temp / "lu-holiday-baseline.xml")
+          selected = run_trial("selected", required)
+          omission = run_trial("omitted-consumer", required[:2])
+          passed_cases = dict.fromkeys(required, "passed")
+          expected_omission = {**passed_cases, required[-1]: "not_run"}
+          ok = (version_ok and baseline["required"] == passed_cases
+                and selected["required"] == passed_cases and selected["holiday_router_cases"] == 3
+                and omission["required"] == expected_omission and omission["holiday_router_cases"] == 2)
+          print("HOLIDAY_SELECTION_TRIAL " + json.dumps({
+              "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "checkout": checkout, "head": head, "tested_base": tested_base, "event_base": event_base,
+              "event_base_matches_tested": event_base == tested_base,
+              "baseline": baseline, "selected": selected, "omitted_consumer": omission,
+              "omitted_consumer_rejected": omission["required"] == expected_omission, "passed": ok,
+          }, sort_keys=True))
+          if not ok:
+              raise SystemExit("Holiday selection evidence did not satisfy its trial contract.")
+          PY
+
       - name: Verify current specification hygiene
         run: python scripts/validate_spec_hygiene.py
       - name: Verify whitespace
