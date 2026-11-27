@@ -105,9 +105,14 @@ async function scenario(fixture, { denied = new Set(), token = 'synthetic-sessio
       actions: Array.from(row.querySelectorAll('.finance-ongoing-actions button')).map(element => element.textContent),
     })));
   }
-  async function settled() {
+  async function settled({ drainVisibleError = false } = {}) {
     await page.getByRole('button', { name: '查詢案件', exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector('button.finance-btn-primary')?.disabled, undefined, { timeout: 30000 });
+    // A rejected list request can clear loading before its sibling finishes pagination.
+    // Drain only untimed error scenarios; successful measurement timing stays unchanged.
+    if (drainVisibleError && await page.getByRole('alert').isVisible()) {
+      await page.waitForLoadState('networkidle', { timeout: 30000 });
+    }
     assert.equal(active, 0, 'All synthetic HTTP requests must terminate');
     assert.deepEqual(errors, []);
   }
@@ -136,7 +141,7 @@ async function scenario(fixture, { denied = new Set(), token = 'synthetic-sessio
     assert(traces.every(trace => trace.outcome === 'success' && trace.ended >= trace.started));
     measurements.push({ scenario: phase, size: fixture.size, ...timing, requests: traces.length, success: traces.filter(trace => trace.outcome === 'success').length, failures: traces.filter(trace => trace.outcome === 'failure').length, maxConcurrent, trace: structuredClone(traces) });
   }
-  return { page, context, rows, settled, measure, accounting, traces, errors, mount: async () => { await page.evaluate(() => window.financeMount()); await settled(); } };
+  return { page, context, rows, settled, measure, accounting, traces, errors, mount: async (options) => { await page.evaluate(() => window.financeMount()); await settled(options); } };
 }
 
 let origin;
@@ -197,11 +202,11 @@ window.financeRefresh=()=>{revision++;render();};
     const denied = new Set(mode === 'individual-denied' ? ['/api/v1/finance-import/cases/SYN-0002/accounting', '/api/v1/line/payment-overdue-reminders/cases/SYN-0004'] : mode === 'list-denied' ? ['/api/v1/orders/summaries'] : []);
     const current = await scenario(small, { denied });
     try {
-      await current.mount();
+      await current.mount({ drainVisibleError: true });
       if (mode === 'no-token') {
         await current.page.evaluate(() => { window.financeToken = null; window.financeRefresh(); });
         await current.page.getByRole('alert').waitFor();
-        await current.settled();
+        await current.settled({ drainVisibleError: true });
       }
       if (mode === 'individual-denied') {
         const rows = await current.rows();
