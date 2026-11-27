@@ -78,9 +78,9 @@ def query_staff_availability_blocks(
             raise StaffAvailabilityDomainError(StaffAvailabilityErrorCode.INVALID_INTENT)
         return application.query(StaffAvailabilityQuery(staff_id, range_start, range_end))
 
-    return _call(
+    return call_staff_availability(
         lambda: BaseResponse(
-            data=[_block_payload(item) for item in read_blocks()],
+            data=[staff_availability_block_payload(item) for item in read_blocks()],
             message="成功取得月嫂不可服務期間",
         ),
         correlation,
@@ -102,9 +102,9 @@ def preview_staff_availability_change(
 ):
     del principal
     correlation = CorrelationId(correlation_id or uuid4().hex)
-    return _call(
+    return call_staff_availability(
         lambda: BaseResponse(
-            data=_preview_payload(
+            data=staff_availability_preview_payload(
                 application.preview(
                     StaffAvailabilityPreviewRequest(_intent(staff_id, body))
                 )
@@ -130,7 +130,7 @@ def apply_staff_availability_change(
     ),
 ):
     correlation = CorrelationId(correlation_id)
-    return _call(
+    return call_staff_availability(
         lambda: _apply_response(
             application,
             staff_id,
@@ -152,7 +152,7 @@ def _apply_response(application, staff_id, body, idempotency_key, principal, cor
         correlation,
     )
     return BaseResponse(
-        data=_receipt_payload(application.apply(request)),
+        data=staff_availability_receipt_payload(application.apply(request)),
         message="成功套用月嫂不可服務期間異動",
     )
 
@@ -180,13 +180,13 @@ def _intent(staff_id, body):
     )
 
 
-def _preview_payload(preview):
+def staff_availability_preview_payload(preview):
     candidate = preview.candidate
     return {
         "staff_id": preview.staff_id,
         "action": preview.action,
         "source_version": preview.source_version,
-        "target_block": _block_payload(preview.target_block) if preview.target_block else None,
+        "target_block": staff_availability_block_payload(preview.target_block) if preview.target_block else None,
         "candidate_kind": candidate.kind if candidate else None,
         "candidate_start_date": candidate.start_date if candidate else None,
         "candidate_end_date": candidate.end_date if candidate else None,
@@ -196,18 +196,18 @@ def _preview_payload(preview):
     }
 
 
-def _receipt_payload(receipt):
+def staff_availability_receipt_payload(receipt):
     return {
         "staff_id": receipt.staff_id,
         "action": receipt.action,
-        "block": _block_payload(receipt.block),
+        "block": staff_availability_block_payload(receipt.block),
         "aggregate_version": receipt.aggregate_version,
         "preview_fingerprint": receipt.preview_fingerprint.value,
         "idempotency_key": receipt.idempotency_key.value,
     }
 
 
-def _block_payload(block):
+def staff_availability_block_payload(block):
     return {
         "block_id": block.block_id,
         "staff_id": block.staff_id,
@@ -219,7 +219,7 @@ def _block_payload(block):
     }
 
 
-def _call(operation, correlation):
+def call_staff_availability(operation, correlation):
     try:
         return operation()
     except StaffAvailabilityDomainError as error:

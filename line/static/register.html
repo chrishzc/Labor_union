@@ -250,7 +250,8 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         <div class="subtitle">請填寫服務需求，送出後由工會審核。</div>
     </div>
 
-    <div id="statusMessage" class="status-message"></div>
+    <div id="statusMessage" class="status-message" role="status"></div>
+    <button type="button" id="registrationStatusButton" class="btn-secondary" hidden>重新送出</button>
     <a id="registrationRestart" href="/line-gateway" hidden>重新開啟客戶登記與綁定</a>
 
     <p id="studioPreviewNotice" hidden>表單預覽，可試選服務條件。請使用測試資料。</p>
@@ -522,15 +523,17 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             <input type="text" class="form-input" id="refund_bank_account" data-survey="銀行帳號" required placeholder="請輸入完整帳號">
             <div class="form-hint">請填入產婦本人銀行帳號。</div>
         </div>
-        <div class="form-group">
-            <label class="form-label required" for="passbook_cover">存摺封面</label>
-            <input type="file" class="form-input" id="passbook_cover" accept="image/jpeg,image/png,image/webp" required>
-            <div class="form-hint">請上傳清晰的產婦本人存摺封面照片（JPG、PNG 或 WebP，5 MB 以內），供人員核對銀行帳號與分行代碼。</div>
-            <div id="passbookPreviewBox" style="display:none; margin-top:8px;">
-                <img id="passbookPreviewImg" alt="存摺封面預覽" style="max-width:100%; max-height:200px; border-radius:6px; border:1px solid #d1d5db;">
-                <div id="passbookUploadStatus" class="form-hint" style="margin-top:4px;"></div>
+        <template id="passbookCoverTemplate">
+            <div class="form-group">
+                <label class="form-label required" for="passbook_cover">存摺封面</label>
+                <input type="file" class="form-input" id="passbook_cover" accept="image/jpeg,image/png,image/webp" required>
+                <div class="form-hint">請上傳清晰的產婦本人存摺封面照片（JPG、PNG 或 WebP，5 MB 以內），供人員核對銀行帳號與分行代碼。</div>
+                <div id="passbookPreviewBox" style="display:none; margin-top:8px;">
+                    <img id="passbookPreviewImg" alt="存摺封面預覽" style="max-width:100%; max-height:200px; border-radius:6px; border:1px solid #d1d5db;">
+                    <div id="passbookUploadStatus" class="form-hint" style="margin-top:4px;"></div>
+                </div>
             </div>
-        </div>
+        </template>
         <div class="form-group">
             <label class="form-label">確認條款</label>
             <div class="form-hint">點選「已確實詳閱退費原則」，讀完後按「已閱讀並同意」，即可勾選並送出。</div>
@@ -600,12 +603,14 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     const studioPreview = isNonCitizen && new URLSearchParams(location.search).get('studio_preview') === '1';
     const nonCitizenFields = ['service_start_date', 'service_time', 'residence_type', 'delivery_type', 'service_type', 'notes'];
     let refundPolicyAccepted = false;
-    let pendingRegistrationPreview = null;
+    let pendingRegistrationApply = null;
     let registrationSubmissionPending = false;
-    let registrationResultUnknown = false;
     const submissionStorageKey = `registration-submission:${isNonCitizen ? 'non-citizen' : 'subsidy'}`;
     let registrationSubmissionId = studioPreview ? '' : sessionStorage.getItem(submissionStorageKey);
     const hadSubmission = Boolean(registrationSubmissionId);
+    const registrationConflictStorageKey = submissionStorageKey + ':conflict';
+    let registrationConflict = hadSubmission && sessionStorage.getItem(registrationConflictStorageKey) === registrationSubmissionId;
+    let registrationResultUnknown = hadSubmission;
     if (!studioPreview && !hadSubmission) {
         registrationSubmissionId = crypto.randomUUID();
         sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
@@ -770,20 +775,25 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             document.getElementById('studioPreviewNotice').hidden = false;
             document.getElementById('registrationPreviewButton').disabled = true;
         }
+        const passbookTemplate = document.getElementById('passbookCoverTemplate');
         if (isNonCitizen) {
+            passbookTemplate.remove();
             document.getElementById('nonCitizenServiceFields').hidden = false;
             for (const id of [...nonCitizenFields, 'city', 'gender', 'birth_date']) document.getElementById(id).required = true;
             document.getElementById('service_days').removeAttribute('max');
             document.getElementById('refund_bank_code').previousElementSibling.textContent = '退款銀行與分行代號';
             document.getElementById('refund_bank_account').previousElementSibling.textContent = '退款帳戶';
+        } else {
+            passbookTemplate.replaceWith(passbookTemplate.content);
+            setupPassbookCoverPreview();
         }
         initializeLiff();
+        document.getElementById('registrationStatusButton').addEventListener('click', queryRegistrationStatus);
         setupRefundPolicyAgreement();
         if (!studioPreview) autofillFromQueryParams();
         setupIdNumberAutoUppercase();
         setupEmailTypoHint();
         setupServiceDaysIntegerInput();
-        setupPassbookCoverPreview();
     });
 
     let uploadedPassbookFile = null;
@@ -1285,14 +1295,16 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         } else if (isNonCitizen && !/^[0-9０-９]{1,50}$/.test(refundBankAccount.value.replace(/[\s-]/g, ''))) {
             addError(errors, refundBankAccount, '退款帳戶請輸入 1 至 50 碼數字。');
         }
-        const passbookInput = document.getElementById('passbook_cover');
-        const passbookFile = passbookInput && passbookInput.files && passbookInput.files[0];
-        if (!passbookFile) {
-            addError(errors, passbookInput, '請上傳存摺封面照片。');
-        } else if (passbookFile.size > 5 * 1024 * 1024) {
-            addError(errors, passbookInput, '存摺封面圖片大小不可超過 5 MB。');
-        } else if (passbookFile.type && !['image/jpeg', 'image/png', 'image/webp'].includes(passbookFile.type)) {
-            addError(errors, passbookInput, '存摺封面只接受 JPG、PNG 或 WebP 圖片。');
+        if (!isNonCitizen) {
+            const passbookInput = document.getElementById('passbook_cover');
+            const passbookFile = passbookInput && passbookInput.files && passbookInput.files[0];
+            if (!passbookFile) {
+                addError(errors, passbookInput, '請上傳存摺封面照片。');
+            } else if (passbookFile.size > 5 * 1024 * 1024) {
+                addError(errors, passbookInput, '存摺封面圖片大小不可超過 5 MB。');
+            } else if (passbookFile.type && !['image/jpeg', 'image/png', 'image/webp'].includes(passbookFile.type)) {
+                addError(errors, passbookInput, '存摺封面只接受 JPG、PNG 或 WebP 圖片。');
+            }
         }
 
         if (isNonCitizen) {
@@ -1359,7 +1371,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
 
     document.getElementById("registerForm").addEventListener("submit", async function(e) {
         e.preventDefault();
-        if (studioPreview || registrationSubmissionPending || registrationResultUnknown) return;
+        if (studioPreview || !currentIdToken || registrationSubmissionPending || registrationResultUnknown || registrationConflict) return;
         const validation = validateRegistrationForm();
         if (!validation.ok || !validateCustomFields()) {
             const requiredMessage = document.getElementById("statusMessage");
@@ -1375,8 +1387,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         statusMsg.className = "status-message";
         loader.style.display = "flex";
         registrationSubmissionPending = true;
-        const submitButton = document.querySelector('#registerForm button[type="submit"]');
-        submitButton.disabled = true;
+        updateRegistrationControls();
 
         try {
             // 收集 survey_details
@@ -1452,32 +1463,29 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
                 payload.baby_info = surveyDetails['特殊計費:胎數'];
             }
 
-            loader.style.display = "flex";
-            statusMsg.style.display = "none";
-
-            // 0. 上傳存摺封面圖片取得暫存識別碼
-            const passbookFile = document.getElementById('passbook_cover').files[0];
-            if (!uploadedPassbookImageId || uploadedPassbookFile !== passbookFile) {
-                const formData = new FormData();
-                formData.append('file', passbookFile);
-                formData.append('line_id_token', currentIdToken || '');
-                formData.append('development_line_user_id', '');
-                const uploadRes = await fetch('/api/v1/line/identity/registration/passbook', {
-                    method: 'POST',
-                    body: formData
-                });
-                const uploadResult = await uploadRes.json();
-                if (!uploadRes.ok || !uploadResult.data || !uploadResult.data.passbook_image_id) {
-                    loader.style.display = "none";
-                    statusMsg.textContent = registrationErrorMessage(uploadResult, uploadRes.status);
-                    statusMsg.className = "status-message error";
-                    statusMsg.style.display = "block";
-                    return;
+            if (!isNonCitizen) {
+                const passbookFile = document.getElementById('passbook_cover').files[0];
+                if (!uploadedPassbookImageId || uploadedPassbookFile !== passbookFile) {
+                    const formData = new FormData();
+                    formData.append('file', passbookFile);
+                    formData.append('line_id_token', currentIdToken || '');
+                    formData.append('development_line_user_id', '');
+                    const uploadRes = await fetch('/api/v1/line/identity/registration/passbook', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const uploadResult = await uploadRes.json();
+                    if (!uploadRes.ok || !uploadResult.data || !uploadResult.data.passbook_image_id) {
+                        statusMsg.textContent = registrationErrorMessage(uploadResult, uploadRes.status);
+                        statusMsg.className = "status-message error";
+                        statusMsg.style.display = "block";
+                        return;
+                    }
+                    uploadedPassbookFile = passbookFile;
+                    uploadedPassbookImageId = uploadResult.data.passbook_image_id;
                 }
-                uploadedPassbookFile = passbookFile;
-                uploadedPassbookImageId = uploadResult.data.passbook_image_id;
+                payload.passbook_image_id = uploadedPassbookImageId;
             }
-            payload.passbook_image_id = uploadedPassbookImageId;
 
             // 1. 建立背景預覽取得安全指紋與版號
             const previewRes = await fetch('/api/v1/line/identity/registration/preview', {
@@ -1488,7 +1496,6 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             const previewResult = await previewRes.json();
 
             if (!previewRes.ok || !previewResult.data) {
-                loader.style.display = "none";
                 statusMsg.textContent = registrationErrorMessage(previewResult, previewRes.status);
                 statusMsg.className = "status-message error";
                 statusMsg.style.display = "block";
@@ -1497,92 +1504,161 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
 
             const preview = requireRegistrationPreview(previewResult.data);
 
-            // 2. 一鍵自動套用登記
-            registrationResultUnknown = true;
-            const applyRes = await fetch('/api/v1/line/identity/registration/apply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Idempotency-Key': registrationSubmissionId },
+            pendingRegistrationApply = {
+                submissionId: registrationSubmissionId,
                 body: JSON.stringify({
                     ...payload,
                     expected_binding_version: preview.expected_binding_version,
-                    preview_fingerprint: preview.preview_fingerprint
-                })
-            });
-            const applyResult = await applyRes.json();
-            loader.style.display = "none";
-
-            if (!applyRes.ok || !applyResult.data) {
-                if (!applyRes.ok && applyRes.status < 500 && applyRes.status !== 408) registrationResultUnknown = false;
-                statusMsg.textContent = !applyResult.data && applyRes.ok
-                    ? '登記結果讀回不完整，請勿重複送出並聯絡工會確認。'
-                    : registrationErrorMessage(applyResult, applyRes.status);
-                statusMsg.className = "status-message error";
-                statusMsg.style.display = "block";
-                return;
-            }
-
-            renderRegistrationSuccess(applyResult.data);
+                    preview_fingerprint: preview.preview_fingerprint,
+                }),
+            };
+            await applyRegistration(pendingRegistrationApply);
         } catch (error) {
-            console.error(error);
-            loader.style.display = "none";
-            statusMsg.textContent = error.message || "系統連線錯誤，請檢查網路狀態。";
-            statusMsg.className = "status-message error";
-            statusMsg.style.display = "block";
+            if (registrationResultUnknown) showRegistrationRetry();
+            else showRegistrationMessage(error.message || '系統連線錯誤，請重試。', true);
         } finally {
+            loader.style.display = 'none';
             registrationSubmissionPending = false;
-            submitButton.disabled = registrationResultUnknown;
+            updateRegistrationControls();
         }
     });
+
+    function showRegistrationMessage(message, isError) {
+        const status = document.getElementById('statusMessage');
+        status.textContent = message;
+        status.className = isError ? 'status-message error' : 'status-message info';
+        status.style.display = 'block';
+    }
+
+    function showRegistrationRetry() {
+        const message = registrationConflict
+            ? '申請發生衝突，可能已有待審申請。請按「查詢原申請」或聯絡工會確認。'
+            : '尚未確認送件成功，請按「重新送出」。看到申請編號後即可關閉頁面。';
+        showRegistrationMessage(message, true);
+    }
+
+    function updateRegistrationControls() {
+        const form = document.getElementById('registerForm');
+        const retry = document.getElementById('registrationStatusButton');
+        const formLocked = registrationSubmissionPending || registrationResultUnknown || registrationConflict;
+        form.inert = formLocked;
+        document.getElementById('registrationPreviewButton').disabled = studioPreview || formLocked;
+        retry.textContent = registrationConflict ? '查詢原申請' : '重新送出';
+        retry.hidden = !registrationResultUnknown || studioPreview;
+        retry.disabled = registrationSubmissionPending;
+    }
+
+    async function postRegistrationResult(path, body, headers = {}) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        try {
+            const response = await fetch(path, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', ...headers},
+                body,
+                signal: controller.signal,
+            });
+            return {response, result: await response.json()};
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    async function applyRegistration({submissionId, body}) {
+        registrationResultUnknown = true;
+        const {response, result} = await postRegistrationResult('/api/v1/line/identity/registration/apply', body, {'Idempotency-Key': submissionId});
+        if (response.ok) {
+            renderRegistrationSuccess(result.data);
+            return;
+        }
+        const errorCode = result?.detail?.error?.code || result?.detail?.code || result?.error?.code;
+        if (response.status === 409 && errorCode === 'registration_conflict') {
+            registrationConflict = true;
+            pendingRegistrationApply = null;
+            sessionStorage.setItem(registrationConflictStorageKey, submissionId);
+            showRegistrationRetry();
+            return;
+        }
+        if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status) && result.detail) {
+            registrationResultUnknown = false;
+            pendingRegistrationApply = null;
+            showRegistrationMessage(registrationErrorMessage(result, response.status), true);
+            return;
+        }
+        showRegistrationRetry();
+    }
 
     function renderRegistrationSuccess(receipt) {
         if (!receipt || !Number.isSafeInteger(receipt.registration_id) || receipt.registration_id <= 0
             || !['pending_approval', 'approving', 'approved', 'rejected', 'expired'].includes(receipt.identity_status)
+            || receipt.status !== (receipt.identity_status === 'pending_approval' ? 'pending' : receipt.identity_status)
             || (receipt.identity_status === 'pending_approval'
-                && (receipt.client_id !== null || receipt.beclass_record_id !== null))) {
-            throw new Error('登記結果讀回不完整，請勿重複送出並聯絡工會確認。');
+                && (receipt.client_id !== null || receipt.beclass_record_id !== null || receipt.case_no !== null))) {
+            throw new Error('登記結果讀回不完整。');
         }
         registrationResultUnknown = false;
+        pendingRegistrationApply = null;
+        document.getElementById('statusMessage').style.display = 'none';
         const terminal = ['rejected', 'expired'].includes(receipt.identity_status);
         document.getElementById('reapplyButton').style.display = terminal ? 'block' : 'none';
-        const lifecycle = {pending_approval: '申請已送出，待工會核准。', approving: '核准建檔或清除確認中，請查詢原申請。', approved: '申請已核准，待審問卷內容已清除。', rejected: '申請已拒絕，問卷內容已清除。', expired: '申請已到期，問卷內容已清除。'};
+        const lifecycle = {pending_approval: '您可以關閉頁面，後續由工會審核。', approving: '工會正在處理這筆申請，您可以關閉頁面。', approved: '申請已核准，待審問卷內容已清除。', rejected: '申請已拒絕，問卷內容已清除。', expired: '申請已到期，問卷內容已清除。'};
         const successDescription = document.querySelector('.success-desc');
         successDescription.style.whiteSpace = 'pre-line';
         successDescription.textContent = [...new Set([
-            runtimePage?.success_description || '',
             lifecycle[receipt.identity_status],
+            receipt.identity_status === 'pending_approval' ? runtimePage?.success_description : '',
             receipt.expires_at_utc ? `待審到期：${new Date(receipt.expires_at_utc).toLocaleString('zh-TW', {timeZone:'Asia/Taipei'})}（台北時間）` : '',
             `申請編號：${receipt.registration_id}`,
         ])].filter(Boolean).join('\n');
-        document.querySelector('.success-title').textContent = terminal ? (receipt.identity_status === 'expired' ? '申請已到期' : '申請已拒絕') : receipt.identity_status === 'approved' ? '申請已核准' : '申請已送出';
+        document.querySelector('.success-title').textContent = terminal ? (receipt.identity_status === 'expired' ? '申請已到期' : '申請已拒絕') : receipt.identity_status === 'approved' ? '申請已核准' : '申請已收到';
         document.getElementById('formHeader').style.display = 'none';
         document.getElementById('registerForm').style.display = 'none';
         document.getElementById('successCard').style.display = 'block';
     }
 
     async function queryRegistrationStatus() {
-        const statusMsg = document.getElementById('statusMessage');
-        const button = document.getElementById('registrationStatusButton');
-        if (button) button.disabled = true;
+        if (studioPreview || !currentIdToken || registrationSubmissionPending || (registrationConflict && !registrationResultUnknown)) return;
+        registrationSubmissionPending = true;
+        registrationResultUnknown = true;
+        updateRegistrationControls();
+        showRegistrationMessage('正在確認原申請，請稍候。', false);
         try {
-            const response = await fetch('/api/v1/line/identity/registration/status', {
-                method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({line_id_token: currentIdToken, submission_id: registrationSubmissionId})
-            });
-            const result = await response.json();
-            if (!response.ok || !result.data) throw new Error('原申請結果暫時無法確認，請稍後再查詢。');
-            if (result.data.status === 'not_received') {
+            const {response, result} = await postRegistrationResult('/api/v1/line/identity/registration/status', JSON.stringify({
+                line_id_token: currentIdToken,
+                submission_id: registrationSubmissionId,
+            }));
+            if (!response.ok || !result.data) {
+                showRegistrationRetry();
+                return;
+            }
+            if (result.data.status !== 'not_received') {
+                renderRegistrationSuccess(result.data);
+                if (registrationConflict) {
+                    registrationConflict = false;
+                    sessionStorage.removeItem(registrationConflictStorageKey);
+                }
+            } else if (Object.keys(result.data).length !== 1) {
+                showRegistrationRetry();
+            } else if (registrationConflict) {
                 registrationResultUnknown = false;
-                document.querySelector('#registerForm button[type="submit"]').disabled = false;
-                statusMsg.textContent = '目前尚未收到這筆申請，可使用原識別送出表單。';
-                statusMsg.style.display = 'block';
-            } else renderRegistrationSuccess(result.data);
-        } catch (error) {
-            statusMsg.textContent = error.message || '原申請結果暫時無法確認。';
-            statusMsg.style.display = 'block';
-        } finally { if (button) button.disabled = false; }
+                showRegistrationMessage('本次申請未送出。已有待審申請或申請狀態已變更，請聯絡工會確認。', true);
+            } else if (pendingRegistrationApply) {
+                showRegistrationMessage('正在重新送出，請稍候。', false);
+                await applyRegistration(pendingRegistrationApply);
+            } else {
+                registrationResultUnknown = false;
+                showRegistrationMessage('目前尚未收到這筆申請，請填妥表單後送出。', false);
+            }
+        } catch {
+            showRegistrationRetry();
+        } finally {
+            registrationSubmissionPending = false;
+            updateRegistrationControls();
+        }
     }
 
     function startNewRegistration() {
+        if (registrationConflict) return;
         registrationSubmissionId = crypto.randomUUID();
         sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
         registrationResultUnknown = false;
@@ -1591,12 +1667,12 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         document.getElementById('successCard').style.display = 'none';
         document.getElementById('formHeader').style.display = 'block';
         document.getElementById('registerForm').style.display = 'block';
-        document.querySelector('#registerForm button[type="submit"]').disabled = false;
+        updateRegistrationControls();
     }
 
     function requireRegistrationPreview(data) {
         const fingerprint = /^[0-9a-f]{64}$/;
-        if (!data || typeof data.status !== 'string'
+        if (!data || data.status !== 'ready'
             || !Number.isInteger(data.expected_binding_version)
             || data.expected_binding_version < 0
             || !fingerprint.test(data.payload_fingerprint || '')

@@ -6,6 +6,11 @@ from domains.knowledge_retrieval.knowledge import (
     KnowledgeAnswerUnsupported,
     content_set_digest,
 )
+from subsystems.knowledge_retrieval.contracts import (
+    DeleteFaqKnowledgeItemCommand,
+    DeletedFaqIdentity,
+    IngestKnowledgeSourceCommand,
+)
 
 
 class KnowledgeApplication:
@@ -18,7 +23,9 @@ class KnowledgeApplication:
             unit_of_work.commit()
         return result
 
-    def import_missing(self, commands):
+    def import_missing(
+        self, commands: tuple[IngestKnowledgeSourceCommand, ...],
+    ) -> tuple[tuple[tuple[int, bool], ...], tuple[int, ...]]:
         """Import one source catalog atomically without overwriting managed revisions."""
         with self._unit_of_work() as unit_of_work:
             imported = []
@@ -30,7 +37,10 @@ class KnowledgeApplication:
                 if existing is not None:
                     skipped.append(int(existing["id"]))
                     continue
-                imported.append(unit_of_work.knowledge.ingest(command))
+                try:
+                    imported.append(unit_of_work.knowledge.ingest(command))
+                except DeletedFaqIdentity as error:
+                    skipped.append(error.item_id)
             unit_of_work.commit()
         return tuple(imported), tuple(skipped)
 
@@ -73,6 +83,12 @@ class KnowledgeApplication:
 
     def retire_and_request_index(self, command) -> tuple[int, int]:
         return self._transition_and_request_index("retire", command)
+
+    def delete_faq(self, command: DeleteFaqKnowledgeItemCommand) -> int:
+        with self._unit_of_work() as unit_of_work:
+            item_id = unit_of_work.knowledge.delete_faq(command)
+            unit_of_work.commit()
+        return item_id
 
     def request_index_build(self, actor_id: str, idempotency_key: str) -> int:
         with self._unit_of_work() as unit_of_work:

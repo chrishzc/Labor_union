@@ -218,7 +218,7 @@ def test_faq_04_mysql_publication_and_receipt_rollback(monkeypatch):
     assert app.publish_and_request_index(second)[0] == first_version + 2
     assert catalog.get(qa_id).answer == "B"
 
-    assert save("答" * 5000, first_version + 2, "oversize") == item_id
+    assert save("答" * 4999 + "😀", first_version + 2, "oversize") == item_id
     too_long = publish(first_version + 3, "publish-oversize")
     with pytest.raises(ValueError, match="knowledge_qa_line_reply_too_long"):
         app.publish_and_request_index(too_long)
@@ -712,3 +712,335 @@ def test_faq_cutover_blocked_keeps_legacy_readers(_faq_preserved_upgrade, monkey
     _faq_expect_switch_blocked(case)
     _faq_runtime_answers(case, monkeypatch, case.candidate)
     _faq_runtime_answers(case, monkeypatch)
+
+
+def test_faq_delete_mysql_permanent_purge_and_active_answer_guard(monkeypatch):
+    from dataclasses import replace
+
+    from pymysql.err import OperationalError
+
+    from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
+    from infrastructure.mysql.knowledge_retrieval_unit_of_work import KnowledgeRetrievalMySqlUnitOfWork
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from subsystems.knowledge_retrieval.contracts import (
+        DeleteFaqKnowledgeItemCommand,
+        RetireKnowledgeItemCommand,
+    )
+    from subsystems.knowledge_retrieval.faq_catalog import (
+        PredecessorPublishedFaqCatalog,
+        PublishedFaqCatalog,
+    )
+
+    actors = _seed_admin_users()
+    actor = ActorContext(str(actors["author"]))
+    app = KnowledgeApplication(open_knowledge_retrieval_unit_of_work)
+    catalog = PublishedFaqCatalog(open_knowledge_retrieval_unit_of_work)
+    predecessor = PredecessorPublishedFaqCatalog(open_knowledge_retrieval_unit_of_work)
+    run_id = "CI-" + uuid4().hex[:16].upper()
+    correlation = CorrelationId(run_id)
+    answer = "隔離測試正式答案"
+
+    def ingest(qa_id: str, attempt: str, text: str) -> IngestKnowledgeSourceCommand:
+        qa = GovernedQaContent(
+            qa_id, "服務流程", "合成", f"合成問題 {qa_id}？", (), text,
+            f"fixture:{qa_id}",
+        )
+        return IngestKnowledgeSourceCommand(
+            qa.source_identity, "internal_policy", qa.question, encode_governed_qa(qa),
+            qa.source_ref, actor, IdempotencyKey(f"{run_id}:{attempt}"), correlation,
+        )
+
+    def delete(item_id: int, version: int, attempt: str) -> DeleteFaqKnowledgeItemCommand:
+        return DeleteFaqKnowledgeItemCommand(
+            item_id, ExpectedVersion(version), actor, "清除隔離測試題目",
+            IdempotencyKey(f"{run_id}:{attempt}"), correlation,
+        )
+
+    draft = ingest(run_id + "-DRAFT", "draft", "隔離測試草稿")
+    draft_id, _ = app.ingest(draft)
+    draft_delete = delete(draft_id, 1, "delete-draft")
+    with get_connection() as connection, connection.cursor() as cursor:
+        with pytest.raises(OperationalError, match="knowledge_item_versions records cannot be deleted"):
+            cursor.execute("DELETE FROM knowledge_item_versions WHERE item_id=%s", (draft_id,))
+        connection.rollback()
+
+    def fail_before_commit(_unit_of_work):
+        raise RuntimeError("fixture failure after FAQ purge")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(KnowledgeRetrievalMySqlUnitOfWork, "commit", fail_before_commit)
+        with pytest.raises(RuntimeError, match="fixture failure after FAQ purge"):
+            app.delete_faq(draft_delete)
+    assert app.get_item(draft_id)["current_version"] == 1
+    assert app.delete_faq(draft_delete) == draft_id
+    assert app.delete_faq(draft_delete) == draft_id
+    with pytest.raises(RuntimeError, match="knowledge_idempotency_conflict"):
+        app.delete_faq(replace(draft_delete, reason="不同刪除操作"))
+    with pytest.raises(LookupError, match="knowledge_item_not_found"):
+        app.delete_faq(delete(draft_id, 1, "delete-missing"))
+
+    official = ingest(run_id, "official", answer)
+    item_id, _ = app.ingest(official)
+    published_version = app.publish(PublishKnowledgeItemCommand(
+        item_id, ExpectedVersion(1), actor, "發布隔離測試題目",
+        IdempotencyKey(f"{run_id}:publish"), correlation,
+    ))
+    with pytest.raises(RuntimeError, match="knowledge_faq_delete_published"):
+        app.delete_faq(delete(item_id, published_version, "delete-active"))
+    assert catalog.get(run_id).answer == answer
+
+    revision = ingest(run_id, "revision", "編輯中的新版草稿")
+    app.ingest(replace(revision, expected_version=ExpectedVersion(published_version)))
+    current_version = published_version + 1
+    blocked = delete(item_id, current_version, "delete-active-draft")
+    with pytest.raises(RuntimeError, match="knowledge_faq_delete_published"):
+        app.delete_faq(blocked)
+    with pytest.raises(RuntimeError, match="knowledge_item_version_conflict"):
+        app.delete_faq(delete(item_id, published_version, "delete-stale"))
+    assert catalog.get(run_id).answer == answer
+
+    with get_connection() as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE knowledge_items SET published_version=NULL WHERE id=%s", (item_id,))
+        connection.commit()
+    assert predecessor.get(run_id).answer == answer
+    assert not next(row for row in app.list_items(500) if row["id"] == item_id)["faq_delete_eligible"]
+    with pytest.raises(RuntimeError, match="knowledge_faq_delete_published"):
+        app.delete_faq(blocked)
+    assert predecessor.get(run_id).answer == answer
+    with get_connection() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE knowledge_items SET published_version=%s WHERE id=%s",
+            (published_version, item_id),
+        )
+        connection.commit()
+
+    retired_version = app.retire(RetireKnowledgeItemCommand(
+        item_id, ExpectedVersion(current_version), actor, "停用隔離測試題目",
+        IdempotencyKey(f"{run_id}:retire"), correlation,
+    ))
+    assert next(row for row in app.list_items(500) if row["id"] == item_id)["faq_delete_eligible"]
+    assert app.delete_faq(delete(item_id, retired_version, "delete-retired")) == item_id
+    assert app.get_item(item_id) is None
+    assert predecessor.get(run_id) is None
+    assert catalog.get(run_id) is None
+
+    replacement = ingest(run_id.lower(), "reimport", "不可匯入的新版答案")
+    for command in (official, replacement, replace(replacement, expected_version=ExpectedVersion(retired_version))):
+        with pytest.raises(RuntimeError, match="knowledge_faq_identity_deleted"):
+            app.ingest(command)
+    unrelated = ingest(run_id + "-NEW", "unrelated", "可以匯入的草稿")
+    imported, _ = app.import_missing((replacement, unrelated))
+    assert len(imported) == 1
+    assert app.get_item(imported[0][0])["source_identity"] == unrelated.source_identity
+    assert not {item_id, draft_id} & {row["id"] for row in app.list_items(500)}
+
+    with get_connection() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) AS n FROM knowledge_items WHERE id IN (%s,%s)", (item_id, draft_id))
+        assert cursor.fetchone()["n"] == 0
+        cursor.execute("SELECT COUNT(*) AS n FROM knowledge_item_versions WHERE item_id IN (%s,%s)", (item_id, draft_id))
+        assert cursor.fetchone()["n"] == 0
+        cursor.execute("SELECT COUNT(*) AS n FROM knowledge_item_events WHERE knowledge_item_id IN (%s,%s)", (item_id, draft_id))
+        assert cursor.fetchone()["n"] == 0
+        cursor.execute(
+            "SELECT idempotency_key,receipt_json FROM knowledge_apply_receipts WHERE idempotency_key IN (%s,%s,%s,%s)",
+            (draft_delete.idempotency_key.value, official.idempotency_key.value,
+             replacement.idempotency_key.value, blocked.idempotency_key.value),
+        )
+        receipts = {row["idempotency_key"]: row["receipt_json"] for row in cursor.fetchall()}
+        assert set(receipts) == {draft_delete.idempotency_key.value, official.idempotency_key.value}
+        assert answer not in receipts[draft_delete.idempotency_key.value]
+
+
+def test_faq_delete_guard_upgrade_preserves_1087_rows_and_reruns():
+    from pathlib import Path
+
+    from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
+    from scripts.migrate_preserved_database_additive_schema import (
+        DatabaseConfig,
+        _canonical_artifact_descriptor,
+        _schema_snapshot,
+        local_additive_descriptor_state,
+        schema_statements_for_state,
+    )
+
+    assert DATABASE.startswith("lu_test_faq_")
+    config = DatabaseConfig(
+        os.environ["LABOR_UNION_TEST_MYSQL_HOST"], int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        os.environ["LABOR_UNION_TEST_MYSQL_USER"], os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+    )
+    assert config.host == "127.0.0.1"
+    sql = Path(__file__).resolve().parents[1] / "db/schema_parts/1088_faq_permanent_delete_guard.sql"
+    descriptor = _canonical_artifact_descriptor(sql.name)
+    actor = ActorContext(str(_seed_admin_users()["author"]))
+    qa_id = "CI-UPGRADE-" + uuid4().hex[:12].upper()
+    qa = GovernedQaContent(qa_id, "服務流程", "合成", "升級前的題目", (), "保留的答案", f"fixture:{qa_id}")
+    app = KnowledgeApplication(open_knowledge_retrieval_unit_of_work)
+    item_id, _ = app.ingest(IngestKnowledgeSourceCommand(
+        qa.source_identity, "internal_policy", qa.question, encode_governed_qa(qa), qa.source_ref,
+        actor, IdempotencyKey(qa_id), CorrelationId(qa_id),
+    ))
+    before = app.get_item(item_id)
+
+    def migrate() -> str:
+        snapshot = _schema_snapshot(config, DATABASE)
+        status = local_additive_descriptor_state(snapshot, descriptor, sql.name)
+        if status == "absent":
+            with config.connect(DATABASE) as connection, connection.cursor() as cursor:
+                for statement in schema_statements_for_state(sql, status, snapshot):
+                    cursor.execute(statement)
+        else:
+            assert status == "exact"
+        assert local_additive_descriptor_state(_schema_snapshot(config, DATABASE), descriptor, sql.name) == "exact"
+        assert app.get_item(item_id) == before
+        with config.connect(DATABASE) as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS n FROM knowledge_item_events WHERE knowledge_item_id=%s", (item_id,))
+            assert cursor.fetchone()["n"] == 1
+        return status
+
+    assert migrate() == "absent"
+    assert migrate() == "exact"
+
+
+def test_faq_cutover_1088_resumes_after_drop_and_preserves_source(tmp_path, monkeypatch):
+    from argparse import Namespace
+    from pathlib import Path
+    from secrets import token_hex
+
+    from pymysql.err import OperationalError
+
+    from domains.knowledge_retrieval.qa_catalog import GovernedQaContent, encode_governed_qa
+    from infrastructure.mysql.knowledge_retrieval_unit_of_work import ManagedKnowledgeRetrievalMySqlUnitOfWork
+    from scripts import migrate_preserved_database_additive_schema as migration
+    from scripts.bootstrap_disposable_mysql_schema import bootstrap
+    from subsystems.knowledge_retrieval.contracts import DeleteFaqKnowledgeItemCommand
+    from subsystems.knowledge_retrieval.faq_catalog import PublishedFaqCatalog
+
+    container = os.environ.get("FAQ_CUTOVER_MYSQL_CONTAINER")
+    if not container:
+        pytest.skip("requires the Shared LINE FAQ CI workflow isolated MySQL service")
+    host = os.environ["LABOR_UNION_TEST_MYSQL_HOST"]
+    port = int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"])
+    assert host == "127.0.0.1" and port == 3307 and DATABASE.startswith("lu_test_faq_")
+    run_id = token_hex(6)
+    source, candidate = (f"lu_test_faq_1088_{kind}_{run_id}" for kind in ("source", "candidate"))
+    admin = migration.DatabaseConfig(host, port, "root", "")
+    bootstrap(Namespace(host=host, port=port, user=admin.user, password=admin.password,
+                        database=source, confirm_database=source, max_schema_part=1087))
+
+    reader = migration.DatabaseConfig(host, port, f"faq_ro_{run_id}", token_hex(20))
+    with admin.connect(source) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO admin_users (username,password_hash,display_name,role) "
+            "VALUES (%s,'unused','FAQ interruption fixture','line_agent')", (f"faq_author_{run_id}",),
+        )
+        actor = ActorContext(str(cursor.lastrowid))
+        cursor.execute("CREATE USER %s@%s IDENTIFIED BY %s", (reader.user, "%", reader.password))
+        cursor.execute(f"GRANT SELECT,SHOW VIEW,TRIGGER,EVENT ON `{source}`.* TO %s@%s", (reader.user, "%"))
+        cursor.execute("GRANT SHOW_ROUTINE ON *.* TO %s@%s", (reader.user, "%"))
+
+    def unit(database):
+        return ManagedKnowledgeRetrievalMySqlUnitOfWork(admin.connect(database))
+
+    source_app = KnowledgeApplication(lambda: unit(source))
+    correlation = CorrelationId(run_id)
+
+    def seed(label, answer):
+        qa_id = f"ci-{run_id}-{label}"
+        qa = GovernedQaContent(qa_id, "服務流程", "合成", label, (), answer, f"fixture:{qa_id}")
+        item_id, _ = source_app.ingest(IngestKnowledgeSourceCommand(
+            qa.source_identity, "internal_policy", qa.question, encode_governed_qa(qa), qa.source_ref,
+            actor, IdempotencyKey(qa_id), correlation,
+        ))
+        return item_id, qa_id
+
+    target, _ = seed("target", "可以永久刪除")
+    sibling, _ = seed("neighbor", "保留另一草稿")
+    active, active_qa = seed("active", "保持生效的正式答案")
+    source_app.publish(PublishKnowledgeItemCommand(
+        active, ExpectedVersion(1), actor, "fixture publish", IdempotencyKey(f"{run_id}:publish"), correlation,
+    ))
+    config = migration.SeparateDatabaseConfig(
+        migration.DatabaseDescriptor("source-read", source, reader),
+        migration.DatabaseDescriptor("candidate-write", candidate, admin),
+    )
+    manifest = Path(__file__).resolve().parents[1] / "db/migration_releases/labor_union_2026_11_27_faq_permanent_delete_guard_v1.json"
+    for name in ("RELEASE_MANIFEST", "SCHEMA_PARTS", "OWNED_OBJECTS", "MANIFEST_DRIVEN_RELEASE"):
+        monkeypatch.setattr(migration, name, getattr(migration, name))
+    migration.configure_release_manifests((manifest,))
+    plan_path, dump_path, backup_path, op_path = (
+        tmp_path / name for name in ("plan.json", "source.sql", "backup.json", "operation.json")
+    )
+    plan = migration.build_plan(config, source, candidate)
+    assert plan["status"] == "ready"
+    source_schema = migration._schema_snapshot(config, source)["sha256"]
+    source_rows = migration._table_evidence(config, source)
+    migration.write_receipt(plan_path, plan)
+    migration.create_source_dump(reader, source, dump_path, backup_path, mysql_container=container)
+    migration.restore_candidate(config, source, candidate, dump_path, backup_path, op_path, mysql_container=container)
+
+    class SimulatedInterruption(BaseException):
+        pass
+
+    artifact = "1088_faq_permanent_delete_guard.sql"
+    guard = "trg_knowledge_item_versions_before_delete"
+    write_receipt = migration.write_receipt
+
+    def interrupt_after_drop(path, receipt):
+        steps = receipt.get("schema_steps", [])
+        if path == op_path and steps:
+            step = steps[-1]
+            if step.get("part") == artifact and step.get("index") == 1 and step.get("status") == "applied":
+                raise SimulatedInterruption
+        write_receipt(path, receipt)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(migration, "write_receipt", interrupt_after_drop)
+        with pytest.raises(SimulatedInterruption):
+            migration.apply_schema(config, source, candidate, plan_path, op_path, mysql_container=container)
+    assert migration._schema_snapshot(config, source)["sha256"] == source_schema
+    assert migration._table_evidence(config, source) == source_rows
+    snapshot = migration._schema_snapshot(config, candidate)
+    assert all(row["trigger_name"] != guard for row in snapshot["triggers"])
+    receipt = migration.read_receipt(op_path)
+    assert receipt["schema_steps"][-1]["status"] == "prepared"
+    unmatched_path = tmp_path / "unmatched-operation.json"
+    receipt["schema_steps"][-1].pop("faq_guard_drop")
+    migration.write_receipt(unmatched_path, receipt)
+    with pytest.raises(migration.UpgradeBlocked):
+        migration.apply_schema(config, source, candidate, plan_path, unmatched_path, mysql_container=container)
+    assert all(row["trigger_name"] != guard for row in migration._schema_snapshot(config, candidate)["triggers"])
+
+    migration.apply_schema(config, source, candidate, plan_path, op_path, mysql_container=container)
+    assert migration.verify_candidate(config, source, candidate, op_path)["status"] == "verified"
+    assert migration._owned_classification(migration._schema_snapshot(config, candidate))[artifact] == "exact"
+    steps = [step for step in migration.read_receipt(op_path)["schema_steps"] if step["part"] == artifact]
+    assert [step["index"] for step in steps] == [1, 2]
+    runtime_file = tmp_path / "runtime.env"
+    runtime_file.write_text(
+        f"DB_HOST={host}\nDB_PORT={port}\nDB_USER={admin.user}\nDB_PASSWORD=\nDB_DATABASE={source}\n",
+        encoding="utf-8",
+    )
+    migration.switch_environment(runtime_file, source, candidate, op_path, tmp_path / "switch.json", config=config)
+    assert migration.config_from_env(runtime_file)[1] == candidate
+    assert migration._schema_snapshot(config, source)["sha256"] == source_schema
+    assert migration._table_evidence(config, source) == source_rows
+    with admin.connect(candidate) as connection, connection.cursor() as cursor:
+        with pytest.raises(OperationalError, match="knowledge_item_versions records cannot be deleted"):
+            cursor.execute("DELETE FROM knowledge_item_versions WHERE item_id=%s", (target,))
+
+    candidate_app = KnowledgeApplication(lambda: unit(candidate))
+    catalog = PublishedFaqCatalog(lambda: unit(candidate))
+    unrelated_before = {item_id: candidate_app.get_item(item_id) for item_id in (sibling, active)}
+    with pytest.raises(RuntimeError, match="knowledge_faq_delete_published"):
+        candidate_app.delete_faq(DeleteFaqKnowledgeItemCommand(
+            active, ExpectedVersion(2), actor, "fixture active delete", IdempotencyKey(f"{run_id}:active"), correlation,
+        ))
+    assert candidate_app.delete_faq(DeleteFaqKnowledgeItemCommand(
+        target, ExpectedVersion(1), actor, "fixture target delete", IdempotencyKey(f"{run_id}:target"), correlation,
+    )) == target
+    assert candidate_app.get_item(target) is None
+    assert {item_id: candidate_app.get_item(item_id) for item_id in (sibling, active)} == unrelated_before
+    assert catalog.get(active_qa).answer == "保持生效的正式答案"
+    assert source_app.get_item(target) is not None
+    assert migration._schema_snapshot(config, source)["sha256"] == source_schema
+    assert migration._table_evidence(config, source) == source_rows

@@ -15,6 +15,217 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  liff-mutation-readback:
+    name: LIFF availability and original result contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: development
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Confirm the exact candidate checkout
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install declared runtime and focused test dependencies
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 playwright
+      - name: Install Chromium for the LIFF browser contract
+        run: python -m playwright install --with-deps chromium
+      - name: Verify original receipts and protected LIFF writes
+        run: |
+          set -euo pipefail
+          export STAFF_PROFILE_CHANGE_TEST_REDIS_PORT=6391
+          redis_container="liff-profile-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker rm -fv "$redis_container" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$redis_container" \
+            -p "127.0.0.1:$STAFF_PROFILE_CHANGE_TEST_REDIS_PORT:6379" \
+            redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+          for attempt in $(seq 1 25); do
+            if docker exec "$redis_container" redis-cli ping | grep -qx PONG; then break; fi
+            sleep 1
+          done
+          docker exec "$redis_container" redis-cli ping | grep -qx PONG
+          line_tests=tests/domains/external-integration/subsystems/line
+          python -m pytest -vv --junitxml=liff-mutation-contracts.xml \
+            "$line_tests/modules/staff-service-day-media/contract/test_line_staff_calendar_contract.py" \
+            "$line_tests/integration/test_staff_leave_intake_api.py" \
+            "$line_tests/modules/line-identity-management/contract/test_identity_binding_readback.py" \
+            "$line_tests/modules/line-identity-management/contract/test_customer_binding_presentation.py" \
+            "$line_tests/modules/line-identity-management/contract/test_line_identity_api_routes.py" \
+            tests/domains/staff/subsystems/staff/modules/staff-roster-profile/contract/test_staff_profile_change_intake.py
+      - name: Confirm focused LIFF cases ran without skips
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse("liff-mutation-contracts.xml").findall(".//testcase")
+          for required in ("test_staff_availability_ui_requires_original_receipt_and_formal_readback",
+                           "test_postponement_lost_group_acknowledgement_only_queries_original_proposal",
+                           "test_liff_submission_recovery_in_browser",
+                           "test_binding_known_conflict_stays_definitive_without_masking_unknown",
+                           "test_binding_result_readback_requires_exact_verified_original_operation",
+                           "test_customer_bind_page_reads_lost_apply_receipt_after_reopen",
+                           "test_postponement_receipt_uses_original_actor_and_group_event"):
+              assert any(case.get("name", "").startswith(required) for case in cases), required
+          assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error"))
+          print(f"{len(cases)} LIFF cases passed with no skips")
+          PY
+
+  non-citizen-passbook:
+    name: Non-citizen LIFF passbook contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports: ["127.0.0.1:3307:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      APP_ENV: development
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3307"
+      DB_USER: root
+      DB_SSL_MODE: disabled
+      DB_DATABASE: lu_test_nc_passbook_${{ github.run_id }}_${{ github.run_attempt }}
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Confirm the exact candidate checkout
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install declared runtime and focused test dependencies
+        id: registration-dependencies
+        run: python -m pip install -r requirements.txt httpx2==2.10.0
+      - name: Install the browser used by registration presentation contracts
+        run: python -m playwright install --with-deps chromium
+      - name: Verify rendered forms and Preview Apply approval contracts
+        run: >-
+          python -m pytest -vv --junitxml=passbook-contracts.xml
+          tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py
+          tests/domains/case-import/subsystems/case-import/modules/provisional-registration/test_registration_intake.py
+      - name: Initialize credentials for this disposable MySQL service
+        run: |
+          python - <<'PY'
+          import os
+          import secrets
+          import pymysql
+          password = secrets.token_urlsafe(32)
+          print(f"::add-mask::{password}")
+          connection = pymysql.connect(host='127.0.0.1', port=3307, user='root', password='', autocommit=True)
+          try:
+              with connection.cursor() as cursor:
+                  for host in ('%', 'localhost'):
+                      cursor.execute("ALTER USER 'root'@%s IDENTIFIED BY %s", (host, password))
+          finally:
+              connection.close()
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as environment:
+              environment.write(f'DB_PASSWORD={password}\n')
+          PY
+      - name: Verify no-image approval receipt and formal readback in isolated MySQL
+        env:
+          NON_CITIZEN_MYSQL: "1"
+        run: >-
+          python -m pytest -vv --junitxml=passbook-mysql.xml
+          tests/domains/case-import/subsystems/case-import/integration/test_registration_staged_approval_mysql.py::test_no_passbook_non_citizen_approval_completes_and_replays_original_case
+      - name: Verify original receipt retry and persistence with isolated Redis
+        if: ${{ !cancelled() && steps.registration-dependencies.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          export REGISTRATION_REDIS_TEST=1
+          export REGISTRATION_REDIS_DURABILITY_TEST=1
+          export REGISTRATION_REDIS_TEST_PORT=6381
+          export REGISTRATION_REDIS_TEST_CONTAINER="registration-receipt-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export REGISTRATION_REDIS_TEST_SECRET_DIR
+          REGISTRATION_REDIS_TEST_SECRET_DIR="$(mktemp -d "$RUNNER_TEMP/registration-receipt.XXXXXX")"
+          trap 'docker rm -fv "$REGISTRATION_REDIS_TEST_CONTAINER" >/dev/null 2>&1 || true' EXIT
+          python - <<'PY'
+          import os
+          import secrets
+          from pathlib import Path
+          root = Path(os.environ['REGISTRATION_REDIS_TEST_SECRET_DIR'])
+          for role in ('admin', 'intake'):
+              token = secrets.token_urlsafe(32)
+              print(f"::add-mask::{token}")
+              path = root / f'{role}.secret'
+              path.write_text(token, encoding='ascii')
+              path.chmod(0o600)
+          PY
+          docker run -d --name "$REGISTRATION_REDIS_TEST_CONTAINER" \
+            -p 127.0.0.1:6381:6379 \
+            --mount "type=bind,src=$PWD/deploy/registration/redis.conf,dst=/usr/local/etc/redis/redis.conf,readonly" \
+            --mount "type=bind,src=$PWD/deploy/registration/redis-entrypoint.sh,dst=/usr/local/bin/registration-redis-entrypoint,readonly" \
+            --mount "type=bind,src=$REGISTRATION_REDIS_TEST_SECRET_DIR/admin.secret,dst=/run/secrets/registration_admin_password,readonly" \
+            --mount "type=bind,src=$REGISTRATION_REDIS_TEST_SECRET_DIR/intake.secret,dst=/run/secrets/registration_intake_password,readonly" \
+            --entrypoint /bin/sh redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 \
+            /usr/local/bin/registration-redis-entrypoint
+          python - <<'PY'
+          import os
+          import time
+          from pathlib import Path
+          from redis import Redis
+          from redis.exceptions import RedisError
+          secret = Path(os.environ['REGISTRATION_REDIS_TEST_SECRET_DIR']) / 'admin.secret'
+          with Redis(host='127.0.0.1', port=6381, username='registration-admin',
+                     password=secret.read_text(encoding='ascii'), socket_connect_timeout=1, socket_timeout=1) as client:
+              for attempt in range(30):
+                  try:
+                      if client.ping():
+                          break
+                  except RedisError:
+                      pass
+                  time.sleep(1)
+              else:
+                  raise RuntimeError('isolated registration Redis did not become ready')
+          PY
+          REGISTRATION_REDIS_TEST_CONTAINER_ID="$(docker inspect "$REGISTRATION_REDIS_TEST_CONTAINER" --format "{{.Id}}")"
+          export REGISTRATION_REDIS_TEST_CONTAINER_ID
+          test_root=tests/domains/case-import/subsystems/case-import/modules/provisional-registration
+          python -m pytest -vv --junitxml=registration-receipt-redis.xml \
+            "$test_root/test_registration_redis.py::test_unknown_acknowledgement_can_only_be_resolved_by_original_submission" \
+            "$test_root/test_registration_redis.py::test_unavailable_status_never_claims_unreceived_and_original_key_can_retry" \
+            "$test_root/test_registration_durability.py::test_acknowledged_pending_and_high_water_survive_ungraceful_restart"
+      - name: Confirm required test groups executed without skips
+        if: ${{ !cancelled() }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree
+          for report in ('passbook-contracts.xml', 'passbook-mysql.xml', 'registration-receipt-redis.xml'):
+              root = ElementTree.parse(Path(report)).getroot()
+              cases = list(root.iter('testcase'))
+              assert cases, f'{report}: no cases executed'
+              for case in cases:
+                  assert case.find('skipped') is None, f'{report}: skipped {case.attrib}'
+                  assert case.find('failure') is None, f'{report}: failed {case.attrib}'
+                  assert case.find('error') is None, f'{report}: error {case.attrib}'
+                  print(f"{report}: {case.get('classname')}::{case.get('name')} passed")
+          PY
+
   python-syntax:
     name: Python syntax
     runs-on: ubuntu-latest

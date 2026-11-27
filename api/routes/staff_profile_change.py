@@ -78,8 +78,11 @@ class EditBasis(BaseModel):
     matching: int = Field(ge=0)
 
 
-class Submission(StaffLiffRequest):
+class SubmissionReference(StaffLiffRequest):
     submission_id: UUID
+
+
+class Submission(SubmissionReference):
     basis: EditBasis
     profile: ContactChanges | None = None
     bank: BankReplacement | None = None
@@ -175,6 +178,14 @@ def decide_review(application_id: Annotated[int, Path(gt=0)], body: ReviewDecisi
             raise StaffProfileChangeConflict from None
         item = staging.decide(application_id, "complete", operation_id=operation)
         return BaseResponse(data=_approved_review(item))
+
+
+@router.post(f"{_LIFF}/submission-status")
+def query_submission_status(body: SubmissionReference):
+    staff_id = _bound_staff_id(body)
+    with _translate_errors():
+        item = staff_profile_change_staging().status_for_submission(staff_id, body.submission_id)
+        return BaseResponse(data=_status(item) if item is not None else {"status": "not_received"})
 
 
 @router.post(f"{_LIFF}/{{application_id}}/status")

@@ -146,8 +146,9 @@ class RegistrationReviewApplication:
                         snapshot.actor or "system:recovery",
                         CorrelationId(f"registration-recovery:{registration_id}"),
                     )
-                    snapshot = self._staging.complete(registration_id, snapshot.operation_id, receipt)
+                    completed = self._staging.complete(registration_id, snapshot.operation_id, receipt)
                     self._delete_passbook_if_present(snapshot)
+                    snapshot = completed
                 if snapshot.status == "approved":
                     recovered += 1
             except Exception:

@@ -1,10 +1,10 @@
 """File: staff_leave_intake.py
 Description: 提供月嫂查詢班表、預檢合意延期檔期及建立群組提案。"""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
 from api.routes.line_staff_self_service import _required_staff, _verified_line_user_id
@@ -31,6 +31,7 @@ from subsystems.line.group_helper_application import (
     load_group_helper_proposal,
     lock_group_postponement,
     postponement_group_binding,
+    postponement_group_received,
     postponement_group_message,
     postponement_proposal_ref,
     require_postponement_assignment,
@@ -57,6 +58,20 @@ class StaffLeaveDeferPreviewRequest(StaffLiffRequest):
 
 class StaffLeaveDeferProposeRequest(StaffLeaveDeferPreviewRequest):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=140)
+
+
+class StaffLeaveDeferStatusRequest(StaffLiffRequest):
+    model_config = ConfigDict(extra='forbid')
+    case_no: str = Field(min_length=1, max_length=50)
+    assignment_id: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=1, max_length=140)
+
+
+class StaffLeaveDeferStatusResponse(BaseModel):
+    status: Literal["not_received", "draft_saved", "group_received"]
+    case_no: str | None = None
+    assignment_id: int | None = None
+    idempotency_key: str | None = None
 
 
 class StaffLeaveCasesRequest(StaffLiffRequest):
@@ -156,6 +171,40 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest):
         response = _proposal_response(saved, proposal_payload)
         line_uow.commit()
         return response
+
+
+@router.post(
+    '/leave-results/proposal-status',
+    response_model=BaseResponse[StaffLeaveDeferStatusResponse],
+    response_model_exclude_none=True,
+)
+def leave_defer_status(body: StaffLeaveDeferStatusRequest):
+    actor, staff = _verified_staff_context(body)
+    staff_id = int(staff['staff_id'])
+    proposal_ref = postponement_proposal_ref(body.case_no, body.idempotency_key)
+    with open_line_unit_of_work() as unit_of_work:
+        draft = load_group_helper_proposal(unit_of_work, POSTPONEMENT_DRAFT_FAMILY, body.case_no, proposal_ref)
+        if draft is None or (
+            draft["staff_id"] != staff_id
+            or draft["assignment_id"] != body.assignment_id
+            or draft["line_actor_fingerprint"] != fingerprint_payload({"line_user_id": actor.value}).value
+        ):
+            return BaseResponse(data={"status": "not_received"})
+        binding = postponement_group_binding(unit_of_work, body.case_no)
+        if binding is None or binding.version.value != draft["group_binding_version"]:
+            raise typed_http_error(
+                409, "conflict", "leave_result_group_unavailable",
+                "原案件群組已變更，請聯絡工會確認原提案。", "staff-leave-proposal-status",
+            )
+        application = build_service_start_application(unit_of_work._connection)
+        _result_call(lambda: require_postponement_assignment(application, body.case_no, staff_id, body.assignment_id, ()))
+        received = postponement_group_received(unit_of_work, body.case_no, proposal_ref)
+    return BaseResponse(data={
+        "status": "group_received" if received else "draft_saved",
+        "case_no": body.case_no,
+        "assignment_id": body.assignment_id,
+        "idempotency_key": body.idempotency_key,
+    })
 
 
 def _preview_postponement(app, body, staff_id, changes, *, lock=False):

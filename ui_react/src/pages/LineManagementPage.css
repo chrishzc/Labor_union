@@ -3658,7 +3658,6 @@
 }
 .qa-editor-field textarea { resize: vertical; }
 .qa-editor-field small { color: var(--line-color-text-muted); font-weight: 400; }
-.qa-editor-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .qa-editor-enabled { min-height: 44px; margin: 0; }
 
 @media (max-width: 720px) {
@@ -3667,7 +3666,6 @@
   .qa-catalog-summary { align-items: stretch; flex-direction: column; }
   .qa-catalog-actions { flex-wrap: wrap; }
   .qa-catalog-actions button { flex: 1 1 auto; min-height: 44px; }
-  .qa-editor-columns { grid-template-columns: 1fr; }
 }
 
 .line-pairing-candidate-grid {
@@ -4823,10 +4821,19 @@
 .studio-feedback-toolbar select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-color-border); border-radius: var(--radius-md); background: #fff; color: var(--line-color-text); font: inherit; font-size: 0.82rem; }
 .studio-search input { padding-left: 40px; }
 .studio-qa-toolbar > small { margin-left: auto; color: var(--line-color-text-muted); white-space: nowrap; }
-.ai-customer-service-page .qa-catalog-list { max-height: none; overflow: visible; margin-top: 0; }
+.ai-customer-service-page .qa-catalog-list { display: grid; gap: 8px; max-height: none; overflow: visible; margin-top: 0; }
 .ai-customer-service-page .studio-qa-item { flex: 1; min-width: 0; margin-bottom: 0; padding: 0; border: 0; border-radius: 0; background: #fff; }
-.studio-qa-row { display: flex; align-items: flex-start; gap: 16px; border-top: 1px solid var(--line-color-border-subtle); }
-.studio-row-edit { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; margin-top: 20px; }
+.studio-qa-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  padding: 0 14px;
+  border: 1px solid var(--line-color-border-subtle);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+.studio-row-edit { display: inline-flex; align-items: center; gap: 5px; margin-top: 20px; }
 .studio-row-edit svg { width: 15px; height: 15px; }
 .ai-customer-service-page .qa-catalog-summary { min-height: 84px; padding: 16px 10px; gap: 16px; }
 .ai-customer-service-page .qa-catalog-summary:hover { background: #fffcfa; }
@@ -4840,19 +4847,51 @@
 .ai-customer-service-page .qa-catalog-detail > div { margin-top: 12px; }
 .studio-answer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .studio-technical { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line-color-border-subtle); color: var(--line-color-text-muted); font-size: 0.78rem; overflow-wrap: anywhere; }
-.studio-technical summary,
-.studio-editor-secondary summary { cursor: pointer; min-height: 32px; }
+.studio-technical summary { cursor: pointer; min-height: 32px; }
 .studio-technical > p,
 .studio-technical > small { display: block; margin-top: 12px; line-height: 1.8; }
-.studio-list-footer { margin: 12px 0 0; padding-top: 16px; border-top: 1px solid var(--line-color-border-subtle); color: var(--line-color-text-muted); font-size: 0.76rem; }
-.studio-editor-secondary { margin-top: 10px; padding-top: 16px; border-top: 1px solid var(--line-color-border-subtle); color: var(--line-color-text-muted); font-size: 0.82rem; }
-.studio-editor-secondary > summary { margin-bottom: 12px; }
-.studio-qa-drawer .drawer-container { width: min(680px, 94vw); }
-.studio-qa-drawer .qa-editor-form { margin-top: 20px; }
-.studio-qa-drawer .line-drawer-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.studio-qa-drawer .line-drawer-footer .line-danger-btn { background: #fff; color: #a73732; border: 1px solid #e5b6b0; }
-.studio-qa-drawer .line-drawer-footer .line-primary-btn { background: var(--line-color-primary); color: #fff; }
-.studio-qa-drawer .line-drawer-footer .line-secondary-btn { background: #fff; color: var(--line-color-text-muted); border: 1px solid var(--line-color-border); }
+.studio-qa-editing {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0;
+  border-color: #dfad96;
+}
+.studio-qa-editor-header,
+.studio-qa-editor-actions,
+.studio-qa-confirmation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+}
+.studio-qa-editor-header {
+  border-bottom: 1px solid var(--line-color-border-subtle);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: #fff0e5;
+}
+.studio-qa-editor-header h3 { margin: 0; font-size: 0.92rem; }
+.studio-qa-editor-header .studio-question-title { overflow-wrap: anywhere; }
+.studio-inline-qa-form { gap: 0; }
+.studio-qa-fields { display: grid; gap: 12px; padding: 16px; }
+.studio-qa-editor-actions,
+.studio-qa-confirmation {
+  border-top: 1px solid var(--line-color-border-subtle);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: #fff8f2;
+}
+.studio-qa-editor-actions > small { color: var(--line-color-text-muted); }
+.studio-qa-editor-actions .qa-catalog-actions,
+.studio-qa-confirmation .qa-catalog-actions { flex-wrap: wrap; }
+.qa-catalog-panel .studio-qa-editor-actions .line-secondary-btn,
+.qa-catalog-panel .studio-qa-confirmation .line-secondary-btn {
+  background: #fff !important;
+  color: var(--line-color-text-muted) !important;
+  border-color: var(--line-color-border) !important;
+}
+.studio-qa-confirmation { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.studio-qa-confirmation > div:first-child { min-width: 0; }
+.studio-qa-confirmation .line-error { margin: 8px 0 0; }
 .studio-empty { padding: 30px 12px; color: var(--line-color-text-muted); text-align: center; font-size: 0.85rem; }
 .line-guidance-panel .studio-guidance-layout { grid-template-columns: 285px minmax(0, 1fr); align-items: start; }
 .line-guidance-panel .ai-studio-sidebar { padding: 20px 14px; border-color: var(--line-color-border-subtle); border-radius: 16px; background: #fff; }
@@ -5000,7 +5039,8 @@
   .studio-feedback-row > button { width: fit-content; justify-self: end; padding-left: 0; }
   .studio-feedback-row .qa-lifecycle-badge { justify-self: start; font-size: 0.68rem; margin-left: 0; }
   .ai-customer-service-page .qa-catalog-summary .qa-lifecycle-badge { align-self: flex-start; width: fit-content; }
-  .studio-qa-drawer .drawer-container { width: 100vw; }
+  .studio-qa-editor-actions .qa-catalog-actions,
+  .studio-qa-confirmation .qa-catalog-actions { margin-left: auto; }
 }
 .line-tab-btn.active:hover, .line-page-btn.active:hover { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 .ai-customer-service-page .real-llm-quick-button:hover { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }

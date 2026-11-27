@@ -9,7 +9,7 @@ from typing import Protocol
 from unicodedata import normalize
 from uuid import uuid4
 
-from domains.knowledge_retrieval.qa_catalog import format_line_faq_reply, line_faq_reply_fits
+from domains.knowledge_retrieval.qa_catalog import line_faq_reply_fits
 
 
 FAQ_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}"
@@ -58,9 +58,6 @@ class PublishedFaqAnswer(Protocol):
 
     @property
     def answer(self) -> str: ...
-
-    @property
-    def source_ref(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +214,7 @@ def _project_card(
                 "faq_question_not_published", f"categories[{index}].questions[{position}].qa_id", link.qa_id,
             ))
             continue
-        if not line_faq_reply_fits(format_line_faq_reply(item.answer, item.source_ref)):
+        if not line_faq_reply_fits(item.answer):
             issues.append(FaqIssue(
                 "faq_line_reply_too_long", f"categories[{index}].questions[{position}]", link.qa_id,
             ))

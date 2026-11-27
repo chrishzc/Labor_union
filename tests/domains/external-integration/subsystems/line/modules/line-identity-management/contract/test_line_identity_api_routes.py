@@ -6,6 +6,7 @@ Description: 驗證 canonical LINE identity API 的 typed payload、驗證身分
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
@@ -17,6 +18,7 @@ from api.schemas.line_identity import (
     CanonicalLineReviewDecisionRequest,
     CustomerIdentityApplyRequest,
     CustomerIdentityRequest,
+    LineIdentityBindingResultRequest,
     ProvisionalRegistrationRequest,
     ProvisionalRegistrationPreviewRequest,
     StaffIdentityRequest,
@@ -33,7 +35,9 @@ from domains.line.review import (
 )
 from shared_kernel.identities import CorrelationId, ExpectedVersion
 from subsystems.line.identity_application import LineIdentityApplication, LineIdentityAuthenticationError, LineIdentityConflictError
-from subsystems.line.identity_contracts import AdminCredentialProof, LineIdentityApplyStatus, LineIdentityCandidate
+from subsystems.line.identity_contracts import (
+    AdminCredentialProof, CustomerIdentityProof, LineIdentityApplyStatus, LineIdentityCandidate,
+)
 
 
 @pytest.mark.parametrize("blocked_by", [None, "password", "stale", "exclusive_role"])
@@ -459,3 +463,113 @@ def _registration_preview_payload():
         address="台北市中山區",
         passbook_image_id="test-passbook-image",
     )
+
+
+def test_binding_result_readback_requires_exact_verified_original_operation(monkeypatch):
+    now = datetime(2026, 11, 15, tzinfo=timezone.utc)
+    flow = LineIdentityFlowId("original-flow")
+    owner = LineUserId("U-receipt-owner")
+    role = LineBindingSubjectType.CUSTOMER
+    purpose = LineIdentityFlowPurpose.CUSTOMER_BINDING
+    operation = UUID("065a0b1e-2005-470b-a6d4-83159d3f22f7")
+    proof = CustomerIdentityProof("合成資料", "0912345678")
+    durable = {"consumed": False, "binding": None, "receipts": {}}
+    commits = []
+
+    @contextmanager
+    def unit_of_work():
+        staged = {**durable, "receipts": dict(durable["receipts"])}
+
+        def bind(_claim, _version, *_):
+            binding = LineIdentityBindingSnapshot(owner, LineIdentityBindingStatus.BOUND,
+                                                  ExpectedVersion(1), role, "17")
+            staged["binding"] = binding
+            return binding
+
+        def commit():
+            durable.update(staged)
+            commits.append(True)
+
+        yield SimpleNamespace(
+            identity_flows=SimpleNamespace(
+                get=lambda _: LineIdentityFlowSnapshot(
+                    flow, purpose, owner,
+                    LineIdentityFlowStatus.USED if staged["consumed"] else LineIdentityFlowStatus.ACTIVE,
+                    now + timedelta(minutes=15), "fixture",
+                ),
+                consume=lambda *_: staged.update(consumed=True),
+            ),
+            customers=SimpleNamespace(
+                resolve_customer=lambda _: LineIdentityCandidate(role, "17", None),
+                bind_customer=lambda *_: None,
+            ),
+            identities=SimpleNamespace(
+                get=lambda *_: staged["binding"],
+                bind=bind,
+                list_by_user=lambda _: (staged["binding"],),
+                reset_failure_streak=lambda *_: None,
+            ),
+            receipts=SimpleNamespace(
+                append=lambda item: staged["receipts"].update({item.key: item}),
+                get=staged["receipts"].get,
+            ),
+            audit=SimpleNamespace(append=lambda _: None),
+            outbox=SimpleNamespace(append=lambda _: None),
+            delivery_tasks=SimpleNamespace(enqueue=lambda _: None),
+            commit=commit,
+        )
+
+    application = LineIdentityApplication(unit_of_work, lambda: now)
+    monkeypatch.setattr(line_identity, "get_line_identity_application", lambda: application)
+    monkeypatch.setattr(line_identity, "_verified_line_user_id",
+                        lambda body: owner if body.line_id_token == "owner-token" else LineUserId("U-other"))
+    request = {
+        "line_id_token": "owner-token", "flow_id": flow.value, "purpose": purpose.value,
+        "attempt_id": operation,
+    }
+
+    def query(**overrides):
+        payload = LineIdentityBindingResultRequest(**{**request, **overrides})
+        return line_identity.read_identity_binding_result(payload).data
+
+    assert query().status == "unconfirmed"
+    preview = application.preview_customer(flow, owner, proof)
+    result = application.apply_customer(
+        flow, owner, proof, preview.expected_version, preview.preview_fingerprint,
+        CorrelationId("receipt-readback"), operation,
+    )
+    assert durable["consumed"] and len(durable["receipts"]) == 1
+    assert query().status == "bound"
+    assert query().receipt_identity == result.receipt_identity
+    for overrides in (
+        {"line_id_token": "other-token"}, {"flow_id": "other-flow"},
+        {"purpose": "staff_verification"}, {"attempt_id": "653fff63-80bf-4c4a-9e07-ed99cc4ea2e1"},
+    ):
+        missing = query(**overrides)
+        assert missing.status == "unconfirmed" and missing.receipt_identity is None
+    assert len(commits) == 1
+
+
+@pytest.mark.parametrize("error,detail", [
+    (LineIdentityConflictError("此月嫂已綁定其他 LINE 帳號"), "line_identity_binding_conflict"),
+    (RuntimeError("unknown_storage_outcome"), "unknown_storage_outcome"),
+])
+def test_binding_known_conflict_stays_definitive_without_masking_unknown(monkeypatch, error, detail):
+    def fail(*_):
+        raise error
+
+    monkeypatch.setattr(line_identity, "get_line_identity_application",
+                        lambda: SimpleNamespace(apply_customer=fail))
+    monkeypatch.setattr(line_identity, "_verified_line_user_id", lambda _: LineUserId("U-known-conflict"))
+    payload = CustomerIdentityApplyRequest(
+        flow_id="flow-known-conflict", name="合成資料", phone="0912345678",
+        expected_version=0, preview_fingerprint="a" * 64,
+        attempt_id="065a0b1e-2005-470b-a6d4-83159d3f22f7",
+    )
+    with pytest.raises(HTTPException) as outcome:
+        line_identity.apply_customer(payload)
+    assert outcome.value.status_code == 409
+    if isinstance(error, LineIdentityConflictError):
+        assert outcome.value.detail["error"]["code"] == detail
+    else:
+        assert outcome.value.detail == detail

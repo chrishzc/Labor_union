@@ -1,0 +1,32 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-faq-permanent-delete-guard-2026-11-27-v1",
+  "descriptors": {
+    "1088_faq_permanent_delete_guard.sql": {
+      "tables": {},
+      "parent_columns": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [
+        "trg_knowledge_item_versions_before_delete"
+      ]
+    }
+  },
+  "predecessor_triggers": {
+    "trg_knowledge_item_versions_before_delete": {
+      "action_timing": "BEFORE",
+      "event_manipulation": "DELETE",
+      "event_object_table": "knowledge_item_versions",
+      "action_statement": "atom(signalsqlstate'45000'setmessage_text='knowledge_item_versions records cannot be deleted')"
+    }
+  },
+  "successor_triggers": {
+    "trg_knowledge_item_versions_before_delete": {
+      "action_timing": "BEFORE",
+      "event_manipulation": "DELETE",
+      "event_object_table": "knowledge_item_versions",
+      "action_statement": "atom(beginifnotexists(select1fromknowledge_itemsitemjoinknowledge_apply_receiptsreceiptonreceipt.idempotency_key=concat('faq-deleted:',sha2(lower(item.source_identity),256))andreceipt.command_fingerprint=sha2(lower(item.source_identity),256)whereitem.id=old.item_idandleft(item.source_identity,15)=binary'line-common-qa:'anditem.published_versionisnullanditem.statein('draft','reviewed','retired')andjson_unquote(json_extract(receipt.receipt_json,'$.deleting_faq_item_id'))=cast(old.item_idaschar)andjson_unquote(json_extract(receipt.receipt_json,'$.deleting_connection_id'))=cast(connection_id()aschar))thensignalsqlstate'45000'setmessage_text='knowledge_item_versions records cannot be deleted';endif;end)"
+    }
+  }
+}

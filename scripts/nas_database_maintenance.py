@@ -301,6 +301,17 @@ def is_nas_maintenance_target(settings):
         return host != "localhost"
 
 
+def _windows_upgrade_app_environment(environment_file: Path) -> str:
+    app_environment = os.environ.get("APP_ENV", "").strip()
+    if not app_environment:
+        configured = dotenv_values(environment_file, encoding="utf-8").get("APP_ENV")
+        app_environment = (configured or "").strip()
+    app_environment = app_environment.lower() or "development"
+    require(app_environment in {"development", "production"},
+            "Windows 的 APP_ENV 必須設定為 development 或 production。")
+    return app_environment
+
+
 def destination_ready(settings, *, writable=False, create=False):
     root = settings["backup_root"]
     require(not root.is_symlink() and not root.is_junction(), "NAS 備份根目錄不能是符號連結或本機轉接點。")
@@ -828,11 +839,14 @@ def upgrade(settings):
 
     has_tools = bool(resolve_client_tool("mysql") and resolve_client_tool("mysqldump"))
     is_nas_target = is_nas_maintenance_target(settings)
-    is_local_nas_test = (
-        not is_nas_target
-        and settings["database"].startswith("lu_nas_")
+    is_windows_production = (
+        not is_nas_target and _windows_upgrade_app_environment(settings["environment_file"]) == "production"
     )
-    if not (is_nas_target or is_local_nas_test):
+    uses_nas_compatibility = is_nas_target or (
+        not is_windows_production and settings["database"].startswith("lu_nas_")
+    )
+    use_candidate = is_windows_production or uses_nas_compatibility
+    if not use_candidate:
         print("執行直連結構升級（Additive Migration）...", flush=True)
         try:
             result = updater.update_local_database(
@@ -860,6 +874,8 @@ def upgrade(settings):
     require(has_tools, "安全升級需要 mysql 與 mysqldump。")
     source = settings["database"]
     read = reader(settings)
+    if not is_nas_target:
+        updater.validate_local_source(read, source)
     candidate = new_candidate("upgrade")
     write = writer(settings, candidate)
     for executable in ("mysql", "mysqldump"):
@@ -884,7 +900,7 @@ def upgrade(settings):
     plan = migration.build_plan(config, source, candidate,
                                 source_recovery_root=updater.DEFAULT_RECEIPT_ROOT)
     require(plan["status"] == "ready" and not plan["candidate_exists"], "升級預檢未通過，原資料庫不變。")
-    if is_local_nas_test:
+    if not is_nas_target:
         source_objects = plan["source_objects"]
         faq_gate_required = (source_objects.get(migration._SHARED_LINE_FAQ_ARTIFACT) == "exact"
                              and migration._shared_faq_selected())
@@ -922,15 +938,16 @@ def upgrade(settings):
     result = migration.verify_candidate(config, source, candidate, operation)
     require(result.get("status") == "verified", "副本驗證未通過，未切換資料庫。")
     require(not protect_account_receipts(write, candidate, apply=False), "副本含未保護的帳號收據，未切換資料庫。")
-    if is_local_nas_test:
+    if not is_nas_target:
         updater.require_current_database(updater.build_additive_preview(write, candidate, directory))
     prepare_runtime_access(settings, candidate)
-    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
-    _candidate_conn = config.connect(candidate)
-    try:
-        ensure_nas_procedures(_candidate_conn)
-    finally:
-        _candidate_conn.close()
+    if uses_nas_compatibility:
+        from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+        candidate_connection = config.connect(candidate)
+        try:
+            ensure_nas_procedures(candidate_connection)
+        finally:
+            candidate_connection.close()
     # Reuse the canonical fresh-read/data-fingerprint/config switch guard.
     require(digest(settings["environment_file"]) == original_env_digest, "連線設定已改變，未切換資料庫。")
     migration.switch_environment(settings["environment_file"], source, candidate, operation,

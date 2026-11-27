@@ -219,18 +219,36 @@ class RedisRegistrationStagingRepository:
         if not valid:
             raise ProvisionalRegistrationStorageError("registration_redis_initialization_required")
 
-    def status_for_submission(self, line_user_id: str, submission_id: str):
+    def replay_submission(
+        self, candidate: ProvisionalRegistrationCandidate, submission_id: str,
+    ) -> StagedRegistration | None:
+        saved = self._original_submission(
+            candidate.line_user_id, submission_id, expected_fingerprint=candidate.payload_fingerprint,
+        )
+        return replace(saved, replayed=True) if saved is not None else None
+
+    def status_for_submission(self, line_user_id: str, submission_id: str) -> StagedRegistration | None:
+        return self._original_submission(line_user_id, submission_id)
+
+    def _original_submission(
+        self, line_user_id: str, submission_id: str, *, expected_fingerprint: PreviewFingerprint | None = None,
+    ) -> StagedRegistration | None:
         try:
             submission_id = str(UUID(submission_id))
         except (ValueError, TypeError, AttributeError):
             raise ProvisionalRegistrationConflictError("registration_submission_id_invalid") from None
-        registration_id = self._call("get", PREFIX + f"submission:{_subject(line_user_id)}:{submission_id}")
+        subject = _subject(line_user_id)
+        registration_id = self._call("get", PREFIX + f"submission:{subject}:{submission_id}")
         if registration_id is None:
+            self.ensure_initialized()
             return None
-        snapshot = self.get(int(registration_id), public=True)
-        if self._metadata(snapshot.registration_id)["subject"] != _subject(line_user_id):
+        registration_id = int(registration_id)
+        saved = self._metadata(registration_id)
+        if saved["subject"] != subject:
             raise ProvisionalRegistrationConflictError("registration_subject_mismatch")
-        return snapshot
+        if expected_fingerprint is not None and saved["fingerprint"] != expected_fingerprint.value:
+            raise ProvisionalRegistrationConflictError("registration_active_application_conflict")
+        return self.get(registration_id, public=True)
 
     def get(self, registration_id: int, *, public=False) -> StagedRegistration:
         meta = self._metadata(registration_id)
