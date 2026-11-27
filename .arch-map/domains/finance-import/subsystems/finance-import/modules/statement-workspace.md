@@ -67,6 +67,8 @@
 
 ## Contracts
 
+- 案件帳務列表載入、返回與資料刷新適用 [Global #12 §3.1 UI 狀態模型](../../../../../requirements/12_Global_效能與UX體感架構.md#31-ui-狀態模型)。
+
 ### 從銀行匯入到成功明細匯出 ^statement-export-admission
 
 ```yaml archmap-impact
