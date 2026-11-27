@@ -12,6 +12,7 @@ class ImportFieldIssueView(BaseModel):
     source_field: str = Field(min_length=1)
     code: str = Field(min_length=1)
     message: str = Field(min_length=1)
+    optional_skip_review_identity: str | None = Field(default=None, min_length=1)
 
 
 class CaseImportFieldIssuesView(BaseModel):

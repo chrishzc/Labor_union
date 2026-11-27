@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { notificationTasksClient as client, notificationFailure, notifyNotificationTasksChanged, type NotificationItem, type NotificationPage, type NotificationSource, type NotificationCatalog } from '../api/line_notifications/notification_tasks_client';
 import { importFieldIssueHref } from '../api/case_import/import_field_issues';
-import { NotificationTaskActions, notificationHref } from '../components/NotificationTaskActions';
+import { NotificationTaskActions, notificationHref, OptionalImportFieldSkip } from '../components/NotificationTaskActions';
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { formatTaipeiDateTime } from '../shared/taipeiTime';
 import './NotificationTasksPreviewPage.css';
@@ -58,8 +58,10 @@ export function NotificationTasksPage() {
   const [revision,setRevision]=useState(0);const [busy,setBusy]=useState(false);const [expanded,setExpanded]=useState('');
   const detailRef=useRef<HTMLElement>(null);const generation=useRef(0);const locked=useRef(false);
   const intents=useRef<Record<string,string>>({});
+  const importFieldReads = useRef({ loadedPages: 1, version: 0 });
   useEffect(()=>{
     const abort=new AbortController();const version=++generation.current;
+    importFieldReads.current = { loadedPages: 1, version: 0 };
     setLoading(true);setQueryError('');setFailures({});setPools({});setExpanded('');
     void client.catalog(abort.signal).then(async sources=>{
       if(abort.signal.aborted)return;
@@ -78,23 +80,36 @@ export function NotificationTasksPage() {
     return()=>window.removeEventListener('hashchange',recheck);
   },[]);
   const refreshSource=useCallback(async(source:NotificationSource)=>{
-    const version=generation.current;const result=await client.list(source);
-    if(version!==generation.current)return;
-    setPools(old=>({...old,[source]:result}));setFailures(old=>({...old,[source]:undefined}));
+    const version = generation.current;
+    const importRead = source === 'import_fields' ? importFieldReads.current : null;
+    const importVersion = importRead ? ++importRead.version : 0;
+    const isCurrent = () => version === generation.current && (!importRead || importRead.version === importVersion);
+    try {
+      let result = await client.list(source);
+      const items = [...result.items];
+      let loadedPages = 1;
+      while (isCurrent() && importRead && loadedPages < importRead.loadedPages && result.next_cursor != null) {
+        result = await client.list(source, result.next_cursor);
+        items.push(...result.items);
+        loadedPages += 1;
+      }
+      if (!isCurrent()) return;
+      if (importRead) {
+        importRead.loadedPages = loadedPages;
+        importRead.version += 1;
+      }
+      setPools(old => ({...old, [source]: {...result, items}}));
+      setFailures(old => ({...old, [source]: undefined}));
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (importRead) importRead.version += 1;
+      setFailures(old => ({...old, [source]: notificationFailure(error)}));
+    }
   },[]);
   const refreshAfterCommit=useCallback(async()=>{
     notifyNotificationTasksChanged();
-    const version=generation.current;
-    // One original command can change several sources (for example a shared
-    // assistance ticket). Re-read the bounded owner pages without closing an
-    // unfinished coordination panel or pretending a failed read is zero.
-    await Promise.all(catalog.map(async({source})=>{
-      try {
-        const result=await client.list(source);
-        if(version===generation.current){setPools(old=>({...old,[source]:result}));setFailures(old=>({...old,[source]:undefined}));}
-      }catch(error){if(version===generation.current)setFailures(old=>({...old,[source]:notificationFailure(error)}));}
-    }));
-  },[catalog]);
+    await Promise.all(catalog.map(({source}) => refreshSource(source)));
+  },[catalog,refreshSource]);
   const loaded=catalog.flatMap(source=>pools[source.source]?.items ?? []);
   const coveredTasks=new Set(loaded.flatMap(item=>item.failure?.related_task_ids ?? []));
   const allItems=[...new Map(loaded.filter(item=>item.source!=='delivery' || !coveredTasks.has(item.reference_id!)).map(value=>row(value)).map(item=>[item.id,item])).values()];
@@ -128,11 +143,23 @@ export function NotificationTasksPage() {
   const select=(item:Row)=>requestLeave(()=>{setSelectedId(item.id);setNotice('');setExpanded('');if(window.matchMedia('(max-width: 1000px)').matches)window.requestAnimationFrame(()=>detailRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));});
   const loadMore=async()=>{
     if(moreBusy)return;setMoreBusy(true);const version=generation.current;
-    await Promise.all(pendingMore.map(async s=>{try {
-      const cursor=pools[s.source]!.next_cursor!;const next=await client.list(s.source,cursor);
-      if(version===generation.current)setPools(old=>({...old,[s.source]:{...next,items:[...new Map([...(old[s.source]?.items??[]),...next.items].map(item=>[item.id,item])).values()]}}));
-      if(version===generation.current)setFailures(old=>({...old,[s.source]:undefined}));
-    }catch(error){if(version===generation.current)setFailures(old=>({...old,[s.source]:notificationFailure(error)}));}}));setMoreBusy(false);
+    await Promise.all(pendingMore.map(async ({source}) => {
+      const cursor = pools[source]?.next_cursor;
+      if (cursor == null) return;
+      const importRead = source === 'import_fields' ? importFieldReads.current : null;
+      const importVersion = importRead?.version;
+      const isCurrent = () => version === generation.current && importRead?.version === importVersion;
+      try {
+        const next = await client.list(source, cursor);
+        if (!isCurrent()) return;
+        if (importRead) importRead.loadedPages += 1;
+        setPools(old => ({...old, [source]: {...next, items: [...new Map([...(old[source]?.items ?? []), ...next.items].map(item => [item.id, item])).values()]}}));
+        setFailures(old => ({...old, [source]: undefined}));
+      } catch (error) {
+        if (isCurrent()) setFailures(old => ({...old, [source]: notificationFailure(error)}));
+      }
+    }));
+    setMoreBusy(false);
   };
   const act=async(item:Row)=>{
     if(locked.current)return;
@@ -166,7 +193,7 @@ export function NotificationTasksPage() {
     </ManagementPageHeader>
     <div className="notification-preview-page">
 
-    {(queryError || failedSources.length>0) && <div className="notification-preview-banner" role="alert"><strong>{queryError || failedSources.length===scopedSources.length?'目前無法讀取事項':'部分事項未能載入'}</strong>{queryError && <p>{queryError}</p>}{failedSources.map(s=><p key={s.source}>{s.label}：{failures[s.source]} <button type="button" className="np-button" onClick={()=>void refreshSource(s.source).catch(error=>setFailures(old=>({...old,[s.source]:notificationFailure(error)})))}>重試{s.label}</button></p>)}</div>}
+    {(queryError || failedSources.length>0) && <div className="notification-preview-banner" role="alert"><strong>{queryError || failedSources.length===scopedSources.length?'目前無法讀取事項':'部分事項未能載入'}</strong>{queryError && <p>{queryError}</p>}{failedSources.map(s=><p key={s.source}>{s.label}：{failures[s.source]} <button type="button" className="np-button" onClick={()=>void refreshSource(s.source)}>重試{s.label}</button></p>)}</div>}
     {loading && <p role="status">正在讀取待處理事項…</p>}
     <div className="notification-preview-toolbar">
       <div className="notification-preview-groups" role="group" aria-label="事項分類">{groupOptions.map(({ id, label, icon: Icon }) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'active' : ''} onClick={() => requestLeave(() => { setGroup(id); setPage(1); setNotice(''); })}><Icon size={15} aria-hidden="true" />{label}<span>{groupCount(id)}</span></button>)}</div>
@@ -202,8 +229,9 @@ export function NotificationTasksPage() {
           {selected.source!=='registration' && <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />處理原因</h3><p>{selected.reason}</p></section>}
           {selected.source === 'import_fields' && selectedCaseNo && <section className="notification-preview-reason">
             <h3>待修正欄位</h3>
-            <ul>{selected.import_field_issues?.map(issue => <li key={JSON.stringify([issue.source, issue.owner, issue.field, issue.source_field, issue.code])}>
+            <ul>{selected.import_field_issues?.map(issue => <li key={JSON.stringify([issue.source, issue.owner, issue.field, issue.source_field, issue.code, issue.optional_skip_review_identity])}>
               <a href={importFieldIssueHref(selectedCaseNo, issue)}>{issue.message}</a>
+              {issue.optional_skip_review_identity && !failures.import_fields && <OptionalImportFieldSkip caseNo={selectedCaseNo} reviewIdentity={issue.optional_skip_review_identity} sourceField={issue.source_field} onCommitted={refreshAfterCommit} />}
             </li>)}</ul>
           </section>}
           {selected.recipient && selected.source!=='customer_binding' && selected.source!=='registration' && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>

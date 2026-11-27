@@ -183,10 +183,13 @@ def _read_source(source, cursor, principal):
         connection = get_connection()
         try:
             result = build_import_field_issues_query(connection).query_page(page=page, page_size=SIZE)
+            can_skip = has_required_capability(principal, "data_browser.write")
             items = [
                 _item(source, entry.case_no, '進件資料待修正', f'{len(entry.issues)} 項欄位問題待修正。',
                       '請至客戶名冊核對同案欄位。', case_no=entry.case_no,
-                      import_field_issues=[issue.as_dict() for issue in entry.issues])
+                      import_field_issues=[issue.as_dict() if can_skip else
+                                            issue.as_dict() | {"optional_skip_review_identity": None}
+                                            for issue in entry.issues])
                 for entry in result.items
             ]
             return NotificationPage(items=items, total=result.total,

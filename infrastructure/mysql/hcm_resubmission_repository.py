@@ -149,7 +149,8 @@ class MySqlHcmResubmissionRepository:
         fields = tuple(sorted({code.split(":", 1)[1] for code in codes
                                if code.startswith(("hcm_field_missing:", "hcm_field_invalid:"))}))
         unresolved = self._unresolved_fields(fields, row)
-        return tuple(current_hcm_field_issue(field, code) for field in unresolved for code in codes
+        return tuple(current_hcm_field_issue(field, code, review_identity=str(review["review_identity"]))
+                     for field in unresolved for code in codes
                      if code in {"hcm_field_missing:" + field, "hcm_field_invalid:" + field})
 
     def query_current_reviews(self, *, limit: int, before_id: int | None):

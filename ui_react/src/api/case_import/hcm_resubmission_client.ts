@@ -47,16 +47,16 @@ export async function loadCurrentHcmReviewsForCases(
 }
 
 export const hcmResubmissionClient = {
-  async previewFieldSkip(reviewIdentity: string, sourceField: string): Promise<HcmReviewSkipPreview> {
+  async previewFieldSkip(reviewIdentity: string, sourceField: string, optionalOnly = false): Promise<HcmReviewSkipPreview> {
     const raw = await transport.post(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(reviewIdentity)}/skip-field/preview`,
-      { source_field: sourceField }, { token: token() });
+      { source_field: sourceField, ...(optionalOnly ? { optional_only: true } : {}) }, { token: token() });
     const preview = decodePayload(z.object({ data: SkipPreviewSchema }), raw).data;
     if (preview.review_identity !== reviewIdentity || preview.source_field !== sourceField) throw new Error('警示略過預覽與欄位不一致。');
     return preview;
   },
-  async applyFieldSkip(preview: HcmReviewSkipPreview, idempotencyKey: string): Promise<HcmResubmissionReceipt> {
+  async applyFieldSkip(preview: HcmReviewSkipPreview, idempotencyKey: string, optionalOnly = false): Promise<HcmResubmissionReceipt> {
     const raw = await transport.post(`/api/v1/case-import/hcm/reviews/${encodeURIComponent(preview.review_identity)}/skip-field/apply`, {
-      source_field: preview.source_field, expected_review_version: preview.review_version, preview_fingerprint: preview.preview_fingerprint,
+      source_field: preview.source_field, ...(optionalOnly ? { optional_only: true } : {}), expected_review_version: preview.review_version, preview_fingerprint: preview.preview_fingerprint,
     }, { token: token(), headers: { 'Idempotency-Key': idempotencyKey, 'X-Correlation-ID': idempotencyKey } });
     const receipt = decodePayload(HcmResubmissionReceiptEnvelopeSchema, raw).data;
     if (receipt.review_identity !== preview.review_identity || receipt.case_no !== preview.case_no
