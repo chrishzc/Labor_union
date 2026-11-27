@@ -646,7 +646,11 @@ def _funding_schedule(
             pending_reason="historical_payroll_end_date_missing",
             pending_detail="缺少實際結束日，正式應付預計付款日與分期保留待確認。",
         )
-    funding = query_subsidy_payable_handoff(connection, case_no, payroll_candidate_total=amount)
+    funding = query_subsidy_payable_handoff(
+        connection,
+        case_no,
+        payroll_candidate_total=amount if allow_split_installments else None,
+    )
     if funding.staff_subsidy_reason:
         return HistoricalFundingSchedule(
             due_date=None,
