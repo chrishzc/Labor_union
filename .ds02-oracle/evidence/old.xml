@@ -1,0 +1,589 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="32" failures="4" errors="0" time="4.069977821">
+    <testsuite name="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" timestamp="2026-11-27T11:39:16.691Z" hostname="runnervm0hi8g" tests="32" failures="4" errors="0" skipped="28" time="4.069977821">
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="帶入同案及月嫂，同步後重新查核清冊" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="已結清款項只顯示查核原因" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="顯示歷史歸屬更正的待核對原因，無成功回報或清冊重讀" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同步回執逐人讀回應付，驗證指派 17 與另一人的缺項" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同步回執逐人讀回應付，驗證指派 99 與另一人的缺項" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="沒有同步回執時唯讀查回同名月嫂 42 的正式應付" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="沒有同步回執時唯讀查回同名月嫂 43 的正式應付" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同步回應 rejected 後仍可查核，不重送同步" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同步回應 missing 後仍可查核，不重送同步" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同人混合指派 &apos;needs_review&apos;，未建帳列先回 false 時不顯金額，移除後才顯示" time="1.045119875">
+            <failure message="[2mexpect([22m[31melement[39m[2m).toHaveTextContent()[22m
+
+Expected element to have text content:
+[32m  請核對本案指派[39m
+Received:
+[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[39m
+
+Ignored nodes: comments, script, style
+[36m&lt;html&gt;[39m
+  [36m&lt;head /&gt;[39m
+  [36m&lt;body&gt;[39m
+    [36m&lt;div&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;歷史月嫂款查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;h3&gt;[39m
+          [0m合成月嫂甲[0m
+          [0m · 應付清冊查核[0m
+        [36m&lt;/h3&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m尚未建立月嫂應付帳務及付款日。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-primary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m同步月嫂應付[0m
+        [36m&lt;/button&gt;[39m
+      [36m&lt;/section&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;正式應付唯讀查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0mCASE-OLD-1[0m
+          [0m · [0m
+          [0m合成月嫂甲[0m
+          [0m · 月嫂編號 [0m
+          [0m42[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-secondary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m重新查核正式應付[0m
+        [36m&lt;/button&gt;[39m
+        [36m&lt;p[39m
+          [33mrole[39m=[32m&quot;status&quot;[39m
+        [36m&gt;[39m
+          [0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[0m
+        [36m&lt;/p&gt;[39m
+      [36m&lt;/section&gt;[39m
+    [36m&lt;/div&gt;[39m
+  [36m&lt;/body&gt;[39m
+[36m&lt;/html&gt;[39m" type="Error">
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  請核對本案指派
+Received:
+  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+
+Ignored nodes: comments, script, style
+&lt;html&gt;
+  &lt;head /&gt;
+  &lt;body&gt;
+    &lt;div&gt;
+      &lt;section
+        aria-label=&quot;歷史月嫂款查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;h3&gt;
+          合成月嫂甲
+           · 應付清冊查核
+        &lt;/h3&gt;
+        &lt;p&gt;
+          尚未建立月嫂應付帳務及付款日。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-primary&quot;
+          type=&quot;button&quot;
+        &gt;
+          同步月嫂應付
+        &lt;/button&gt;
+      &lt;/section&gt;
+      &lt;section
+        aria-label=&quot;正式應付唯讀查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;p&gt;
+          CASE-OLD-1
+           · 
+          合成月嫂甲
+           · 月嫂編號 
+          42
+        &lt;/p&gt;
+        &lt;p&gt;
+          查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-secondary&quot;
+          type=&quot;button&quot;
+        &gt;
+          重新查核正式應付
+        &lt;/button&gt;
+        &lt;p
+          role=&quot;status&quot;
+        &gt;
+          月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+        &lt;/p&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+ ❯ src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+            </failure>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同人混合指派 &apos;needs_review&apos;，未建帳列先回 true 時不顯金額，移除後才顯示" time="1.008123509">
+            <failure message="[2mexpect([22m[31melement[39m[2m).toHaveTextContent()[22m
+
+Expected element to have text content:
+[32m  請核對本案指派[39m
+Received:
+[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[39m
+
+Ignored nodes: comments, script, style
+[36m&lt;html&gt;[39m
+  [36m&lt;head /&gt;[39m
+  [36m&lt;body&gt;[39m
+    [36m&lt;div&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;歷史月嫂款查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;h3&gt;[39m
+          [0m合成月嫂甲[0m
+          [0m · 應付清冊查核[0m
+        [36m&lt;/h3&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m尚未建立月嫂應付帳務及付款日。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-primary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m同步月嫂應付[0m
+        [36m&lt;/button&gt;[39m
+      [36m&lt;/section&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;正式應付唯讀查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0mCASE-OLD-1[0m
+          [0m · [0m
+          [0m合成月嫂甲[0m
+          [0m · 月嫂編號 [0m
+          [0m42[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-secondary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m重新查核正式應付[0m
+        [36m&lt;/button&gt;[39m
+        [36m&lt;p[39m
+          [33mrole[39m=[32m&quot;status&quot;[39m
+        [36m&gt;[39m
+          [0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[0m
+        [36m&lt;/p&gt;[39m
+      [36m&lt;/section&gt;[39m
+    [36m&lt;/div&gt;[39m
+  [36m&lt;/body&gt;[39m
+[36m&lt;/html&gt;[39m" type="Error">
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  請核對本案指派
+Received:
+  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+
+Ignored nodes: comments, script, style
+&lt;html&gt;
+  &lt;head /&gt;
+  &lt;body&gt;
+    &lt;div&gt;
+      &lt;section
+        aria-label=&quot;歷史月嫂款查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;h3&gt;
+          合成月嫂甲
+           · 應付清冊查核
+        &lt;/h3&gt;
+        &lt;p&gt;
+          尚未建立月嫂應付帳務及付款日。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-primary&quot;
+          type=&quot;button&quot;
+        &gt;
+          同步月嫂應付
+        &lt;/button&gt;
+      &lt;/section&gt;
+      &lt;section
+        aria-label=&quot;正式應付唯讀查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;p&gt;
+          CASE-OLD-1
+           · 
+          合成月嫂甲
+           · 月嫂編號 
+          42
+        &lt;/p&gt;
+        &lt;p&gt;
+          查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-secondary&quot;
+          type=&quot;button&quot;
+        &gt;
+          重新查核正式應付
+        &lt;/button&gt;
+        &lt;p
+          role=&quot;status&quot;
+        &gt;
+          月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+        &lt;/p&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+ ❯ src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+            </failure>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同人混合指派 &apos;not_established&apos;，未建帳列先回 false 時不顯金額，移除後才顯示" time="1.007354451">
+            <failure message="[2mexpect([22m[31melement[39m[2m).toHaveTextContent()[22m
+
+Expected element to have text content:
+[32m  請核對本案指派[39m
+Received:
+[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[39m
+
+Ignored nodes: comments, script, style
+[36m&lt;html&gt;[39m
+  [36m&lt;head /&gt;[39m
+  [36m&lt;body&gt;[39m
+    [36m&lt;div&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;歷史月嫂款查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;h3&gt;[39m
+          [0m合成月嫂甲[0m
+          [0m · 應付清冊查核[0m
+        [36m&lt;/h3&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m尚未建立月嫂應付帳務及付款日。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-primary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m同步月嫂應付[0m
+        [36m&lt;/button&gt;[39m
+      [36m&lt;/section&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;正式應付唯讀查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0mCASE-OLD-1[0m
+          [0m · [0m
+          [0m合成月嫂甲[0m
+          [0m · 月嫂編號 [0m
+          [0m42[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-secondary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m重新查核正式應付[0m
+        [36m&lt;/button&gt;[39m
+        [36m&lt;p[39m
+          [33mrole[39m=[32m&quot;status&quot;[39m
+        [36m&gt;[39m
+          [0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[0m
+        [36m&lt;/p&gt;[39m
+      [36m&lt;/section&gt;[39m
+    [36m&lt;/div&gt;[39m
+  [36m&lt;/body&gt;[39m
+[36m&lt;/html&gt;[39m" type="Error">
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  請核對本案指派
+Received:
+  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+
+Ignored nodes: comments, script, style
+&lt;html&gt;
+  &lt;head /&gt;
+  &lt;body&gt;
+    &lt;div&gt;
+      &lt;section
+        aria-label=&quot;歷史月嫂款查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;h3&gt;
+          合成月嫂甲
+           · 應付清冊查核
+        &lt;/h3&gt;
+        &lt;p&gt;
+          尚未建立月嫂應付帳務及付款日。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-primary&quot;
+          type=&quot;button&quot;
+        &gt;
+          同步月嫂應付
+        &lt;/button&gt;
+      &lt;/section&gt;
+      &lt;section
+        aria-label=&quot;正式應付唯讀查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;p&gt;
+          CASE-OLD-1
+           · 
+          合成月嫂甲
+           · 月嫂編號 
+          42
+        &lt;/p&gt;
+        &lt;p&gt;
+          查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-secondary&quot;
+          type=&quot;button&quot;
+        &gt;
+          重新查核正式應付
+        &lt;/button&gt;
+        &lt;p
+          role=&quot;status&quot;
+        &gt;
+          月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+        &lt;/p&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+ ❯ src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+            </failure>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同人混合指派 &apos;not_established&apos;，未建帳列先回 true 時不顯金額，移除後才顯示" time="1.006173762">
+            <failure message="[2mexpect([22m[31melement[39m[2m).toHaveTextContent()[22m
+
+Expected element to have text content:
+[32m  請核對本案指派[39m
+Received:
+[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[39m
+
+Ignored nodes: comments, script, style
+[36m&lt;html&gt;[39m
+  [36m&lt;head /&gt;[39m
+  [36m&lt;body&gt;[39m
+    [36m&lt;div&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;歷史月嫂款查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;h3&gt;[39m
+          [0m合成月嫂甲[0m
+          [0m · 應付清冊查核[0m
+        [36m&lt;/h3&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m尚未建立月嫂應付帳務及付款日。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-primary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m同步月嫂應付[0m
+        [36m&lt;/button&gt;[39m
+      [36m&lt;/section&gt;[39m
+      [36m&lt;section[39m
+        [33maria-label[39m=[32m&quot;正式應付唯讀查核&quot;[39m
+        [33mclass[39m=[32m&quot;case-accounting-card&quot;[39m
+      [36m&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0mCASE-OLD-1[0m
+          [0m · [0m
+          [0m合成月嫂甲[0m
+          [0m · 月嫂編號 [0m
+          [0m42[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;p&gt;[39m
+          [0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。[0m
+        [36m&lt;/p&gt;[39m
+        [36m&lt;button[39m
+          [33mclass[39m=[32m&quot;finance-btn-secondary&quot;[39m
+          [33mtype[39m=[32m&quot;button&quot;[39m
+        [36m&gt;[39m
+          [0m重新查核正式應付[0m
+        [36m&lt;/button&gt;[39m
+        [36m&lt;p[39m
+          [33mrole[39m=[32m&quot;status&quot;[39m
+        [36m&gt;[39m
+          [0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認[0m
+        [36m&lt;/p&gt;[39m
+      [36m&lt;/section&gt;[39m
+    [36m&lt;/div&gt;[39m
+  [36m&lt;/body&gt;[39m
+[36m&lt;/html&gt;[39m" type="Error">
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  請核對本案指派
+Received:
+  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+
+Ignored nodes: comments, script, style
+&lt;html&gt;
+  &lt;head /&gt;
+  &lt;body&gt;
+    &lt;div&gt;
+      &lt;section
+        aria-label=&quot;歷史月嫂款查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;h3&gt;
+          合成月嫂甲
+           · 應付清冊查核
+        &lt;/h3&gt;
+        &lt;p&gt;
+          尚未建立月嫂應付帳務及付款日。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-primary&quot;
+          type=&quot;button&quot;
+        &gt;
+          同步月嫂應付
+        &lt;/button&gt;
+      &lt;/section&gt;
+      &lt;section
+        aria-label=&quot;正式應付唯讀查核&quot;
+        class=&quot;case-accounting-card&quot;
+      &gt;
+        &lt;p&gt;
+          CASE-OLD-1
+           · 
+          合成月嫂甲
+           · 月嫂編號 
+          42
+        &lt;/p&gt;
+        &lt;p&gt;
+          查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。
+        &lt;/p&gt;
+        &lt;button
+          class=&quot;finance-btn-secondary&quot;
+          type=&quot;button&quot;
+        &gt;
+          重新查核正式應付
+        &lt;/button&gt;
+        &lt;p
+          role=&quot;status&quot;
+        &gt;
+          月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認
+        &lt;/p&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+ ❯ src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+            </failure>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;所選月嫂缺指派編號&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;同人多正式指派&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;指派來源重複&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;義務連結重複&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;義務被另一位同名月嫂宣稱&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;兩人使用同一指派編號&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;款項列重複&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;回應是另一案&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;缺正式款項&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;款項方向錯誤&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;只有另一位同名月嫂&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;只有未建帳試算&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="&apos;選取義務與指派不一致&apos; 時不以同名、試算或案件總額補位" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="所選月嫂識別未知時不查別人的正式款項" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="正式應付為零仍以正式金額讀回" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="已有原款項的更正面板也可唯讀重查" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="讀取失敗可重新唯讀查核" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="切換同名月嫂後不顯示前一人的延遲讀回" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx" name="同案兩位同名的查核列顯示人員編號，選取保留各自識別" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,0 +1,101 @@
+{
+  "run_id": "45992195244",
+  "attempt": "1",
+  "run_url": "https://github.com/chrishzc/Labor_union/actions/runs/45992195244/attempts/1",
+  "checkout_sha": "207daf6e5ea16b2a84671eafbf616bd9a2c603e5",
+  "github_sha": "207daf6e5ea16b2a84671eafbf616bd9a2c603e5",
+  "node": "v24.22.3",
+  "npm": "11.19.1",
+  "fixed_component_blob": "a66ea80cfad3da6da082169ad880e114c18da2e2",
+  "old_component_blob": "39c423f6c36563008d361954932e60ccee174fc5",
+  "shared_sha256": {
+    "ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx": "eeaecf4dda2f2ef4f7c6280bfd0c84e50eae9665e2daae23f65add49991abaa7",
+    "ui_react/package-lock.json": "73217faa1f3b9b16b45bb53f997d83f573acd582aaff3b1117d3a9cfc493974a",
+    "ui_react/package.json": "e9e4742bcddb71ce72d236ce01670b3b3c6620e19a6816b88a597354b246d666"
+  },
+  "groups": {
+    "fixed": {
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx",
+        "-t",
+        "同人混合指派",
+        "--reporter=verbose",
+        "--reporter=json",
+        "--reporter=junit",
+        "--outputFile.json=/home/runner/work/Labor_union/Labor_union/.ds02-oracle/results/fixed.json",
+        "--outputFile.junit=/home/runner/work/Labor_union/Labor_union/.ds02-oracle/results/fixed.xml"
+      ],
+      "exit_code": 0,
+      "component_blob": "a66ea80cfad3da6da082169ad880e114c18da2e2",
+      "junit_selected_count": 4,
+      "cases": [
+        {
+          "name": "同人混合指派 'needs_review'，未建帳列先回 false 時不顯金額，移除後才顯示",
+          "status": "passed",
+          "failure_messages": ""
+        },
+        {
+          "name": "同人混合指派 'needs_review'，未建帳列先回 true 時不顯金額，移除後才顯示",
+          "status": "passed",
+          "failure_messages": ""
+        },
+        {
+          "name": "同人混合指派 'not_established'，未建帳列先回 false 時不顯金額，移除後才顯示",
+          "status": "passed",
+          "failure_messages": ""
+        },
+        {
+          "name": "同人混合指派 'not_established'，未建帳列先回 true 時不顯金額，移除後才顯示",
+          "status": "passed",
+          "failure_messages": ""
+        }
+      ]
+    },
+    "old": {
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx",
+        "-t",
+        "同人混合指派",
+        "--reporter=verbose",
+        "--reporter=json",
+        "--reporter=junit",
+        "--outputFile.json=/home/runner/work/Labor_union/Labor_union/.ds02-oracle/results/old.json",
+        "--outputFile.junit=/home/runner/work/Labor_union/Labor_union/.ds02-oracle/results/old.xml"
+      ],
+      "exit_code": 1,
+      "component_blob": "39c423f6c36563008d361954932e60ccee174fc5",
+      "junit_selected_count": 4,
+      "cases": [
+        {
+          "name": "同人混合指派 'needs_review'，未建帳列先回 false 時不顯金額，移除後才顯示",
+          "status": "failed",
+          "failure_messages": "Error: \u001b[2mexpect(\u001b[22m\u001b[31melement\u001b[39m\u001b[2m).toHaveTextContent()\u001b[22m\n\nExpected element to have text content:\n\u001b[32m  請核對本案指派\u001b[39m\nReceived:\n\u001b[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<html>\u001b[39m\n  \u001b[36m<head />\u001b[39m\n  \u001b[36m<body>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"歷史月嫂款查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<h3>\u001b[39m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 應付清冊查核\u001b[0m\n        \u001b[36m</h3>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m尚未建立月嫂應付帳務及付款日。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-primary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m同步月嫂應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"正式應付唯讀查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0mCASE-OLD-1\u001b[0m\n          \u001b[0m · \u001b[0m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 月嫂編號 \u001b[0m\n          \u001b[0m42\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-secondary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m重新查核正式應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n        \u001b[36m<p\u001b[39m\n          \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[0m\n        \u001b[36m</p>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</body>\u001b[39m\n\u001b[36m</html>\u001b[39m\n    at Proxy.__VITEST_EXTEND_ASSERTION__ (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1888:12)\n    at Proxy.<anonymous> (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/chai/index.js:1737:25)\n    at /home/runner/work/Labor_union/Labor_union/ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58\n    at runWithExpensiveErrorDiagnosticsDisabled (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/config.js:47:12)\n    at checkCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:124:77)\n    at Timeout.checkRealTimersCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:118:16)\n    at listOnTimeout (node:internal/timers:685:17)\n    at processTimers (node:internal/timers:618:7)"
+        },
+        {
+          "name": "同人混合指派 'needs_review'，未建帳列先回 true 時不顯金額，移除後才顯示",
+          "status": "failed",
+          "failure_messages": "Error: \u001b[2mexpect(\u001b[22m\u001b[31melement\u001b[39m\u001b[2m).toHaveTextContent()\u001b[22m\n\nExpected element to have text content:\n\u001b[32m  請核對本案指派\u001b[39m\nReceived:\n\u001b[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<html>\u001b[39m\n  \u001b[36m<head />\u001b[39m\n  \u001b[36m<body>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"歷史月嫂款查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<h3>\u001b[39m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 應付清冊查核\u001b[0m\n        \u001b[36m</h3>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m尚未建立月嫂應付帳務及付款日。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-primary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m同步月嫂應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"正式應付唯讀查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0mCASE-OLD-1\u001b[0m\n          \u001b[0m · \u001b[0m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 月嫂編號 \u001b[0m\n          \u001b[0m42\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-secondary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m重新查核正式應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n        \u001b[36m<p\u001b[39m\n          \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[0m\n        \u001b[36m</p>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</body>\u001b[39m\n\u001b[36m</html>\u001b[39m\n    at Proxy.__VITEST_EXTEND_ASSERTION__ (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1888:12)\n    at Proxy.<anonymous> (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/chai/index.js:1737:25)\n    at /home/runner/work/Labor_union/Labor_union/ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58\n    at runWithExpensiveErrorDiagnosticsDisabled (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/config.js:47:12)\n    at checkCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:124:77)\n    at Timeout.checkRealTimersCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:118:16)\n    at listOnTimeout (node:internal/timers:685:17)\n    at processTimers (node:internal/timers:618:7)"
+        },
+        {
+          "name": "同人混合指派 'not_established'，未建帳列先回 false 時不顯金額，移除後才顯示",
+          "status": "failed",
+          "failure_messages": "Error: \u001b[2mexpect(\u001b[22m\u001b[31melement\u001b[39m\u001b[2m).toHaveTextContent()\u001b[22m\n\nExpected element to have text content:\n\u001b[32m  請核對本案指派\u001b[39m\nReceived:\n\u001b[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<html>\u001b[39m\n  \u001b[36m<head />\u001b[39m\n  \u001b[36m<body>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"歷史月嫂款查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<h3>\u001b[39m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 應付清冊查核\u001b[0m\n        \u001b[36m</h3>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m尚未建立月嫂應付帳務及付款日。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-primary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m同步月嫂應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"正式應付唯讀查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0mCASE-OLD-1\u001b[0m\n          \u001b[0m · \u001b[0m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 月嫂編號 \u001b[0m\n          \u001b[0m42\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-secondary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m重新查核正式應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n        \u001b[36m<p\u001b[39m\n          \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[0m\n        \u001b[36m</p>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</body>\u001b[39m\n\u001b[36m</html>\u001b[39m\n    at Proxy.__VITEST_EXTEND_ASSERTION__ (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1888:12)\n    at Proxy.<anonymous> (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/chai/index.js:1737:25)\n    at /home/runner/work/Labor_union/Labor_union/ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58\n    at runWithExpensiveErrorDiagnosticsDisabled (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/config.js:47:12)\n    at checkCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:124:77)\n    at Timeout.checkRealTimersCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:118:16)\n    at listOnTimeout (node:internal/timers:685:17)\n    at processTimers (node:internal/timers:618:7)"
+        },
+        {
+          "name": "同人混合指派 'not_established'，未建帳列先回 true 時不顯金額，移除後才顯示",
+          "status": "failed",
+          "failure_messages": "Error: \u001b[2mexpect(\u001b[22m\u001b[31melement\u001b[39m\u001b[2m).toHaveTextContent()\u001b[22m\n\nExpected element to have text content:\n\u001b[32m  請核對本案指派\u001b[39m\nReceived:\n\u001b[31m  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<html>\u001b[39m\n  \u001b[36m<head />\u001b[39m\n  \u001b[36m<body>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"歷史月嫂款查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<h3>\u001b[39m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 應付清冊查核\u001b[0m\n        \u001b[36m</h3>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m尚未建立月嫂應付帳務及付款日。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-primary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m同步月嫂應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"正式應付唯讀查核\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"case-accounting-card\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0mCASE-OLD-1\u001b[0m\n          \u001b[0m · \u001b[0m\n          \u001b[0m合成月嫂甲\u001b[0m\n          \u001b[0m · 月嫂編號 \u001b[0m\n          \u001b[0m42\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<p>\u001b[39m\n          \u001b[0m查核目前正式應付，不會重新同步或新增款項，也不代表原次同步已成功。\u001b[0m\n        \u001b[36m</p>\u001b[39m\n        \u001b[36m<button\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"finance-btn-secondary\"\u001b[39m\n          \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m重新查核正式應付\u001b[0m\n        \u001b[36m</button>\u001b[39m\n        \u001b[36m<p\u001b[39m\n          \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[0m月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認\u001b[0m\n        \u001b[36m</p>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</body>\u001b[39m\n\u001b[36m</html>\u001b[39m\n    at Proxy.__VITEST_EXTEND_ASSERTION__ (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1888:12)\n    at Proxy.<anonymous> (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///home/runner/work/Labor_union/Labor_union/ui_react/node_modules/chai/index.js:1737:25)\n    at /home/runner/work/Labor_union/Labor_union/ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx:241:58\n    at runWithExpensiveErrorDiagnosticsDisabled (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/config.js:47:12)\n    at checkCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:124:77)\n    at Timeout.checkRealTimersCallback (/home/runner/work/Labor_union/Labor_union/ui_react/node_modules/@testing-library/dom/dist/wait-for.js:118:16)\n    at listOnTimeout (node:internal/timers:685:17)\n    at processTimers (node:internal/timers:618:7)"
+        }
+      ]
+    }
+  },
+  "acceptance_changes": [],
+  "scope": "Only four mixed-assignment cases via the existing UI button, real accounting client and decoder, mocked transport GET; no DB, browser, deployment or merge.",
+  "oracle": "passed"
+}

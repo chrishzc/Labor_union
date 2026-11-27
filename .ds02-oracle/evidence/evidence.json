@@ -1,0 +1,139 @@
+{
+  "verification": "passed",
+  "independent_verifier": true,
+  "repository": "chrishzc/Labor_union",
+  "branch": "verify/ds02-ci-oracle-20261127",
+  "run": {
+    "id": 45992195244,
+    "attempt": 1,
+    "head_sha": "207daf6e5ea16b2a84671eafbf616bd9a2c603e5",
+    "status": "completed",
+    "conclusion": "success",
+    "event": "push",
+    "html_url": "https://github.com/chrishzc/Labor_union/actions/runs/45992195244",
+    "created_at": "2026-11-27T11:38:55Z",
+    "updated_at": "2026-11-27T11:39:53Z"
+  },
+  "job": {
+    "id": 140482553500,
+    "url": "https://github.com/chrishzc/Labor_union/actions/runs/45992195244/job/140482553500",
+    "conclusion": "success"
+  },
+  "artifact": {
+    "id": 15193897848,
+    "url": "https://github.com/chrishzc/Labor_union/actions/runs/45992195244/artifacts/15193897848",
+    "sha256": "fc6db1b8da9bf593c86c9253dc67e7b658f538f30e9b7198be6ef076ac49575e",
+    "size_bytes": 14379,
+    "download_and_junit_readback": "passed"
+  },
+  "inputs": [
+    {
+      "library_file_id": "libfile_fde3_f-ef22ebf424e48191b4d9fec1632d6e00_8c2f93831e508191bfd97d957c73fc88",
+      "file_id": "file_000000000ea481fbb34f123d50176b74",
+      "name": "lu-study-snapshot.bundle",
+      "version": 0,
+      "sha256": "f13afb1059df7b035643f1d289e8474890201a8b2c6d2f4e8c683bc06b0df912",
+      "size_bytes": 13855085
+    },
+    {
+      "library_file_id": "libfile_fde3_f-3e8676e4e0808191851e2fce1d269737_8c2f93831e508191bfd97d957c73fc88",
+      "file_id": "file_00000000122c81f5953f9b62dad3f3d2",
+      "name": "lu-ds02-candidate.patch",
+      "version": 0,
+      "sha256": "75a46e3a2a2ebdad6634667441d5c86cfa90bdc58157d8cc47f63e700d36cbde",
+      "size_bytes": 19814
+    },
+    {
+      "library_file_id": "libfile_fde3_f-33f9b87b1f588191826fb4be5d3b77a7_8c2f93831e508191bfd97d957c73fc88",
+      "file_id": "file_00000000ee88822fb14e3cf91d9a4bf5",
+      "name": "lu-ds02-mixed-status-full.patch",
+      "version": 0,
+      "sha256": "7e01b7c1cf560359bb68987e3b3c4deae257443c922cbb1612f2c350ecf85eba",
+      "size_bytes": 23004
+    }
+  ],
+  "source": {
+    "base": "252195342a168fd7e49daaabab12c892bd91ae70",
+    "snapshot": "3d1246d4ccce517d22b59f5ade688b891148203d",
+    "source_commit": "af37823d98e994cdf0412fcb2660d1725a1b6704",
+    "expected_and_actual_source_tree": "65125bb860417d5f3b18e27a48f9887eaad2c695",
+    "ci_checkout": "207daf6e5ea16b2a84671eafbf616bd9a2c603e5",
+    "old_component_blob": "39c423f6c36563008d361954932e60ccee174fc5",
+    "fixed_component_blob": "a66ea80cfad3da6da082169ad880e114c18da2e2",
+    "source_tree_equivalence": "Exact whole-tree equality: snapshot + fixed full patch equals original base + two verified documents + same component/test bytes."
+  },
+  "pstack": {
+    "repository": "chrishzc/personal_tips",
+    "commit": "03fffdb6b6f3ff595959f027e0511acbd95123f3",
+    "read": [
+      "skills/precise-query/SKILL.md",
+      "skills/principle-prove-it-works/SKILL.md"
+    ],
+    "mode": "Read-only pinned sources; no host install/configuration change; no claim of repeating the original blind acceptance."
+  },
+  "shared": {
+    "node": "v24.22.3",
+    "npm": "11.19.1",
+    "sha256": {
+      "ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx": "eeaecf4dda2f2ef4f7c6280bfd0c84e50eae9665e2daae23f65add49991abaa7",
+      "ui_react/package-lock.json": "73217faa1f3b9b16b45bb53f997d83f573acd582aaff3b1117d3a9cfc493974a",
+      "ui_react/package.json": "e9e4742bcddb71ce72d236ce01670b3b3c6620e19a6816b88a597354b246d666"
+    },
+    "same_dependency_install": true,
+    "component_only_swap": true
+  },
+  "results": [
+    {
+      "name": "同人混合指派 'needs_review'，未建帳列先回 false 時不顯金額，移除後才顯示",
+      "fixed": "passed",
+      "old": "failed",
+      "expected_old_failure": "Expected assignment-review hint; received selected staff formal amount.",
+      "actual_old_failure": "Error: expect(element).toHaveTextContent()\n\nExpected element to have text content:\n  請核對本案指派\nReceived:\n  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認"
+    },
+    {
+      "name": "同人混合指派 'needs_review'，未建帳列先回 true 時不顯金額，移除後才顯示",
+      "fixed": "passed",
+      "old": "failed",
+      "expected_old_failure": "Expected assignment-review hint; received selected staff formal amount.",
+      "actual_old_failure": "Error: expect(element).toHaveTextContent()\n\nExpected element to have text content:\n  請核對本案指派\nReceived:\n  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認"
+    },
+    {
+      "name": "同人混合指派 'not_established'，未建帳列先回 false 時不顯金額，移除後才顯示",
+      "fixed": "passed",
+      "old": "failed",
+      "expected_old_failure": "Expected assignment-review hint; received selected staff formal amount.",
+      "actual_old_failure": "Error: expect(element).toHaveTextContent()\n\nExpected element to have text content:\n  請核對本案指派\nReceived:\n  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認"
+    },
+    {
+      "name": "同人混合指派 'not_established'，未建帳列先回 true 時不顯金額，移除後才顯示",
+      "fixed": "passed",
+      "old": "failed",
+      "expected_old_failure": "Expected assignment-review hint; received selected staff formal amount.",
+      "actual_old_failure": "Error: expect(element).toHaveTextContent()\n\nExpected element to have text content:\n  請核對本案指派\nReceived:\n  月嫂編號 42 · 正式應付 NT$ 48,000 · 付款日 待確認"
+    }
+  ],
+  "positive_control": "Fixed four cases each remove only assignment 99, retain assignment 17, obligation original-42, NT$ 48,000 and null due date, then display the original amount/date.",
+  "get_only": "All fixed cases complete assertions of exactly two accounting GETs with AbortSignal, zero transport POST, zero sync, zero supplement and zero onSaved. These assertions remain unchanged in old group; old cases stop at the initial review-hint failure before downstream positive-control/GET-only assertions.",
+  "checks": {
+    "input_sha256": "passed",
+    "whole_source_tree": "passed",
+    "git_diff_check": "passed",
+    "json_and_junit_four_each": "passed",
+    "fixed_cases": "passed: 4/4",
+    "old_sensitivity": "passed: 4/4 expected assertion failures; npm exit 1",
+    "strict_typecheck": "passed",
+    "focused_lint": "passed: 0 warnings, 0 errors",
+    "ci_helper_python_syntax": "passed"
+  },
+  "acceptance_changes": [],
+  "runner_or_fixture_changes": [],
+  "unverified": [
+    "Other tests in historical_payable_review.test.tsx were filtered out; no full-file/full-suite runtime pass is claimed.",
+    "Real browser/network/backend/database/production data and deployment were not exercised.",
+    "No local project test file was run.",
+    "No PR, merge, branch protection, merge-gate or existing workflow changes; no writes to #439, #447, main or other people's branches.",
+    "Structural architecture validation was not rerun here; prior fixed-patch closure evidence is separate from this behavioral CI result."
+  ],
+  "local_scope": "/tmp/lu-ds02-ci-oracle-20261127",
+  "remaining_blockers": []
+}
