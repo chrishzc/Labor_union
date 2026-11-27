@@ -199,7 +199,17 @@ describe('Finance case list progressive owner results', () => {
   it.each(['accounting', 'notices'])('does not reuse successful sensitive %s data after refresh denies that owner', async owner => {
     const view = render(<FinanceCaseList onCase={vi.fn()} />);
     await started();
-    for (const id of cases) await finish(id, 41000, id === 'SYN-P-004');
+    for (const id of cases) {
+      if (id === 'SYN-P-001') {
+        const value = pendingCase(id);
+        await act(async () => {
+          value.accounting.resolve(accounting(id, 41000));
+          value.notices.resolve([{ case_no: id, payment_stage: 'deposit', payment: null, recipient_label: '合成收件者', can_send: false,
+            unavailable_reason: null, message: null, history: [{ task_id: 1, requested_at: '2026-01-01T00:00:00Z', sent_at: '2026-01-01T00:00:00Z', status: 'sent', content: null, actor: null }] }]);
+        });
+      } else await finish(id, 41000, id === 'SYN-P-004');
+    }
+    expect(screen.getByText('已發送 2026-01-01 08:00')).toBeVisible();
     await loaded();
     expect(rowIds()).not.toContain('SYN-P-004');
     generation();
@@ -218,6 +228,7 @@ describe('Finance case list progressive owner results', () => {
     expect(within(row).queryByText('NT$ 41,000')).not.toBeInTheDocument();
     expect(within(row).getByText(owner === 'accounting' ? '帳務來源待確認' : '通知紀錄待確認')).toBeVisible();
     expect(within(row).queryByText('尚無成功通知紀錄')).not.toBeInTheDocument();
+    expect(within(row).queryByText(/已發送/)).not.toBeInTheDocument();
     expect(within(row).queryByRole('button', { name: '發出提醒' })).not.toBeInTheDocument();
     for (const id of cases.slice(1)) await finish(id, 51000, id === 'SYN-P-004');
     await loaded();
