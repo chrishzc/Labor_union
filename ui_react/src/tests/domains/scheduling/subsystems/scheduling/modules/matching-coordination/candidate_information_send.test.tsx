@@ -130,7 +130,8 @@ it('shows current reservations before LINE inquiry or manual willingness and ref
   expect(card.getByRole('radio', { name: '願意承接' })).toBeEnabled();
   expect(card.queryByText('其他案件等待訂金保留，僅提醒。')).not.toBeInTheDocument();
   await openSharedPreview();
-  expect(card.getByRole('button', { name: '確認寄送（測試月嫂）' })).toBeEnabled();
+  expect(card.getByRole('button', { name: '寄送通知（測試月嫂）' })).toBeEnabled();
+  expect(card.queryByRole('button', { name: /確認寄送|再次寄送|預覽並寄送/ })).not.toBeInTheDocument();
   expect(client.sendInformation).not.toHaveBeenCalled();
 
   search.mockResolvedValueOnce({ ...inquiryAvailability, planned_start_date: '2026-10-02', planned_end_date: '2026-10-03', conflicts: [
@@ -156,7 +157,7 @@ it('offers a retry when the current availability cannot be checked', async () =>
   expect(screen.queryByText('目前無法查詢候選月嫂的檔期。')).not.toBeInTheDocument();
 });
 
-it.each([null, 'sent', 'failed', 'queued', 'pending', 'retryable_failed', 'cancelled'] as const)('再次寄送不受前次寄送狀態 %s 或未儲存日期限制', async status => {
+it.each([null, 'sent', 'failed', 'queued', 'pending', 'retryable_failed', 'cancelled'] as const)('寄送通知不受前次寄送狀態 %s 或未儲存日期限制', async status => {
   const initial = await client.query('CASE-1');
   const candidate = initial.candidates[0];
   vi.mocked(client.previewCaseWeeklyService).mockResolvedValue({
@@ -169,13 +170,32 @@ it.each([null, 'sent', 'failed', 'queued', 'pending', 'retryable_failed', 'cance
   }] });
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
   const card = within(await screen.findByRole('article'));
-  fireEvent.click(card.getByRole('button', { name: '再次寄送（測試月嫂）' }));
+  fireEvent.click(card.getByRole('button', { name: '寄送通知（測試月嫂）' }));
   await waitFor(() => expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     candidateId: 3, resend: true, previewFingerprint: undefined,
   })));
   expect(client.previewInformationPackage).not.toHaveBeenCalled();
   expect(screen.queryByRole('region', { name: '寄送預覽' })).not.toBeInTheDocument();
-  await waitFor(() => expect(card.getByRole('button', { name: '再次寄送（測試月嫂）' })).toBeEnabled());
+  await waitFor(() => expect(card.getByRole('button', { name: '寄送通知（測試月嫂）' })).toBeEnabled());
+});
+
+it.each(['workbench', 'legacy'] as const)('shows a single enabled 寄送通知 button across all candidate statuses in %s', async presentation => {
+  const initial = await client.query('CASE-1');
+  const base = initial.candidates[0]!;
+  vi.mocked(client.query).mockResolvedValue({
+    ...initial,
+    candidates: [
+      { ...base, id: 10, staff_id: 101, staff_name: '活躍月嫂', status: 'active' },
+      { ...base, id: 11, staff_id: 102, staff_name: '退出月嫂', status: 'withdrawn' },
+      { ...base, id: 12, staff_id: 103, staff_name: '選定月嫂', status: 'selected' },
+    ],
+  });
+  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation={presentation} />);
+  for (const name of ['活躍月嫂', '退出月嫂', '選定月嫂']) {
+    const button = await screen.findByRole('button', { name: `寄送通知（${name}）` });
+    expect(button).toBeEnabled();
+  }
+  expect(screen.queryByRole('button', { name: /確認寄送|再次寄送|預覽並寄送/ })).not.toBeInTheDocument();
 });
 
 it('shows only changed information on the candidate card without opening another preview', async () => {
@@ -201,12 +221,12 @@ it('previews all four pages before the candidate cards and sends only from the n
   expect(screen.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual([
     '1. 設定每週服務說明', '2. 預覽案件資訊', '3. 選擇月嫂',
   ]);
-  const sendButton = await screen.findByRole('button', { name: '確認寄送（測試月嫂）' });
-  expect(sendButton).toBeDisabled();
+  const sendButton = await screen.findByRole('button', { name: '寄送通知（測試月嫂）' });
+  expect(sendButton).toBeEnabled();
   const panel = await openSharedPreview();
   await within(panel).findByText('第 1 頁，共 4 頁');
   expect(client.sendInformation).not.toHaveBeenCalled();
-  expect(within(panel).queryByRole('button', { name: /確認寄送/ })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: /寄送通知|確認寄送|再次寄送/ })).not.toBeInTheDocument();
   for (const name of ['訂單資訊二', '每週服務說明', '共用回覆卡']) {
     fireEvent.click(within(panel).getByRole('button', { name }));
     expect(within(panel).getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true');
@@ -222,8 +242,8 @@ it('previews all four pages before the candidate cards and sends only from the n
   expect(sendButton).toBeEnabled();
   fireEvent.click(sendButton);
   expect(await screen.findByText('等待發送 · 2026-11-13 12:16')).toBeInTheDocument();
-  expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ candidateId: 3, previewFingerprint: 'a'.repeat(64) }));
-  expect(screen.queryByRole('button', { name: '確認寄送（測試月嫂）' })).not.toBeInTheDocument();
+  expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ candidateId: 3, resend: true, previewFingerprint: undefined }));
+  expect(screen.getByRole('button', { name: '寄送通知（測試月嫂）' })).toBeEnabled();
 });
 
 it('previews the case documents before any candidate has been added', async () => {
@@ -236,12 +256,12 @@ it('previews the case documents before any candidate has been added', async () =
   expect(client.sendInformation).not.toHaveBeenCalled();
 });
 
-it('blocks preview and send until service dates have been saved', async () => {
+it('blocks shared preview until service dates have been saved while keeping candidate send available', async () => {
   const preview = await client.previewCaseInformation('CASE-1', 3);
   vi.mocked(client.previewCaseInformation).mockResolvedValue({ ...preview, send_allowed: false });
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
   expect(await screen.findByText('請先保存每週服務說明的日期。')).toBeInTheDocument();
-  expect(await screen.findByRole('button', { name: '確認寄送（測試月嫂）' })).toBeDisabled();
+  expect(await screen.findByRole('button', { name: '寄送通知（測試月嫂）' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: '展開案件資訊預覽' }));
   const panel = screen.getByRole('region', { name: '預覽案件資訊' });
   expect(within(panel).getByText('保存每週服務說明後，即可預覽案件資訊。')).toBeInTheDocument();
@@ -250,15 +270,11 @@ it('blocks preview and send until service dates have been saved', async () => {
   expect(client.sendInformation).not.toHaveBeenCalled();
 });
 
-it('sends only the clicked candidate using their own fingerprint', async () => {
+it('sends only to the caregiver whose card was clicked', async () => {
   const original = await client.query('CASE-1');
   const sent = new Set<number>();
   const first = original.candidates[0]!;
   const second = { ...first, id: 4, staff_id: 9, staff_name: '另一位月嫂' };
-  const preview = await client.previewInformationPackage('CASE-1', first.id);
-  vi.mocked(client.previewInformationPackage).mockImplementation(async (_caseNo, id) => ({
-    ...preview, candidate_id: id, preview_fingerprint: (id === first.id ? 'a' : 'b').repeat(64),
-  }));
   vi.mocked(client.query).mockImplementation(async () => ({ ...original, candidates: [first, second].map(item => ({
     ...item, information: { ...item.information, package: sent.has(item.id)
       ? { status: 'queued', sent_at: '2026-10-01T00:00:00Z', event_id: item.id, line_task_id: item.id + 10 } : null },
@@ -268,58 +284,25 @@ it('sends only the clicked candidate using their own fingerprint', async () => {
     return { status: 'queued', event_id: command.candidateId, line_task_id: command.candidateId + 10 };
   });
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
-  await openSharedPreview();
+  const shared = await openSharedPreview();
   expect(screen.getAllByRole('region', { name: '預覽案件資訊' })).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: '確認寄送（另一位月嫂）' }));
+  expect(within(shared).queryByRole('button', { name: /寄送通知/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '寄送通知（另一位月嫂）' }));
   expect(await screen.findByText(/等待發送/)).toBeInTheDocument();
-  expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ candidateId: 4, previewFingerprint: 'b'.repeat(64) }));
-  const firstSend = screen.getByRole('button', { name: '確認寄送（測試月嫂）' });
+  expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ candidateId: 4, resend: true, previewFingerprint: undefined }));
+  const firstSend = screen.getByRole('button', { name: '寄送通知（測試月嫂）' });
   await waitFor(() => expect(firstSend).toBeEnabled());
   fireEvent.click(firstSend);
   await waitFor(() => expect(screen.getAllByText(/等待發送/)).toHaveLength(2));
-  expect(client.sendInformation).toHaveBeenNthCalledWith(2, expect.objectContaining({ candidateId: 3, previewFingerprint: 'a'.repeat(64) }));
-});
-
-it('directly resends only to the caregiver whose card was clicked', async () => {
-  const initial = await client.query('CASE-1');
-  const first = initial.candidates[0]!;
-  const second = { ...first, id: 4, staff_id: 9, staff_name: '另一位月嫂' };
-  vi.mocked(client.query).mockResolvedValue({ ...initial, candidates: [first, second] });
-
-  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
-  const shared = await openSharedPreview();
-  const secondCard = screen.getByRole('heading', { name: /另一位月嫂/ }).closest('article')!;
-  expect(within(shared).queryByRole('button', { name: /再次寄送/ })).not.toBeInTheDocument();
-  fireEvent.click(within(secondCard).getByRole('button', { name: '再次寄送（另一位月嫂）' }));
-  await waitFor(() => expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    candidateId: second.id, resend: true, previewFingerprint: undefined,
-  })));
+  expect(client.sendInformation).toHaveBeenNthCalledWith(2, expect.objectContaining({ candidateId: 3, resend: true, previewFingerprint: undefined }));
   expect(screen.queryByRole('region', { name: '寄送預覽' })).not.toBeInTheDocument();
 });
 
-it('requires reopening the case preview if the recipient documents have changed', async () => {
+it('shows the send failure for caregiver_has_no_line_delivery_identity without retrying or reporting an unknown outcome', async () => {
+  const message = '月嫂尚未完成 LINE 綁定，無法寄送資訊。請先完成月嫂的 LINE 綁定後，再重新寄送。';
+  vi.mocked(client.sendInformation).mockRejectedValue(new ApiHttpError(409, 'caregiver_has_no_line_delivery_identity', message));
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
-  await openSharedPreview();
-  const preview = await client.previewInformationPackage('CASE-1', 3);
-  vi.mocked(client.previewInformationPackage).mockResolvedValue({
-    ...preview, documents: preview.documents.map(part => ({ ...part, line_sections: [] })),
-  });
-  const sendButton = screen.getByRole('button', { name: '確認寄送（測試月嫂）' });
-  fireEvent.click(sendButton);
-  expect(await screen.findByRole('alert')).toHaveTextContent('案件資訊已更新，請重新核對預覽後再確認寄送。');
-  expect(sendButton).toBeDisabled();
-  expect(client.sendInformation).not.toHaveBeenCalled();
-});
-
-it.each([
-  ['caregiver_has_no_line_delivery_identity', '月嫂尚未完成 LINE 綁定，無法寄送資訊。請先完成月嫂的 LINE 綁定後，再重新寄送。'],
-  ['candidate_information_preview_stale', '訂單內容或月嫂的 LINE 綁定資料已更新。請重新開啟案件預覽，再確認寄送。'],
-])('shows the send failure for %s without retrying or reporting an unknown outcome', async (code, message) => {
-  const serverMessage = code === 'candidate_information_preview_stale' ? '請取消本次寄送，重新開啟寄送確認後再寄送。' : message;
-  vi.mocked(client.sendInformation).mockRejectedValue(new ApiHttpError(409, code, serverMessage));
-  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
-  await openSharedPreview();
-  fireEvent.click(await screen.findByRole('button', { name: '確認寄送（測試月嫂）' }));
+  fireEvent.click(await screen.findByRole('button', { name: '寄送通知（測試月嫂）' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(message);
   expect(screen.queryByText('寄送結果尚未確認；請確認寄送結果。')).not.toBeInTheDocument();
   expect(client.sendInformation).toHaveBeenCalledTimes(1);

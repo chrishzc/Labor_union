@@ -7,7 +7,6 @@ import {
   createCandidateWillingnessCommand,
   type CandidateContactPool,
   type CandidateInformationSendCommand,
-  type CandidateInformationKind,
   type CandidateInformationPackagePreview,
   type CaseInformationPreview,
   type CaseWeeklyServicePreview,
@@ -16,7 +15,7 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 import { defaultMatchingFilterPolicy, matchingCandidateWorkflowClient, type MatchingAvailability } from '../api/scheduling/matching_candidate_workflow_client';
 import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
-import { CandidateInformationPages, CandidateWeeklyServiceTable, OrderCandidateInformationPanel, OrderCandidateInformationSendPanel, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
+import { CandidateInformationPages, CandidateWeeklyServiceTable, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
 import { CandidatePlannedServiceDates } from './CandidatePlannedServiceDates';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { CaregiverCommuteQuery } from './CaregiverCommute';
@@ -78,8 +77,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<number, string>>({});
   const [willingnessNotices, setWillingnessNotices] = useState<Record<number, string>>({});
-  const [sharedInformation, setSharedInformation] = useState<{ kind?: CandidateInformationKind } | null>(null);
-  const [informationTarget, setInformationTarget] = useState<number | null>(null);
   const [datesReady, setDatesReady] = useState<boolean | null>(null);
   const [weeklyStartDate, setWeeklyStartDate] = useState<string | null>(null);
   const [weekly, setWeekly] = useState<CaseWeeklyServicePreview | null>(null);
@@ -91,7 +88,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   const [previewDocuments, setPreviewDocuments] = useState<CaseInformationPreview[] | null>(null);
   const [previewReply, setPreviewReply] = useState<CandidateInformationPackagePreview | undefined>();
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [preparingSend, setPreparingSend] = useState<number | null>(null);
   const [sendError, setSendError] = useState<{ candidateId: number; message: string } | null>(null);
   const [informationRevision, setInformationRevision] = useState(0);
   const [responseTarget, setResponseTarget] = useState<{ id: number; name: string } | null>(null);
@@ -111,7 +107,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     candidateId: number;
   }>());
   const informationInFlight = useRef(new Set<string>());
-  const preparingSendRef = useRef(false);
   const focusedCandidate = useRef<string | null>(null);
   const sectionId = useId();
   const workbench = presentation === 'workbench';
@@ -131,7 +126,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   const pendingStatus = (status: string) => ['applying', 'observing', 'outcome_unknown', 'observation_failed'].includes(status);
   const mutationPending = candidateInformationFlows.some((flow) => pendingStatus(flow.status))
     || orderMutationFlowStore.getCandidateWillingnessForCase(caseNo).some((flow) => pendingStatus(flow.status));
-  const protectedOperation = mutationPending || preparingSend !== null;
+  const protectedOperation = mutationPending;
   const hasDraft = Object.values(reasonDrafts).some((value) => value.trim().length > 0);
   const datesDirty = dateEdit?.dirty ?? false;
   const datesBusy = dateEdit?.busy ?? false;
@@ -167,8 +162,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     cancelWillingnessReadbacks();
     setWillingnessNotices({});
     setMutationError(null);
-    setInformationTarget(null);
-    setSharedInformation(null);
     setWeeklyStartDate(null);
     setWeekly(null);
     setWeeklyOpen(true);
@@ -552,31 +545,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   ], { busy: protectedOperation });
 
   const canUseDates = datesReady === true && dateEdit !== null && !datesDirty && !datesBusy && !protectedOperation;
-  const confirmCandidateSend = async (candidate: CandidateContact) => {
-    if (!canUseDates || !previewRequested || !previewDocuments || preparingSendRef.current) return;
-    preparingSendRef.current = true;
-    setPreparingSend(candidate.id);
-    setSendError(null);
-    try {
-      const preview = await candidateContactPoolClient.previewInformationPackage(caseNo, candidate.id);
-      if (!mounted.current || activeCaseNo.current !== caseNo) return;
-      if (!preview.preview_fingerprint) throw new Error('請先保存每週服務說明的日期。');
-      const sameDocuments = previewDocuments.every(part => JSON.stringify(part.line_sections) ===
-        JSON.stringify(preview.documents.find(document => document.info_type === part.info_type)?.line_sections));
-      const sameReply = !previewReply ||
-        JSON.stringify([previewReply.reply_text, previewReply.reply_actions]) === JSON.stringify([preview.reply_text, preview.reply_actions]);
-      if (!sameDocuments || !sameReply) {
-        setPreviewMode('idle');
-        throw new Error('案件資訊已更新，請重新核對預覽後再確認寄送。');
-      }
-      await submitInformation(createCandidateInformationSendCommand(caseNo, candidate.id, preview.preview_fingerprint));
-    } catch (error) {
-      if (mounted.current && activeCaseNo.current === caseNo) setSendError({ candidateId: candidate.id, message: errorMessage(error) });
-    } finally {
-      preparingSendRef.current = false;
-      if (mounted.current) setPreparingSend(null);
-    }
-  };
 
   const renderInformationHistory = (candidate: CandidateContact) => {
     const history = ([1, 2, 3] as const).filter(kind => candidate.information[kind]);
@@ -587,56 +555,26 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       </div>)}</dl>
     </details>;
   };
-  const openInformation = (candidate: CandidateContact) => {
-    setMutationError(null);
-    setSendError(null);
-    setInformationTarget(candidate.id);
-  };
-  const renderSendPreview = (candidate: CandidateContact) => {
-    const openerId = `candidate-package-${caseNo}-${candidate.id}`;
-    return informationTarget === candidate.id && <OrderCandidateInformationSendPanel
-      key={openerId} caseNo={caseNo} candidate={candidate} revision={informationRevision}
-      blocked={protectedOperation} onSubmit={submitInformation}
-      sendError={sendError?.candidateId === candidate.id ? sendError.message : mutationError}
-      onClose={() => {
-        const opener = document.getElementById(openerId);
-        if (opener?.getAttribute('aria-expanded') !== 'true') return;
-        setMutationError(null);
-        setInformationTarget(null);
-        opener.focus();
-      }}
-      onViewDates={() => setSharedInformation({ kind: 3 })} />;
-  };
-  const renderResendButton = (candidate: CandidateContact) => {
+  const renderSendButton = (candidate: CandidateContact) => {
     const pending = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id);
     return <button type="button" className="btn-primary-action"
-      aria-label={`再次寄送（${candidate.staff_name}）`} disabled={pending !== undefined}
+      aria-label={`寄送通知（${candidate.staff_name}）`} disabled={pending !== undefined}
       onClick={() => { void resendInformation(candidate.id); }}>
-      {pending?.status === 'applying' || pending?.status === 'observing' ? '寄送處理中…' : '再次寄送'}
+      {pending?.status === 'applying' || pending?.status === 'observing' ? '寄送處理中…' : '寄送通知'}
     </button>;
   };
-  const renderInformation = (candidate: CandidateContact) => {
-    const expanded = informationTarget === candidate.id;
-    const openerId = `candidate-package-${caseNo}-${candidate.id}`;
-    return <>
-      <div className="candidate-package-entry">
-        <div>
-          <strong>寄送案件資訊</strong>
-          <p>訂單資訊一、訂單資訊二、每週服務說明、共用回覆卡</p>
-          {candidate.information.package && <p>{deliveryStatus(candidate.information.package)}</p>}
-        </div>
-        {!candidate.information.package && <button id={openerId} type="button" className="btn-primary-action"
-          aria-expanded={expanded}
-          aria-label={`預覽並寄送（${candidate.staff_name}）`}
-          disabled={candidate.status !== 'active' || protectedOperation}
-          onClick={() => openInformation(candidate)}>預覽並寄送</button>}
-        {renderResendButton(candidate)}
+  const renderInformation = (candidate: CandidateContact) => <>
+    <div className="candidate-package-entry">
+      <div>
+        <strong>寄送案件資訊</strong>
+        <p>訂單資訊一、訂單資訊二、每週服務說明、共用回覆卡</p>
+        {candidate.information.package && <p>{deliveryStatus(candidate.information.package)}</p>}
       </div>
-      {renderSendPreview(candidate)}
-      {!expanded && sendError?.candidateId === candidate.id && <p role="alert">{sendError.message}</p>}
-      {renderInformationHistory(candidate)}
-    </>;
-  };
+      {renderSendButton(candidate)}
+    </div>
+    {sendError?.candidateId === candidate.id && <p role="alert">{sendError.message}</p>}
+    {renderInformationHistory(candidate)}
+  </>;
 
   return (
     <section className="order-candidate-list" aria-label={`案件 ${caseNo} 候選聯絡狀態`}>
@@ -703,7 +641,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       </header>
       {state.status === 'idle' && <div className="order-case-empty"><h4>查看已加入的人選</h4><p>讀取候選清單以查看意願與聯絡紀錄；要加入人選，請切換「新增候選月嫂」。</p></div>}
 
-      {mutationError !== null && responseTarget === null && informationTarget === null && <p className="order-v2-drawer-error" role="alert">{mutationError}</p>}
+      {mutationError !== null && responseTarget === null && <p className="order-v2-drawer-error" role="alert">{mutationError}</p>}
 
       {state.status === 'error' && (
         <div className="order-v2-notice blocked" role="alert">
@@ -787,13 +725,10 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                   <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} compact />
                   <div className="candidate-card-footer">
                     {candidate.information.package && <p>{deliveryStatus(candidate.information.package)}</p>}
-                    {candidate.status === 'active' && <>
-                      {candidate.willingness === 'willing' && <button type="button" className="candidate-confirmation-link" disabled={protectedOperation} onClick={() => onOpenCustomerConfirmation?.(candidate.id)}>前往客戶確認準備 →</button>}
-                      {!candidate.information.package && <button type="button" className="btn-primary-action"
-                        aria-label={`確認寄送（${candidate.staff_name}）`} disabled={!canUseDates || !previewRequested || !previewDocuments}
-                        onClick={() => { void confirmCandidateSend(candidate); }}>{preparingSend === candidate.id ? '寄送處理中…' : '確認寄送'}</button>}
-                    </>}
-                    {renderResendButton(candidate)}
+                    {candidate.status === 'active' && candidate.willingness === 'willing' && (
+                      <button type="button" className="candidate-confirmation-link" disabled={protectedOperation} onClick={() => onOpenCustomerConfirmation?.(candidate.id)}>前往客戶確認準備 →</button>
+                    )}
+                    {renderSendButton(candidate)}
                   </div>
                 </div>
                 {candidate.information_changes && candidate.information_changes.length > 0 && <div className="order-v2-drawer-error" role="status">
@@ -898,9 +833,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         </>
       )}
       </div>
-      {sharedInformation && <OrderCandidateInformationPanel caseNo={caseNo} initialKind={sharedInformation.kind}
-        onDatesSaved={() => { setInformationRevision(value => value + 1); onObserved?.(); }}
-        onClose={() => { setSharedInformation(null); setInformationRevision(value => value + 1); }} />}
     </section>
   );
 };
