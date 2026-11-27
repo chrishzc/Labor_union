@@ -455,8 +455,11 @@ jobs:
           checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           parents = subprocess.check_output(["git", "show", "-s", "--format=%P", "HEAD"], text=True).split()
           event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))["pull_request"]
-          base, head = event["base"]["sha"], event["head"]["sha"]
-          version_ok = checkout == os.environ["GITHUB_SHA"] and parents == [base, head]
+          event_base, head = event["base"]["sha"], event["head"]["sha"]
+          expected_ref = f"refs/pull/{event['number']}/merge"
+          version_ok = (checkout == os.environ["GITHUB_SHA"] and os.environ["GITHUB_REF"] == expected_ref
+                        and len(parents) == 2 and parents[1] == head)
+          tested_base = parents[0] if version_ok else None
           baseline = evidence(temp / "lu-holiday-baseline.xml")
           selected = run_trial("selected", required)
           omission = run_trial("omitted-consumer", required[:2])
@@ -467,7 +470,8 @@ jobs:
                 and omission["required"] == expected_omission and omission["holiday_router_cases"] == 2)
           print("HOLIDAY_SELECTION_TRIAL " + json.dumps({
               "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-              "checkout": checkout, "head": head, "base": base,
+              "checkout": checkout, "head": head, "tested_base": tested_base, "event_base": event_base,
+              "event_base_matches_tested": event_base == tested_base,
               "baseline": baseline, "selected": selected, "omitted_consumer": omission,
               "omitted_consumer_rejected": omission["required"] == expected_omission, "passed": ok,
           }, sort_keys=True))
