@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { contractSigningMutationClient } from '../../../../../../../api/orders/contract_signing_mutation_client';
-import { transport } from '../../../../../../../api/shared/transport';
+import { transport, UPLOAD_TIMEOUT_MS } from '../../../../../../../api/shared/transport';
 
 const receipt = {
   document_version_id: 7,
@@ -32,6 +32,7 @@ describe('contractSigningMutationClient', () => {
     expect((body as FormData).get('expected_document_version_id')).toBe('7');
     expect((body as FormData).get('document')).toBeInstanceOf(File);
     expect(vi.mocked(transport.post).mock.calls[0][0]).toBe('/api/v1/orders/CASE-1/contract-signing/client/signed-return');
+    expect(vi.mocked(transport.post).mock.calls[0][2]).toEqual(expect.objectContaining({ timeoutMs: UPLOAD_TIMEOUT_MS }));
   });
 
   it('uses Preview then multipart Apply for manual staff attestation without a LINE delivery task', async () => {
@@ -43,12 +44,14 @@ describe('contractSigningMutationClient', () => {
     vi.mocked(transport.post).mockResolvedValueOnce({ success: true, message: 'preview', data: preview, error: null });
     await expect(contractSigningMutationClient.previewManualStaffAttestation('CASE-1', 3, 'phone', '已電話確認簽約。', command)).resolves.toEqual(preview);
     expect(vi.mocked(transport.post).mock.calls[0][0]).toBe('/api/v1/orders/CASE-1/contract-signing/staff-segments/3/manual-attestation/preview');
+    expect(vi.mocked(transport.post).mock.calls[0][2]?.timeoutMs).toBeUndefined();
 
     vi.mocked(transport.post).mockResolvedValueOnce({ success: true, message: 'apply', data: { ...receipt, line_delivery_task_id: null }, error: null });
     const file = new File(['signed'], 'manual-signed.pdf', { type: 'application/pdf' });
     await contractSigningMutationClient.recordManualStaffAttestation('CASE-1', 3, file, 'phone', '已電話確認簽約。', preview.preview_fingerprint, command);
     const [, body] = vi.mocked(transport.post).mock.calls[1];
     expect(vi.mocked(transport.post).mock.calls[1][0]).toBe('/api/v1/orders/CASE-1/contract-signing/staff-segments/3/manual-attestation');
+    expect(vi.mocked(transport.post).mock.calls[1][2]).toEqual(expect.objectContaining({ timeoutMs: UPLOAD_TIMEOUT_MS }));
     expect((body as FormData).get('confirmation_method')).toBe('phone');
     expect((body as FormData).get('reason')).toBe('已電話確認簽約。');
     expect((body as FormData).get('preview_fingerprint')).toBe('a'.repeat(64));

@@ -717,3 +717,34 @@ def test_staff_profile_photo_viewer_supports_mobile_pinch_and_reuses_published_i
         expect(dialog.get_by_role("button", name="縮小圖片")).to_be_disabled()
         assert len(image_calls) == 1
         browser.close()
+
+
+def test_published_image_response_caches_transcoded_bytes_by_source_hash(monkeypatch):
+    route._DISPLAY_IMAGE_CACHE.clear()
+    first_buf, second_buf = BytesIO(), BytesIO()
+    Image.new("RGB", (4, 4), "green").save(first_buf, format="PNG")
+    Image.new("RGB", (4, 4), "yellow").save(second_buf, format="PNG")
+    images = {"a" * 64: first_buf.getvalue(), "b" * 64: second_buf.getvalue()}
+    current_digest = ["a" * 64]
+    encode_calls = []
+    original_encode = route._encode_display_image
+
+    def counted_encode(source, image_format):
+        encode_calls.append(image_format)
+        return original_encode(source, image_format)
+
+    monkeypatch.setattr(route, "_encode_display_image", counted_encode)
+    web = SimpleNamespace(customer_image=lambda _s, _e, _v: SimpleNamespace(
+        content=images[current_digest[0]], content_sha256=current_digest[0],
+    ))
+
+    r1 = route._published_image_response(web, 7, 1, 1)
+    r2 = route._published_image_response(web, 7, 1, 1)
+    assert r1.body == r2.body
+    assert r1.headers["Cache-Control"] == "private, no-store"
+    assert len(encode_calls) == 1
+
+    current_digest[0] = "b" * 64
+    r3 = route._published_image_response(web, 7, 1, 1)
+    assert r3.body != r1.body
+    assert len(encode_calls) == 2

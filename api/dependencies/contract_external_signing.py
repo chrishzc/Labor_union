@@ -40,6 +40,7 @@ from infrastructure.archive.contract_documents import (
     discard_uncommitted_contract_document,
 )
 from infrastructure.mysql.mysql_adapter import DB_CONFIG, get_connection
+from infrastructure.runtime.file_transfer_settings import FileSettingsError, file_read_capacity
 from infrastructure.mysql.order_contract_completion_repository import (
     MySqlOrderContractCompletionRepository,
 )
@@ -327,10 +328,16 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
         clock = SystemBusinessClock()
         unit_of_work_factory = lambda: MySqlUnitOfWork(connection)
         repository = MySqlContractExternalSigningRepository(connection)
+        try:
+            capacity = file_read_capacity()
+        except FileSettingsError:
+            capacity = 20 * 1024 * 1024
         controlled = ControlledFileWorkflow(
             MySqlControlledFileWorkflowRepository(connection),
             FileSystemControlledFileStorage(
-                _controlled_file_storage_root()
+                _controlled_file_storage_root(),
+                max_staging_bytes=capacity,
+                max_read_bytes=capacity,
             ),
             unit_of_work_factory,
             clock,

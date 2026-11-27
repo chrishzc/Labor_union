@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
-import { transport, type RequestOptions } from '../shared/transport';
+import { transport, UPLOAD_TIMEOUT_MS, type RequestOptions } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
 
 const ReceiptSchema = z.strictObject({
@@ -69,7 +69,10 @@ function commandOptions(options: ContractCommandOptions): RequestOptions {
 }
 
 async function command(path: string, body: unknown, options: ContractCommandOptions): Promise<ContractSigningReceipt> {
-  const envelope = decodePayload(EnvelopeSchema, await transport.post(path, body, commandOptions(options)));
+  const requestOptions = body instanceof FormData
+    ? { ...commandOptions(options), timeoutMs: UPLOAD_TIMEOUT_MS }
+    : commandOptions(options);
+  const envelope = decodePayload(EnvelopeSchema, await transport.post(path, body, requestOptions));
   if (!envelope.success) {
     throw new ApiHttpError(400, 'CONTRACT_SIGNING_COMMAND_FAILED', envelope.error ?? envelope.message, false, envelope);
   }

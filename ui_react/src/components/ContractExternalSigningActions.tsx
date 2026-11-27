@@ -127,6 +127,8 @@ function assertFinalReadbackMatchesCase(caseNo: string, readback: FinalDocumentR
   }
 }
 
+const MAX_SIGNED_PDF_BYTES = 20 * 1024 * 1024;
+
 function outcomeCouldBeUnknown(error: unknown): boolean {
   return error instanceof ApiTimeoutError
     || error instanceof ApiNetworkError
@@ -695,17 +697,29 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     if (staff.length !== archiveSegments.length) return;
     const identity = currentIdentity(identities.current, 'signed-archive');
     const signal = archiveRequest.current?.signal;
+    const wasUnknown = archiveUnknown;
     setArchiveBusy(true);
     setArchiveError(null);
     try {
-      const files = await contractExternalSigningClient.archiveSignedFiles(caseNo, client, staff, identity);
+      let files: SignedArchiveFile[] | null = null;
+      if (wasUnknown) {
+        const existing = await contractExternalSigningClient.querySignedArchive(caseNo, signal);
+        if (signal?.aborted) return;
+        setArchiveSegments(existing.staff_segments);
+        if (existing.files !== null) {
+          files = existing.files;
+        }
+      }
+      if (files === null) {
+        files = await contractExternalSigningClient.archiveSignedFiles(caseNo, client, staff, identity);
+      }
       if (signal?.aborted) return;
       setArchivedFiles(files);
       setFileReturns({});
       setArchiveUnknown(false);
     } catch (error) {
       if (signal?.aborted) return;
-      setArchiveUnknown(outcomeCouldBeUnknown(error));
+      setArchiveUnknown(wasUnknown || outcomeCouldBeUnknown(error));
       setArchiveError(safeErrorMessage(error));
       return;
     } finally {
@@ -728,8 +742,17 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       <header><div><strong>{name || title}</strong><p>{meta?.period || '服務期間待核對'}</p></div><span className={`contract-document-status ${file ? 'complete' : ''}`}>{file ? '已選擇' : '待回收'}</span></header>
       <label className="contract-return-file">{target.scope === 'client' ? '客戶服務契約 PDF' : `${name || '月嫂'} 委任契約 PDF`}
         {!file && <input type="file" accept="application/pdf,.pdf" disabled={archiveBusy || archiveUnknown} onChange={event => {
-          const file = event.target.files?.item(0) ?? null;
-          setFileReturns(previous => ({ ...previous, [key]: file }));
+          const selected = event.target.files?.item(0) ?? null;
+          if (selected) {
+            const validMime = !selected.type || selected.type.toLowerCase() === 'application/pdf';
+            if (!selected.name.toLowerCase().endsWith('.pdf') || !validMime || selected.size <= 0 || selected.size > MAX_SIGNED_PDF_BYTES) {
+              event.target.value = '';
+              setArchiveError('請上傳 PDF 檔案，每份上限 20 MB。');
+              return;
+            }
+          }
+          setArchiveError(null);
+          setFileReturns(previous => ({ ...previous, [key]: selected }));
           identities.current.delete('signed-archive');
         }} />}
       </label>

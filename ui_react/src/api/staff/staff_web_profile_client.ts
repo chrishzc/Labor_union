@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { notificationOptions } from '../line_notifications/notification_tasks_client';
-import { transport } from '../shared/transport';
+import { transport, UPLOAD_TIMEOUT_MS } from '../shared/transport';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../shared/typed_errors';
 
 const id = z.number().int().positive();
@@ -132,12 +132,14 @@ export const staffWebProfileClient = {
     const body = new FormData();
     body.set('upload_id', uploadId);
     body.set('photograph', file);
-    const result = await transport.post<{ data: unknown }>(`${rosterPath(staffId)}/uploads`, body, notificationOptions(signal));
+    const result = await transport.post<{ data: unknown }>(
+      `${rosterPath(staffId)}/uploads`, body, { ...notificationOptions(signal), timeoutMs: UPLOAD_TIMEOUT_MS },
+    );
     return uploadedPhotoSchema.parse(result.data);
   },
   async publishForStaff(staffId: number, command: WebProfilePublicationInput, signal?: AbortSignal) {
     const result = await transport.post<{ data: unknown }>(
-      `${rosterPath(staffId)}/publications`, command, notificationOptions(signal),
+      `${rosterPath(staffId)}/publications`, command, { ...notificationOptions(signal), timeoutMs: UPLOAD_TIMEOUT_MS },
     );
     return publicationsSchema.parse(result.data);
   },

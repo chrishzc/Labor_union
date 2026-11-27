@@ -3,7 +3,7 @@
  * Description: 驗證 Fetch 傳輸、嚴格 Global error 與逾時中斷防護。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ADMIN_SESSION_UNAUTHORIZED_EVENT, transport } from '../api/shared/transport';
+import { ADMIN_SESSION_UNAUTHORIZED_EVENT, transport, UPLOAD_TIMEOUT_MS } from '../api/shared/transport';
 import {
   ApiAbortError,
   ApiHttpError,
@@ -425,5 +425,45 @@ describe('Shared API Transport Client', () => {
       '/api/v1/item/1',
       expect.objectContaining({ method: 'DELETE' })
     );
+  });
+
+  it('FormData 上傳預設使用較長逾時預算，JSON 維持 10 秒，timeoutMs=0 不逾時', async () => {
+    vi.useFakeTimers();
+    try {
+      globalThis.fetch = vi.fn().mockImplementation((_url, options) => {
+        return new Promise((_resolve, reject) => {
+          const signal = options.signal as AbortSignal;
+          signal.addEventListener('abort', () => {
+            const err = new Error('The operation was aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        });
+      });
+
+      const jsonPromise = transport.post('/api/v1/json', { hello: 'world' });
+      const jsonRejection = expect(jsonPromise).rejects.toThrow(ApiTimeoutError);
+      const form = new FormData();
+      form.set('file', new File(['abc'], 'a.pdf', { type: 'application/pdf' }));
+      const formPromise = transport.post('/api/v1/upload', form);
+      const infinitePromise = transport.post('/api/v1/upload', form, { timeoutMs: 0 });
+
+      let formSettled = false;
+      void formPromise.catch(() => { formSettled = true; });
+      let infiniteSettled = false;
+      void infinitePromise.catch(() => { infiniteSettled = true; });
+
+      await vi.advanceTimersByTimeAsync(10000);
+      await jsonRejection;
+      expect(formSettled).toBe(false);
+      expect(infiniteSettled).toBe(false);
+
+      const formRejection = expect(formPromise).rejects.toThrow(ApiTimeoutError);
+      await vi.advanceTimersByTimeAsync(UPLOAD_TIMEOUT_MS - 10000);
+      await formRejection;
+      expect(infiniteSettled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

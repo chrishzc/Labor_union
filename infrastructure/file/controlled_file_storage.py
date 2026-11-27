@@ -36,6 +36,7 @@ from subsystems.controlled_files.contracts import (
     ControlledFileStagingContent,
     ControlledFileStagingRegistrationStatus,
     ControlledFileStagingResult,
+    ControlledFileStagingVerification,
     DiscoveredControlledFile,
 )
 
@@ -44,6 +45,7 @@ _IGNORED_SUFFIXES = frozenset({".crdownload", ".partial", ".tmp"})
 _MAX_DISCOVERY_LIMIT = 100
 _DEFAULT_MAX_READ_BYTES = 20 * 1024 * 1024
 _DEFAULT_MAX_STAGING_BYTES = 20 * 1024 * 1024
+_HASH_CHUNK_BYTES = 256 * 1024
 _STAGING_TTL = timedelta(hours=24)
 _STAGING_DIRECTORY = STAGING_DIRECTORY
 _LEGACY_STAGING_DIRECTORY = ".controlled-file-staging"
@@ -76,6 +78,7 @@ class FileSystemControlledFileStorage:
         self._max_staging_bytes = max_staging_bytes
         self._staging_ttl = staging_ttl
         self._clock = clock
+        self._staging_layout_ready_root: Path | None = None
 
     @property
     def staging_ttl(self) -> timedelta:
@@ -329,6 +332,43 @@ class FileSystemControlledFileStorage:
             expires_at=expires_at,
         )
 
+    def verify_staged(
+        self,
+        staging_id: str,
+        *,
+        expected_sha256: str,
+    ) -> ControlledFileStagingVerification:
+        """Stream-verify staged bytes and return metadata without buffering payload into RAM."""
+        _validate_staging_id(staging_id)
+        if not _is_sha256(expected_sha256):
+            raise ControlledFileStorageError(
+                "controlled_file_digest_invalid",
+                "檔案完整性識別格式無效",
+                retryable=False,
+            )
+        root = self._require_ready_root()
+        metadata, size_bytes, digest = self._verify_staging_record(root, staging_id)
+        expires_at = _parse_utc_datetime(metadata.get("expires_at"))
+        now = datetime.fromtimestamp(self._clock(), timezone.utc)
+        if now >= expires_at:
+            raise ControlledFileStorageError(
+                "controlled_file_staging_expired",
+                "staging 檔案已過期",
+                retryable=False,
+            )
+        if digest != expected_sha256.lower() or digest != metadata.get("sha256_digest"):
+            raise ControlledFileStorageError(
+                "controlled_file_staging_digest_mismatch",
+                "staging 檔案完整性驗證失敗",
+                retryable=False,
+            )
+        return ControlledFileStagingVerification(
+            staging_id=staging_id,
+            size_bytes=size_bytes,
+            sha256_digest=digest,
+            expires_at=expires_at,
+        )
+
     def read_registered_staged(
         self,
         staging_id: str,
@@ -574,9 +614,23 @@ class FileSystemControlledFileStorage:
     def _ensure_staging_layout(self, root: Path) -> Path:
         staging_root = root / _STAGING_DIRECTORY
         try:
+            if (
+                self._staging_layout_ready_root == root
+                and staging_root.is_dir()
+                and (staging_root / "objects").is_dir()
+                and (staging_root / "idempotency").is_dir()
+            ):
+                for directory in (staging_root, staging_root / "objects", staging_root / "idempotency"):
+                    if directory.is_symlink() or directory.is_junction():
+                        raise ControlledFileStorageError(
+                            "controlled_file_staging_locator_invalid",
+                            "staging 儲存邊界無效",
+                            retryable=False,
+                        )
+                return staging_root
             ensure_storage_layout(root)
             for directory in (staging_root, staging_root / "objects", staging_root / "idempotency"):
-                if directory.is_symlink():
+                if directory.is_symlink() or directory.is_junction():
                     raise ControlledFileStorageError(
                         "controlled_file_staging_locator_invalid",
                         "staging 儲存邊界無效",
@@ -584,6 +638,7 @@ class FileSystemControlledFileStorage:
                     )
                 directory.mkdir(exist_ok=True)
             staging_root.resolve(strict=True).relative_to(root)
+            self._staging_layout_ready_root = root
         except ControlledFileStorageError:
             raise
         except (OSError, ValueError, StorageLayoutError) as error:
@@ -725,6 +780,79 @@ class FileSystemControlledFileStorage:
                 retryable=False,
             )
         return metadata, content
+
+    def _verify_staging_record(
+        self,
+        root: Path,
+        staging_id: str,
+    ) -> tuple[dict[str, object], int, str]:
+        object_directory = self._staging_object_directory(root, staging_id)
+        metadata_path = object_directory / "metadata.json"
+        payload_path = object_directory / "payload.bin"
+        if payload_path.is_symlink() or metadata_path.is_symlink():
+            raise ControlledFileStorageError(
+                "controlled_file_staging_locator_invalid",
+                "staging 儲存邊界無效",
+                retryable=False,
+            )
+        try:
+            metadata = _read_json(metadata_path)
+            size_bytes = metadata.get("size_bytes")
+            if metadata.get("staging_id") != staging_id or not isinstance(size_bytes, int):
+                raise ValueError("invalid staging metadata")
+            if size_bytes > self._max_staging_bytes:
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_too_large",
+                    "staging 檔案超過讀取上限",
+                    retryable=False,
+                )
+        except FileNotFoundError as error:
+            raise ControlledFileStorageError(
+                "controlled_file_staging_not_found",
+                "指定 staging 檔案不存在",
+                retryable=False,
+            ) from error
+        except ControlledFileStorageError:
+            raise
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+            raise ControlledFileStorageError(
+                "controlled_file_staging_reconciliation_required",
+                "staging 檔案狀態無法確認，需要對帳",
+                retryable=False,
+            ) from error
+
+        try:
+            total_bytes, digest = _stream_hash_path(payload_path, size_bytes)
+        except FileNotFoundError as error:
+            finalized_reference = metadata.get("finalized_object_reference")
+            if finalized_reference is None:
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_not_found",
+                    "指定 staging 檔案不存在",
+                    retryable=False,
+                ) from error
+            try:
+                reference = _validate_object_reference(str(finalized_reference))
+                content_path = self._resolve_target(root, reference)
+                total_bytes, digest = _stream_hash_path(content_path, size_bytes)
+            except ControlledFileStorageError:
+                raise
+            except (FileNotFoundError, OSError, ValueError) as final_error:
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_reconciliation_required",
+                    "正式檔案狀態無法確認，需要對帳",
+                    retryable=False,
+                ) from final_error
+        except ControlledFileStorageError:
+            raise
+        except OSError as error:
+            raise ControlledFileStorageError(
+                "controlled_file_staging_reconciliation_required",
+                "staging 檔案狀態無法確認，需要對帳",
+                retryable=False,
+            ) from error
+
+        return metadata, total_bytes, digest
 
     def _load_staging_result(
         self,
@@ -990,6 +1118,30 @@ def _staging_fingerprint(
         ("controlled-file-staging.v1", filename, mime_type, str(size_bytes), sha256_digest)
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _stream_hash_path(path: Path, expected_size: int) -> tuple[int, str]:
+    before = path.stat()
+    hasher = hashlib.sha256()
+    total_bytes = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(_HASH_CHUNK_BYTES):
+            total_bytes += len(chunk)
+            hasher.update(chunk)
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise ControlledFileStorageError(
+            "controlled_file_staging_changed_during_read",
+            "staging 檔案在讀取期間發生變更",
+            retryable=True,
+        )
+    if before.st_size != expected_size or total_bytes != expected_size:
+        raise ControlledFileStorageError(
+            "controlled_file_staging_digest_mismatch",
+            "staging 檔案完整性驗證失敗",
+            retryable=False,
+        )
+    return total_bytes, hasher.hexdigest()
 
 
 def _write_bytes_exclusive(path: Path, content: bytes) -> None:

@@ -1,5 +1,8 @@
+from collections import OrderedDict
+import hashlib
 from io import BytesIO
 from pathlib import PureWindowsPath
+from threading import Lock
 from typing import Annotated
 from unicodedata import category as unicode_category
 from uuid import UUID
@@ -52,6 +55,57 @@ _IMAGE_FORMATS = {"JPEG": ("photo.jpg", "image/jpeg"), "PNG": ("photo.png", "ima
                   "WEBP": ("photo.webp", "image/webp")}
 _PRIVATE_HEADERS = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
 _HEIF_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1"}
+
+
+class _DisplayImageCache:
+    """Bounded thread-safe LRU cache of transcoded display bytes keyed by immutable source SHA-256."""
+
+    def __init__(
+        self,
+        *,
+        max_items: int = 64,
+        max_bytes: int = 64 * 1024 * 1024,
+        max_entry_bytes: int = 8 * 1024 * 1024,
+    ) -> None:
+        self._max_items = max_items
+        self._max_bytes = max_bytes
+        self._max_entry_bytes = max_entry_bytes
+        self._entries: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
+        self._total_bytes = 0
+        self._lock = Lock()
+
+    def get(self, key: str) -> tuple[bytes, str] | None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            self._entries.move_to_end(key)
+            return entry
+
+    def put(self, key: str, data: bytes, mime: str) -> None:
+        size = len(data)
+        if size > self._max_entry_bytes:
+            return
+        with self._lock:
+            existing = self._entries.pop(key, None)
+            if existing is not None:
+                self._total_bytes -= len(existing[0])
+            while self._entries and (
+                len(self._entries) >= self._max_items
+                or self._total_bytes + size > self._max_bytes
+            ):
+                _, (evicted, _) = self._entries.popitem(last=False)
+                self._total_bytes -= len(evicted)
+            self._entries[key] = (data, mime)
+            self._total_bytes += size
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+            self._total_bytes = 0
+
+
+_DISPLAY_IMAGE_CACHE = _DisplayImageCache()
 
 
 @router.get(f"{_ADMIN}/templates")
@@ -217,8 +271,15 @@ def preview_published_staff_web_image(
 
 def _published_image_response(web: StaffWebProfile, staff_id: int, entry_id: int, version: int) -> Response:
     contents = web.customer_image(staff_id, entry_id, version)
+    cache_key = getattr(contents, "content_sha256", None) or hashlib.sha256(contents.content).hexdigest()
+    cached = _DISPLAY_IMAGE_CACHE.get(cache_key)
+    if cached is not None:
+        return _image_response(cached[0], cached[1])
     source, image_format = _decode_image(contents.content)
-    return _image_response(_encode_display_image(source, image_format), _IMAGE_FORMATS[image_format][1])
+    encoded = _encode_display_image(source, image_format)
+    mime = _IMAGE_FORMATS[image_format][1]
+    _DISPLAY_IMAGE_CACHE.put(cache_key, encoded, mime)
+    return _image_response(encoded, mime)
 
 
 def _require_customer_scope(staff_id: int, body: CustomerWebProfileRequest) -> None:
