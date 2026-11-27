@@ -112,6 +112,8 @@ def _eligibility_blockers(facts: HistoricalPrecisionRestartFacts) -> tuple[str, 
     }:
         return ("historical_precision_restart_not_eligible",)
     blockers: list[str] = []
+    if len({assignment.staff_id for assignment in facts.assignments}) != 1:
+        blockers.append("historical_order_staff_not_unique")
     if (
         facts.historical_day_revision > 0
         or facts.open_nonstage_obligation_count > 0
