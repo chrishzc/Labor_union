@@ -19,7 +19,7 @@ permissions:
 jobs:
   frontend:
     name: Synthetic frontend A B A B and existing regressions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       BASELINE_SHA: e6bc4adc1919127884b7672c62adaff650188ec3
