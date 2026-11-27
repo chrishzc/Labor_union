@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from datetime import date, datetime, timezone
 import json
+import sqlite3
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -78,8 +79,12 @@ class _FakeDeliveryRepo:
 
 
 class _FakeOrderGroupsRepo:
-    def __init__(self, binding_status: LineOrderGroupBindingStatus = LineOrderGroupBindingStatus.ACTIVE) -> None:
+    def __init__(
+        self, binding_status: LineOrderGroupBindingStatus = LineOrderGroupBindingStatus.ACTIVE,
+        *, case_no: str = "C-2026-01",
+    ) -> None:
         self.status = binding_status
+        self.case_no = case_no
         self.group_id = "G-case-1"
         self.version = 1
 
@@ -87,12 +92,12 @@ class _FakeOrderGroupsRepo:
         if group_id != self.group_id:
             return None
         return SimpleNamespace(
-            case_no="C-2026-01", status=self.status,
+            case_no=self.case_no, status=self.status,
             group_id=LineGroupId(group_id), version=SimpleNamespace(value=self.version),
         )
 
     def get_invitation(self, case_no: str, *, lock: bool = False) -> Any:
-        if case_no == "C-2026-01":
+        if case_no == self.case_no:
             return SimpleNamespace(binding=self.get_by_group(self.group_id))
         return None
 
@@ -182,6 +187,7 @@ class _FakeGroupHelperUoW:
         service_completed: bool = False,
         order_information_sections: tuple[Any, ...] | None = None,
         client_name: str | None = None,
+        case_no: str = "C-2026-01",
     ) -> None:
         self._connection = None
         self.configurations = SimpleNamespace(
@@ -189,7 +195,7 @@ class _FakeGroupHelperUoW:
         )
         self.receipts = _FakeReceiptRepo()
         self.delivery_tasks = _FakeDeliveryRepo()
-        self.order_groups = _FakeOrderGroupsRepo()
+        self.order_groups = _FakeOrderGroupsRepo(case_no=case_no)
         self.customer_service = _FakeCustomerServiceRepo()
         self.service_start_workflow = _FakeServiceStartWorkflow()
         self._helper_proposals: dict[tuple[str, str], dict[str, Any]] = {}
@@ -201,7 +207,7 @@ class _FakeGroupHelperUoW:
         self.client_name = client_name or "林小姐"
 
     def group_helper_context(self, case_no: str, user_id: str) -> dict[str, Any] | None:
-        if case_no != "C-2026-01":
+        if case_no != self.order_groups.case_no:
             return None
         ctx: dict[str, Any] = {
             "case_no": case_no,
@@ -1437,6 +1443,66 @@ def test_group_helper_case_information_postback_and_text_reply() -> None:
     )
     empty_payload = json.loads(empty_uow.delivery_tasks.requests[-1].payload_json)
     assert "目前無此案件之服務條件與費用約定資料" in str(empty_payload)
+
+
+@pytest.mark.parametrize(
+    ("case_no", "imported_accounts", "other_cases", "expected_account"),
+    [
+        pytest.param("A115001", (), (), "99781699115501", id="historical-non-citizen-formula"),
+        pytest.param("A115001", ("99781699115001",), (), "99781699115001", id="historical-non-citizen-imported"),
+        pytest.param("A116001", ("99781699116001",), (), "99781699116501", id="non-citizen-116-formula"),
+        pytest.param("A117002", (), (), "99781699117502", id="non-citizen-117-formula"),
+        pytest.param("116000001", (), (), "99781699116001", id="ordinary-116-formula"),
+        pytest.param("115000001", ("99781699115001",), (), "99781699115001", id="ordinary-imported"),
+        pytest.param("115000001", (), (), "尚未匯入（請洽工會專員）", id="ordinary-missing"),
+        pytest.param("A116001", (), ("116000501",), "待確認（請洽工會專員）", id="formula-collision"),
+        pytest.param(
+            "A115001", ("99781699115001", "99781699115002"), (), "待確認（請洽工會專員）",
+            id="historical-non-citizen-ambiguous-import",
+        ),
+    ],
+)
+def test_group_helper_case_information_displays_effective_virtual_account(
+    case_no: str, imported_accounts: tuple[str, ...], other_cases: tuple[str, ...], expected_account: str,
+) -> None:
+    uow = _FakeGroupHelperUoW(case_no=case_no, order_information_sections=())
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute("CREATE TABLE orders (case_no TEXT PRIMARY KEY)")
+        connection.execute(
+            "CREATE TABLE client_legacy_virtual_accounts (id INTEGER PRIMARY KEY, case_no TEXT, virtual_account TEXT)"
+        )
+        connection.executemany("INSERT INTO orders VALUES (?)", [(number,) for number in (case_no, *other_cases)])
+        connection.executemany(
+            "INSERT INTO client_legacy_virtual_accounts (case_no, virtual_account) VALUES (?, ?)",
+            [(case_no, account) for account in imported_accounts],
+        )
+        cursor = connection.cursor()
+        uow._connection = SimpleNamespace(cursor=lambda: nullcontext(SimpleNamespace(
+            execute=lambda sql, params: cursor.execute(sql.replace("%s", "?"), params),
+            fetchone=cursor.fetchone,
+            fetchall=cursor.fetchall,
+        )))
+        assert _make_app().handle_postback(
+            _make_inbox(
+                "evt-case-info-virtual-account",
+                {"type": "postback", "postback": {"data": "group-helper:case-information"}},
+                user_id="U-customer-1",
+            ),
+            uow,
+        )
+    finally:
+        connection.close()
+
+    payload = json.loads(uow.delivery_tasks.requests[-1].payload_json)
+    assert case_no in payload["altText"]
+    body = json.dumps(payload["contents"]["body"], ensure_ascii=False)
+    assert f'"text": "{expected_account}"' in body
+    if expected_account.isdigit():
+        assert f'"clipboardText": "{expected_account}"' in body
+    else:
+        assert '"clipboardText"' not in body
+        assert "99781699" not in body
 
 
 def test_multi_caregiver_context_recognition_and_stress_test() -> None:
