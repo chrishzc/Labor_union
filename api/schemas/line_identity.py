@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from shared_kernel.clock import SystemBusinessClock
@@ -75,6 +76,20 @@ class LineIdentityFlowValidationResponse(BaseModel):
     expires_at: datetime
 
 
+class LineIdentityBindingResultRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    line_id_token: str = Field(min_length=1, max_length=4096, pattern=r"\S")
+    flow_id: str = Field(min_length=1, max_length=191)
+    purpose: Literal["customer_binding", "staff_verification", "admin_binding"]
+    attempt_id: UUID
+
+
+class LineIdentityBindingResultResponse(BaseModel):
+    status: Literal["bound", "existing", "unconfirmed"]
+    receipt_identity: str | None = None
+
+
 class CustomerIdentityRequest(LiffIdentityContext):
     name: str = Field(min_length=1, max_length=100)
     phone: str = Field(min_length=1, max_length=30)
@@ -83,6 +98,7 @@ class CustomerIdentityRequest(LiffIdentityContext):
 class CustomerIdentityApplyRequest(CustomerIdentityRequest):
     expected_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    attempt_id: UUID | None = None
 
 
 class StaffIdentityRequest(LiffIdentityContext):
@@ -94,6 +110,7 @@ class StaffIdentityRequest(LiffIdentityContext):
 class StaffIdentityApplyRequest(StaffIdentityRequest):
     expected_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    attempt_id: UUID | None = None
 
 
 class AdminIdentityBindingRequest(LiffIdentityContext):
@@ -104,6 +121,7 @@ class AdminIdentityBindingRequest(LiffIdentityContext):
 class AdminIdentityBindingApplyRequest(AdminIdentityBindingRequest):
     expected_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    attempt_id: UUID | None = None
 
 
 class LineIdentityCandidateResponse(BaseModel):

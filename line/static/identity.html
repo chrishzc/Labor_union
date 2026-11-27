@@ -48,6 +48,8 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
     <button id="register-non-citizen" type="button"><strong>非市民服務申請</strong><span>填寫非市民服務需求，送工會核准建案。</span></button>
   </div>
   <form id="form" hidden></form>
+  <div id="identity-preview" hidden></div>
+  <button id="binding-result-lookup" class="secondary" type="button" hidden>查詢原綁定</button>
   <div id="message" role="status"></div>
   <div id="staff-binding-mismatch" hidden>
     <h2 tabindex="-1">找不到您的月嫂資料</h2>
@@ -67,6 +69,7 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
 <script>
 const definitions = {
   customer_binding: {
+    purpose: "customer_binding",
     title: "客戶資料綁定",
     roleLabel: "客戶",
     description: "請輸入登記時使用的姓名與電話。",
@@ -74,6 +77,7 @@ const definitions = {
     fields: [["name", "姓名", "text"], ["phone", "行動電話", "tel"]]
   },
   staff_verification: {
+    purpose: "staff_verification",
     title: "月嫂身分綁定",
     roleLabel: "月嫂",
     description: "請輸入姓名、身分證字號與出生日期。資料核對成功後會立即完成綁定。",
@@ -81,6 +85,7 @@ const definitions = {
     fields: [["name", "姓名", "text"], ["identity_card", "身分證字號", "text"], ["birthday", "出生日期", "date"]]
   },
   admin_binding: {
+    purpose: "admin_binding",
     title: "工會帳號綁定",
     roleLabel: "工會人員",
     description: "請使用既有後台帳號登入；本操作不會變更您的權限。",
@@ -92,6 +97,8 @@ let idToken = "";
 let flowId = "";
 let formBuilt = false;
 let bindingResultUnknown = false;
+let pendingBinding = null;
+let bindingEntryFlow = "";
 const identityPreviewStatusLabels = {
   authentication_pending: "等待套用時驗證管理員帳號",
   matched: "已找到可綁定資料",
@@ -138,7 +145,7 @@ function showIdentityError(error, fallback) {
 }
 
 function reauthenticateLine() {
-  sessionStorage.clear();
+  sessionStorage.removeItem('line_flow_id_customer');
   try { liff.logout(); } catch (_) {}
   liff.login({redirectUri: location.href});
 }
@@ -161,10 +168,8 @@ function buildForm(definition) {
   const button = document.createElement("button");
   button.type = "submit";
   button.textContent = "確認送出身分驗證";
-  const previewBox = document.createElement("div");
-  previewBox.id = "identity-preview";
-  previewBox.hidden = true;
-  form.append(previewBox, button);
+  const previewBox = document.getElementById("identity-preview");
+  form.append(button);
   form.addEventListener("submit", event => submitForm(event, definition, button, previewBox));
   formBuilt = true;
 }
@@ -270,9 +275,90 @@ function requireIdentityPreview(result) {
   return preview;
 }
 
+function bindingAttemptKey(purpose) {
+  return "line-binding-attempt:identity:" + purpose + ":" + bindingEntryFlow;
+}
+
+function storeBindingAttempt(attempt) {
+  sessionStorage.setItem(bindingAttemptKey(attempt.purpose), JSON.stringify(attempt));
+}
+
+function clearBindingAttempt(definition) {
+  sessionStorage.removeItem(bindingAttemptKey(definition.purpose));
+  pendingBinding = null;
+  bindingResultUnknown = false;
+  document.getElementById("binding-result-lookup").hidden = true;
+}
+
+async function requestBindingOutcome(path, body) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(path, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body), signal: controller.signal,
+    });
+    return {response, result: await response.json()};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isDefiniteBindingRejection(response, result) {
+  return response.status >= 400 && response.status < 500
+    && ![408, 429].includes(response.status) && Boolean(result?.detail)
+    && (response.status !== 409 || ["line_customer_rebind_blocked", "line_identity_binding_conflict"]
+        .includes(identityErrorCode(result)));
+}
+
+function showBindingLookup(definition, previewBox) {
+  const lookup = document.getElementById("binding-result-lookup");
+  lookup.hidden = false;
+  lookup.onclick = () => readBindingResult(definition, previewBox);
+  document.getElementById("binding-help").hidden = true;
+}
+
+async function readBindingResult(definition, previewBox) {
+  const lookup = document.getElementById("binding-result-lookup");
+  if (!pendingBinding || lookup.disabled) return;
+  lookup.disabled = true;
+  try {
+    const {response, result} = await requestBindingOutcome("/api/v1/line/identity/flow/binding-result", {
+      ...pendingBinding, line_id_token: idToken,
+    });
+    if (!response.ok) throw bindingRequestError(response, result, "目前無法查詢原綁定。");
+    const receipt = result?.data;
+    if (isBindingReceipt(receipt)) {
+      showBindingReceipt(definition, previewBox, receipt);
+      clearBindingAttempt(definition);
+      return;
+    }
+    showMessage("尚未確認綁定結果。請稍後查詢原綁定或聯絡工會。", true);
+  } catch (error) {
+    showIdentityError(error, "暫時無法確認綁定結果，請稍後查詢原綁定。");
+  } finally {
+    lookup.disabled = false;
+  }
+}
+
+async function recoverPendingBinding(definition) {
+  const raw = sessionStorage.getItem(bindingAttemptKey(definition.purpose));
+  if (!raw) return false;
+  let attempt;
+  try { attempt = JSON.parse(raw); } catch { return false; }
+  if (!attempt || attempt.purpose !== definition.purpose || !attempt.flow_id || !attempt.attempt_id) return false;
+  pendingBinding = {flow_id: attempt.flow_id, purpose: attempt.purpose, attempt_id: attempt.attempt_id};
+  bindingResultUnknown = true;
+  document.getElementById("description").hidden = true;
+  const previewBox = document.getElementById("identity-preview");
+  showBindingLookup(definition, previewBox);
+  await readBindingResult(definition, previewBox);
+  return true;
+}
+
 async function submitForm(event, definition, button, previewBox) {
   event.preventDefault();
-  if (bindingResultUnknown) return;
+  if (bindingResultUnknown || button.disabled) return;
   let applySubmitted = false;
   button.disabled = true;
   document.getElementById("binding-help").hidden = true;
@@ -294,41 +380,35 @@ async function submitForm(event, definition, button, previewBox) {
     }
     const preview = requireIdentityPreview(previewResult);
 
-    // 2. 一鍵直接套用
+    const attempt = {flow_id: flowId, purpose: definition.purpose, attempt_id: crypto.randomUUID()};
+    storeBindingAttempt(attempt);
+    pendingBinding = attempt;
     applySubmitted = true;
-    const applyRes = await fetch(`/api/v1/line/identity/${definition.endpoint}/apply`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        ...payload,
-        expected_version: preview.expected_version,
-        preview_fingerprint: preview.preview_fingerprint
-      })
-    });
-    const applyResult = await applyRes.json();
+    const {response: applyRes, result: applyResult} = await requestBindingOutcome(
+      "/api/v1/line/identity/" + definition.endpoint + "/apply", {
+        ...payload, expected_version: preview.expected_version,
+        preview_fingerprint: preview.preview_fingerprint, attempt_id: attempt.attempt_id,
+      },
+    );
     if (!applyRes.ok) {
-      applySubmitted = false;
-      throw bindingRequestError(
-        applyRes,
-        applyResult,
-        "身分套用失敗，請稍後再試。"
-      );
+      if (isDefiniteBindingRejection(applyRes, applyResult)) {
+        applySubmitted = false;
+        clearBindingAttempt(definition);
+      }
+      throw bindingRequestError(applyRes, applyResult, "身分套用失敗，請稍後再試。");
     }
-    const receipt = requireIdentityApply(applyResult, preview);
-    const {roleLabel, endpoint} = definition;
-    if (receipt.status === "existing") {
-      showMessage(`${roleLabel}身分已完成綁定`);
-      previewBox.textContent = "此 LINE 帳號已綁定此身分，可直接返回 LINE 使用。";
-    } else {
-      showMessage(`${roleLabel}身分綁定成功`);
-      const menu = endpoint === "staff" ? "月嫂選單" : endpoint === "admin" ? "工會選單" : "客戶選單";
-      previewBox.textContent = endpoint === "admin"
-        ? `請返回 LINE 聊天室。系統會稍後更新${menu}。`
-        : `請返回 LINE 聊天室。若您只有${roleLabel}身分，系統會稍後更新${menu}。若同時綁定客戶與月嫂身分，請輸入「切換客戶」或「切換月嫂」選擇身分。`;
-    }
-    previewBox.hidden = false;
+    showBindingReceipt(definition, previewBox, requireIdentityApply(applyResult, preview));
+    clearBindingAttempt(definition);
     button.disabled = true;
   } catch (error) {
+    bindingResultUnknown = applySubmitted;
+    button.disabled = applySubmitted;
+    if (applySubmitted) {
+      event.target.reset?.();
+      showBindingLookup(definition, previewBox);
+      showMessage("綁定結果讀回不完整，尚未確認。請查詢原綁定。", true);
+      return;
+    }
     const staffMismatch = definition.endpoint === "staff"
       && error.code === "line_identity_match_not_found"
       && error.message === "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員";
@@ -344,16 +424,33 @@ async function submitForm(event, definition, button, previewBox) {
       showIdentityError(error, "目前無法完成身分綁定，請確認資料正確或稍後再試。");
     }
     document.getElementById("binding-help").hidden = false;
-    bindingResultUnknown = applySubmitted;
-    button.disabled = bindingResultUnknown;
   }
+}
+
+function showBindingReceipt(definition, previewBox, receipt) {
+  const {roleLabel, endpoint} = definition;
+  if (receipt.status === "existing") {
+    showMessage(roleLabel + "身分已完成綁定");
+    previewBox.textContent = "此 LINE 帳號已綁定此身分，可直接返回 LINE 使用。";
+  } else {
+    showMessage(roleLabel + "身分綁定成功");
+    const menu = endpoint === "staff" ? "月嫂選單" : endpoint === "admin" ? "工會選單" : "客戶選單";
+    previewBox.textContent = endpoint === "admin"
+      ? "請返回 LINE 聊天室。系統會稍後更新" + menu + "。"
+      : "請返回 LINE 聊天室。若您只有" + roleLabel + "身分，系統會稍後更新" + menu
+        + "。若同時綁定客戶與月嫂身分，請輸入「切換客戶」或「切換月嫂」選擇身分。";
+  }
+  previewBox.hidden = false;
+}
+
+function isBindingReceipt(receipt) {
+  return receipt && ["bound", "existing"].includes(receipt.status)
+    && typeof receipt.receipt_identity === "string" && receipt.receipt_identity.trim();
 }
 
 function requireIdentityApply(result, preview) {
   const receipt = result?.data;
-  if (!receipt || !['bound', 'existing'].includes(receipt.status)
-      || typeof receipt.receipt_identity !== 'string' || !receipt.receipt_identity.trim()
-      || receipt.preview_fingerprint !== preview.preview_fingerprint) {
+  if (!isBindingReceipt(receipt) || receipt.preview_fingerprint !== preview.preview_fingerprint) {
     throw new Error('綁定結果讀回不完整，請勿重複送出；請聯絡工會確認。');
   }
   return receipt;
@@ -518,9 +615,11 @@ async function initialize() {
   }
   if (target === "staff_verification" || purposeParam === "staff_verification") {
     await ensureLineIdToken();
-    await openIdentityFlow("staff_verification");
     const definition = definitions.staff_verification;
+    bindingEntryFlow = flowIdParam;
     document.getElementById("title").textContent = definition.title;
+    if (await recoverPendingBinding(definition)) return;
+    await openIdentityFlow("staff_verification");
     document.getElementById("description").textContent = definition.description;
     document.getElementById("customer-choice").hidden = true;
     showIdentityEntry(definition, "staff_verification");
@@ -534,6 +633,8 @@ async function initialize() {
   document.getElementById("title").textContent = definition.title;
   document.getElementById("description").textContent = definition.description;
   await ensureLineIdToken();
+  bindingEntryFlow = flowId;
+  if (await recoverPendingBinding(definition)) return;
   await validateIdentityFlow(purpose);
   configureCustomerChoice(definition);
   showIdentityEntry(definition, purpose);

@@ -15,6 +15,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  liff-mutation-readback:
+    name: LIFF availability and original result contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: development
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Confirm the exact candidate checkout
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install declared runtime and focused test dependencies
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 playwright
+      - name: Install Chromium for the LIFF browser contract
+        run: python -m playwright install --with-deps chromium
+      - name: Verify original receipts and protected LIFF writes
+        run: |
+          set -euo pipefail
+          export STAFF_PROFILE_CHANGE_TEST_REDIS_PORT=6391
+          redis_container="liff-profile-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker rm -fv "$redis_container" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$redis_container" \
+            -p "127.0.0.1:$STAFF_PROFILE_CHANGE_TEST_REDIS_PORT:6379" \
+            redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+          for attempt in $(seq 1 25); do
+            if docker exec "$redis_container" redis-cli ping | grep -qx PONG; then break; fi
+            sleep 1
+          done
+          docker exec "$redis_container" redis-cli ping | grep -qx PONG
+          line_tests=tests/domains/external-integration/subsystems/line
+          python -m pytest -vv --junitxml=liff-mutation-contracts.xml \
+            "$line_tests/modules/staff-service-day-media/contract/test_line_staff_calendar_contract.py" \
+            "$line_tests/integration/test_staff_leave_intake_api.py" \
+            "$line_tests/modules/line-identity-management/contract/test_identity_binding_readback.py" \
+            "$line_tests/modules/line-identity-management/contract/test_customer_binding_presentation.py" \
+            "$line_tests/modules/line-identity-management/contract/test_line_identity_api_routes.py" \
+            tests/domains/staff/subsystems/staff/modules/staff-roster-profile/contract/test_staff_profile_change_intake.py
+      - name: Confirm focused LIFF cases ran without skips
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse("liff-mutation-contracts.xml").findall(".//testcase")
+          for required in ("test_staff_availability_ui_requires_original_receipt_and_formal_readback",
+                           "test_postponement_lost_group_acknowledgement_only_queries_original_proposal",
+                           "test_liff_submission_recovery_in_browser",
+                           "test_binding_known_conflict_stays_definitive_without_masking_unknown",
+                           "test_binding_result_readback_requires_exact_verified_original_operation",
+                           "test_customer_bind_page_reads_lost_apply_receipt_after_reopen",
+                           "test_postponement_receipt_uses_original_actor_and_group_event"):
+              assert any(case.get("name", "").startswith(required) for case in cases), required
+          assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error"))
+          print(f"{len(cases)} LIFF cases passed with no skips")
+          PY
+
   non-citizen-passbook:
     name: Non-citizen LIFF passbook contracts
     runs-on: ubuntu-latest

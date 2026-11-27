@@ -1,4 +1,4 @@
-"""Verified LIFF APIs for caregiver order and schedule queries."""
+"""Verified LIFF APIs for caregiver orders, schedules, payouts and availability."""
 
 from __future__ import annotations
 
@@ -9,13 +9,29 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.error_contracts import typed_http_error
 from api.dependencies.line_identity import get_liff_token_verifier
+from api.dependencies.staff_availability import StaffAvailabilityApplication, get_staff_availability_application
+from api.routes.staff_availability import (
+    call_staff_availability,
+    staff_availability_block_payload,
+    staff_availability_preview_payload,
+    staff_availability_receipt_payload,
+)
 from api.schemas.base import BaseResponse
 from api.schemas.line_staff_self_service import (
+    StaffAvailabilityLiffApplyBody,
+    StaffAvailabilityLiffPage,
+    StaffAvailabilityLiffPreviewBody,
+    StaffAvailabilityLiffQueryBody,
     StaffLiffRequest,
     StaffOrderPageView,
     StaffOrderSearchRequest,
     StaffPayoutPageView,
     StaffScheduleView,
+)
+from api.schemas.staff_availability import (
+    StaffAvailabilityPreviewView,
+    StaffAvailabilityReceiptView,
+    StaffUnavailabilityBlockView,
 )
 from subsystems.staff_payables.staff_payout_self_service_query import (
     StaffPayoutSelfServiceQuery,
@@ -26,13 +42,25 @@ from domains.line.identity_flow import (
     LineIdentityFlowPurpose,
     validate_identity_flow,
 )
+from domains.scheduling.staff_availability import (
+    StaffAvailabilityAction,
+    StaffAvailabilityBlockStatus,
+    StaffAvailabilityIntent,
+)
 from infrastructure.line.liff_token_verifier import (
     InvalidLiffTokenError,
     LiffVerificationUnavailableError,
 )
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
+from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.scheduling import staff_monthly_calendar_query as _staff_monthly_calendar_query
+from subsystems.scheduling.staff_availability_workflow import (
+    StaffAvailabilityApplyRequest,
+    StaffAvailabilityPreviewRequest,
+    StaffAvailabilityRecordsQuery,
+)
 from subsystems.scheduling.staff_monthly_calendar_query import get_staff_monthly_calendar_schedule
 
 
@@ -64,6 +92,82 @@ def monthly_schedule(
         int(staff["staff_id"]), year, month, include_historical_reservations=False,
     )
     return BaseResponse(data={**schedule, "staff_name": staff["staff_name"]})
+
+
+@router.post("/availability-blocks/query", response_model=BaseResponse[StaffAvailabilityLiffPage])
+def query_own_availability_blocks(
+    payload: StaffAvailabilityLiffQueryBody,
+    application: StaffAvailabilityApplication = Depends(get_staff_availability_application),
+):
+    staff_id = _availability_staff_id(payload.line_id_token)
+
+    def query_page():
+        records = application.query_records(StaffAvailabilityRecordsQuery(staff_id, payload.after_id, payload.limit))
+        return BaseResponse(data=StaffAvailabilityLiffPage(
+            staff_id=staff_id,
+            items=[
+                StaffUnavailabilityBlockView.model_validate(staff_availability_block_payload(block))
+                for block in records
+                if block.status is StaffAvailabilityBlockStatus.EFFECTIVE
+            ],
+            next_after_id=records[-1].block_id if len(records) == payload.limit else None,
+        ))
+
+    return call_staff_availability(query_page, CorrelationId("line-staff-availability:query"))
+
+
+@router.post("/availability-blocks/preview", response_model=BaseResponse[StaffAvailabilityPreviewView])
+def preview_own_availability_block(
+    payload: StaffAvailabilityLiffPreviewBody,
+    application: StaffAvailabilityApplication = Depends(get_staff_availability_application),
+):
+    staff_id = _availability_staff_id(payload.line_id_token)
+    return call_staff_availability(
+        lambda: BaseResponse(data=staff_availability_preview_payload(
+            application.preview(StaffAvailabilityPreviewRequest(_availability_intent(staff_id, payload)))
+        )),
+        CorrelationId("line-staff-availability:preview"),
+    )
+
+
+@router.post("/availability-blocks/apply", response_model=BaseResponse[StaffAvailabilityReceiptView])
+def apply_own_availability_block(
+    payload: StaffAvailabilityLiffApplyBody,
+    application: StaffAvailabilityApplication = Depends(get_staff_availability_application),
+):
+    staff_id = _availability_staff_id(payload.line_id_token)
+    key = IdempotencyKey(str(payload.idempotency_key))
+    correlation = CorrelationId(f"line-staff-availability:{key.value}")
+
+    def apply():
+        receipt = application.apply(StaffAvailabilityApplyRequest(
+            _availability_intent(staff_id, payload),
+            ExpectedVersion(payload.expected_version),
+            PreviewFingerprint(payload.preview_fingerprint),
+            key,
+            ActorContext(f"line-staff:{staff_id}"),
+            correlation,
+        ))
+        return BaseResponse(data=staff_availability_receipt_payload(receipt))
+
+    return call_staff_availability(apply, correlation)
+
+
+def _availability_staff_id(token: str) -> int:
+    line_user_id = _verify_liff_token(token)
+    with open_line_unit_of_work() as unit_of_work:
+        staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
+    return int(staff["staff_id"])
+
+
+def _availability_intent(staff_id: int, payload: StaffAvailabilityLiffPreviewBody) -> StaffAvailabilityIntent:
+    return StaffAvailabilityIntent(
+        StaffAvailabilityAction.CREATE_LONG_LEAVE,
+        staff_id,
+        payload.reason.strip(),
+        payload.start_date,
+        payload.end_date,
+    )
 
 
 @router.post("/payouts", response_model=BaseResponse[StaffPayoutPageView])
@@ -104,25 +208,7 @@ def _required_staff(staff):
 def _verified_line_user_id(payload) -> LineUserId:
     token = payload.line_id_token.strip()
     if token:
-        try:
-            return get_liff_token_verifier().verify(token).line_user_id
-        except InvalidLiffTokenError as error:
-            raise typed_http_error(
-                401,
-                "forbidden",
-                "liff_token_invalid",
-                "LINE 登入狀態已失效或與此 LIFF 不一致，請重新登入 LINE。",
-                "line-staff-self-service:liff-token-invalid",
-            ) from error
-        except LiffVerificationUnavailableError as error:
-            raise typed_http_error(
-                503,
-                "unavailable",
-                "liff_verification_unavailable",
-                "LINE 身分驗證服務暫時無法連線，請稍後再試。",
-                "line-staff-self-service:liff-verification-unavailable",
-                retryable=True,
-            ) from error
+        return _verify_liff_token(token)
     flow_id = payload.flow_id.strip()
     if flow_id:
         return _verified_staff_self_service_flow(flow_id)
@@ -136,6 +222,28 @@ def _verified_line_user_id(payload) -> LineUserId:
         "缺少有效的 LINE 登入狀態，請重新從 LINE 開啟此頁。",
         "line-staff-self-service:liff-token-required",
     )
+
+
+def _verify_liff_token(token: str) -> LineUserId:
+    try:
+        return get_liff_token_verifier().verify(token).line_user_id
+    except InvalidLiffTokenError as error:
+        raise typed_http_error(
+            401,
+            "forbidden",
+            "liff_token_invalid",
+            "LINE 登入狀態已失效或與此 LIFF 不一致，請重新登入 LINE。",
+            "line-staff-self-service:liff-token-invalid",
+        ) from error
+    except LiffVerificationUnavailableError as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "liff_verification_unavailable",
+            "LINE 身分驗證服務暫時無法連線，請稍後再試。",
+            "line-staff-self-service:liff-verification-unavailable",
+            retryable=True,
+        ) from error
 
 
 def _verified_staff_self_service_flow(flow_id: str) -> LineUserId:

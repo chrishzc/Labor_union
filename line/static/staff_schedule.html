@@ -607,14 +607,14 @@ Description: 提供月嫂查班、不接案日期，以及雙方合意延期的�
       </div>
       <div class="full">
         <label for="unavailReason">不接案原因</label>
-        <input id="unavailReason" type="text" placeholder="例如：返鄉休息、個人休假、回診" value="返鄉休息">
+        <input id="unavailReason" type="text" maxlength="500" placeholder="例如：返鄉休息、個人休假、回診" value="返鄉休息">
       </div>
     </div>
-    <button type="button" id="submitUnavailBtn" class="primary" style="margin-top:14px;">＋ 登記不接案日期</button>
-    <div id="unavailStatus" class="message" style="display:none;"></div>
+    <button type="button" id="submitUnavailBtn" class="primary" disabled style="margin-top:14px;">＋ 登記不接案日期</button>
+    <div id="unavailStatus" class="message" role="status" style="display:none;"></div>
     <div style="margin-top:14px;">
       <h3 style="font-size:16px;font-weight:800;color:#241c18;margin:0 0 6px;">已登記不接案紀錄</h3>
-      <div id="unavailRecordList" class="hint">目前尚無已登記的不接案日期。</div>
+      <div id="unavailRecordList" class="hint" aria-live="polite">尚未取得不接案紀錄。</div>
     </div>
   </section>
 </main>
@@ -640,6 +640,7 @@ let postponeStaffId;
 let postponeOccupancy = new Map();
 let postponeCheck = { status: 'idle' };
 let lastSentPostponeSelection;
+let postponeGroupPending = null;
 
 function closeLiffWindow() {
   if (typeof liff !== "undefined" && typeof liff.closeWindow === "function") {
@@ -1288,7 +1289,7 @@ function showPostponeUnavailableView(message) {
 }
 
 function postponeEditingLocked() {
-  return ['submitting', 'complete', 'stale'].includes(postponeCheck.status);
+  return ['submitting', 'awaiting-group', 'stale'].includes(postponeCheck.status);
 }
 
 function navCalMonth(delta) {
@@ -1513,7 +1514,7 @@ function updatePostponePairs() {
 
 function renderPostponeCheck() {
   const notice = document.getElementById('postponeActionNotice');
-  const {status, message, groupMessage} = postponeCheck;
+  const {status, message} = postponeCheck;
   notice.hidden = !message;
   notice.className = status === 'conflict' || status === 'unavailable' || status === 'stale' || postponeCheck.submitFailed ? 'message error' : 'message';
   notice.textContent = message ?? '';
@@ -1522,12 +1523,12 @@ function renderPostponeCheck() {
   retry.textContent = status === 'stale' ? '讀取最新排班' : '重新檢查檔期';
   document.getElementById('postponeAssignment').disabled = postponeEditingLocked();
   const returnButton = document.getElementById('postponeReturnToGroup');
-  returnButton.hidden = lastSentPostponeSelection === undefined;
-  returnButton.disabled = status === 'submitting' || Boolean(groupMessage);
+  returnButton.hidden = status !== 'sent' && lastSentPostponeSelection === undefined;
+  returnButton.disabled = status === 'submitting' || status === 'awaiting-group';
   const submitBtn = document.getElementById('postponeSubmitBtn');
-  const canRetrySend = status === 'complete' && Boolean(groupMessage);
-  submitBtn.disabled = status !== 'ready' && !canRetrySend;
-  if (canRetrySend) submitBtn.textContent = '重試送出延期申請';
+  const canCheckGroup = status === 'awaiting-group';
+  submitBtn.disabled = status !== 'ready' && !canCheckGroup;
+  if (canCheckGroup) submitBtn.textContent = '查詢原提案';
 }
 
 async function retryPostponeCheck() {
@@ -1545,7 +1546,7 @@ function postponeSelectionKey() {
 }
 
 function sentPostponeState() {
-  return {status: 'sent', message: '延期申請已送出。可繼續調整日期，或回群組查看確認卡。'};
+  return {status: 'sent', message: '原群組已受理延期提案。可繼續調整日期，或回群組查看確認卡。'};
 }
 
 function markPostponeScheduleStale(code) {
@@ -1619,30 +1620,90 @@ function canSendPostponeToGroup() {
     typeof liff.sendMessages === 'function';
 }
 
-async function sendPostponeMessage(groupMessage) {
-  postponeCheck = {status: 'submitting', message: '正在將延期申請送到原群組…'};
-  renderPostponeCheck();
+function postponeGroupStorageKey() {
+  return 'line-postpone-awaiting-group:' + focusCaseNo;
+}
+
+function readPendingPostponeGroup() {
   try {
-    if (!canSendPostponeToGroup()) throw new Error('LINE 群組傳訊無法使用');
-    await liff.sendMessages([{type: 'text', text: groupMessage}]);
-  } catch (_) {
-    postponeCheck = {
-      status: 'complete', groupMessage, submitFailed: true,
-      message: '日期已儲存，LINE 尚未確認送出。請重試送出同一筆申請。',
-    };
+    const pending = JSON.parse(sessionStorage.getItem(postponeGroupStorageKey()));
+    return Number.isSafeInteger(pending?.assignment_id) && pending.assignment_id > 0 &&
+      typeof pending.idempotency_key === 'string' && /^[0-9a-f-]{36}$/i.test(pending.idempotency_key) ? pending : null;
+  } catch {
+    return null;
+  }
+}
+
+async function queryPostponeGroup() {
+  const pending = postponeGroupPending;
+  if (!pending || postponeCheck.status === 'submitting') return;
+  postponeCheck = {status: 'submitting', message: '正在確認原提案是否已由群組受理…'};
+  renderPostponeCheck();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const result = await leaveResultPost('proposal-status', {
+      case_no: focusCaseNo,
+      assignment_id: pending.assignment_id,
+      idempotency_key: pending.idempotency_key,
+    }, controller.signal);
+    if (result?.status === 'group_received' && result.case_no === focusCaseNo &&
+        result.assignment_id === pending.assignment_id && result.idempotency_key === pending.idempotency_key) {
+      sessionStorage.removeItem(postponeGroupStorageKey());
+      postponeGroupPending = null;
+      if (pending.selection) lastSentPostponeSelection = pending.selection;
+      postponeCheck = sentPostponeState();
+      updatePostponePairs();
+      return;
+    }
+    postponeCheck = {status: 'awaiting-group', message: '提案草稿已儲存，尚未確認原群組受理。請查詢原提案或回群組確認。'};
+  } catch (error) {
+    postponeCheck = {status: 'awaiting-group', submitFailed: true,
+      message: error.code === 'leave_result_group_unavailable' ? error.message : '目前無法確認原群組是否受理，請稍後查詢原提案。'};
+  } finally {
+    clearTimeout(timeout);
+    renderPostponeCheck();
+    renderPostponeCalendar();
+  }
+}
+
+async function sendPostponeMessage(groupMessage, intent, idempotencyKey) {
+  if (!canSendPostponeToGroup()) {
+    postponeCheck = {status: 'ready', intent, idempotencyKey, submitFailed: true,
+      message: '提案草稿已儲存。請從原 LINE 案件群組開啟延期頁面確認。'};
     renderPostponeCheck();
     return;
   }
-  lastSentPostponeSelection = postponeSelectionKey();
-  postponeCheck = sentPostponeState();
-  updatePostponePairs();
+  const pending = {assignment_id: intent.assignment_id, idempotency_key: idempotencyKey};
+  try {
+    sessionStorage.setItem(postponeGroupStorageKey(), JSON.stringify(pending));
+  } catch {
+    postponeCheck = {status: 'ready', intent, idempotencyKey, submitFailed: true,
+      message: '無法保留原提案識別，群組訊息尚未送出。請聯絡工會。'};
+    renderPostponeCheck();
+    return;
+  }
+  postponeGroupPending = {...pending, selection: postponeSelectionKey()};
+  postponeCheck = {status: 'submitting', message: '正在將延期申請送到原群組…'};
   renderPostponeCheck();
-  renderPostponeCalendar();
+  let timeout;
+  try {
+    await Promise.race([
+      liff.sendMessages([{type: 'text', text: groupMessage}]),
+      new Promise(resolve => { timeout = setTimeout(resolve, 10000); }),
+    ]);
+  } catch {
+    // A missing acknowledgement does not prove the provider skipped the send.
+  } finally {
+    clearTimeout(timeout);
+  }
+  postponeCheck = {status: 'awaiting-group'};
+  await queryPostponeGroup();
 }
 
 async function submitPostponeProposal() {
-  if (postponeCheck.status === 'complete' && postponeCheck.groupMessage) {
-    await sendPostponeMessage(postponeCheck.groupMessage);
+  if (postponeCheck.status === 'awaiting-group') {
+    await queryPostponeGroup();
     return;
   }
   if (postponeCheck.status !== 'ready') return;
@@ -1677,7 +1738,7 @@ async function submitPostponeProposal() {
     renderPostponeCalendar();
     return;
   }
-  await sendPostponeMessage(proposed.group_message);
+  await sendPostponeMessage(proposed.group_message, intent, idempotencyKey);
 }
 
 function loadPostponeAssignment(caseItem) {
@@ -1702,7 +1763,8 @@ function selectPostponeAssignment(assignmentId) {
 }
 
 async function setupPostponeWorkbench(assignments) {
-  const previousAssignmentId = postponeCase?.assignment_id;
+  const pending = readPendingPostponeGroup();
+  const previousAssignmentId = pending?.assignment_id ?? postponeCase?.assignment_id;
   const assignment = assignments.find(item => item.assignment_id === previousAssignmentId) ?? assignments[0];
   postponeMonthRequest?.abort();
   postponeCheck.controller?.abort();
@@ -1739,6 +1801,11 @@ async function setupPostponeWorkbench(assignments) {
   }));
   initPostponeSwipe();
   loadPostponeAssignment(assignment);
+  if (pending) {
+    postponeGroupPending = pending;
+    postponeCheck = {status: 'awaiting-group'};
+    await queryPostponeGroup();
+  }
 }
 
 function initPostponeSwipe() {
@@ -1810,44 +1877,195 @@ async function loadPostponeCase() {
   }
 }
 
-function registerUnavailabilityHandlers() {
-  const submitBtn = document.getElementById("submitUnavailBtn");
-  if (!submitBtn) return;
-  submitBtn.addEventListener("click", () => {
-    const start = document.getElementById("unavailStartDate").value;
-    const end = document.getElementById("unavailEndDate").value;
-    const reason = document.getElementById("unavailReason").value.trim() || "返鄉休息";
-    const statusBox = document.getElementById("unavailStatus");
-    if (!start || !end) {
-      statusBox.textContent = "請選擇不接案的開始日與結束日。";
-      statusBox.className = "message error";
-      statusBox.style.display = "block";
-      return;
-    }
-    if (start > end) {
-      statusBox.textContent = "開始日不得大於結束日，請重新確認。";
-      statusBox.className = "message error";
-      statusBox.style.display = "block";
-      return;
-    }
-    statusBox.textContent = `已成功登記不接案：${start} 至 ${end}（${reason}）。系統將自動避開此期間派案。`;
-    statusBox.className = "message";
-    statusBox.style.display = "block";
 
-    const list = document.getElementById("unavailRecordList");
-    if (list.textContent === "目前尚無已登記的不接案日期。") {
-      list.replaceChildren();
+let unavailabilityBusy = false;
+let pendingUnavailability = null;
+
+const unavailabilityErrors = {
+  staff_unavailability_overlap: "所選日期與既有不接案紀錄重疊，請確認日期。",
+  staff_unavailability_assignment_conflict: "所選日期已有正式排班，請聯絡工會。",
+  staff_unavailability_waiting_lock_conflict: "所選日期已有待成立的排班，請聯絡工會。",
+  staff_unavailability_buffer_conflict: "所選日期與既有排班保留時段重疊，請聯絡工會。",
+  staff_availability_stale: "排班或不接案紀錄已變更，請重新確認日期。",
+  invalid_staff_availability_intent: "不接案資料不正確，請重新確認。",
+};
+const unavailabilityAction = "create_long_leave";
+
+function setUnavailabilityControls() {
+  const button = document.getElementById("submitUnavailBtn");
+  button.disabled = !lineIdToken || unavailabilityBusy;
+  button.textContent = pendingUnavailability?.receipt ? "查詢登記結果"
+    : pendingUnavailability ? "重試原登記" : "＋ 登記不接案日期";
+  for (const id of ["unavailStartDate", "unavailEndDate", "unavailReason"]) {
+    document.getElementById(id).disabled = !lineIdToken || unavailabilityBusy || Boolean(pendingUnavailability);
+  }
+}
+
+async function postUnavailability(path, payload) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch("/api/v1/line/staff-self-service/availability-blocks/" + path, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({line_id_token: lineIdToken, ...payload}),
+      signal: controller.signal,
+    });
+    const data = await responseData(response);
+    if (!response.ok || data.success !== true || !data.data) {
+      showReauthenticationFor(data);
+      const code = responseErrorCode(data);
+      const message = unavailabilityErrors[code] || responseMessage(data, "目前無法處理不接案資料。");
+      throw Object.assign(new Error(message), {code, status: response.status});
     }
+    return data.data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function validUnavailabilityBlock(block, staffId) {
+  return Number.isSafeInteger(block?.block_id) && block.block_id > 0 &&
+    block.staff_id === staffId && block.status === "effective" &&
+    typeof block.start_date === "string" && typeof block.reason === "string" &&
+    (block.kind === "long_leave" && typeof block.end_date === "string" ||
+     block.kind === "paused_service" && (block.end_date === null || typeof block.end_date === "string"));
+}
+
+async function loadUnavailabilityRecords(expectedStaffId) {
+  let afterId = 0;
+  let staffId = expectedStaffId;
+  const records = [];
+  do {
+    const data = await postUnavailability("query", {after_id: afterId});
+    staffId ??= data.staff_id;
+    const next = data.next_after_id;
+    if (!Number.isSafeInteger(staffId) || staffId <= 0 || data.staff_id !== staffId ||
+        !Array.isArray(data.items) || !data.items.every(item => validUnavailabilityBlock(item, staffId) &&
+          item.block_id > afterId && (next === null || item.block_id <= next)) ||
+        (next !== null && (!Number.isSafeInteger(next) || next <= afterId))) {
+      throw new Error("不接案紀錄格式不完整。");
+    }
+    records.push(...data.items);
+    afterId = next;
+  } while (afterId !== null);
+
+  const list = document.getElementById("unavailRecordList");
+  list.replaceChildren(...records.map(block => {
     const item = document.createElement("div");
-    item.style.padding = "10px 14px";
-    item.style.marginTop = "8px";
-    item.style.borderRadius = "10px";
-    item.style.background = "#ede9fe";
-    item.style.color = "#4c1d95";
-    item.style.fontWeight = "800";
-    item.textContent = `🚫 ${start} ～ ${end}｜${reason}（個人休假）`; // 契約相容: 正式不可服務
-    list.prepend(item);
-  });
+    item.textContent = `${block.start_date} 至 ${block.end_date ?? "未指定結束日"}${block.reason ? "｜" + block.reason : ""}`;
+    return item;
+  }));
+  if (records.length === 0) list.textContent = "目前尚無已登記的不接案日期。";
+  return records;
+}
+
+async function prepareUnavailability(intent) {
+  const preview = await postUnavailability("preview", intent);
+  if (preview.can_apply === false && Array.isArray(preview.blockers)) {
+    throw new Error(preview.blockers.map(code => unavailabilityErrors[code]).find(Boolean) ||
+      "所選日期無法登記，請確認排班或聯絡工會。");
+  }
+  if (preview.can_apply !== true || preview.action !== unavailabilityAction ||
+      !Number.isSafeInteger(preview.staff_id) || preview.staff_id <= 0 ||
+      !Number.isSafeInteger(preview.source_version) || preview.source_version < 0 ||
+      typeof preview.preview_fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint) ||
+      preview.candidate_kind !== "long_leave" || preview.candidate_start_date !== intent.start_date ||
+      preview.candidate_end_date !== intent.end_date) {
+    throw new Error("日期核對結果不完整，請重新確認。");
+  }
+  return {
+    staffId: preview.staff_id,
+    payload: Object.freeze({
+      ...intent,
+      expected_version: preview.source_version,
+      preview_fingerprint: preview.preview_fingerprint,
+      idempotency_key: crypto.randomUUID(),
+    }),
+    receipt: null,
+  };
+}
+
+function requireUnavailabilityReceipt(receipt, {staffId, payload}) {
+  if (receipt.staff_id !== staffId || receipt.action !== unavailabilityAction ||
+      receipt.idempotency_key !== payload.idempotency_key ||
+      receipt.preview_fingerprint !== payload.preview_fingerprint ||
+      !Number.isSafeInteger(receipt.aggregate_version) || receipt.aggregate_version <= payload.expected_version ||
+      !validUnavailabilityBlock(receipt.block, staffId) || receipt.block.kind !== "long_leave" ||
+      receipt.block.start_date !== payload.start_date || receipt.block.end_date !== payload.end_date ||
+      receipt.block.reason !== payload.reason) {
+    throw new Error("登記收據格式不完整。");
+  }
+  return receipt;
+}
+
+async function submitUnavailability() {
+  if (scheduleMode === "postpone" || !lineIdToken || unavailabilityBusy) return;
+  unavailabilityBusy = true;
+  setUnavailabilityControls();
+  try {
+    if (!pendingUnavailability) {
+      const start = document.getElementById("unavailStartDate").value;
+      const end = document.getElementById("unavailEndDate").value;
+      const reason = document.getElementById("unavailReason").value.trim();
+      if (!start || !end || start > end) throw new Error("請確認不接案的開始日與結束日。");
+      show("unavailStatus", "正在確認不接案日期…");
+      pendingUnavailability = await prepareUnavailability({start_date: start, end_date: end, reason});
+    }
+    const operation = pendingUnavailability;
+    if (!operation.receipt) {
+      show("unavailStatus", "正在確認登記結果…");
+      const receipt = await postUnavailability("apply", operation.payload);
+      operation.receipt = requireUnavailabilityReceipt(receipt, operation);
+    }
+    const records = await loadUnavailabilityRecords(operation.staffId);
+    if (!records.some(block => block.block_id === operation.receipt.block.block_id &&
+        block.kind === "long_leave" && block.start_date === operation.payload.start_date &&
+        block.end_date === operation.payload.end_date && block.reason === operation.payload.reason)) {
+      throw new Error("目前查不到本次登記的有效紀錄。");
+    }
+    pendingUnavailability = null;
+    show("unavailStatus", "不接案日期已登記，您可以關閉頁面。");
+    await loadSchedule();
+  } catch (error) {
+    if (pendingUnavailability?.receipt) {
+      show("unavailStatus", "已收到登記收據，目前無法確認正式紀錄。請按「查詢登記結果」。", true);
+    } else if (pendingUnavailability &&
+        ([409, 422].includes(error.status) && Object.hasOwn(unavailabilityErrors, error.code) ||
+         error.status === 409 && error.code === "staff_availability_idempotency_conflict")) {
+      pendingUnavailability = null;
+      show("unavailStatus", error.message, true);
+    } else if (pendingUnavailability) {
+      show("unavailStatus", "尚未確認登記結果。請按「重試原登記」，或重新開頁查閱不接案紀錄。", true);
+    } else {
+      show("unavailStatus", error.message || "目前無法登記不接案日期，請稍後再試。", true);
+    }
+  } finally {
+    unavailabilityBusy = false;
+    setUnavailabilityControls();
+  }
+}
+
+async function registerUnavailabilityHandlers() {
+  setUnavailabilityControls();
+  if (!lineIdToken) {
+    show("unavailStatus", "請重新登入 LINE 後查詢或登記不接案日期。", true);
+    document.getElementById("reauthenticate").hidden = false;
+    return;
+  }
+  document.getElementById("submitUnavailBtn").addEventListener("click", submitUnavailability);
+  const list = document.getElementById("unavailRecordList");
+  list.textContent = "正在讀取不接案紀錄…";
+  unavailabilityBusy = true;
+  setUnavailabilityControls();
+  try {
+    await loadUnavailabilityRecords();
+  } catch (_) {
+    list.textContent = "目前無法讀取不接案紀錄，請重新開啟頁面再試。";
+  } finally {
+    unavailabilityBusy = false;
+    setUnavailabilityControls();
+  }
 }
 
 async function init() {
@@ -1924,9 +2142,9 @@ async function init() {
   if (scheduleMode === 'postpone') {
     await loadPostponeCase();
   } else {
-    registerUnavailabilityHandlers();
     registerMonthNavigatorHandlers();
-    loadSchedule();
+    await loadSchedule();
+    registerUnavailabilityHandlers();
   }
 }
 

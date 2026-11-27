@@ -11,9 +11,9 @@ ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "
 REBIND_BLOCKED_MESSAGE = "拒絕重新綁定，請聯絡工會人員確認身分解除舊綁定。在用新帳號綁定"
 
 
-def _run_page(status, actions="await handleFormSubmit(event);", *, apply_status="bound", preview_ok=True, in_client=True, survey_complete=True, existing_case=False, case_no=None, rebind_blocked_at=None):
+def _run_page(status, actions="await handleFormSubmit(event);", *, apply_status="bound", preview_ok=True, in_client=True, survey_complete=True, existing_case=False, case_no=None, rebind_blocked_at=None, apply_lost=False):
     source = (ROOT / "line/static/bind.html").read_text(encoding="utf-8").split("<script>", 1)[1].split("</script>", 1)[0]
-    settings = json.dumps({"status": status, "apply_status": apply_status, "preview_ok": preview_ok, "in_client": in_client, "survey_complete": survey_complete, "existing_case": existing_case, "case_no": case_no, "rebind_blocked_at": rebind_blocked_at, "rebind_blocked_message": REBIND_BLOCKED_MESSAGE})
+    settings = json.dumps({"status": status, "apply_status": apply_status, "preview_ok": preview_ok, "in_client": in_client, "survey_complete": survey_complete, "existing_case": existing_case, "case_no": case_no, "rebind_blocked_at": rebind_blocked_at, "apply_lost": apply_lost, "rebind_blocked_message": REBIND_BLOCKED_MESSAGE})
     harness = r"""
 const vm = require('node:vm');
 const settings = SETTINGS;
@@ -40,7 +40,7 @@ const location = {search, origin: 'https://line.example.test', replace: url => r
 const context = vm.createContext({
   document: {getElementById: get, querySelectorAll: () => [], createElement: () => new Element()},
   window: {addEventListener(){}, location, close(){}},
-  URL, URLSearchParams, console, setTimeout: callback => callback(), crypto: {randomUUID: () => 'request-test'},
+  URL, URLSearchParams, console, AbortController, setTimeout: callback => callback(), clearTimeout(){}, crypto: {randomUUID: () => 'request-test'},
   sessionStorage: {getItem: k => storage.get(k) || null, setItem: (k,v) => storage.set(k,v), removeItem: k => storage.delete(k)},
   liff: {isInClient: () => settings.in_client, getContext: () => ({type: 'utou'}),
     isApiAvailable: () => true, sendMessages: async values => messages.push(values), closeWindow: () => closes++},
@@ -55,6 +55,9 @@ const context = vm.createContext({
         has_completed_survey: settings.survey_complete, currently_bound: false, case_no: settings.case_no,
       },
     }})};
+
+    if (url.endsWith('/binding-result')) return {ok:true,json:async()=>({data:{status:'bound',receipt_identity:'original-receipt'}})};
+    if (url.endsWith('/apply') && settings.apply_lost) throw new Error('lost response');
     if (url.endsWith('/apply')) return {ok: settings.apply_status !== 'conflict', json: async () => ({data: {status: settings.apply_status, receipt_identity:'public-receipt', preview_fingerprint:'a'.repeat(64), review_request_id:9}})};
     throw new Error('Unexpected request: ' + url);
   },
@@ -64,7 +67,7 @@ const event = {preventDefault(){}};
 context.event = event;
 (async () => {
   await vm.runInContext('(async () => { currentIdToken = "test-id-token"; runtimePage = {success_title:"綁定成功",success_description:"綁定成功，專屬選單將稍後更新。"}; ACTIONS })()', context);
-  const output = {calls, messages, redirects, closes, elements: {}};
+  const output = {calls, messages, redirects, closes, elements: {}, stored:[...storage.values()]};
   for (const [id, element] of elements) output.elements[id] = {text: element.textContent, display: element.style.display};
   process.stdout.write(JSON.stringify(output));
 })().catch(error => {console.error(error); process.exitCode = 1;});
@@ -223,3 +226,17 @@ def test_direct_rebind_is_blocked_before_apply_and_creates_no_review(conflict):
     target = LineIdentityCandidate(LineBindingSubjectType.CUSTOMER, "requested-client", None)
     binding = None
     assert application.preview_customer(flow_id, user, proof).status.value == "matched"
+
+
+def test_customer_bind_page_reads_lost_apply_receipt_after_reopen():
+    result = _run_page(
+        "matched", "await handleFormSubmit(event); pendingBinding = null; await recoverPendingBinding();",
+        apply_lost=True,
+    )
+    assert [call["url"].rsplit("/", 1)[-1] for call in result["calls"]] == ["preview", "apply", "binding-result"]
+    assert result["calls"][2]["body"] == {
+        "flow_id": "flow-test", "purpose": "customer_binding", "line_id_token": "test-id-token",
+        "attempt_id": result["calls"][1]["body"]["attempt_id"],
+    }
+    assert result["elements"]["successContent"]["display"] == "block"
+    assert result["stored"] == []
