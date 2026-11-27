@@ -393,7 +393,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       setRichMenuConfiguration(loadedState(configuration));
       setSelectedMenuId((current) => current ?? configuration.menus[0]?.id ?? null);
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) setRichMenuConfiguration(errorState(displayQueryError(error, '圖文選單設定載入失敗')));
+      if (!controller.signal.aborted) setRichMenuConfiguration(errorState(displayQueryError(error, '圖文選單設定載入失敗，請按上方「重新整理」。')));
     });
     return () => controller.abort();
   }, [activeTab, richMenuDraft, richMenuReload]);
@@ -660,11 +660,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </button>
             </div>
 
-            <LoadingOrError state={richMenuConfiguration} loadingText="正在載入 圖文選單 設定…" />
+            <LoadingOrError state={richMenuConfiguration} loadingText="正在載入圖文選單設定…" />
             {richMenuConfiguration.status === 'loaded' && richMenuConfiguration.value?.isEmpty && (
               <div className="line-empty-state">
-                <h4>目前沒有已核准的 圖文選單 設定</h4>
-                <p>畫面不會以範例選單或未核准 LIFF 路由補齊。</p>
+                <h4>目前沒有已核准的圖文選單設定</h4>
+                <p>請聯絡 LINE 管理人員確認圖文選單設定。</p>
               </div>
             )}
 
@@ -1006,7 +1006,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     }}
                   />
                 )}
-                {publicationReadState === 'unknown' && <p role="status">目前無法查詢發布結果；未重新送出發布。</p>}
+                {publicationReadState === 'unknown' && <p role="status">目前無法查詢發布結果。系統尚未重送發布工作，請按上方「重新整理」核對原發布工作。</p>}
                 {(activePublicationTracking || activePublicationLock?.state !== 'editable') && (
                   <section className="richmenu-publish-card" aria-label="圖文選單 發布狀態">
                     {activePublicationTracking ? (
@@ -1029,7 +1029,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                           </p>
                         ) : (
                           <>
-                            <p>發布工作未成功完成。</p>
+                            <p>發布工作未成功完成。{activePublicationTracking.status === 'publish_retryable_failed' ? '請使用下方的重試操作。' : '請記下發布編號並聯絡 LINE 管理人員。'}</p>
                             {activePublicationTracking.status === 'publish_retryable_failed' && <LineRichMenuPublicationActions
                               selectedMenu={null} selectedPublication={{ id: activePublicationTracking.id, menuDefinitionId: activePublicationTracking.menuDefinitionId, status: activePublicationTracking.status, statusLabel: '發布可重試失敗' }}
                               client={richMenuPublication} onQueued={(queued) => {
@@ -1046,7 +1046,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         </h4>
                         <p>{activePublicationLock.readonly_reason}</p>
                         {activePublicationLock.state === 'published' && (
-                          <p>這不是月嫂或工會人員的權限限制；若要再次發布，請先編輯並保存，建立下一版草稿。</p>
+                          <p>若要再次發布，請先編輯並儲存，建立下一版草稿。</p>
                         )}
                       </>
                     ) : (

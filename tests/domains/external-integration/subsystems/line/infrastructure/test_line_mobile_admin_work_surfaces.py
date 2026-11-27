@@ -242,7 +242,7 @@ assert.equal(get('status').className, 'error');
     )
 
 
-def test_mobile_substitute_todo_opens_management_schedule_for_the_same_case():
+def test_mobile_handover_todo_requires_group_join_before_saving_same_request() -> None:
     import subprocess
 
     script = r'''
@@ -260,27 +260,60 @@ class Element {
 const source = fs.readFileSync('line/static/mobile_admin.html', 'utf8');
 const start = source.indexOf('function serviceStartTodoCard(');
 assert(start >= 0);
+const calls = [];
+const commands = new Map();
+let refreshed = false;
 const context = vm.createContext({
   document: { createElement: tag => new Element(tag) },
-  sessionStorage: { getItem: () => null },
-  URLSearchParams,
+  sessionStorage: {
+    getItem: key => commands.get(key) ?? null,
+    setItem: (key, value) => commands.set(key, value),
+    removeItem: key => commands.delete(key),
+  },
+  crypto: {randomUUID: () => '8b635a6b-1cd7-4085-abe5-60437ef69e9d'},
+  notificationViewCurrent: () => () => true,
+  notificationSequence: 1,
+  loadReviewWorkbench: async () => { refreshed = true; },
+  postJson: async (path, payload) => {
+    calls.push({path, payload});
+    return {...item, status: 'applied', result: {
+      actual_start_date: '2027-01-05', first_payment_due_date: '2027-01-12', assignments: [],
+    }};
+  },
 });
 vm.runInContext(source.slice(start, source.indexOf('</script>', start)), context);
 const item = {
-  request_id: 8, case_no: 'CASE&1', workflow_kind: 'leave', status: 'substitute_required',
-  staff_name: '原月嫂', leave_dates: [{original_date: '2027-01-05'}],
-  willingness: 'willing', joined: false,
+  request_id: 8, case_no: 'CASE&1', workflow_kind: 'handover', status: 'substitute_required',
+  version: 3, staff_name: '原月嫂', handover_dates: ['2027-01-05', '2027-01-08'],
+  selected_staff_id: 2, selected_staff_name: '接任月嫂', willingness: 'willing',
+  proposed_start_date: '2027-01-05', joined: false,
 };
-const card = context.serviceStartTodoCard(item, [], 'https://management.test/test/');
-const body = card.children[0].children;
-assert(body.some(node => node.textContent.includes('2027-01-05')));
-const schedule = body.find(node => node.tag === 'a');
-assert.equal(schedule.href, 'https://management.test/test/#order-workbench-v2?case=CASE%261&work=service&substitute=8');
-assert.equal(schedule.textContent, '前往多月嫂排班');
-assert(!body.some(node => ['button', 'input', 'select'].includes(node.tag)));
-const unavailable = context.serviceStartTodoCard(item, [], null).children[0].children;
-assert(!unavailable.some(node => node.tag === 'a'));
-assert(unavailable.some(node => node.textContent.includes('管理端連結暫時不可用')));
+const findButton = (nodes, label) => nodes.find(node => node.tag === 'button' && node.textContent === label);
+const saveLabel = '儲存交接日並更新排班與帳務';
+const awaitingJoin = context.serviceStartTodoCard(item, []).children[0].children;
+assert(awaitingJoin.some(node => node.textContent === '案件 CASE&1'));
+assert(awaitingJoin.some(node => node.textContent === '原月嫂：原月嫂｜原區段剩餘服務日：2027-01-05、2027-01-08'));
+assert(findButton(awaitingJoin, '寄送本案群組邀請連結'));
+assert.equal(findButton(awaitingJoin, saveLabel), undefined);
+
+const ready = context.serviceStartTodoCard({...item, joined: true}, []).children[0].children;
+const date = ready.find(node => node.tag === 'label').children[0];
+const save = findButton(ready, saveLabel);
+date.value = '2027-01-09';
+date.onchange();
+assert.equal(save.disabled, true);
+date.value = '2027-01-08';
+date.onchange();
+assert.equal(save.disabled, false);
+assert(ready.some(node => node.textContent === '交接日起接任 1 個服務日：2027-01-08'));
+save.onclick();
+await new Promise(setImmediate);
+assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{
+  path: '/api/v1/line/mobile-admin/service-start/8/dates',
+  payload: {start_date: '2027-01-08', expected_version: 3, idempotency_key: '8b635a6b-1cd7-4085-abe5-60437ef69e9d'},
+}]);
+assert.equal(refreshed, true);
+assert.equal(commands.size, 0);
 '''
     subprocess.run(
         ["node", "--input-type=module", "-e", script],
@@ -372,7 +405,7 @@ def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None
     assert "/api/v1/line/mobile-admin/matching-followups" in source
     assert "客戶資料異動" not in source
     assert "客戶／月嫂身分重綁與異常" in source
-    assert "服務開始、延期、代班與換人" in source
+    assert ">服務中換人</strong>" in source
     assert "月嫂回覆提醒" in source
     assert "月嫂確認與條件協調" not in source
     assert "待提醒" in source

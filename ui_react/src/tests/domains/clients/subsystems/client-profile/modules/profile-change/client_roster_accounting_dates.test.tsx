@@ -5,6 +5,10 @@ import { ClientRegistrySummarySchema } from '../../../../../../../api/client_reg
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn() }));
 vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({ clientRegistryClient: mocks }));
+vi.mock('../../../../../../../api/case_import/import_field_issues', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../../../../../api/case_import/import_field_issues')>(),
+  loadCurrentImportFieldIssuesForCases: async () => [],
+}));
 
 const item = {
   client_id: 1, case_no: '115000101', imported_virtual_accounts: [], built_in_virtual_account: '99781699115101', name: '客戶甲', phone: null, city: null,
@@ -80,10 +84,10 @@ describe('client roster accounting date columns', () => {
     render(<ClientRosterPage />);
     const row = (await screen.findByText('115000101')).closest('tr')!;
     fireEvent.click(row);
-    expect(await screen.findByRole('alert')).toHaveTextContent('帳務詳情無法計算');
+    const drawer = await screen.findByRole('dialog', { name: '案件 115000101 詳細資料' });
+    expect(await within(drawer).findByRole('alert')).toHaveTextContent('帳務詳情無法計算');
     const [, , , staffObligations] = await dateCells();
     expect(staffObligations).toHaveTextContent('2026-10-15');
-    expect(screen.getByRole('alert').closest('[role="dialog"]')).toHaveAccessibleName('案件 115000101 詳細資料');
   });
 
   it('distinguishes an older response without the new fields from stored nulls', async () => {

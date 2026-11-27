@@ -133,7 +133,7 @@ function renderPayouts(page) {
   const results = document.getElementById("results");
   results.replaceChildren();
   if (!page.items.length) {
-    showStatus(`${page.staff_name} 在 ${page.year} 年 ${page.month} 月沒有薪資請款明細。`);
+    showStatus(`${page.staff_name} 在 ${page.year} 年 ${page.month} 月沒有薪資請款明細。若要查其他月份，請變更「預計付款月份」後再查詢。`);
     return;
   }
   showStatus(`${page.staff_name}｜${page.year} 年 ${page.month} 月有 ${page.items.length} 筆案件薪資。`);
@@ -194,13 +194,13 @@ async function loadPayouts() {
     });
     const result = await responseData(response);
     if (!response.ok || result.success === false || !result.data) {
-      showStatus(responseMessage(result, "薪資明細載入失敗。"), true);
+      showStatus(responseMessage(result, "無法讀取薪資明細。請稍後再按「查詢薪資明細」。"), true);
       showReauthenticationFor(result);
       return;
     }
     renderPayouts(requirePayoutPage(result.data));
   } catch (_) {
-    showStatus("薪資明細無法載入或資料格式不正確，請稍後重試。", true);
+    showStatus("無法讀取薪資明細。請稍後再按「查詢薪資明細」。若仍無法查看，請聯絡工會。", true);
   } finally {
     button.disabled = !identityReady && !flowId;
   }
@@ -223,7 +223,7 @@ async function init() {
       }
     }
   } catch (_) {
-    showStatus("LIFF 初始化失敗，請重新開啟頁面。", true);
+    showStatus("無法確認 LINE 身分。請按「重新登入 LINE」。", true);
     document.getElementById("reauthenticate").hidden = false;
   }
   if (!lineIdToken && !flowId) {

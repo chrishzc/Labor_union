@@ -145,7 +145,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     mocks.loadSummaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     mocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
       const selectedStage = params.stage;
-      return page(selectedStage, [timeline(selectedStage ?? 'intake_validation')]);
+      return page(selectedStage, [timeline(selectedStage ?? 'matching_pool')]);
     });
   });
 

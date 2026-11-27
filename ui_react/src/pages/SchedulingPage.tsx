@@ -580,7 +580,7 @@ function HolidayPolicyWorkspace({ onHolidayChanged }: { onHolidayChanged: (dateP
       {draft?.receipt && (
         <section className="holiday-policy-receipt" aria-live="polite">
           <div className="holiday-policy-receipt-header">
-            <h3>國定假日政策已更新</h3>
+            <h3>{machine.type === 'observed' ? '國定假日政策已更新' : '國定假日變更已受理'}</h3>
             <button
               type="button"
               className="holiday-policy-btn-secondary"
@@ -590,7 +590,11 @@ function HolidayPolicyWorkspace({ onHolidayChanged }: { onHolidayChanged: (dateP
             </button>
           </div>
           <p>
-            {machine.type === 'observed' ? '已重新查詢並確認最新國定假日政策。' : '變更已受理，正在確認最新政策狀態。'}
+            {machine.type === 'observed'
+              ? '已重新查詢並確認最新國定假日政策。'
+              : machine.type === 'observation_failed'
+                ? '尚未確認最新政策。請點選「重新查詢最新政策」。'
+                : '正在查詢最新政策。'}
           </p>
         </section>
       )}
@@ -841,7 +845,7 @@ function eligibilityErrorMessage(error: unknown): string {
     return '目前沒有資格查詢權限，請確認管理員登入狀態。';
   }
   if (error.code === 'SCHEDULING_ELIGIBILITY_VALIDATION') {
-    return '案件服務日期、每日時段或服務人員資格主檔尚未完整，請補齊後重試。';
+    return '資格查詢所需資料未齊。請在「待辦看板」開啟本案，核對「確認服務日期與排班」和「編輯客戶與訂單資料」的服務時段，並在月嫂詳情核對「完整資格主檔」。';
   }
   return '資格與檔期服務暫時無法回應，請稍後重試。';
 }
@@ -1067,6 +1071,7 @@ interface GanttSpan {
   endDay: number;
   visualStartDate: string;
   visualEndDate: string;
+  assignmentRange?: OrderServiceRange;
   tone: 'active' | 'rest' | 'buffer' | 'leave' | 'waiting' | 'available' | 'unavailable' | 'conflict' | 'deposit-conflict' | 'free' | 'historical';
   icon?: string;
   clientName?: string;
@@ -1219,7 +1224,7 @@ function resolveOrderSpanEnrichment(
   dateRangeText: string;
   dailyTimeText?: string;
 } {
-  if (!context || !caseNo) {
+  if (!context || (!caseNo && assignmentId == null)) {
     return {
       fullStartDate: spanStartDate,
       fullEndDate: spanEndDate,
@@ -1227,26 +1232,21 @@ function resolveOrderSpanEnrichment(
     };
   }
   const optAssign = context.staffAssignments.find(
-    (item) => item.case_no === caseNo && (assignmentId == null || item.id === assignmentId),
+    (item) => assignmentId == null ? item.case_no === caseNo : item.id === assignmentId && (!caseNo || item.case_no === caseNo),
   );
   const projAssign = context.projectionAssignments.find(
-    (item) => item.case_no === caseNo && (assignmentId == null || item.assignment_id === assignmentId),
+    (item) => assignmentId == null ? item.case_no === caseNo : item.assignment_id === assignmentId && (!caseNo || item.case_no === caseNo),
   );
-  const summary = context.orderSummariesByCaseNo[caseNo];
-  const caseDates = assignmentId == null ? summary : undefined;
+  const summary = caseNo ? context.orderSummariesByCaseNo[caseNo] : undefined;
+  const assignmentRange = orderServiceRange(projAssign?.assigned_start_date ?? null, projAssign?.assigned_end_date ?? null)
+    ?? orderServiceRange(optAssign?.assigned_start_date ?? null, optAssign?.assigned_end_date ?? null);
 
-  const fullStartDate =
-    (assignmentId == null ? optAssign?.actual_start_date : undefined)
-    ?? optAssign?.assigned_start_date
-    ?? caseDates?.startDate
-    ?? projAssign?.assigned_start_date
-    ?? spanStartDate;
-  const fullEndDate =
-    (assignmentId == null ? optAssign?.actual_end_date : undefined)
-    ?? optAssign?.assigned_end_date
-    ?? caseDates?.endDate
-    ?? projAssign?.assigned_end_date
-    ?? spanEndDate;
+  const fullStartDate = assignmentId == null
+    ? optAssign?.actual_start_date ?? optAssign?.assigned_start_date ?? summary?.startDate ?? projAssign?.assigned_start_date ?? spanStartDate
+    : assignmentRange?.start ?? spanStartDate;
+  const fullEndDate = assignmentId == null
+    ? optAssign?.actual_end_date ?? optAssign?.assigned_end_date ?? summary?.endDate ?? projAssign?.assigned_end_date ?? spanEndDate
+    : assignmentRange?.end ?? spanEndDate;
   const dateRangeText = fullStartDate === fullEndDate
     ? fullStartDate
     : `${fullStartDate} ～ ${fullEndDate}`;
@@ -1324,7 +1324,7 @@ function showHistoricalCaseRanges(spans: GanttSpan[], ranges?: ReadonlyMap<strin
 }
 
 function monthlyShiftSpans(
-  schedule: StaffMonthlySchedule,
+  schedule: ReturnType<typeof mergeStaffCalendarDays>,
   context?: SpanEnrichmentContext,
 ): GanttSpan[] {
   const sortedDays = [...schedule.days].sort((a, b) => a.work_date.localeCompare(b.work_date));
@@ -1359,11 +1359,16 @@ function monthlyShiftSpans(
     const orderKey = shift.case_no || shift.assignment_id
       ? `${shift.case_no ?? ''}#${shift.assignment_id ?? ''}`
       : null;
+    const statusLabel = shift.status === 'historical_assignment' && !shift.starts_at
+      ? '歷史指派區間（不計入工時）'
+      : (shift.status === 'working' || shift.status === 'resting') && shift.assignment_status === 'completed'
+        ? '服務已結束'
+        : labels[shift.status];
 
     // 合併正式跨日續班與同案排休日，歷史續班另列。
     if (orderKey && !isHistorical && (continuation || shift.status === 'resting')) {
       const existing = activeOrderSpans.get(orderKey);
-      if (existing && (existing.endDay >= day - 1)) {
+      if (existing && existing.endDay >= day - 1 && existing.statusLabel === statusLabel) {
         existing.endDay = Math.max(existing.endDay, day);
         if (continuation && !existing.dailyTimeText?.includes('續班')) {
           existing.dailyTimeText = `${existing.dailyTimeText ?? ''} 續班`.trim();
@@ -1384,26 +1389,16 @@ function monthlyShiftSpans(
       ? `${continuation ? '00:00' : shift.starts_at.slice(11, 16)}–${shift.ends_at.slice(0, 10) > shift.work_date ? '翌日' : ''}${shift.ends_at.slice(11, 16)}${continuation ? ' 續班' : ''}`
       : ['working', 'historical_assignment', 'waiting_deposit_lock'].includes(shift.status) ? '時段未確認' : '';
 
-    const key = [shift.case_no, shift.assignment_id, shift.lock_id, shift.unavailability_block_id, shift.status, lane, time].join(':');
+    const key = [shift.case_no, shift.assignment_id, shift.lock_id, shift.unavailability_block_id, shift.status, statusLabel, lane, time].join(':');
     const prior = previous.get(key);
     if (prior?.endDay === day - 1) {
       prior.endDay = day;
       if (shift.work_date > prior.visualEndDate) {
         prior.visualEndDate = shift.work_date;
-        if (isHistorical) prior.dateRangeText = prior.visualStartDate === prior.visualEndDate
-          ? prior.visualStartDate
-          : `${prior.visualStartDate} ～ ${prior.visualEndDate}`;
       }
       continue;
     }
 
-    const enrichment = resolveOrderSpanEnrichment(
-      shift.case_no,
-      shift.assignment_id,
-      shift.work_date,
-      shift.work_date,
-      context,
-    );
     const icon = shift.status === 'working' || shift.status === 'resting'
       ? '🟢'
       : shift.status === 'waiting_deposit_lock'
@@ -1423,12 +1418,10 @@ function monthlyShiftSpans(
       lane,
       icon,
       tone: tones[shift.status],
-      clientName: enrichment.clientName ?? shift.client_name ?? undefined,
+      clientName: shift.client_name ?? undefined,
       caseText: shift.case_no || labels[shift.status],
-      dateRangeText: isHistorical ? shift.work_date : enrichment.dateRangeText,
-      dailyTimeText: time || enrichment.dailyTimeText,
-      statusLabel: shift.status === 'historical_assignment' && !shift.starts_at
-        ? '歷史指派區間（不計入工時）' : labels[shift.status],
+      dailyTimeText: time || undefined,
+      statusLabel,
       shift,
     };
     spans.push(span);
@@ -1437,7 +1430,26 @@ function monthlyShiftSpans(
       activeOrderSpans.set(orderKey, span);
     }
   }
-  return spans;
+  return spans.map((span) => {
+    const shift = span.shift;
+    const isFormalAssignment = shift?.assignment_id != null && (shift.status === 'working' || shift.status === 'resting');
+    const enrichment = resolveOrderSpanEnrichment(
+      shift?.case_no,
+      shift?.assignment_id,
+      span.visualStartDate,
+      isFormalAssignment ? span.visualEndDate : span.visualStartDate,
+      context,
+    );
+    return {
+      ...span,
+      assignmentRange: isFormalAssignment
+        ? { start: enrichment.fullStartDate, end: enrichment.fullEndDate }
+        : undefined,
+      clientName: enrichment.clientName ?? span.clientName,
+      dateRangeText: enrichment.dateRangeText,
+      dailyTimeText: span.dailyTimeText ?? enrichment.dailyTimeText,
+    };
+  });
 }
 
 function caseShiftSpans(config: GhostProjectionConfig, state: CaseEligibilityRowState | undefined, lane: number, month: string): GanttSpan[] {
@@ -2498,7 +2510,7 @@ const SchedulingWorkbench: React.FC = () => {
           )}
           {selectedStaffRow?.kind === 'terms_incomplete' && (
             <div className="scheduling-status error" role="alert" style={{ background: '#fffbeb', borderColor: '#f59e0b', color: '#b45309' }}>
-              ⚠️ 該服務人員所屬訂單的每日服務時段尚未完整，請至本案客戶與訂單資料補齊。
+              該服務人員所屬訂單的每日服務時段尚未完整。請在「待辦看板」開啟本案，再選「編輯客戶與訂單資料」核對服務時段。
             </div>
           )}
           {holidayLoading && <p role="status">{holidays.snapshot ? '正在更新當月國定假日…' : '正在讀取當月國定假日…'}</p>}
@@ -2640,10 +2652,22 @@ const SchedulingWorkbench: React.FC = () => {
                   for (const span of monthSpans) {
                     const key = [span.shift?.status, span.caseText, span.shift?.assignment_id,
                       span.shift?.lock_id, span.shift?.unavailability_block_id,
-                      span.visualStartDate, span.visualEndDate, span.dailyTimeText].join('|');
+                      span.visualStartDate, span.visualEndDate, span.dailyTimeText, span.statusLabel].join('|');
                     if (!uniqueSpans.has(key)) uniqueSpans.set(key, { ...span, id: key, lane: undefined });
                   }
-                  const spans = showHistoricalCaseRanges([...uniqueSpans.values()], allRanges);
+                  const assignmentSpanCounts = new Map<number, number>();
+                  for (const span of uniqueSpans.values()) {
+                    const assignmentId = span.shift?.assignment_id;
+                    if (span.assignmentRange && assignmentId != null) {
+                      assignmentSpanCounts.set(assignmentId, (assignmentSpanCounts.get(assignmentId) ?? 0) + 1);
+                    }
+                  }
+                  const positionedSpans = [...uniqueSpans.values()].map((span) => {
+                    const assignmentId = span.shift?.assignment_id;
+                    if (!span.assignmentRange || assignmentId == null || assignmentSpanCounts.get(assignmentId) !== 1) return span;
+                    return { ...span, visualStartDate: span.assignmentRange.start, visualEndDate: span.assignmentRange.end };
+                  });
+                  const spans = showHistoricalCaseRanges(positionedSpans, allRanges);
                   if (ghostConfig) {
                     spans.push(...caseShiftSpans(
                       ghostConfig,
@@ -3029,7 +3053,7 @@ const SchedulingWorkbench: React.FC = () => {
                 </div>
               ) : (
                 <div style={{ padding: '36px 16px', textAlign: 'center', color: '#8b7169', fontSize: '0.88rem', background: '#fffcfb', borderRadius: '10px', border: '1px dashed #dec0b6' }}>
-                  👆 請先選取服務人員並查詢，系統不會用樣本資料推測客戶需求或月嫂條件。
+                  請在上方選擇案件與服務人員，再點選「重新檢測」。
                 </div>
               )}
             </div>
@@ -3053,7 +3077,7 @@ const SchedulingWorkbench: React.FC = () => {
 
               {eligibilityState.kind === 'idle' && (
                 <div style={{ padding: '36px 16px', textAlign: 'center', color: '#8b7169', fontSize: '0.88rem', background: '#fffcfb', borderRadius: '10px', border: '1px dashed #dec0b6' }}>
-                  👆 請在上方確認案件編號與服務人員，點擊「查詢資格與撞期」。
+                  請在上方確認案件與服務人員，再點選「重新檢測」。
                 </div>
               )}
 
@@ -3140,7 +3164,7 @@ const SchedulingWorkbench: React.FC = () => {
                   )}
                   {eligibilityResult.needsCorrection && (
                     <p role="status" style={{ fontSize: '0.82rem', color: '#b45309', marginTop: '6px' }}>
-                      ⚠️ 資料待補正：請依上方「需補齊」與資格檢查的實際項目處理後重試。
+                      資料待補正：請依上方「需補齊」與資格檢查的項目處理。案件資料可在「待辦看板」開啟本案核對，月嫂資料可在月嫂詳情的「完整資格主檔」核對。處理後再點選「重新檢測」。
                     </p>
                   )}
                 </div>

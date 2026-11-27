@@ -73,5 +73,5 @@ it('衝突保留原作業，可改交接日或改問其他月嫂；已無剩餘�
 });
 it('缺少案件來源不允許旁路換人流程',()=>{
  window.location.hash='';render(<ServiceHandoverPage/>);
- expect(screen.getByRole('alert')).toHaveTextContent('請從案件的「服務安排」開啟「轉換為多月嫂」或「調整多月嫂排班」');
+ expect(screen.getByRole('alert')).toHaveTextContent('請在案件的「確認服務日期與排班」展開「服務中換人」，再選擇要交接的服務區段。');
 });

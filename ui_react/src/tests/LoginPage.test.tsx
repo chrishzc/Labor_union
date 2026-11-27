@@ -260,7 +260,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/此帳號需先完成 MFA 綁定；React 綁定流程尚未啟用。/)
+        screen.getByText(/此帳號需先綁定驗證器。若未顯示綁定畫面，請聯絡系統管理員。/)
       ).toBeInTheDocument();
     });
 

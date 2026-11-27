@@ -127,7 +127,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
       {state.status === 'ready' && matchingPlan === null && !historicalBinding && !historicalArrangementPending && (
         <p role="status">{plan && plan.assignments.length > 0
           ? '尚無有效媒合方案；既有正式指派資料顯示於下方。'
-          : '尚無有效媒合方案；請至「推薦確認」確認人選。既有正式指派資料仍顯示於下方。'}</p>
+          : '尚無有效媒合方案。請到「推薦月嫂給客戶確認」確認人選。'}</p>
       )}
 
       {showScheduleActions && plan !== null && !historicalArrangementPending && (!historicalBinding || plan.assignments.length > 0) && (

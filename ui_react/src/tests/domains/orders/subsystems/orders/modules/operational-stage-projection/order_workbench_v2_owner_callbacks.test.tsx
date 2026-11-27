@@ -7,6 +7,7 @@ import { OrderAssignmentPlanPanel } from '../../../../../../../components/OrderA
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import type { OrderTerms } from '../../../../../../../api/orders/order_query_schemas';
+import type { CustomerConfirmationPreview } from '../../../../../../../api/scheduling/matching_plan_communication_client';
 
 const mocks = vi.hoisted(() => ({ termsQuery: vi.fn(), termsPreview: vi.fn(), termsApply: vi.fn(), pool: vi.fn(), willingness: vi.fn(),
   createWillingnessCommand: vi.fn(), assignment: vi.fn(), active: vi.fn(), contact: vi.fn(), previewConfirmation: vi.fn(), sendConfirmation: vi.fn() }));
@@ -16,6 +17,10 @@ vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () 
   candidateContactPoolClient: { query: mocks.pool, recordWillingness: mocks.willingness },
 }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: mocks.assignment } }));
+vi.mock('../../../../../../../api/staff_directory/staff_directory_client', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../../../../../api/staff_directory/staff_directory_client')>(),
+  loadActiveStaffIds: vi.fn(async () => new Set([8])),
+}));
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.active } }));
 vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: {
   queryContactState: mocks.contact,
@@ -64,18 +69,26 @@ describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
     mocks.willingness.mockResolvedValue({ status: 'recorded', event_id: 18 });
     mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [], scheduling_version: 4,
       scheduling_generation: 2, contracted_service_days: 3, service_hours_per_day: 8 });
-    mocks.active.mockResolvedValue({ planId: 51, status: 'proposed', activeLockId: null, planVersion: 1, segments: [] });
+    mocks.active.mockResolvedValue({
+      planId: 51, status: 'proposed', activeLockId: null, planVersion: 1,
+      segments: [{ segmentId: 71, sequence: 1, staffId: 8, assignedStartDate: '2026-09-01', assignedEndDate: '2026-09-02' }],
+    });
     mocks.contact.mockResolvedValue({ plan: { id: 51, case_no: CASE, communication_version: 4, status: 'proposed', is_active: 1 },
-      segments: [], all_willing: true, customer_decision: 'pending', customer_profiles_status: null,
+      segments: [{ segment_id: 71, staff_id: 8, staff_name: '測試月嫂', willingness: 'willing' }],
+      all_willing: true, customer_decision: 'pending', customer_profiles_status: null,
       customer_confirmation_status: null, customer_profiles_manual_confirmation: null });
     mocks.previewConfirmation.mockResolvedValue({
       case_no: CASE, plan_id: 51, expected_version: 4,
       order_information_1_ready: true, order_information_2_ready: true,
       weekly_service_ready: true, weekly_service_row_count: 1,
-      order_information_1: [], order_information_2: [], weekly_service_rows: [],
-      caregiver_resumes: [{ staff_id: 8, staff_name: '測試月嫂', ready: true, filename: 'resume.pdf', version: 1, blocker: null }],
+      order_information_1: [{ segment_id: 71, staff_id: 8, staff_name: '測試月嫂', text: '訂單資訊－1',
+        line_sections: [{ title: '服務安排', rows: [['約定開始日', '2026-09-01']] }] }],
+      order_information_2: [{ segment_id: 71, staff_id: 8, staff_name: '測試月嫂', text: '訂單資訊－2',
+        line_sections: [{ title: '照護需求', rows: [['每日服務時數', '8 小時']] }] }],
+      weekly_service_rows: [{ serial_number: 1, staff_id: 8, staff_name: '測試月嫂', week_start_date: '2026-09-01', week_end_date: '2026-09-02', service_hours_per_day: 8, weekly_work_days: 2, weekly_hours: 16 }],
+      caregiver_web_profiles: [{ staff_id: 8, staff_name: '測試月嫂', admin_preview_url: '/api/v1/admin/staff-web-profile/8/preview' }],
       blockers: [], send_allowed: true,
-    });
+    } satisfies CustomerConfirmationPreview);
   });
 
   it('條款 callback 帶動父查詢更新至同一已觀察版本，不抹去完成證據', async () => {

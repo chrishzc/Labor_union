@@ -135,7 +135,7 @@ describe('ClientRosterPage', () => {
     expect(warning.closest('td')).toHaveTextContent('未登錄');
   });
 
-  it('顯示 BeClass 煮食鎖定警示在案件詳情的下廚料理欄', async () => {
+  it('服務資料已鎖定時仍可獨立補填 BeClass 下廚料理需求', async () => {
     const detail = await mocks.query();
     const lockedTerms = { ...orderTerms, service_data_locked: true, terms: { ...orderTerms.terms, requires_cooking: null } };
     termsQuery.mockResolvedValue(lockedTerms);
@@ -145,10 +145,14 @@ describe('ClientRosterPage', () => {
     const target = new URLSearchParams(importFieldIssueHref(item.case_no, cookingIssue).split('?')[1]);
     render(<ClientRosterPage initialCaseNo={item.case_no} focusField={target.get('field') ?? undefined} />);
     const cooking = await screen.findByRole('combobox', { name: '下廚料理需求' });
-    expect(cooking).toBeDisabled();
+    expect(cooking).toBeEnabled();
     expect(cooking).toHaveAttribute('aria-invalid', 'true');
     expect(cooking).toHaveAccessibleDescription(cookingIssue.message);
     expect(screen.getByLabelText('服務天數')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('服務天數')).toBeDisabled();
+    fireEvent.change(cooking, { target: { value: 'yes' } });
+    expect(cooking).toHaveValue('yes');
+    expect(screen.getByLabelText('服務天數')).toBeDisabled();
   });
 
   it('opens the formal cancellation for a non-root operator from the selected roster case', async () => {

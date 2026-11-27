@@ -103,7 +103,7 @@ async function apiError(response: Response): Promise<string> {
   const payload = await response.json().catch(() => ({})) as { detail?: string | { code?: string } };
   const code = typeof payload.detail === 'string' ? payload.detail : payload.detail?.code;
   const messages: Record<string, string> = {
-    knowledge_qa_answer_required: '標準回答尚未完成，不能發布。',
+    knowledge_qa_answer_required: '標準回答尚未完成，請補上回答再發布。',
     knowledge_qa_line_reply_too_long: '答案原文超過 LINE 上限，請縮短答案再發布。',
     knowledge_faq_delete_published: '這則問答仍有生效的正式答案，請先停用再刪除。',
     knowledge_faq_identity_deleted: '這個題目編號曾被永久刪除，請使用其他編號。',
@@ -111,7 +111,7 @@ async function apiError(response: Response): Promise<string> {
     knowledge_review_required: '目前狀態不能執行這個動作，請重新整理確認。',
     knowledge_state_conflict: '目前狀態不能執行這個動作，請重新整理確認。',
   };
-  return (code && messages[code]) || code || `操作失敗（${response.status}）`;
+  return (code && messages[code]) || '無法確認問答操作結果。請重新整理題庫並核對目前狀態。';
 }
 
 function decodeQa(item: KnowledgeItem): ManagedQa | null {
@@ -530,7 +530,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
         </div>
       </div>
 
-      {readStatus !== 'ready' && <div className={readStatus === 'error' ? 'line-error' : 'studio-description'} role="status">{readStatus === 'loading' ? '正在讀取問答資料…' : '問答資料讀取失敗，請重新整理。'}</div>}
+      {readStatus !== 'ready' && <div className={readStatus === 'error' ? 'line-error' : 'studio-description'} role="status">{readStatus === 'loading' ? '正在讀取問答資料…' : '問答資料讀取失敗，請重新整理題庫（「更多操作」→「重新整理」）。'}</div>}
       {readStatus === 'ready' && items.length === 0 && <div className="line-warning" role="status">目前尚無題目，可匯入內建 54 題。</div>}
       <div className="studio-status-row">
         <div className={`qa-index-status is-${latestIndex?.index_status ?? 'missing'}`} role="status">
@@ -573,7 +573,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
             {renderConfirmation(item.id)}
           </article>
         ))}
-        {readStatus === 'ready' && filteredItems.length === 0 && items.length > 0 && <div className="studio-empty" role="status">目前沒有符合條件的問答。</div>}
+        {readStatus === 'ready' && filteredItems.length === 0 && items.length > 0 && <div className="studio-empty" role="status">目前沒有符合條件的問答。請調整搜尋文字或問答狀態。</div>}
       </div>
     </div>
   );

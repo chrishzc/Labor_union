@@ -102,7 +102,7 @@ export function FinanceCaseList({
       }));
       if (!controller.signal.aborted) setRows(collected);
     }).catch(() => {
-      if (!controller.signal.aborted) setError('案件帳務或營運階段暫時無法取得，請重新查詢。');
+      if (!controller.signal.aborted) setError('暫時無法讀取案件帳務或案件進度。請按「查詢案件」重試。');
     }).finally(() => {
       if (!controller.signal.aborted) setLoading(false);
     });
@@ -196,7 +196,7 @@ export function FinanceCaseList({
       {loading && <p role="status">正在讀取{subTab === 'ongoing' ? '進行中案件' : '所有案件'}與正式帳務…</p>}
       {error && <p role="alert">{error}</p>}
       {!loading && unknownScope > 0 && (
-        <p role="status">有 {unknownScope} 案的營運階段來源待確認，暫未列入本清單。</p>
+        <p role="status">有 {unknownScope} 案暫時無法確認進度，未列入此清單。請到「待辦看板」核對案件進度。</p>
       )}
 
       {!error && (

@@ -27,7 +27,7 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
         setRequired(status.required);
       }
     }).catch(() => {
-      if (active) setError('無法讀取帳號設定狀態，請確認資料庫連線與初始化已完成後重試。');
+      if (active) setError('無法讀取帳號設定狀態。請按「重新確認」。若仍無法讀取，請維護人員檢查資料庫連線與初始化。');
     }).finally(() => { if (active) setChecking(false); });
     return () => { active = false; };
   }, [retry]);
@@ -44,7 +44,7 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
       return;
     }
     if (password !== confirmation) {
-      setError('兩次輸入的密碼不一致。');
+      setError('兩次輸入的密碼不一致，請重新輸入相同的密碼。');
       return;
     }
     setSaving(true);
@@ -64,7 +64,7 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
         } catch { /* Keep setup closed to the application until status is known. */ }
       }
       setError(failure instanceof ApiHttpError
-        ? failure.message : '無法完成帳號設定，請確認連線後重試。');
+        ? failure.message : '無法確認最高管理員帳號是否已建立。請檢查連線並重新整理頁面，再依畫面指示操作。');
     } finally {
       setPassword('');
       setConfirmation('');

@@ -140,6 +140,7 @@ describe('SchedulingPage query-only presentation', () => {
     vi.mocked(staffAssignmentOptionsClient.getStaffAssignmentOptions).mockImplementation(async staffId => staffId === 11 ? [
       { id: 102, start: '12', end: '14' },
       { id: 101, start: '03', end: '05' },
+      { id: 104, start: '25', end: '28' },
     ].map(({ id, start, end }) => ({
       id, case_no: 'CASE-SCH-001', staff_id: staffId, status: 'completed', order_status: orderStatus,
       assigned_start_date: `${ym}-${start}`, assigned_end_date: `${ym}-${end}`,
@@ -151,6 +152,10 @@ describe('SchedulingPage query-only presentation', () => {
         { id: 101, day: '04', start: '08', end: '10' },
         { id: 102, day: '13', start: '12', end: '14' },
         { id: 103, day: '23', start: '16', end: '18' },
+        { id: 103, day: '24', start: '16', end: '18' },
+        { id: 104, day: '25', start: '08', end: '10' },
+        { id: 104, day: '27', start: '08', end: '10' },
+        { id: 104, day: '28', start: '12', end: '14' },
       ].map(({ id, day, start, end }) => ({
         work_date: `${ym}-${day}`, service_date: `${ym}-${day}`,
         starts_at: `${ym}-${day}T${start}:00:00+08:00`, ends_at: `${ym}-${day}T${end}:00:00+08:00`,
@@ -159,14 +164,30 @@ describe('SchedulingPage query-only presentation', () => {
       })) : [],
     }));
     render(<SchedulingPage />);
-    const [first, second, unmatched] = await screen.findAllByRole('button', { name: /CASE-SCH-001.*\d\d:00–/ });
+    const [first, second, unmatched, ...splitSpans] = await screen.findAllByRole('button', { name: /CASE-SCH-001.*\d\d:00–/ });
     await waitFor(() => expect(first).toHaveTextContent(`${ym}-03 ～ ${ym}-05`));
     expect(second).toHaveTextContent(`${ym}-12 ～ ${ym}-14`);
-    expect(unmatched).toHaveTextContent(`${ym}-23`);
+    expect(unmatched).toHaveTextContent(`${ym}-23 ～ ${ym}-24`);
     expect(unmatched).not.toHaveTextContent(`${ym}-12`);
+    expect(first.getAttribute('title')).toContain(`${ym}-03 ～ ${ym}-05`);
+    expect(second.getAttribute('title')).toContain(`${ym}-12 ～ ${ym}-14`);
+    expect(unmatched.getAttribute('title')).toContain(`${ym}-23 ～ ${ym}-24`);
     const monthColumn = (month - 1) * 3;
+    const lastThirdLength = new Date(Date.UTC(year, month, 0)).getUTCDate() - 20;
     expect(parseFloat(first.style.left)).toBeCloseTo((monthColumn + 0.2) / 36 * 100, 5);
+    expect(parseFloat(first.style.width)).toBeCloseTo(0.3 / 36 * 100, 5);
     expect(parseFloat(second.style.left)).toBeCloseTo((monthColumn + 1.1) / 36 * 100, 5);
+    expect(parseFloat(second.style.width)).toBeCloseTo(0.3 / 36 * 100, 5);
+    expect(parseFloat(unmatched.style.left)).toBeCloseTo((monthColumn + 2 + 2 / lastThirdLength) / 36 * 100, 5);
+    expect(parseFloat(unmatched.style.width)).toBeCloseTo(2 / lastThirdLength / 36 * 100, 5);
+    expect(splitSpans.map(span => span.getAttribute('data-start-day'))).toEqual(['25', '27', '28']);
+    for (const span of splitSpans) {
+      const day = Number(span.getAttribute('data-start-day'));
+      expect(span.getAttribute('data-end-day')).toBe(span.getAttribute('data-start-day'));
+      expect(parseFloat(span.style.left)).toBeCloseTo((monthColumn + 2 + (day - 21) / lastThirdLength) / 36 * 100, 5);
+      expect(parseFloat(span.style.width)).toBeCloseTo(Math.max(0.5, 1 / lastThirdLength / 36 * 100), 5);
+      expect(span.getAttribute('title')).toContain(`${ym}-25 ～ ${ym}-28`);
+    }
     fireEvent.click(first);
     expect(new URLSearchParams(window.location.hash.split('?')[1]).get('work')).toBe('service');
   });
@@ -781,7 +802,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(formal).toHaveAttribute('data-end-day', '11');
   });
 
-  it('keeps canonical occupancy ahead on overlapping dates while retaining the remaining historical dates', async () => {
+  it('shows a distinct historical interval alongside overlapping formal occupancy', async () => {
     vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
       staff_id: staffId, year, month,
       days: [
@@ -794,11 +815,20 @@ describe('SchedulingPage query-only presentation', () => {
 
     render(<SchedulingPage />);
 
-    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
-    const remainingHistorical = document.querySelector('.gantt-span-bar.span-historical');
-    expect(remainingHistorical).toHaveAttribute('data-start-day', '3');
-    expect(remainingHistorical).toHaveAttribute('data-end-day', '3');
-    expect(document.querySelectorAll('.gantt-span-bar:not(.span-historical)')).not.toHaveLength(0);
+    const [formal] = await screen.findAllByRole('button', { name: /CASE-SCH-001.*排班/ });
+    const staffRow = within(formal.closest<HTMLElement>('[data-staff-id]')!);
+    const historicalSpans = await staffRow.findAllByRole('button', { name: /HIS-081.*歷史指派/ });
+    expect(formal).toHaveAttribute('data-start-day', '1');
+    expect(formal).toHaveAttribute('data-end-day', '2');
+    const coveredDays = new Set<number>();
+    for (const span of historicalSpans) {
+      expect(span).toHaveClass('span-historical');
+      const start = Number(span.getAttribute('data-start-day'));
+      const end = Number(span.getAttribute('data-end-day'));
+      for (let day = start; day <= end; day += 1) coveredDays.add(day);
+      if (start <= 2) expect(span.style.top).not.toBe(formal.style.top);
+    }
+    expect(coveredDays).toEqual(new Set([1, 2, 3]));
   });
 
   it('keeps canonical data visible and retries only the failed historical month for the affected row', async () => {
@@ -1225,7 +1255,8 @@ describe('SchedulingPage query-only presentation', () => {
     expect(orderBar).toHaveAttribute('data-end-day', '2');
     expect(orderBar).toHaveTextContent('排班客戶甲');
     expect(orderBar).toHaveTextContent('CASE-SCH-001');
-    expect(orderBar).toHaveTextContent('2026-08-01 ～ 2026-08-10');
+    expect(orderBar).toHaveTextContent('2026-08-01 ～ 2026-08-02');
+    expect(orderBar).toHaveAttribute('title', expect.stringContaining('2026-08-01 ～ 2026-08-02'));
     expect(orderBar).toHaveTextContent('09:00–18:00');
   });
 });
