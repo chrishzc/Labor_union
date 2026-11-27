@@ -247,6 +247,92 @@ jobs:
               summary.write("\n".join(lines) + "\n")
           PY
 
+      - name: Compare weekly report test selection and verify a missing-case rejection
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.weekly_contracts.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+          import xml.etree.ElementTree as ET
+
+          # Trial mapping for this one boundary, not a general change selector.
+          module = "test_subsidy_reconciliation_register"
+          source = (
+              "tests/domains/government-subsidy/subsystems/government-subsidy/"
+              f"modules/reconciliation-register-query/{module}.py"
+          )
+          required = (
+              "test_established_unserved_is_zero_without_registered_volume_or_missing_rate_fallback",
+              "test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim",
+              "test_order_accounting_projection_reuses_operations_report_amount_by_case",
+          )
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def read_receipt(path):
+              root = ET.parse(path).getroot()
+              cases = list(root.iter("testcase"))
+              suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+              if not cases or not suites:
+                  raise ValueError("empty test evidence")
+              seconds = round(sum(float(suite.attrib["time"]) for suite in suites), 3)
+              matches = {}
+              for case in cases:
+                  name = case.get("name")
+                  if case.get("classname", "").rsplit(".", 1)[-1] != module or name not in required:
+                      continue
+                  status = "passed"
+                  if name in matches:
+                      status = "ambiguous"
+                  elif case.find("failure") is not None or case.find("error") is not None:
+                      status = "failed"
+                  elif case.find("skipped") is not None:
+                      status = "skipped"
+                  matches[name] = status
+              rejected = {
+                  name: matches.get(name, "not_run")
+                  for name in required
+                  if matches.get(name) != "passed"
+              }
+              return {"cases": len(cases), "suite_seconds": seconds, "rejected": rejected}
+
+          def run_trial(label, names):
+              report = temp / f"lu-weekly-trial-{label}.xml"
+              start = time.monotonic()
+              subprocess.run(
+                  [sys.executable, "-m", "pytest", "-q", f"--junitxml={report}",
+                   *(f"{source}::{name}" for name in names)], check=True, timeout=120,
+              )
+              return {**read_receipt(report), "process_seconds": round(time.monotonic() - start, 3)}
+
+          baseline = read_receipt(temp / "lu-weekly-contracts.xml")
+          selected = run_trial("selected", required)
+          omitted = required[1]
+          probe = run_trial("omission", (required[0], required[2]))
+          probe_ok = probe["rejected"] == {omitted: "not_run"} and probe["cases"] == 2
+          comparison_ok = not baseline["rejected"] and not selected["rejected"] and selected["cases"] == 3
+          checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          result = {
+              "trial": "weekly-report-selection-v1",
+              "run": os.environ["GITHUB_RUN_ID"],
+              "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "checkout": checkout,
+              "runner_expected_checkout": os.environ["GITHUB_SHA"],
+              "baseline": baseline,
+              "selected": selected,
+              "omission_probe": probe,
+              "omission_rejected_as_expected": probe_ok,
+              "passed": comparison_ok and probe_ok and checkout == os.environ["GITHUB_SHA"],
+          }
+          print("WEEKLY_SELECTION_TRIAL " + json.dumps(result, sort_keys=True))
+          if not result["passed"]:
+              raise SystemExit("Weekly report selection trial did not satisfy its evidence checks.")
+          PY
+
   weekly-report-frontend:
     name: Weekly report frontend
     runs-on: ubuntu-latest
