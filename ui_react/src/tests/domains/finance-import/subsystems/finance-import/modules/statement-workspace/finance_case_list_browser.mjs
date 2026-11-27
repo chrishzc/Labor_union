@@ -12,7 +12,7 @@ const require = createRequire(resolve(root, 'package.json'));
 const { z } = await import(pathToFileURL(require.resolve('zod')).href);
 assert(process.env.PLAYWRIGHT_PACKAGE_DIR, 'Install isolated CI browser tools first');
 const browserRequire = createRequire(resolve(process.env.PLAYWRIGHT_PACKAGE_DIR, 'package.json'));
-const { chromium } = await import(pathToFileURL(browserRequire.resolve('playwright')).href);
+const { chromium } = browserRequire('playwright');
 const { build, preview, loadConfigFromFile, mergeConfig } = await import(pathToFileURL(require.resolve('vite')).href);
 const rowSchema = z.object({ caseNo: z.string(), amount: z.string().nullable(), status: z.array(z.string().nullable()), actions: z.array(z.string().nullable()) });
 const wireFixtureSchema = z.object({
