@@ -26,6 +26,7 @@ Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。�
   - `infrastructure/redis/staff_profile_change_staging.py`
   - `domains/staff/web_profile.py`
   - `subsystems/staff/web_profile.py`
+  - `subsystems/staff/published_photo_integrity.py`
   - `api/dependencies/staff_web_profile.py`
   - `infrastructure/mysql/staff_web_profile_repository.py`
   - `api/routes/staff_web_profile.py`
@@ -65,6 +66,7 @@ Staff 個人網頁擁有共用項目模板、待審照片及版本化發布。�
 - entrypoint: `GET|POST /api/v1/admin/staff-web-profile/templates`、`PUT /api/v1/admin/staff-web-profile/templates/{item_id}`
 - entrypoint: `GET /api/v1/admin/staff-web-profile/{staff_id}/folders`、`POST /{staff_id}/uploads`、`POST /{staff_id}/publications`、`DELETE /{staff_id}/folders/{template_item_id}/entries/{entry_id}`（同一 admin API prefix）。
 - entrypoint: `GET /api/v1/admin/staff-web-profile/{staff_id}/website`、`GET /{staff_id}/website/images/{entry_id}/{version}`（同一 admin API prefix）。
+- entrypoint: `GET /api/v1/admin/staff-web-profile/{staff_id}/website/integrity` ([規格 35 §3.6](../../../../../requirements/35_月嫂個人網頁與照片審核發布正式規格.md#36-後台查詢已發布照片完整性)).
 - entrypoint: `POST /api/v1/line/staff-self-service/profile-change/{query|photos|submit}`
 - entrypoint: `POST /api/v1/line/staff-web-profiles/{staff_id}/query`
 - entrypoint: `GET /line-staff-web-profile` — 推薦訊息及 LIFF gateway 的客戶頁入口；頁面資料與圖片仍逐次經授權 API 讀取。

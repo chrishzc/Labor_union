@@ -32,6 +32,8 @@ from api.schemas.staff_web_profile import (
     FolderView,
     PublicationInput,
     PublicationsView,
+    PublishedPhotoIntegrityReportView,
+    PublishedPhotoIntegrityView,
     PublishedWebProfilePreviewView,
     RemovedFileView,
     TemplateItemInput,
@@ -258,6 +260,19 @@ def preview_published_staff_web_profile(
     with _translate_errors(), staff_web_profile_application() as web:
         response.headers.update(_PRIVATE_HEADERS)
         return BaseResponse(data=web.customer_page(staff_id))
+
+
+@router.get(f"{_WEBSITE}/integrity", response_model=BaseResponse[PublishedPhotoIntegrityReportView],
+            dependencies=[Depends(require_registry_reader)])
+def check_published_staff_web_photos(
+    staff_id: _ID, response: Response,
+) -> BaseResponse[PublishedPhotoIntegrityReportView]:
+    with _translate_errors(), staff_web_profile_application() as web:
+        response.headers.update(_PRIVATE_HEADERS)
+        photos = web.published_photo_integrity(staff_id, _decode_image)
+        return BaseResponse(data=PublishedPhotoIntegrityReportView(
+            staff_id=staff_id, photos=tuple(PublishedPhotoIntegrityView.model_validate(photo) for photo in photos),
+        ))
 
 
 @router.get(f"{_WEBSITE}/images/{{entry_id}}/{{version}}", dependencies=[Depends(require_registry_reader)])

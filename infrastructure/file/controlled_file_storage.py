@@ -746,15 +746,33 @@ class FileSystemControlledFileStorage:
                     "指定 staging 檔案不存在",
                     retryable=False,
                 ) from error
+            if not isinstance(finalized_reference, str):
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_reconciliation_required",
+                    "正式檔案狀態無法確認，需要對帳",
+                    retryable=False,
+                ) from error
             try:
-                reference = _validate_object_reference(str(finalized_reference))
+                reference = _validate_object_reference(finalized_reference)
                 content_path = self._resolve_target(root, reference)
                 before = content_path.stat()
                 content = content_path.read_bytes()
                 after = content_path.stat()
-            except ControlledFileStorageError:
-                raise
-            except (FileNotFoundError, OSError, ValueError) as final_error:
+            except ControlledFileStorageError as final_error:
+                if final_error.code != "controlled_file_not_found":
+                    raise
+                try:
+                    same_record = self._require_ready_root() == root and _read_json(metadata_path) == metadata
+                except (OSError, ValueError):
+                    same_record = False
+                if same_record:
+                    raise
+                raise ControlledFileStorageError(
+                    "controlled_file_staging_reconciliation_required",
+                    "正式檔案狀態無法確認，需要對帳",
+                    retryable=False,
+                ) from final_error
+            except (OSError, ValueError) as final_error:
                 raise ControlledFileStorageError(
                     "controlled_file_staging_reconciliation_required",
                     "正式檔案狀態無法確認，需要對帳",

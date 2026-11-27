@@ -735,3 +735,96 @@ jobs:
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
       - run: npm run lint
       - run: npm run build
+
+  published-photo-integrity:
+    name: Published staff photo integrity
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: test
+      PYTHONPATH: .
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Confirm exact candidate and record CI revision
+        run: |
+          checkout="$(git rev-parse HEAD)"
+          parents="$(git show -s --format=%P HEAD)"
+          printf 'Checkout %s\nHead %s\nParents %s\nPR base %s\nRun %s attempt %s\n' \
+            "$checkout" "$EXPECTED_HEAD_SHA" "$parents" "$EVENT_BASE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$checkout" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install runtime and CI dependencies
+        id: dependencies
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 ruff pyright
+      - name: Verify focused syntax, strict query types and specification
+        run: |
+          ruff check --select E9,F63,F7,F82 \
+            api/routes/staff_web_profile.py api/schemas/staff_web_profile.py \
+            infrastructure/file/controlled_file_storage.py subsystems/staff/web_profile.py \
+            subsystems/staff/published_photo_integrity.py \
+            tests/domains/staff/subsystems/staff/modules/staff-roster-profile/contract/test_published_photo_integrity.py
+          config=.ci-published-photo-integrity-pyright.json
+          trap 'rm -f "$config"' EXIT
+          printf '%s\n' '{"typeCheckingMode":"strict","include":["subsystems/staff/published_photo_integrity.py"]}' > "$config"
+          pyright --project "$config"
+          python -m scripts.validate_spec_hygiene --mode strict
+          python -m scripts.validate_agent_governance
+          git diff --check HEAD^ HEAD
+      - name: Verify all required published photo behaviors with synthetic storage
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          from xml.etree import ElementTree
+
+          module = "test_published_photo_integrity"
+          source = f"tests/domains/staff/subsystems/staff/modules/staff-roster-profile/contract/{module}.py"
+          required = (
+              "test_integrity_requires_registry_read_and_checks_only_the_published_snapshot",
+              "test_integrity_separates_confirmed_missing_digest_size_and_decode_failures",
+              "test_integrity_reports_permission_io_and_disappearing_reads_as_unavailable",
+              "test_integrity_reports_unavailable_root_and_mount_disappearance_as_unavailable",
+              "test_integrity_keeps_missing_metadata_and_unconfirmed_staging_distinct_from_missing_payload",
+              "test_integrity_rejects_wrong_file_owner_purpose_staff_and_crop_source_before_download",
+              "test_integrity_returns_an_empty_snapshot_and_distinguishes_an_unknown_staff_member",
+          )
+          report = Path(os.environ["RUNNER_TEMP"]) / "lu-published-photo-integrity.xml"
+          result = subprocess.run(
+              [sys.executable, "-m", "pytest", "-vv", f"--junitxml={report}",
+               *(f"{source}::{name}" for name in required)],
+              check=False,
+          )
+          cases = ElementTree.parse(report).findall(".//testcase") if report.is_file() else []
+          passed = []
+          for case in cases:
+              if case.get("classname", "").rsplit(".", 1)[-1] == module and all(
+                  case.find(tag) is None for tag in ("error", "failure", "skipped")
+              ):
+                  passed.append(case.get("name"))
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("\n### Published photo contract cases\n\n")
+              for name in required:
+                  summary.write(f"- {'PASS' if passed.count(name) == 1 else 'NO PASS'} `{name}`\n")
+          if result.returncode or len(cases) != len(required) or set(passed) != set(required):
+              raise SystemExit("Every named published photo contract case must pass exactly once.")
+          PY
+      - name: Upload published photo JUnit evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-photo-integrity-junit
+          path: ${{ runner.temp }}/lu-published-photo-integrity.xml
+          if-no-files-found: warn

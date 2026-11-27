@@ -10,6 +10,8 @@ from domains.staff.web_profile import (
     WebProfileTemplateItem,
 )
 
+from subsystems.staff.published_photo_integrity import PhotoIntegrityReason, PhotoIntegrityStatus
+
 
 class WebProfilePhotoInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -74,6 +76,20 @@ class PublishedWebProfileGroupView(BaseModel):
 class PublishedWebProfilePreviewView(BaseModel):
     name: str
     groups: list[PublishedWebProfileGroupView]
+
+
+class PublishedPhotoIntegrityView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    entry_id: int
+    version: int
+    status: PhotoIntegrityStatus
+    reason: PhotoIntegrityReason
+
+
+class PublishedPhotoIntegrityReportView(BaseModel):
+    staff_id: int
+    photos: tuple[PublishedPhotoIntegrityView, ...]
 
 
 class EntryVersionView(BaseModel):
