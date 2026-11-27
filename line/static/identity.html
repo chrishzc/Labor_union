@@ -266,11 +266,11 @@ function requireIdentityPreview(result) {
   if (!preview || !Object.hasOwn(identityPreviewStatusLabels, preview.status)
       || !Number.isInteger(preview.expected_version)
       || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint || "")) {
-    throw new Error("預覽回應格式不完整，未執行套用。");
+    throw new Error("這次沒有連結 LINE。請關掉這頁，再從 LINE 打開。");
   }
   if (preview.candidate !== null && preview.candidate !== undefined
       && typeof preview.candidate.currently_bound !== "boolean") {
-    throw new Error("預覽候選狀態格式不完整，未執行套用。");
+    throw new Error("這次沒有連結 LINE。請關掉這頁，再從 LINE 打開。");
   }
   return preview;
 }
@@ -406,7 +406,7 @@ async function submitForm(event, definition, button, previewBox) {
     if (applySubmitted) {
       event.target.reset?.();
       showBindingLookup(definition, previewBox);
-      showMessage("綁定結果讀回不完整，尚未確認。請查詢原綁定。", true);
+      showMessage("還不知道 LINE 有沒有連結成功。請按「查詢原綁定」，不要再送一次。", true);
       return;
     }
     const staffMismatch = definition.endpoint === "staff"
@@ -556,7 +556,7 @@ function hasSensitiveFlowContext() {
 
 function showRegistrationEntry() {
   const definition = definitions.customer_binding;
-  document.getElementById("title").textContent = "服務確認與導流";
+  document.getElementById("title").textContent = "申請服務或連結 LINE";
   document.getElementById("description").textContent = "已在新竹市政府平台完成申請登記嗎？";
   configureCustomerChoice(definition);
   buildForm(definition);

@@ -218,11 +218,11 @@ def test_liff_submission_recovery_in_browser(scenario):
         if scenario in {"lost-reopen", "absent-reopen"}:
             page.reload()
         else:
-            expect(recovery).to_have_text("查詢原申請" if scenario == "known-conflict" else "重新送出")
+            expect(recovery).to_have_text("查詢原申請" if scenario == "known-conflict" else "確認送出結果")
             recovery.click()
 
         if scenario == "not-received":
-            expect(status).to_contain_text("尚未確認送件成功")
+            expect(status).to_contain_text("還不知道工會有沒有收到")
             expect(recovery).to_be_enabled()
             assert len(submissions) == 1
             recovery.click()

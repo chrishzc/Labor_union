@@ -91,7 +91,7 @@ async function openProfile() {
     const staffId = params.get("staff_id");
     const interaction = params.get("interaction");
     if (!staffId || !/^[1-9]\d*$/.test(staffId) || (!admin && !interaction)) {
-      throw new Error(admin ? "連結不完整，請從月嫂名冊重新開啟。" : "連結不完整，請從 LINE 推薦訊息重新開啟。");
+      throw new Error(admin ? "連結不完整，請從月嫂名冊重新開啟。" : "這個連結打不開。請回到工會傳給你的 LINE 訊息，再點一次月嫂連結。");
     }
     let request;
     let path;
