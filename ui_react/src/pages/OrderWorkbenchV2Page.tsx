@@ -9,6 +9,7 @@ import { sessionClient } from '../api/auth/session_client';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -19,6 +20,7 @@ import './OrdersPage.css';
 import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
+import { isViewAccessDenied, useAdminOperationsViews, useOperationsQuery, useOperationsScroll, viewTimestamp } from './admin_operations_view_cache';
 import { WorkbenchCaseStatistics } from '../components/WorkbenchCaseStatistics';
 import { loadCurrentImportFieldIssuesForCases, importFieldIssueHref, type ImportFieldIssueCase } from '../api/case_import/import_field_issues';
 import {
@@ -38,13 +40,15 @@ import {
   CORE_STAGE_DEFINITIONS,
   coreStageDefinition,
   ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE,
-  type OrderCoreStageWorkbenchViewModel,
 } from '../adapters/orders/order_core_stage_projection_adapter';
 import {
   adaptOrderSummaryPage,
   formatServiceRange,
   type OrderSummaryCardViewModel,
 } from '../adapters/orders/order_summary_adapter';
+
+const EMPTY_SUMMARIES: ReadonlyMap<string, OrderSummaryCardViewModel> = new Map();
+const EMPTY_INTAKE: ReadonlyMap<string, ImportFieldIssueCase> = new Map();
 
 function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: boolean): string {
   if (summaryLoading) return '正式案件摘要載入中。';
@@ -60,26 +64,16 @@ function coreQueryErrorMessage(error: unknown): string {
 }
 
 export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ homeNavigationRequest = 0 }) => {
-  const [view, setView] = useState<OrderCoreStageWorkbenchViewModel | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [summaryIndex, setSummaryIndex] = useState<ReadonlyMap<string, OrderSummaryCardViewModel>>(
-    () => new Map(),
-  );
-  const [summaryLoading, setSummaryLoading] = useState(true);
-  const [summaryQueryFailed, setSummaryQueryFailed] = useState(false);
-  const [intakeReviews, setIntakeReviews] = useState<ReadonlyMap<string, ImportFieldIssueCase>>(new Map());
-  const [intakeReviewsError, setIntakeReviewsError] = useState(false);
-  const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(null);
-  const [search, setSearch] = useState('');
+  const views = useAdminOperationsViews();
+  const cache = views.workbench;
+  const [selectedStage, setSelectedStage] = useState<CoreStageCode | null>(() => cache.selection.stage);
+  const [search, setSearch] = useState(() => cache.selection.search);
   const [projectionRefreshKey, setProjectionRefreshKey] = useState(0);
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
     branchType: CoreStageBranchType;
     openUpcomingStaffing?: boolean;
   } | null>(null);
-  const requestSequence = useRef(0);
   const [caseLink, setCaseLink] = useState(() => window.location.hash);
   const caseLinkParams = new URLSearchParams(
     caseLink.startsWith('#order-workbench-v2?') ? caseLink.split('?')[1] : '',
@@ -88,15 +82,30 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   const requestedSubstitute = caseLinkParams.get('substitute');
   const openUpcomingStaffing = caseLinkParams.get('staffing') === 'upcoming';
   const [caseLinkError, setCaseLinkError] = useState<string | null>(null);
-  const lastResolvedQuery = useRef<string | null>(null);
-  const refreshProjection = useCallback(() => setProjectionRefreshKey((current) => current + 1), []);
-  const closeDrawer = useCallback(() => {
+  useOperationsScroll(views, 'order-workbench-v2', selectedDrawer === null && !requestedCase);
+  useLayoutEffect(() => {
+    cache.selection = { stage: selectedStage, search };
+  }, [cache, selectedStage, search]);
+
+  const refreshProjection = useCallback(() => {
+    views.invalidateWorkbench();
+    setProjectionRefreshKey(current => current + 1);
+  }, [views]);
+  const observeChanged = useCallback((scope?: 'calendar') => {
+    if (scope === 'calendar') views.invalidateSchedulingMonths();
+    else views.scheduling.options.invalidate();
+    refreshProjection();
+  }, [views, refreshProjection]);
+  const clearDrawer = useCallback(() => {
     setSelectedDrawer(null);
     setCaseLink('');
     setCaseLinkError(null);
     if (new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('case')) window.history.replaceState(null, '', '#order-workbench-v2');
+  }, []);
+  const closeDrawer = useCallback(() => {
+    clearDrawer();
     refreshProjection();
-  }, [refreshProjection]);
+  }, [clearDrawer, refreshProjection]);
   useEffect(() => {
     const readCaseLink = () => {
       const hash = window.location.hash;
@@ -154,98 +163,53 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
     return () => controller.abort();
   }, [requestedCase, requestedSubstitute, openUpcomingStaffing]);
 
-  useEffect(() => {
-    const requestId = requestSequence.current + 1;
-    requestSequence.current = requestId;
-    const controller = new AbortController();
+  const queryKey = selectedStage ?? 'all';
+  const readCore = useCallback(async (signal: AbortSignal) => {
     const query: OrderCoreStageProjectionQueryParams = {
       page_size: 200,
       lifecycle_scope: 'all',
       workbench_scope: 'in_progress',
       stage: selectedStage ?? undefined,
     };
+    return adaptOrderCoreStageTimelinePage(await loadAllCoreStageTimelines(query, { signal }), query);
+  }, [selectedStage]);
+  const core = useOperationsQuery({ cache: cache.core, queryKey, read: readCore, refreshKey: projectionRefreshKey });
+  const view = core.snapshot?.data ?? null;
+  const loading = view === null && core.status.kind === 'loading';
+  const refreshing = view !== null && core.status.kind === 'loading';
+  const error = core.status.kind === 'failed' ? coreQueryErrorMessage(core.status.error) : null;
+  const coreAccessDenied = core.status.kind === 'failed' && isViewAccessDenied(core.status.error);
+  useLayoutEffect(() => {
+    if (coreAccessDenied) clearDrawer();
+  }, [coreAccessDenied, clearDrawer]);
 
-    const queryKey = JSON.stringify(query);
-    const readbackRefresh = lastResolvedQuery.current === queryKey;
-    setError(null);
-    setRefreshing(readbackRefresh);
-    if (!readbackRefresh) {
-      setLoading(true);
-      setView(null);
-    }
-
-    void loadAllCoreStageTimelines(query, {
-      signal: controller.signal,
-    })
-      .then((page) => {
-        if (controller.signal.aborted || requestSequence.current !== requestId) return;
-        const nextView = adaptOrderCoreStageTimelinePage(page, query);
-        lastResolvedQuery.current = queryKey;
-        setView(nextView);
-      })
-      .catch((caught) => {
-        if (controller.signal.aborted || requestSequence.current !== requestId) return;
-        setError(coreQueryErrorMessage(caught));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && requestSequence.current === requestId) {
-          setLoading(false);
-          setRefreshing(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [
-    projectionRefreshKey,
-    selectedStage,
-  ]);
-
-  useEffect(() => {
-    let alive = true;
-    const controller = new AbortController();
-    setSummaryIndex(new Map());
-    setSummaryLoading(true);
-    setSummaryQueryFailed(false);
-
-    void loadAllOrderSummaries(
+  const readSummaries = useCallback(async (signal: AbortSignal) => {
+    const data = await loadAllOrderSummaries(
       ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
       { lifecycle_scope: 'all', page_size: 200 },
-      { signal: controller.signal },
-    )
-      .then((data) => {
-        if (!alive) return;
-        const summaries = adaptOrderSummaryPage(data).items;
-        setSummaryIndex(new Map(summaries.map((item) => [item.id, item])));
-      })
-      .catch(() => {
-        if (!alive) return;
-        setSummaryIndex(new Map());
-        setSummaryQueryFailed(true);
-      })
-      .finally(() => {
-        if (alive) setSummaryLoading(false);
-      });
+      { signal },
+    );
+    const summaries = adaptOrderSummaryPage(data).items;
+    return new Map(summaries.map(item => [item.id, item]));
+  }, []);
+  const summaries = useOperationsQuery({
+    cache: cache.summaries, queryKey: 'all', read: readSummaries, refreshKey: projectionRefreshKey,
+  });
+  const summaryIndex = summaries.snapshot?.data ?? EMPTY_SUMMARIES;
+  const summaryLoading = summaries.status.kind === 'loading';
+  const summaryQueryFailed = summaries.status.kind === 'failed';
 
-    return () => {
-      alive = false;
-      controller.abort();
-    };
-  }, [projectionRefreshKey]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setIntakeReviews(new Map());
-    setIntakeReviewsError(false);
-    const caseNos = (view?.items ?? []).map((item) => item.id);
-    void loadCurrentImportFieldIssuesForCases(caseNos, { signal: controller.signal })
-      .then((reviews) => {
-        if (!controller.signal.aborted) setIntakeReviews(new Map(reviews.map((review) => [review.case_no, review])));
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setIntakeReviewsError(true);
-      });
-    return () => controller.abort();
+  const intakeKey = JSON.stringify([queryKey, ...(view?.items ?? []).map(item => item.id)]);
+  const readIntake = useCallback(async (signal: AbortSignal) => {
+    const reviews = await loadCurrentImportFieldIssuesForCases((view?.items ?? []).map(item => item.id), { signal });
+    return new Map(reviews.map(review => [review.case_no, review]));
   }, [view]);
+  const intake = useOperationsQuery({
+    cache: cache.intake, queryKey: intakeKey, read: readIntake, refreshKey: projectionRefreshKey,
+    enabled: view !== null && core.status.kind === 'ready',
+  });
+  const intakeReviews = intake.snapshot?.data ?? EMPTY_INTAKE;
+  const intakeReviewsError = intake.status.kind === 'failed';
 
   const displayedItems = (view?.items ?? []).filter((item) => {
     if (!normalizedSearch) return true;
@@ -263,7 +227,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
     setSelectedStage(stage);
   };
 
-  if (selectedDrawer !== null) return (
+  if (selectedDrawer !== null && !coreAccessDenied) return (
     <>
       {error !== null && <div role="alert"><p>案件清單更新失敗，請重新整理後繼續。</p><button type="button" onClick={refreshProjection}>重新整理</button></div>}
       {caseLinkError && <p role="alert">{caseLinkError}</p>}
@@ -277,7 +241,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
           summary={summaryIndex.get(selectedDrawer.caseNo)}
           workbenchScope="in_progress"
           onClose={closeDrawer}
-          onObserved={refreshProjection}
+          onObserved={observeChanged}
         />
       </fieldset>
     </>
@@ -290,8 +254,8 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
 
       <details className="order-v2-overview-details">
         <summary>案件受理統計</summary>
-        <WorkbenchCaseStatistics refreshKey={projectionRefreshKey} />
-        <WorkbenchCaseStatistics refreshKey={projectionRefreshKey} caseCategory="non_citizen" />
+        <WorkbenchCaseStatistics viewCache={cache} refreshKey={projectionRefreshKey} />
+        <WorkbenchCaseStatistics viewCache={cache} refreshKey={projectionRefreshKey} caseCategory="non_citizen" />
       </details>
 
       <div className="order-v2-overview-details order-v2-stage-overview">
@@ -346,13 +310,18 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
 
       {summaryQueryFailed && !loading && !error && (
         <div className="order-v2-summary-warning" role="status">
-          仍可查看案件分類。客戶、日期與月嫂資料暫時無法載入。
+          {summaries.snapshot
+            ? <>案件摘要更新失敗，顯示 {viewTimestamp(summaries.snapshot.updatedAt)} 的資料。 <button type="button" onClick={refreshProjection}>重試</button></>
+            : '仍可查看案件分類。客戶、日期與月嫂資料暫時無法載入。'}
         </div>
       )}
 
       {loading && <div className="order-v2-empty">正在查詢訂單資料…</div>}
-      {error && <div className="order-v2-error" role="alert">{error}</div>}
-      {!loading && view !== null && (refreshing || error !== null) && (
+      {error && <div className="order-v2-error" role="alert">
+        {error}
+        {core.snapshot && <> 顯示 {viewTimestamp(core.snapshot.updatedAt)} 的資料。 <button type="button" onClick={refreshProjection}>重試</button></>}
+      </div>}
+      {refreshing && (
         <div className="order-v2-summary-warning" role="status">清單更新中，暫時無法操作案件。</div>
       )}
       {!loading && !error && displayedCount === 0 && (
@@ -424,7 +393,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
                     <div className="order-v2-notice warning">
                       <strong>進件欄位待修正</strong>
                       <span>{intakeReviews.get(item.id)!.issues.map((issue) => issue.source_field).join('、')}</span>
-                      <a href={importFieldIssueHref(item.id, intakeReviews.get(item.id)?.issues[0])} onClick={(event) => event.stopPropagation()}>修正資料</a>
+                      {!entryDisabled && <a href={importFieldIssueHref(item.id, intakeReviews.get(item.id)?.issues[0])} onClick={(event) => event.stopPropagation()}>修正資料</a>}
                     </div>
                   )}
                   {intakeReviewsError && (
