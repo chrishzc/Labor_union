@@ -19,7 +19,7 @@
     <dl><dt>案件編號</dt><dd id="caseNo"></dd><dt>訂金</dt><dd id="amount"></dd><dt>繳費狀態</dt><dd id="state"></dd></dl>
     <section id="unpaid" hidden><dl><dt>繳費期限</dt><dd id="due"></dd><dt>銀行代碼</dt><dd id="bank"></dd><dt>虛擬帳號</dt><dd id="account"></dd></dl>
       <button id="copy" type="button">複製帳號</button></section>
-    <section id="settled" hidden><dl><dt>入帳日期</dt><dd id="received"></dd></dl><p>訂金已確認入帳，謝謝您。</p></section>
+    <section id="settled" hidden><dl><dt>入帳日期</dt><dd id="received"></dd></dl><p>工會已確認收到訂金。</p></section>
   </section>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -39,18 +39,18 @@ async function initialize(){
     const token=liff.getIDToken(); if(!token)throw new Error("請重新從 LINE 開啟此頁。");
     const response=await fetch("/api/v1/line/deposit-payment/query",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({case_no:caseNo,line_id_token:token})});
     const result=await response.json();
-    if(!response.ok)throw new Error(result.detail?.error?.message || result.error?.message || "目前無法取得繳費資料。");
+    if(!response.ok)throw new Error("目前查不到繳費資料。");
     const data=result.data;
     if(data.case_no!==caseNo || !Number.isSafeInteger(data.amount_ntd) || data.amount_ntd<=0 || !["unpaid","settled"].includes(data.status))throw new Error("繳費資料不完整，請聯絡工會。");
-    put("caseNo",data.case_no);put("amount",`NT$${data.amount_ntd.toLocaleString("zh-TW")}`);put("state",data.status==="settled"?"已入帳":"尚未入帳");
+    put("caseNo",data.case_no);put("amount",`NT$${data.amount_ntd.toLocaleString("zh-TW")}`);put("state",data.status==="settled"?"已確認收到":"工會還沒確認收到");
     document.getElementById("payment").hidden=false;
     if(data.status==="settled"){
-      put("received",data.received_on || "待工會確認");document.getElementById("settled").hidden=false;show("已確認訂金入帳。");
+      put("received",data.received_on || "還沒確認日期");document.getElementById("settled").hidden=false;show("工會已確認收到訂金。");
     }else if(data.due_date && /^[0-9]{3}$/.test(data.bank_code || "") && /^[0-9]{10,20}$/.test(data.virtual_account || "")){
       put("due",data.due_date);put("bank",data.bank_code);put("account",data.virtual_account);virtualAccount=data.virtual_account;
-      document.getElementById("unpaid").hidden=false;show("請依下列資訊匯款。");
-    }else{show("繳費資料待工會確認，請先勿匯款。");}
-  }catch(error){show(error.message || "目前無法取得繳費資料。",true);}
+      document.getElementById("unpaid").hidden=false;show("工會還沒確認收到這筆錢。如果你已經匯款，請不要再匯一次。還沒匯款的話，請用下面的帳號。");
+    }else{show("工會還沒確認繳費資料。請先不要匯款。");}
+  }catch{show("目前查不到這筆訂金的繳費資料。請先不要匯款。請回 LINE 重新打開，還是不行就聯絡工會。",true);}
 }
 document.getElementById("copy").addEventListener("click",async()=>{
   if(!virtualAccount)return;

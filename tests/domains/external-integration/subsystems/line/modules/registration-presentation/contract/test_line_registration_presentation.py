@@ -256,7 +256,7 @@ def test_registration_passbook_controls_and_submission_in_browser(
             expect(page.locator("#successCard")).to_be_hidden()
             action_label = retry.inner_text()
             if not conflict:
-                expect(page.locator("#statusMessage")).to_contain_text("尚未確認送件成功")
+                expect(page.locator("#statusMessage")).to_contain_text("還不知道工會有沒有收到")
             expect(page.locator("#name")).to_have_value("合成申請")
             assert [endpoint for endpoint, _ in requests] == ["preview", "apply"]
             if conflict:
@@ -274,7 +274,7 @@ def test_registration_passbook_controls_and_submission_in_browser(
                 expect(retry).to_be_visible()
                 expect(submit).to_be_disabled()
                 expect(page.locator("#successCard")).to_be_hidden()
-                expect(page.locator("#statusMessage")).to_contain_text("尚未確認送件成功")
+                expect(page.locator("#statusMessage")).to_contain_text("還不知道工會有沒有收到")
                 assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status"]
 
             if interruption == "not_received":
@@ -283,7 +283,7 @@ def test_registration_passbook_controls_and_submission_in_browser(
                 expect(retry).to_be_visible()
                 expect(submit).to_be_disabled()
                 expect(page.locator("#successCard")).to_be_hidden()
-                expect(page.locator("#statusMessage")).to_contain_text("尚未確認送件成功")
+                expect(page.locator("#statusMessage")).to_contain_text("還不知道工會有沒有收到")
                 assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status", "status"]
                 page.locator("#name").evaluate("(field) => { field.value = '異動後資料'; }")
             retry.click()
@@ -426,6 +426,9 @@ def test_success_readback_requires_a_real_receipt_and_renders_current_registrati
     preview_validator = "function requireRegistrationPreview(data)" + source.split(
         "function requireRegistrationPreview(data)", 1
     )[1].split("function registrationErrorMessage", 1)[0]
+    error_renderer = "function registrationErrorMessage(result, status)" + source.split(
+        "function registrationErrorMessage(result, status)", 1
+    )[1].split("</script>", 1)[0]
     script = r'''
 const assert = require('node:assert/strict');
 const nodes = new Map();
@@ -434,11 +437,13 @@ const document={getElementById:element,querySelector:element};
 let runtimePage = null;
 let registrationResultUnknown = true;
 let pendingRegistrationApply = {body:'synthetic'};
-''' + renderer + preview_validator + r'''
+''' + renderer + preview_validator + error_renderer + r'''
+assert.equal(registrationErrorMessage({detail:{code:'internal_preview_error',message:'請確認姓名。'}},422),'請確認姓名。');
+assert(!registrationErrorMessage({detail:'internal_preview_error'},422).includes('internal_preview_error'));
 const preview={status:'ready',expected_binding_version:0,payload_fingerprint:'a'.repeat(64),preview_fingerprint:'b'.repeat(64)};
 assert.equal(requireRegistrationPreview(preview),preview);
-assert.throws(()=>requireRegistrationPreview({...preview,status:'pending'}),/預覽回應格式不完整/);
-const pending={registration_id:42,status:'pending',identity_status:'pending_approval',client_id:null,beclass_record_id:null,case_no:null};
+assert.throws(()=>requireRegistrationPreview({...preview,status:'pending'}),/這次沒有送出/);
+const pending={registration_id:42,status:'pending',identity_status:'pending_approval',client_id:null,beclass_record_id:null,case_no:null,expires_at_utc:'2026-12-10T03:00:00Z'};
 renderRegistrationSuccess(pending);
 assert.equal(element('.success-desc').textContent,'您可以關閉頁面，後續由工會審核。\n申請編號：42');
 assert.equal(element('.success-title').textContent,'申請已收到');
@@ -448,13 +453,14 @@ assert.equal(registrationResultUnknown,false);
 assert.equal(pendingRegistrationApply,null);
 const outcomes = {
   approving: '工會正在處理這筆申請，您可以關閉頁面。',
-  approved: '申請已核准，待審問卷內容已清除。',
-  rejected: '申請已拒絕，問卷內容已清除。',
-  expired: '申請已到期，問卷內容已清除。',
+  approved: '工會已核准你的申請。',
+  rejected: '這次申請沒有通過。你可以聯絡工會，或重新申請。',
+  expired: '這份申請已到期。請按「重新申請」。',
 };
 for(const [status, message] of Object.entries(outcomes)){
   renderRegistrationSuccess({...pending,status,identity_status:status,client_id:10,beclass_record_id:11});
   assert.equal(element('.success-desc').textContent,message+'\n申請編號：42');
+  assert.equal(element('reapplyButton').style.display, ['rejected','expired'].includes(status) ? 'block' : 'none');
   assert(!element('.success-desc').textContent.includes('待工會核准'));
   assert(!element('.success-desc').textContent.includes('10'));
 }
@@ -505,7 +511,8 @@ def test_registration_page_uses_only_canonical_identity_endpoints() -> None:
     assert "function canUseDevelopmentIdentityFallback(error)" not in source
     assert 'development_line_user_id: ""' in source
     assert "developmentLineUserId" not in source
-    assert "const code = detail?.code || detail?.error?.code || result?.error?.code;" in source
+    assert "/api/v1/line/identity/registration/status" in source
+    assert "errorCode === 'registration_conflict'" in source
     assert "/api/line/register" not in source
     assert "/api/line/config" not in source
 

@@ -91,7 +91,7 @@ def test_obsolete_customer_review_receipt_does_not_claim_success():
         'status': 'pending_review', 'review_request_id': 7,
         'receipt_identity': 'public', 'preview_fingerprint': 'a' * 64,
     }, 'customer', preview_status='requires_review')
-    assert '綁定結果讀回不完整' in result['message']
+    assert '還不能確認 LINE 有沒有連結' in result['message']
     assert result['result'] == ''
 
 
