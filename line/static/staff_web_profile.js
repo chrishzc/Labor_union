@@ -120,15 +120,18 @@ async function readProfile(path, request, signal) {
 async function addImage(slider, item, path, request, signal) {
   const figure = document.createElement("figure");
   slider.append(figure);
+  let url;
   try {
     const response = await readProfile(`${path}/images/${item.image_entry}/${item.image_version}`, request, signal);
     const blob = await response.blob();
     if (signal.aborted) return;
     const image = document.createElement("img");
-    const url = URL.createObjectURL(blob);
+    url = URL.createObjectURL(blob);
     imageUrls.add(url);
     image.src = url;
     image.alt = item.item_name;
+    await image.decode();
+    if (signal.aborted) return;
     const open = document.createElement("button");
     open.type = "button";
     open.className = "photo-open";
@@ -137,6 +140,7 @@ async function addImage(slider, item, path, request, signal) {
     open.addEventListener("click", () => openLargePhoto(image));
     figure.prepend(open);
   } catch {
+    if (url && imageUrls.delete(url)) URL.revokeObjectURL(url);
     if (signal.aborted) return;
     const message = document.createElement("p");
     message.className = "unavailable";
