@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { notificationTasksClient as client, notificationFailure, notifyNotificationTasksChanged, type NotificationItem, type NotificationPage, type NotificationSource, type NotificationCatalog } from '../api/line_notifications/notification_tasks_client';
 import { importFieldIssueHref } from '../api/case_import/import_field_issues';
-import { NotificationTaskActions, notificationHref } from '../components/NotificationTaskActions';
+import { NotificationTaskActions, notificationHref, OptionalImportFieldSkip } from '../components/NotificationTaskActions';
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { formatTaipeiDateTime } from '../shared/taipeiTime';
 import './NotificationTasksPreviewPage.css';
@@ -182,8 +182,9 @@ export function NotificationTasksPage() {
           <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />處理原因</h3><p>{selected.reason}</p></section>
           {selected.source === 'import_fields' && selectedCaseNo && <section className="notification-preview-reason">
             <h3>待修正欄位</h3>
-            <ul>{selected.import_field_issues?.map(issue => <li key={JSON.stringify([issue.source, issue.owner, issue.field, issue.source_field, issue.code])}>
+            <ul>{selected.import_field_issues?.map(issue => <li key={JSON.stringify([issue.source, issue.owner, issue.field, issue.source_field, issue.code, issue.optional_skip_review_identity])}>
               <a href={importFieldIssueHref(selectedCaseNo, issue)}>{issue.message}</a>
+              {issue.optional_skip_review_identity && !failures.import_fields && <OptionalImportFieldSkip caseNo={selectedCaseNo} reviewIdentity={issue.optional_skip_review_identity} sourceField={issue.source_field} onCommitted={refreshAfterCommit} />}
             </li>)}</ul>
           </section>}
           {selected.recipient && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>

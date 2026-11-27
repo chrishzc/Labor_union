@@ -88,7 +88,8 @@ def test_http_query_requires_auth_and_bounds_page():
         assert response.status_code == 200
         assert response.json()["data"]["items"][0]["issues"][0] == {
             "source": "hcm", "owner": "client_profile", "field": "email", "source_field": "email",
-            "code": "hcm_field_invalid:email", "message": "email尚未完成，請補正或依原進件流程確認略過。",
+            "code": "hcm_field_invalid:email", "message": "email尚未完成，請核對此欄位。",
+            "optional_skip_review_identity": None,
         }
         assert client.get("/api/v1/case-import/field-issues?page_size=101").status_code == 422
         assert client.get("/api/v1/case-import/field-issues?page=0").status_code == 422

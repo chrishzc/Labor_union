@@ -178,7 +178,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 
 桌面最多十三類，手機排除 `staff_profile` 與 `import_fields`。各來源依能力授權過濾，每筆可見事項均有處理入口或阻擋原因。
 
-`import_fields` 依 `data_browser.read` 唯讀查詢 Case Import 目前的 HCM／BeClass 欄位問題。每案一筆，詳情聚合該案問題及其正式修正入口，只列案號、問題說明與欄位定位。客戶名冊與訂單進件欄位的正式修正入口在桌面後台，因此手機目錄排除這個來源。修正後由原 Query 重新判定，各問題都解除時移除該案事項。此來源沒有通用已讀或完成狀態，也沒有 LINE 寄送作業。
+`import_fields` 依 `data_browser.read` 唯讀查詢 Case Import 目前的 HCM／BeClass 欄位問題。每案一筆，詳情聚合該案問題及其正式修正入口，只列案號、問題說明與欄位定位。客戶名冊與訂單進件欄位的正式修正入口在桌面後台，因此手機目錄排除這個來源。修正後由原 Query 重新判定，各問題都解除時移除該案事項。選填欄位可由有資料修改權限的承辦在待辦逐欄確認「略過此欄」。HCM 明確允許留白的 email 經既有 Preview／Apply 保存欄位處置，不寫入原資料，也不沿用到新匯入版本；BeClass 退款欄位沿名冊既有「確認此欄留空」規則。必填、條件式必填和未確認可留白的欄位不提供略過入口。成功後讀回；同案尚有其他問題時繼續列出。本來源無整案略過、通用已讀或 LINE 寄送作業。
 
 <a id="line-todo-import-fields"></a>
 

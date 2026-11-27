@@ -8,6 +8,12 @@ from domains.case_import.refund_account import normalize_refund_field
 from domains.clients.profile import ClientProfileValidationError, validate_changes
 
 
+def hcm_notification_can_skip(source_field: str | None) -> bool:
+    # The HCM workbook explicitly accepts a blank email. Do not infer that
+    # an unknown or conditionally required field is optional.
+    return source_field == "email"
+
+
 @dataclass(frozen=True, slots=True)
 class ImportFieldIssue:
     source: Literal["hcm", "client_beclass"]
@@ -17,7 +23,9 @@ class ImportFieldIssue:
     code: str
     message: str
 
-    def as_dict(self) -> dict[str, str]:
+    optional_skip_review_identity: str | None = None
+
+    def as_dict(self) -> dict[str, str | None]:
         return asdict(self)
 
 
@@ -84,7 +92,8 @@ def current_beclass_field_issues(codes: tuple[str, ...], values: Mapping[str, ob
     return tuple(issues)
 
 
-def current_hcm_field_issue(label: str, code: str) -> ImportFieldIssue:
+def current_hcm_field_issue(label: str, code: str, *, review_identity: str | None = None) -> ImportFieldIssue:
     owner, field = HCM_FIELD_TARGETS.get(label, ("client_profile", label))
     return ImportFieldIssue("hcm", owner, field, label, code,
-                            f"{label}尚未完成，請補正或依原進件流程確認略過。")
+                            f"{label}尚未完成，請核對此欄位。",
+                            review_identity if hcm_notification_can_skip(label) else None)

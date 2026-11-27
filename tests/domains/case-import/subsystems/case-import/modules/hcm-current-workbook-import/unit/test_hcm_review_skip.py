@@ -127,3 +127,22 @@ def test_general_skip_rejects_corrected_disposed_superseded_or_changed_field(cha
     with pytest.raises(HcmResubmissionConflict):
         workflow.apply_skip(command(preview, source_field='姓名'))
     assert not repository.events and not repository.outbox and uow.commits == 0
+
+
+def test_notification_can_skip_optional_email_only_and_does_not_close_other_fields():
+    repository = Repository()
+    repository.facts = replace(repository.facts, unresolved_fields=("email", "姓名"))
+    workflow = HcmResubmissionWorkflow(repository, Uow)
+    with pytest.raises(ValueError, match="hcm_review_skip_non_optional"):
+        workflow.preview_skip("review-1", "姓名", optional_only=True)
+    legacy = workflow.preview_skip("review-1", "姓名")
+    with pytest.raises(HcmResubmissionConflict, match="hcm_review_skip_stale"):
+        workflow.apply_skip(command(legacy, source_field="姓名", optional_only=True))
+    preview = workflow.preview_skip("review-1", "email", optional_only=True)
+    assert preview.preview_fingerprint != workflow.preview_skip("review-1", "email").preview_fingerprint
+    assert not repository.events
+    request = command(preview, source_field="email", optional_only=True)
+    assert workflow.apply_skip(request).target_fields == ("review.skip_field:email",)
+    assert workflow.apply_skip(request).replayed
+    assert repository.facts.unresolved_fields == ("姓名",)
+    assert len(repository.events) == 1

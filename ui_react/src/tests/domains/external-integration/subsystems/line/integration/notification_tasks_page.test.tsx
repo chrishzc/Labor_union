@@ -7,6 +7,8 @@ import { ApiHttpError } from '../../../../../../api/shared/typed_errors';
 import { transport } from '../../../../../../api/shared/transport';
 import { sessionClient } from '../../../../../../api/auth/session_client';
 
+import { hcmResubmissionClient } from '../../../../../../api/case_import/hcm_resubmission_client';
+
 const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'overdue:deposit',source:'overdue',group:'reminder',title:'訂金逾期未清',case_no:'116000001',reference_id:null,
   person:'',summary:'本期未繳 NT$ 3,000',reason:'各期獨立判斷',time:'2026-10-24',tag:'待處理',recipient:'客戶私人聊天室',message:'目前訂金餘額',unavailable_reason:'客戶尚未綁定 LINE',expected_version:null,
   delivery_status:null,payment:{case_no:'116000001',payment_stage:'deposit',obligation_identity:'case1:deposit',projection_version:1,obligation_event_id:10,due_date:'2026-10-24',remaining_amount_ntd:3000},log:null,...patch});
@@ -44,6 +46,38 @@ describe('通知事項實際接線',()=>{
     fireEvent.click(screen.getByRole('button',{name:'前往客戶名冊修正'}));
     expect(window.location.hash).toBe('#clients?case=CASE-1&field=email&from=workbench');
     expect(send).not.toHaveBeenCalled();
+  });
+  it('選填 email 略過須確認，成功讀回後仍保留必修欄位', async () => {
+    vi.mocked(client.catalog).mockResolvedValue([importSource]);
+    const task = importTodo('CASE-1');
+    const issues = task.import_field_issues ?? [];
+    const required = issues[1];
+    if (!required) throw new Error('Missing required-field fixture');
+    task.import_field_issues = [{ source: 'hcm', owner: 'client_profile', field: 'email',
+      source_field: 'email', code: 'hcm_field_invalid:email', message: 'email 尚未完成。',
+      optional_skip_review_identity: 'review-1' }, required];
+    vi.mocked(client.list).mockResolvedValue({items:[task],total:1,next_cursor:null});
+    const preview = {review_identity:'review-1',case_no:'CASE-1',source_field:'email',
+      review_version:1,preview_fingerprint:'a'.repeat(64)};
+    const prepare = vi.spyOn(hcmResubmissionClient,'previewFieldSkip').mockResolvedValue(preview);
+    const apply = vi.spyOn(hcmResubmissionClient,'applyFieldSkip').mockResolvedValue({
+      event_identity:'event-1',review_identity:'review-1',case_no:'CASE-1',target_fields:['review.skip_field:email'],
+      resulting_review_version:2,replayed:false,
+    });
+    render(<NotificationTasksPage />);
+    const button = await screen.findByRole('button',{name:'略過此欄'});
+    expect(screen.getAllByRole('button',{name:'略過此欄'})).toHaveLength(1);
+    fireEvent.click(button);
+    const confirm = await screen.findByRole('button',{name:'確認略過此欄'});
+    expect(prepare).toHaveBeenCalledWith('review-1','email',true);
+    expect(apply).not.toHaveBeenCalled();
+    vi.mocked(client.list).mockResolvedValue({
+      items:[{...task,import_field_issues:[required]}],total:1,next_cursor:null,
+    });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByText('email 尚未完成。')).not.toBeInTheDocument());
+    expect(screen.getByRole('link',{name:/希望服務天數尚未完成/})).toBeInTheDocument();
+    expect(apply).toHaveBeenCalledWith(preview,expect.any(String),true);
   });
   it('進件資料讀取失敗保持未確認，讀回成功後才顯示零筆',async()=>{
     vi.mocked(client.catalog).mockResolvedValue([importSource]);

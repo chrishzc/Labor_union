@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
-from api.dependencies.admin_auth import require_admin
+from api.dependencies.admin_auth import has_required_capability, require_admin
 from api.dependencies.hcm_import import get_hcm_resubmission_workflow, get_hcm_workbook_import_service
 from api.schemas.base import BaseResponse
 from api.schemas.hcm_import import (
@@ -86,9 +86,12 @@ def apply_missing_reject_reason_skip(review_identity: str, body: HcmReviewSkipAp
 def preview_hcm_field_skip(review_identity: str, body: HcmReviewFieldSkipPreviewBody,
                            principal: AdminPrincipal = Depends(require_admin),
                            workflow=Depends(get_hcm_resubmission_workflow)):
-    del principal
+    if body.optional_only and not has_required_capability(principal, "data_browser.write"):
+        raise HTTPException(status_code=403, detail={"code": "hcm_review_skip_forbidden"})
     try:
-        return BaseResponse(data=asdict(workflow.preview_skip(review_identity, body.source_field)),
+        preview = (workflow.preview_skip(review_identity, body.source_field, optional_only=True)
+                   if body.optional_only else workflow.preview_skip(review_identity, body.source_field))
+        return BaseResponse(data=asdict(preview),
                             message="請確認略過這項警示")
     except ValueError as error:
         raise HTTPException(status_code=422, detail={"code": str(error)}) from error
@@ -99,10 +102,12 @@ def apply_hcm_field_skip(review_identity: str, body: HcmReviewFieldSkipApplyBody
                          idempotency_key: _IdempotencyHeader, correlation_id: _CorrelationHeader,
                          principal: AdminPrincipal = Depends(require_admin),
                          workflow=Depends(get_hcm_resubmission_workflow)):
+    if body.optional_only and not has_required_capability(principal, "data_browser.write"):
+        raise HTTPException(status_code=403, detail={"code": "hcm_review_skip_forbidden"})
     try:
         request = ApplyHcmReviewSkip(review_identity, body.expected_review_version, body.preview_fingerprint,
                                     idempotency_key, str(principal.username or "admin"), correlation_id,
-                                    source_field=body.source_field)
+                                    source_field=body.source_field, optional_only=body.optional_only)
         return BaseResponse(data=asdict(workflow.apply_skip(request)), message="已保存人工略過紀錄")
     except HcmResubmissionConflict as error:
         raise HTTPException(status_code=409, detail={"code": str(error)}) from error
