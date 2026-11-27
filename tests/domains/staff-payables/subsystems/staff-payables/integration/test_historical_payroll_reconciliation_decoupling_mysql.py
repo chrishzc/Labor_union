@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import date, timedelta
 import hashlib
 import json
@@ -1242,6 +1242,116 @@ def test_star_case3_multi_caregiver_partial_sync_and_preserve_paid_mysql(mysql_c
     assert anti_res["action"] in {"preserved", "already_synced", "skipped"}
     assert _snapshot_tables(mysql_connection, case_nos=(anti_case,), staff_ids=(staff_c,)) == anti_before
     mysql_connection.commit()
+
+
+def test_historical_sync_two_caregivers_with_confirmed_advance_keeps_individual_due_dates(
+    mysql_connection: pymysql.connections.Connection,
+) -> None:
+    case_no = "115000436"
+    august_end = date(2026, 8, 31)
+    september_end = date(2026, 9, 2)
+    with mysql_connection.cursor() as cursor:
+        _, staff = _seed_historical_case(
+            cursor,
+            case_no=case_no,
+            client_name="Synthetic historical advance client",
+            service_days=5,
+            start_day=date(2026, 8, 29),
+            end_day=september_end,
+            staff_specs=(
+                {"name": "August caregiver", "identity_card": "F223456046", "with_bank_account": False,
+                 "end_date": august_end, "schedule_days": 3, "hourly_rate": 300},
+                {"name": "September caregiver", "identity_card": "F223456047", "with_bank_account": False,
+                 "start_date": date(2026, 9, 1), "end_date": september_end,
+                 "schedule_days": 2, "hourly_rate": 350},
+            ),
+        )
+        pricing_rates = {"covered": 350, "excess": 300}
+        cursor.execute(
+            "INSERT INTO case_pricing_events(case_no,resulting_revision,pricing_json,actor,reason,created_at_utc) "
+            "VALUES(%s,1,%s,'synthetic','historical confirmed terms',UTC_TIMESTAMP(6))",
+            (case_no, json.dumps({"identity_name": "一般市民", "rule": "citizen", "subsidy_hours": 16,
+                                  "client": pricing_rates, "payroll": pricing_rates})),
+        )
+        cursor.execute(
+            "UPDATE orders SET pricing_override_event_id=%s,pricing_revision=1 WHERE case_no=%s",
+            (cursor.lastrowid, case_no),
+        )
+        cursor.execute(
+            "INSERT INTO client_ledger_entries(case_no,finance_import_row_id,entry_type,amount_ntd,occurred_on,"
+            "reconciliation_reference,idempotency_key,actor,reason) "
+            "VALUES(%s,NULL,'receipt',12800,%s,%s,%s,'synthetic','original customer advance')",
+            (case_no, august_end, f"legacy-receipt:{case_no}", f"legacy-receipt:{case_no}"),
+        )
+        cursor.execute(
+            "INSERT INTO finance_case_subsidy_plan_events(case_no,version,scheme,actor,operation_key) "
+            "VALUES(%s,1,'advance','synthetic',%s)", (case_no, f"manual-advance:{case_no}"),
+        )
+    mysql_connection.commit()
+
+    snapshot_scope = {"case_nos": (case_no,), "staff_ids": tuple(row["staff_id"] for row in staff)}
+    expected = {
+        (staff[0]["assignment_id"], staff[0]["staff_id"]): (7200, "2026-09-15"),
+        (staff[1]["assignment_id"], staff[1]["staff_id"]): (5600, "2026-10-15"),
+    }
+    accounting_url = f"/api/v1/finance-import/cases/{case_no}/accounting"
+    sync_url = f"/api/v1/orders/{case_no}/payroll/sync-historical-baseline-obligations"
+    before = _snapshot_tables(mysql_connection, **snapshot_scope)
+    mysql_connection.commit()
+
+    with _bank_api_client(mysql_connection) as client:
+        check = client.get(accounting_url)
+        assert check.status_code == 200, check.text
+        initial = check.json()["data"]
+        assert initial["scheme"] == "advance" and not initial["scheme_conflict"], initial
+        assert initial["case_total_ntd"] == 12800 and initial["subsidy_ntd"] == 5600, initial
+        assert initial["staff_items"] == []
+        assert _snapshot_tables(mysql_connection, **snapshot_scope) == before
+        mysql_connection.commit()
+
+        sync = client.post(sync_url)
+        assert sync.status_code == 200, sync.text
+        receipt = sync.json()["data"]
+        assert receipt["scanned_orders"] == receipt["created_count"] == 1, receipt
+        items = receipt["details"][0]["items"]
+        assert len(items) == 2
+        assert {(item["assignment_id"], item["staff_id"]): item["amount_ntd"] for item in items} == {
+            pair: amount for pair, (amount, _) in expected.items()
+        }, receipt
+        assert all(item["action"] == "created" for item in items), receipt
+
+        readback = client.get(accounting_url)
+        assert readback.status_code == 200, readback.text
+        payables = readback.json()["data"]["staff_items"]
+        assert {item["identity"]: item["expected_ntd"] for item in payables} == {
+            item["obligation_identity"]: item["amount_ntd"] for item in items
+        }
+        assert all(not item["has_payment"] and not item["actual_ntd"] for item in payables)
+
+        with closing(mysql_adapter.get_connection()) as read_connection:
+            after_sync = _snapshot_tables(read_connection, **snapshot_scope)
+        assert len(after_sync["staff_obligations"]) == len(after_sync["staff_obligation_events"]) == 2
+        assert {row["obligation_identity"]: (row["staff_id"], row["amount_due_ntd"])
+                for row in after_sync["staff_obligations"]} == {
+            item["obligation_identity"]: (item["staff_id"], item["amount_ntd"]) for item in items
+        }
+        for table in ("client_obligations", "client_ledger_entries", "client_ledger_allocations",
+                      "staff_payout_events", "staff_payout_links", "government_subsidy_entries", "orders"):
+            assert after_sync[table] == before[table], table
+
+        expected_dates = {item["obligation_identity"]: expected[(item["assignment_id"], item["staff_id"])][1]
+                          for item in items}
+        assert {item["obligation_identity"]: item["due_date"] for item in items} == expected_dates, receipt
+        assert {item["identity"]: item["due_date"] for item in payables} == expected_dates
+        for table in ("staff_obligations", "staff_obligation_events"):
+            assert {row["obligation_identity"]: str(row["due_date"]) for row in after_sync[table]} == expected_dates
+
+        repeat = client.post(sync_url)
+        assert repeat.status_code == 200, repeat.text
+        replay = repeat.json()["data"]
+        assert replay["created_count"] == replay["updated_count"] == 0, replay
+        with closing(mysql_adapter.get_connection()) as read_connection:
+            assert _snapshot_tables(read_connection, **snapshot_scope) == after_sync
 
 
 def test_star_case5_ap_export_guardrails_for_undated_and_missing_account_mysql(mysql_connection):
