@@ -5,10 +5,10 @@ import { accountsPayableQueryClient } from '../../../../../../../api/accounts_pa
 import type { HistoricalPayableAuditItem } from '../../../../../../../api/accounts_payable/accounts_payable_query_schemas';
 import { financeAccountingClient, type CaseAccounting } from '../../../../../../../api/finance_import/finance_accounting_client';
 import { monthlyAccountingClient } from '../../../../../../../api/finance_import/monthly_accounting_client';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { transport } from '../../../../../../../api/shared/transport';
 import { ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
 import { HistoricalPayableEditor, HistoricalPayableLookup } from '../../../../../../../components/HistoricalPayableReview';
-
 import { FinancePage } from '../../../../../../../pages/FinancePage';
 
 vi.mock('../../../../../../../components/FinanceCaseAccounting', () => ({
@@ -159,6 +159,7 @@ const sameNameAccounting: CaseAccounting = {
 };
 
 async function recheckAfterSyncTimeout(item: HistoricalPayableAuditItem, accounting?: CaseAccounting) {
+  vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-contract-token');
   const post = vi.spyOn(transport, 'post').mockRejectedValue(new ApiTimeoutError(10_000));
   const get = vi.spyOn(transport, 'get');
   if (accounting) {
@@ -241,6 +242,7 @@ it.each(inconclusiveCases)('DS-02 $name：仍待確認，不顯示旁人金額�
 });
 
 it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只讀取乙的結果', async () => {
+  vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-contract-token');
   const secondRow: HistoricalPayableAuditItem = {
     ...pending, staff_id: 43, reason: '第二位同名月嫂的原列待確認。',
   };
@@ -269,6 +271,8 @@ it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只�
     const firstReview = within(screen.getByRole('region', { name: '歷史月嫂款查核' }));
     fireEvent.click(firstReview.getByRole('button', { name: '同步月嫂應付' }));
     const firstRecheck = await firstReview.findByRole('button', { name: '重新查核' });
+    expect(get).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(1);
     await act(async () => { fireEvent.click(firstRecheck); });
 
     const firstResult = firstReview.getByRole('status');
@@ -288,6 +292,8 @@ it('DS-02 回清冊改選同案同名的乙，沿用同一次未知同步且只�
     const secondReview = within(secondRegion);
     expect(secondRegion).not.toHaveTextContent(/48,000/);
     const secondRecheck = await secondReview.findByRole('button', { name: '重新查核' });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(1);
     await act(async () => { fireEvent.click(secondRecheck); });
 
     expect(secondReview.getByRole('status')).toHaveTextContent('待確認');
