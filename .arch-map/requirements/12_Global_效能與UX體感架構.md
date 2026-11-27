@@ -61,7 +61,7 @@ timeout 不等於失敗；前端以相同 idempotency key 查詢 receipt／retry
 資料匯入、客戶名冊（以 `case_no` 為主）與月嫂名冊（以 `staff_id` 為主）依 [管理端正式入口清冊](19_Global_Entry_Point_Governance.md#21-現行導航與頁面清冊) 進入。獨立檔案管理入口已退役；受控檔案從原業務功能存取，不建立替代頁面。
 
 - 分頁切換屬 local navigation，不得重送 mutation、清空未送出草稿或讓舊 response 覆蓋新分頁；tab／tabpanel 需具可程式判讀之焦點與 selected state。
-- 業務畫面只顯示其 owner 契約允許的檔案資訊。實體儲存路徑、完整 digest、Preview fingerprint、raw cursor 不顯示；檔案讀取與儲存邊界依 [受控檔案正式規格](30_Controlled_File_Storage_NAS正式規格.md)。
+- 業務畫面只顯示其 owner 契約允許的檔案資訊。實體儲存路徑、完整 digest、Preview fingerprint、raw cursor 不顯示；檔案讀取與儲存邊界依 [受控檔案正式規格](30_Controlled_File_Storage正式規格.md)。
 
 ### 3.5 管理端未儲存變更與離頁
 

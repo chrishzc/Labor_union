@@ -135,8 +135,18 @@ class HistoricalPrecisionRestartWorkflow:
 def _preview(context, intent, evaluation_at, *, check_matching=True):
     domain = build_historical_precision_restart_candidate(context.facts, intent)
     if domain.blockers:
+        code = domain.blockers[0]
+        message = "歷史訂單目前不能重啟正常流程。"
+        if code == "historical_order_staff_not_unique":
+            message = "無法唯一確認原月嫂。請先核對歷史採納資料，確認原月嫂後再預覽。"
         raise HistoricalPrecisionRestartError(
-            TypedError(ErrorCategory.DOMAIN_BLOCKED, domain.blockers[0], "歷史訂單目前不能重啟正常流程。", CorrelationId("historical-precision-restart-preview"), domain_blockers=domain.blockers)
+            TypedError(
+                ErrorCategory.DOMAIN_BLOCKED,
+                code,
+                message,
+                CorrelationId("historical-precision-restart-preview"),
+                domain_blockers=domain.blockers,
+            )
         )
     assert domain.scheduling is not None and domain.target_status is not None
     if check_matching and context.matching_conflicts:

@@ -4,12 +4,14 @@ import {
   staffWebFileError, staffWebProfileClient, webProfileCategories, webProfileCategoryLabels,
   type WebProfileCategory, type WebProfileFolder, type WebProfileFolderFile, type WebProfilePublicationInput,
 } from '../api/staff/staff_web_profile_client';
+import { mapWithConcurrency, optimizeImageForUpload } from '../api/shared/image_upload_optimizer';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import './StaffWebFileManagement.css';
 
 const supportedPhotos = 'image/jpeg,image/png,image/webp';
-type DraftPhoto = { file: File; uploadId: string };
+const supportedPhotoSet = new Set(['image/jpeg', 'image/png', 'image/webp']);
+type DraftPhoto = { file: File; uploadId: string; fileId?: string };
 type UploadDraft = {
   category: WebProfileCategory;
   folder: WebProfileFolder | undefined;
@@ -54,6 +56,7 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
   const [deleting, setDeleting] = useState<WebProfileFolderFile | null>(null);
   const [upload, setUpload] = useState<UploadDraft | null>(null);
   const [confirmed, setConfirmed] = useState<WebProfilePublicationInput | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const lifecycle = useRef<AbortController | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -77,6 +80,7 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
   const closeDialog = () => {
     setUpload(null);
     setConfirmed(null);
+    setUploadProgress(null);
     setFolderId(null);
     setDeleting(null);
     setDialogMessage(null);
@@ -127,11 +131,19 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
     try {
       let command = confirmed;
       if (!command) {
-        const files = [];
-        for (const draft of upload.photos) {
-          const uploaded = await staffWebProfileClient.uploadForStaff(staffId, draft.file, draft.uploadId, signal);
-          files.push({ file_id: uploaded.file_id, expiry_date: upload.category === 'other' ? upload.expiry : null });
-        }
+        let done = 0;
+        const total = upload.photos.length;
+        setUploadProgress({ done, total });
+        const files = await mapWithConcurrency(upload.photos, 3, async draft => {
+          if (!draft.fileId) {
+            const prepared = await optimizeImageForUpload(draft.file);
+            const uploaded = await staffWebProfileClient.uploadForStaff(staffId, prepared, draft.uploadId, signal);
+            draft.fileId = uploaded.file_id;
+          }
+          done += 1;
+          if (!signal.aborted) setUploadProgress({ done, total });
+          return { file_id: draft.fileId, expiry_date: upload.category === 'other' ? upload.expiry : null };
+        });
         const current = upload.category === 'other' ? uploadFolder.files[0] : undefined;
         command = {
           operation_id: crypto.randomUUID(),
@@ -168,7 +180,10 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
         setDialogMessage({ text: staffWebFileError(error, '發布結果未確認，請用原操作重試。'), error: true });
       }
     } finally {
-      if (!signal.aborted) setBusy(false);
+      if (!signal.aborted) {
+        setBusy(false);
+        setUploadProgress(null);
+      }
     }
   };
 
@@ -194,7 +209,10 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
       }
       setDialogMessage({ text: staffWebFileError(error, '刪除結果未確認，請用原操作重試。'), error: true });
     } finally {
-      if (!signal.aborted) setBusy(false);
+      if (!signal.aborted) {
+        setBusy(false);
+        setUploadProgress(null);
+      }
     }
   };
 
@@ -287,6 +305,12 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
                   setUpload({ ...upload, photos: [] });
                   return;
                 }
+                if (files.some(file => file.size <= 0 || (file.type && !supportedPhotoSet.has(file.type.toLowerCase())))) {
+                  event.target.value = '';
+                  setDialogMessage({ text: '只接受非空的 JPG、PNG 或 WebP 圖片檔案。', error: true });
+                  setUpload({ ...upload, photos: [] });
+                  return;
+                }
                 setDialogMessage(null);
                 setUpload({ ...upload, photos: files.map(file => ({ file, uploadId: crypto.randomUUID() })) });
               }}
@@ -302,7 +326,9 @@ export function StaffWebFileManagement({ staffId, staffName, canWrite }: {
         <footer>
           <button type="button" className="staff-secondary-btn" disabled={busy} onClick={closeDialog}>取消</button>
           <button type="submit" className="staff-primary-btn" disabled={busy || !upload.photos.length || !uploadFolder}>
-            {busy ? '正在發布…' : confirmed ? '重試原發布' : '確認發布'}
+            {busy && uploadProgress && uploadProgress.done < uploadProgress.total
+              ? `正在上傳（${uploadProgress.done}/${uploadProgress.total}）…`
+              : busy ? '正在發布…' : confirmed ? '重試原發布' : '確認發布'}
           </button>
         </footer>
       </form>

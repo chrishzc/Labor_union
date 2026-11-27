@@ -384,7 +384,8 @@ def test_recommendation_notifications_use_owner_page_and_plan_status_identity(mo
 
     records = (
         CustomerRecommendationFollowup('CASE-1', 1, 'response_failed', None, None, '回覆處理異常'),
-        CustomerRecommendationFollowup('CASE-2', 2, 'awaiting_signing', None, None),
+        CustomerRecommendationFollowup('CASE-2', 2, 'awaiting_signing', None, None,
+                                       signing_reminder_occurrence='a' * 64),
         CustomerRecommendationFollowup('CASE-3', 3, 'reply_reminder', None, None),
     )
     tail = tuple(CustomerRecommendationFollowup('CASE-4', plan, 'reply_reminder', None, None)
@@ -409,10 +410,11 @@ def test_recommendation_notifications_use_owner_page_and_plan_status_identity(mo
     assert len(first.items) == query.SIZE and len(last.items) == 1
     assert [(item.id, item.case_no, item.tag) for item in first.items[:3]] == [
         ('recommendation:1:response_failed', 'CASE-1', '待跟進'),
-        ('recommendation:2:awaiting_signing', 'CASE-2', '待簽約'),
+        (f'recommendation:2:awaiting_signing:{"a" * 64}', 'CASE-2', '待簽約'),
         ('recommendation:3:reply_reminder', 'CASE-3', '待跟進'),
     ]
     assert first.items[0].summary == '回覆處理異常'
+    assert [item.can_dismiss for item in first.items[:3]] == [False, True, False]
     assert all(item.source == source and item.reference_id is None for item in first.items + last.items)
 
 

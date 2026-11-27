@@ -66,3 +66,38 @@ def test_startup_backfills_five_baseline_line_configs_in_all_environments(monkey
         LineConfigurationKind.LIFF,
         LineConfigurationKind.NOTIFICATION_RULES,
     }
+
+
+@pytest.mark.parametrize("environment", ["production", "development"])
+def test_startup_syncs_repo_rich_menu_in_all_environments(monkeypatch, environment) -> None:
+    from api.dependencies.admin_auth import ensure_development_line_configuration
+    from domains.line.configuration import LineConfigurationKind
+    from subsystems.line import configuration_application
+
+    captured: dict[str, object] = {}
+
+    class StubApplication:
+        def __init__(self, _unit_of_work_factory) -> None:
+            pass
+
+        def bootstrap_missing(self, definitions, actor, *, reason, correlation_id) -> dict[object, int]:
+            captured["bootstrapped"] = set(definitions)
+            return {}
+
+        def sync_rich_menu_from_definition(self, definition, actor, *, reason, correlation_id):
+            captured["synced_definition"] = definition
+            captured["sync_actor"] = actor
+            captured["sync_reason"] = reason
+            captured["sync_correlation_id"] = correlation_id
+            return None
+
+    monkeypatch.setenv("APP_ENV", environment)
+    monkeypatch.setattr(configuration_application, "LineConfigurationApplication", StubApplication)
+
+    ensure_development_line_configuration()
+
+    assert LineConfigurationKind.RICH_MENUS in captured["bootstrapped"]
+    customer_menu = next(
+        menu for menu in captured["synced_definition"]["menus"] if menu["id"] == "customer_menu"
+    )
+    assert [button["label"] for button in customer_menu["buttons"]] == ["案件資訊", "常見問題"]

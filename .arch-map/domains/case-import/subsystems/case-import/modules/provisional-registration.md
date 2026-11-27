@@ -61,7 +61,7 @@
 | --- | --- | --- |
 | LINE 正式頁／工作室預覽 → request schema → intake Preview／Apply | [LINE presentation](../../../../external-integration/subsystems/line/modules/registration-presentation.md) 定位畫面；[Case Import §3.1](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#31-非市民進件與配號nc-entrync-formnc-approvalnc-numbernc-stat) 決定欄位與類型分流。 | Preview 可用不等於保存；Apply 的原申請編號及公開 status Query 只證明收件及目前申請狀態。 |
 | 原申請 → 正式 writer 與 MySQL 回執 | Case Import §3.2；`api/routes/registration_applications.py` → `RegistrationReviewApplication` → `subsystems/line/identity_application.py::approve_staged_registration`。 | 管理端原申請 detail 依 `registration_id` 查回 `case_no`／`approved_at_utc`；收尾中仍為 `approving`。正式名冊依相同案號核對正式案件。 |
-| SQL 已提交 → Controlled File → Redis 終態 | Case Import §3.2 分有圖／無圖；有圖才經 `_archive_client_passbook_cover` 及 [Controlled File §§3、5、8.2](../../../../../requirements/30_Controlled_File_Storage_NAS正式規格.md#3-file_purpose_registry-與排除範圍) 確認歸檔。 | 有圖可依正式 file identity 經受控 Query／Download 讀取；無圖沒有圖片回執可等。兩者都由原申請讀回 `approved` 證明適用收尾已完成，圖片本身或 SQL 回執單獨不能證明。 |
+| SQL 已提交 → Controlled File → Redis 終態 | Case Import §3.2 分有圖／無圖；有圖才經 `_archive_client_passbook_cover` 及 [Controlled File §§3、5、8.2](../../../../../requirements/30_Controlled_File_Storage正式規格.md#3-file_purpose_registry-與排除範圍) 確認歸檔。 | 有圖可依正式 file identity 經受控 Query／Download 讀取；無圖沒有圖片回執可等。兩者都由原申請讀回 `approved` 證明適用收尾已完成，圖片本身或 SQL 回執單獨不能證明。 |
 
 由核准／歸檔端反向走讀時，先以原申請與操作核對 SQL 回執，再依 Case Import §3.2 判斷是否有圖；Controlled File 不反推收集資格。回到 §3.1.2 可區分舊待審與已歸檔資料，最後由 LINE presentation 找到原畫面與正式送件入口。此處是原文導航，不表示 Archmap 索引工具已成功正查或反查。
 

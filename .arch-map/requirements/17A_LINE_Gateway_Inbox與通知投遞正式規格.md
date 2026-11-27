@@ -5,7 +5,7 @@
 - 狀態：`current-spec`
 - Owner：LINE Integration Domain（`domains/line/`、`subsystems/line/`）
 - 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、開工當天群組問候、服務開始與換人結果日期表群組通知、Rich Menu 草稿編輯與發布 saga，以及通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`）。
-- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)、[Controlled File Storage 正式規格](30_Controlled_File_Storage正式規格.md)。
 
 ## 2. LINE Webhook Inbox 與 Delivery Task 骨架
 
@@ -37,9 +37,12 @@
 
 ## 3. 服務群組綁定、待辦與代班邀請
 
-- **觀察與待辦（`GET /api/v1/line/order-groups/numbered`、`GET /api/v1/line/order-groups/{case_no}/events/numbered`、`GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`、`GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`）**：依真實分頁顯示加入／離開事件與狀態；「尚未建群」待辦端點 `POST /api/v1/line/mobile-admin/order-group-todos` 預設僅列正常未結案、正式訂金 `settlement_state='settled'` 且金額 `> 0` 尚無服務群組之案號；提供一鍵複製 `綁定訂單 {case_no} 〈本群組邀請網址〉` 格式而不暴露真實 `group_id` 或邀請網址於管理 Query。
+- **觀察與待辦（`GET /api/v1/line/order-groups/numbered`、`GET /api/v1/line/order-groups/{case_no}/events/numbered`、`GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`、`GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`）**：依真實分頁顯示加入／離開事件與狀態。經 `POST /api/v1/line/mobile-admin/order-group-todos` 查詢的「尚未建群」待辦，預設僅列正常未結案、正式訂金 `settlement_state='settled'` 且金額 `> 0` 尚無服務群組之案號。管理 Query 不暴露真實 `group_id` 或邀請網址。
+- **工會 LINE 工作台的群組綁定指引**。尚未建群、通知失敗及尾款提醒的群組綁定指引，依下列群組指令說明三步操作與有效網址送出後的私人邀請排入發送結果。尚未建群待辦可分別複製 `綁定群組` 與本案案號。複製只寫入剪貼簿。
 - **開工問候未送出紀錄**。工會 LINE 工作台「通知事項 → 訂金已付尚未建群 → 開工問候未送出紀錄」沿用同一端點的 `view=opening_greeting_skips`，依時間由新至舊分頁顯示因未綁定有效案件服務群組而略過開工問候的案號、紀錄時間與原因。僅已驗證且具 `ORDER_GROUP_READ` 的工會人員可查看。紀錄取自既有稽核事件，獨立於訂金待辦及其件數，既有紀錄仍可在建群後查閱。查詢不建立投遞工作。
 - **群組指令**：
+  - `綁定群組`：具 `ORDER_GROUP_BIND` 且已綁定 LINE 的工會人員在服務群組輸入指令後，系統用 Reply 詢問案號。輸入符合綁定資格的案號後，系統用 Reply 提示從群組右上角設定選擇「邀請」，再複製「邀請網址」。同一官方帳號、群組及操作人員才能接續，每一步的輸入期限為 10 分鐘。
+  - 貼上有效邀請網址後，系統重新查核操作權限及案件資格，在同一交易儲存群組及網址，並為客戶與已綁定的指派月嫂排入私人邀請卡。群組 Reply 說明邀請已排入發送，實際投遞沿用 `發送邀請` 的資格重查與取消規則。
   - `綁定訂單 {case_no} {邀請網址}`：具 `ORDER_GROUP_BIND` 且已綁定 LINE 之工會人員輸入（接受單／多空白、全形空白或換行；僅接無額外參數 `https://line.me/ti/g/...` 或 `https://line.me/R/ti/g/...`；儲存至私有 `line_order_group_bindings.invitation_url`）。
   - `發送邀請`：於群組重新檢查資格後為媽媽與所有已綁定指派月嫂排入私人邀請卡片（按鈕開啟群組連結）；發送前群組／網址／訂金／人員變動即自動取消舊工作。
 - **開工代班／服務中換人單人邀請（`SSTART-05` / `handover-v1`）**：依 Scheduling 授權對單一已選定且願意承接之月嫂發送原群組連結（不重複邀請全體）；分開回讀「已排入／已送達／失敗／真正入群」。已排班案件的局部代班依 [Scheduling §3.4.1](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction) 辦理。
@@ -47,10 +50,13 @@
 - **後台解除綁定**：具 `ORDER_GROUP_BIND` 的工會人員可在「LINE 營運 → 案件群組」的清單操作欄解除綁定。依該列的綁定版本核對目前群組，在同一交易清除目前群組與私人邀請網址、遞增綁定版本，並新增解除事件。保留原案件、綁定與成員歷程。舊群組失去本案小幫手權限，待送群組邀請沿既有機制重新驗證並取消失效工作。解除僅操作後台綁定。
 - **永久刪除案件群組歷程**：具 `ORDER_GROUP_BIND` 的工會人員可對已解除綁定的個別案件提交「永久刪除群組歷程」。畫面明示刪除範圍與不可復原。以目前綁定版本重新核對，且在同一交易永久刪除該案所有歷次綁定、解除、群組動態、邀請與成員加入／離開事件，以及舊成員投影。保留案件、LINE 對話、共用稽核與精簡的刪除操作收據。未綁定的版本列僅供阻擋過期操作及後續重新綁定，已清除歷程的案件不顯示在群組工作區。已重新綁定、版本不符或無權的操作不得刪除任何紀錄。
 - **LINE 群組解散**：群組解散、官方帳號離群或成員離群均不自動刪除後台歷史紀錄。收到成員離群事件時，沿用既有的成員狀態更新。
-- 受限 NAS 的永久刪除經 `lu_nas_delete_order_group_history_v1` 例程執行，僅管理端連線帳號可呼叫。例程與兩個事件刪除 trigger 均核對同案未完成命令及未綁定狀態。既有案件刪除仍由原例程處理。
+- 受限權限環境的永久刪除經 `lu_nas_delete_order_group_history_v1` 例程執行，僅管理端連線帳號可呼叫。例程與兩個事件刪除 trigger 均核對同案未完成命令及未綁定狀態。既有案件刪除仍由原例程處理。
 
 | 情境（S） | 任務（T） | 操作（A） | 可驗收結果（R） |
 | --- | --- | --- | --- |
+| 工會 LINE 工作台有尚未建群的案件 | 從待辦取得可逐則貼到群組的指令與案號 | 開啟該案待辦，依序使用複製指令與複製案號 | 工作台顯示三步操作及邀請排入發送的時點。兩次複製各自只取得 `綁定群組` 和本案案號。工作台不要求手動發送邀請。 |
+| 工會人員有群組綁定權限，案件符合綁定及邀請資格 | 綁定服務群組並邀請客戶與月嫂 | 在同一群組依序傳送 `綁定群組`、案號、群組邀請網址 | 前兩則 Reply 分別提示案號及邀請網址的取得位置，尚未寫入綁定或排入邀請。第三則訊息儲存綁定和網址，排入私人邀請並用 Reply 確認。 |
+| 群組正等候邀請網址 | 避免誤綁定或誤發送 | 換另一位成員或另一個群組貼網址，或用原帳號貼錯誤網址、超過 10 分鐘再貼網址 | 其他來源與過期訊息無法完成流程。原操作人在期限內貼錯誤網址會收到重貼提示。各情況均未寫入綁定或排入私人邀請。 |
 | 案件有現行綁定，操作者有群組綁定權限 | 解除綁定 | 在清單該案的操作欄送出解除 | 現行群組及邀請網址清除，後台仍可查看歷程，舊群組無法再操作本案小幫手。 |
 | 群組綁定在收到確認前已變動，或操作者只有查詢權限 | 保護目前綁定 | 用舊畫面或唯讀帳號提交解除 | 回傳版本衝突或權限拒絕，現行綁定及歷程維持原樣。 |
 | LINE 群組已解散或成員離群 | 保留既有紀錄 | 回到後台重新查詢該案 | 歷程仍可查閱。成員離群事件僅更新可辨認的成員狀態。 |
@@ -103,7 +109,7 @@
 - 清理屬 LINE owner 維護工作，沿 canonical worker 的 additional worker 接線，每輪有界最多 25 筆候選，每筆 fresh lock task、attempt 與 intent，由一個 outer UoW 保存精確 task/cutoff 清理憑證、執行刪除與去內容化、提交；失敗 rollback 該筆，不產生 provider call。舊資料庫須先套正式 additive guard migration，禁止關閉既有 append-only trigger。
 - attempt DELETE 只接受精確 session command key 對應 durable `line_command_receipts` 的 `line-delivery-retention:<task_id>` result_reference，snapshot task_id/cutoff 一致，且 DB fresh task 仍為無租約的合法終態、最後更新及該 attempt 完成時間早於 cutoff；保留原 registry-delete 例外。session command key 於 finally 清除，不以無憑證旗標開放刪除。
 - 清理後列表及總數同時排除到期標記，直接開啟舊 detail 回 typed `410 line_delivery_history_expired`，顯示內容與明細已到期，而非假空白或泛用 500。既有工作鍵 enqueue 仍回同 task，不重建、不重新發送；原圖片下載不再提供已清除內容；原來源或其精確 replay 內容已到期時，Preview／Apply 拒絕以舊來源補送，回 `notification_source_history_expired`，新業務事件仍按目前資格判斷。尚未處理的異常不受六個月限制。
-- 重跑略過已整理 task，不新增重複憑證。DB 備份可能包含當時尚未到期的內容，依 [NAS 備份保存](10A_NAS_Fresh初始化與維護復原規格.md#52-每日排程備份滾動保存) 管理；本節不回寫或刪除既有備份，也不自動還原內容。
+- 重跑略過已整理 task，不新增重複憑證。DB 備份可能包含當時尚未到期的內容，依 [本機 SQL 備份保存](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#52-每日排程備份滾動保存) 管理；本節不回寫或刪除既有備份，也不自動還原內容。
 
 | ID | S | T | A | R |
 |---|---|---|---|---|
@@ -114,7 +120,7 @@
 
 ## 5. Rich Menu、通知文案編輯與表格圖片
 
-- **Rich Menu 草稿與發布 saga**：`QueryRichMenuDraft`／`PreviewRichMenuDraftChange`／`ApplyRichMenuDraftChange` 依 `(menu_definition_id, configuration_revision)` 區分 `editable | processing | published`（published 快照只讀可由此建立下一草稿）；管理台可改背景圖（含 `image_asset_id`／`sha256`／`image_asset_version` 檢查）、按鈕名稱與動作（`uri | message | postback | richmenuswitch` 互斥清空舊欄位），並以 NAS 唯讀預覽結合記憶體即時手機模擬。發布 saga 由 `line_rich_menu_publication_step_acknowledgements`、`attempt_events` 與 `cleanup_anomalies` 保存斷點與冪等重試，發布成功後依角色 fan-out 綁定既有合法身分（不阻擋身分審核原子提交）。Rich Menu API 不送 `X-Line-Retry-Key`。建立請求送出前保存 durable 記錄，已有成功回應時沿用其選單 ID，結果不明時停下來核對官方帳號，避免重複建立。 發布新版本及接續未完成的清理工作時均保留前一版 LINE 選單，清理收據只結束背景工作。前一版仍可能被尚未完成同步的使用者引用。
+- **Rich Menu 草稿與發布 saga**：`QueryRichMenuDraft`／`PreviewRichMenuDraftChange`／`ApplyRichMenuDraftChange` 依 `(menu_definition_id, configuration_revision)` 區分 `editable | processing | published`（published 快照只讀可由此建立下一草稿）；管理台可改背景圖（含 `image_asset_id`／`sha256`／`image_asset_version` 檢查）、按鈕名稱與動作（`uri | message | postback | richmenuswitch` 互斥清空舊欄位），並以本機受控儲存唯讀預覽結合記憶體即時手機模擬。發布 saga 由 `line_rich_menu_publication_step_acknowledgements`、`attempt_events` 與 `cleanup_anomalies` 保存斷點與冪等重試，發布成功後依角色 fan-out 綁定既有合法身分（不阻擋身分審核原子提交）。Rich Menu API 不送 `X-Line-Retry-Key`。建立請求送出前保存 durable 記錄，已有成功回應時沿用其選單 ID，結果不明時停下來核對官方帳號，避免重複建立。 發布新版本及接續未完成的清理工作時均保留前一版 LINE 選單，清理收據只結束背景工作。前一版仍可能被尚未完成同步的使用者引用。
 - **發布狀態回讀**：受理後依同一發布編號回讀，不把受理當成功。自動追蹤停止、單次查詢失敗、仍在排隊／執行、正式發布失敗、已發布分開呈現。按「重新整理」可重新查同一筆工作，不送第二筆發布；換頁或重開編輯器依同選單與草稿版本查工作；有發布鎖但查不到同版工作時明示結果未知，不重送。經辦可查看發布編號、最後已確認步驟及安全錯誤碼，不需到正式資料庫查。
 - **分頁按鈕與換版**：草稿允許保存的 `richmenuswitch` 必須能通過發布預檢，送 LINE 時帶分頁別名與非空白的動作資料 `data`。先建立新版並上圖，再依需要設定別名、預設或個人選單。別名未建立才建立；已指向本次新版就視為已完成；仍指向預期的前一個發布版本才允許換版。若讀回指向非預期版本或結果未知，保留既有選單，停在待核對，不覆蓋或刪除。
 - **生效判定**：系統確認新版選單已發布與已綁定使用者切換新版是兩件事。依適用的預設或個人選單回讀判定生效；個人選單可繼續優先於預設選單。個別同步未完成時保留前一版，不從發布成功推定全員都已更新。

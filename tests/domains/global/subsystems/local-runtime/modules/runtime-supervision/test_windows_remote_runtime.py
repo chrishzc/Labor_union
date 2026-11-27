@@ -383,3 +383,17 @@ def test_admin_cutover_redirects_old_page_but_keeps_api_methods_and_body(artifac
         for path in ('/', '/administration/', '/testing/', '/webhook/line', '/internal', '/api/v1/orders'):
             assert client.get(path).status_code == 404
     assert requests == [('POST', '/api/v1/orders', b'mode=preview', b'payload')] * 2
+
+
+def test_proxy_timeout_uses_120s_default_and_supports_bounded_override(monkeypatch):
+    monkeypatch.delenv('WINDOWS_REMOTE_PROXY_TIMEOUT_SECONDS', raising=False)
+    default_timeout = remote._proxy_timeout()
+    assert (default_timeout.connect, default_timeout.read, default_timeout.write, default_timeout.pool) == (10.0, 120.0, 120.0, 10.0)
+
+    monkeypatch.setenv('WINDOWS_REMOTE_PROXY_TIMEOUT_SECONDS', '180')
+    custom_timeout = remote._proxy_timeout()
+    assert (custom_timeout.read, custom_timeout.write) == (180.0, 180.0)
+
+    monkeypatch.setenv('WINDOWS_REMOTE_PROXY_TIMEOUT_SECONDS', '3')
+    clamped = remote._proxy_timeout()
+    assert (clamped.read, clamped.write) == (10.0, 10.0)

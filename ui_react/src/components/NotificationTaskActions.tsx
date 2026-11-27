@@ -1,5 +1,6 @@
 /** Notification links and guidance for work performed outside this system. */
 import { useRef, useState } from 'react';
+import { hcmResubmissionClient, type HcmReviewSkipPreview } from '../api/case_import/hcm_resubmission_client';
 import { importFieldIssueHref } from '../api/case_import/import_field_issues';
 import { notificationTasksClient, notificationFailure, type NotificationItem } from '../api/line_notifications/notification_tasks_client';
 export function notificationHref(item:NotificationItem):string | null {
@@ -21,31 +22,84 @@ export function notificationHref(item:NotificationItem):string | null {
   }
 }
 
-export function NotificationTaskActions({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>;sourceReadError?:string}) {
-  if(item.source==='customer_binding') {
-    return item.can_dismiss && item.reference_id && item.case_no
-      ? <CustomerBindingReminder key={item.id} item={item} onCommitted={onCommitted} />
-      : null;
-  }
-  if(item.source==='staff_binding') return <StaffBindingReminder key={item.id} item={item} />;
-  if(item.source==='group') return <section aria-label="案件建群方式"><h3>建立與綁定案件群組</h3><pre style={{whiteSpace:'pre-wrap',font:'inherit'}}>{item.message}</pre><a className="np-button" href={`#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no!)}`}>查看本案群組設定</a></section>;
-  return null;
+export function NotificationTaskActions({ item, onCommitted, expanded }: {
+  item: NotificationItem; onCommitted: () => Promise<void>; expanded: boolean;
+}) {
+  const canDismiss = item.can_dismiss && (item.source !== 'customer_binding' || Boolean(item.reference_id && item.case_no));
+  return <>
+    {canDismiss && <ReminderDismissal key={item.id} item={item} onCommitted={onCommitted} />}
+    {item.source === 'staff_binding' && <StaffBindingReminder key={item.id} item={item} />}
+    {item.source === 'group' && expanded && <section aria-label="案件建群方式"><h3>建立與綁定案件群組</h3><pre style={{whiteSpace:'pre-wrap',font:'inherit'}}>{item.message}</pre><a className="np-button" href={`#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no!)}`}>查看本案群組設定</a></section>}
+  </>;
 }
 
-function CustomerBindingReminder({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>}) {
-  const [notice,setNotice]=useState('');
-  const [busy,setBusy]=useState(false);
-  const key=useRef<string|null>(null);
-  const locked=useRef(false);
-  const dismiss=async()=>{
-    if(locked.current)return;
-    locked.current=true;setBusy(true);
-    key.current ??= crypto.randomUUID();
-    try {await notificationTasksClient.dismissCustomerBinding(item,'使用者移除提醒',key.current);setNotice('本案綁定提醒已移除。');await onCommitted();}
-    catch(error){setNotice(notificationFailure(error));}
-    finally{locked.current=false;setBusy(false);}
+export function OptionalImportFieldSkip({ caseNo, reviewIdentity, sourceField, onCommitted }: {
+  caseNo: string; reviewIdentity: string; sourceField: string; onCommitted: () => Promise<void>;
+}) {
+  const [intent, setIntent] = useState<{ preview: HcmReviewSkipPreview; key: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [saved, setSaved] = useState(false);
+  const locked = useRef(false);
+  const run = async () => {
+    if (locked.current || saved) return;
+    locked.current = true;
+    setBusy(true);
+    setNotice('');
+    try {
+      if (!intent) {
+        const preview = await hcmResubmissionClient.previewFieldSkip(reviewIdentity, sourceField, true);
+        if (preview.case_no !== caseNo) throw new Error('案件已變更，請先重新整理。');
+        setIntent({ preview, key: crypto.randomUUID() });
+      } else {
+        await hcmResubmissionClient.applyFieldSkip(intent.preview, intent.key, true);
+        setSaved(true);
+        setNotice('已記錄略過這一欄，正在更新待辦。');
+        await onCommitted();
+      }
+    } catch (error) {
+      setNotice(notificationFailure(error));
+    } finally {
+      locked.current = false;
+      setBusy(false);
+    }
   };
-  return <section aria-label="客戶綁定提醒">
+  return <div>
+    {intent && !saved && <p>這一欄可以不補。確認後只略過這一欄，不會改動原資料。</p>}
+    <button type="button" className="np-button" disabled={busy || saved} onClick={() => void run()}>
+      {busy ? '處理中…' : saved ? '已記錄略過' : intent ? '確認略過此欄' : '略過此欄'}
+    </button>
+    {notice && <p role="status">{notice}</p>}
+  </div>;
+}
+
+function ReminderDismissal({ item, onCommitted }: { item: NotificationItem; onCommitted: () => Promise<void> }) {
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const key = useRef<string | null>(null);
+  const locked = useRef(false);
+  const customerBinding = item.source === 'customer_binding';
+  const dismiss = async () => {
+    if (locked.current) return;
+    locked.current = true;
+    setBusy(true);
+    key.current ??= crypto.randomUUID();
+    try {
+      if (customerBinding) {
+        await notificationTasksClient.dismissCustomerBinding(item, '使用者移除提醒', key.current);
+      } else {
+        await notificationTasksClient.dismissReminder(item, key.current);
+      }
+      setNotice(customerBinding ? '本案綁定提醒已移除。' : '本筆提醒已移除。');
+      await onCommitted();
+    } catch (error) {
+      setNotice(notificationFailure(error));
+    } finally {
+      locked.current = false;
+      setBusy(false);
+    }
+  };
+  return <section aria-label={customerBinding ? '客戶綁定提醒' : '提醒處置'}>
     <button type="button" className="np-button" disabled={busy} onClick={()=>void dismiss()}>{busy?'處理中…':'移除提醒'}</button>
     {notice && <p role="status">{notice}</p>}
   </section>;

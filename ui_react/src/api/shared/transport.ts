@@ -25,6 +25,7 @@ export interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 10000;
+export const UPLOAD_TIMEOUT_MS = 120000;
 export const ADMIN_SESSION_UNAUTHORIZED_EVENT = 'union-admin-session-unauthorized';
 
 const GlobalFieldErrorSchema = z.strictObject({
@@ -76,12 +77,13 @@ export async function request<T = unknown>(
     params,
     body,
     token,
-    timeoutMs = DEFAULT_TIMEOUT_MS,
+    timeoutMs,
     signal: externalSignal,
     baseUrl = '',
     cache,
     responseType = 'json',
   } = options;
+  const resolvedTimeoutMs = timeoutMs ?? (body instanceof FormData ? UPLOAD_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
 
   // Build query string
   let url = `${baseUrl}${path}`;
@@ -102,10 +104,10 @@ export async function request<T = unknown>(
   const controller = new AbortController();
   let isTimedOut = false;
 
-  const timer = timeoutMs > 0 ? setTimeout(() => {
+  const timer = resolvedTimeoutMs > 0 ? setTimeout(() => {
     isTimedOut = true;
     controller.abort();
-  }, timeoutMs) : undefined;
+  }, resolvedTimeoutMs) : undefined;
 
   if (externalSignal) {
     if (externalSignal.aborted) {
@@ -248,7 +250,7 @@ export async function request<T = unknown>(
     }
 
     if (isTimedOut) {
-      throw new ApiTimeoutError(timeoutMs);
+      throw new ApiTimeoutError(resolvedTimeoutMs);
     }
 
     if (
@@ -256,7 +258,7 @@ export async function request<T = unknown>(
       (error instanceof Error && error.name === 'AbortError')
     ) {
       if (isTimedOut) {
-        throw new ApiTimeoutError(timeoutMs);
+        throw new ApiTimeoutError(resolvedTimeoutMs);
       }
       throw new ApiAbortError();
     }

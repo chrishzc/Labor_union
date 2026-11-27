@@ -212,13 +212,16 @@ def _contract_charge_days(cursor, case_no, schedule_rows, lock):
     return _committed_charge_days(cursor, case_no, lock)
 
 
-def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow_planned: bool = True):
+def load_calculable_client_finance_facts(
+    cursor, order_row, *, lock: bool, allow_planned: bool = True,
+    preserve_payment_due_dates: bool = False,
+):
     """Price confirmed/planned days without creating official Scheduling facts."""
     days = load_client_pricing_charge_days(cursor, order_row, lock=lock, allow_planned=allow_planned)
     if not days and not allow_planned:
         return None, None
     source = _load_client_finance(cursor, order_row, lock)
-    if order_row.get("actual_start_date") is not None:
+    if not preserve_payment_due_dates and order_row.get("actual_start_date") is not None:
         from dataclasses import replace
         source = replace(source, effective_start_date=order_row["actual_start_date"],
             payment_terms=replace(source.payment_terms, first_payment_due_date=order_row["actual_start_date"]))

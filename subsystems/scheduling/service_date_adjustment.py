@@ -38,6 +38,7 @@ class ServiceDateAdjustmentFacts:
     planned_owners: tuple[tuple[date, int], ...] = ()
     first_schedule_days: tuple[ServiceDay, ...] = ()
     accounting_result: HolidayCaseRepricingResult | None = None
+    actual_start_date: date | None = None
 
     @property
     def versions(self) -> tuple[int, int, int | None]:

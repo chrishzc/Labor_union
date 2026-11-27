@@ -29,6 +29,13 @@ from infrastructure.mysql.line_repository_support import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ExpectedVersion
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
+from subsystems.line.order_group_contracts import (
+    GROUP_BINDING_REPLY_TTL,
+    GroupBindingPreviousReply,
+    GroupBindingReplyStage,
+    group_binding_reply_key_prefix,
+)
 from subsystems.line.webhook_contracts import (
     AcceptLineWebhookEventResult,
     ClaimLineWebhookEventsQuery,
@@ -64,6 +71,26 @@ class MySqlLineWebhookInboxRepository:
             cursor.execute(_SELECT_SQL, (event_id.value,))
             row = optional_row(cursor.fetchone())
         return None if row is None else _snapshot(row)
+
+    def latest_group_binding_reply(
+        self, event: CanonicalLineWebhookEvent,
+    ) -> GroupBindingPreviousReply | None:
+        params = (
+            group_binding_reply_key_prefix(event) + "%",
+            REPLY_ONLY_WEBHOOK_SOURCE,
+            database_utc(event.occurred_at - GROUP_BINDING_REPLY_TTL),
+        )
+        with self._connection.cursor() as cursor:
+            cursor.execute(_LATEST_GROUP_BINDING_REPLY_SQL, params)
+            if cursor.fetchone() is None:
+                return None
+            # A transaction that held the first row may have appended the next stage while we waited.
+            cursor.execute(_LATEST_GROUP_BINDING_REPLY_SQL, params)
+            row = dict(cursor.fetchone())
+        return GroupBindingPreviousReply(
+            GroupBindingReplyStage(row["binding_reply_stage"]),
+            _snapshot(row).event,
+        )
 
     def transition(
         self,
@@ -333,6 +360,13 @@ _SELECT_SQL = (
     "identity_source,is_redelivery,processing_status,aggregate_version,attempt_count,max_attempts,"
     "lease_owner,lease_acquired_at_utc,lease_expires_at_utc "
     "FROM line_inbox_events WHERE event_identity=%s"
+)
+_LATEST_GROUP_BINDING_REPLY_SQL = (
+    "SELECT inbox.*,SUBSTRING_INDEX(task.idempotency_key,':',-1) AS binding_reply_stage "
+    "FROM line_delivery_tasks task FORCE INDEX (uq_line_delivery_idempotency) "
+    "STRAIGHT_JOIN line_inbox_events inbox ON inbox.event_identity=task.source_aggregate_identity "
+    "WHERE task.idempotency_key LIKE %s AND task.source_aggregate_type=%s "
+    "AND task.scheduled_at_utc>=%s ORDER BY task.id DESC LIMIT 1 FOR UPDATE"
 )
 _CLAIM_CANDIDATES_SQL = (
     _SELECT_SQL.replace(" WHERE event_identity=%s", "")

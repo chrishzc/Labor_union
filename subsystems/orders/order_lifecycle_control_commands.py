@@ -8,7 +8,7 @@ import json
 import re
 from typing import Literal, Mapping, TypeAlias
 
-OrderLifecycleControlCommand: TypeAlias = "CancellationControlCommand | ActualStartReconfirmationRequiredCommand | ActualStartReconfirmationConfirmedCommand | HumanHoldActivateCommand | HumanHoldReleaseCommand"
+OrderLifecycleControlCommand: TypeAlias = "CancellationControlCommand | ActualStartReconfirmationRequiredCommand | ActualStartReconfirmationConfirmedCommand | HumanHoldActivateCommand | HumanHoldReleaseCommand | ScheduledStartReconfirmationCarryCommand"
 
 class OrderLifecycleControlConflict(ValueError): pass
 class OrderLifecycleControlConcurrencyError(RuntimeError): pass
@@ -23,6 +23,19 @@ class ActualStartReconfirmationRequiredCommand:
 @dataclass(frozen=True)
 class ActualStartReconfirmationConfirmedCommand:
     actor: str; reason: str; expected_version: int; idempotency_key: str; original_actual_start_date: date | str; new_actual_start_date: date | str; deposit_settlement_identity: str; preview_request_hash: str; assignment_apply_receipt: Mapping[str, object]
+@dataclass(frozen=True)
+class ScheduledStartReconfirmationCarryCommand:
+    actor: str
+    reason: str
+    expected_version: int
+    idempotency_key: str
+    prior_projected_start_date: date
+    projected_start_date: date
+    original_actual_start_date: str
+    deposit_settlement_identity: str
+    source_event_id: int
+    schedule_adjustment_receipt_id: int
+
 @dataclass(frozen=True)
 class HumanHoldActivateCommand:
     control_key: str; scope: Literal["enter_service", "auto_complete"]; actor: str; reason: str; expected_version: int; idempotency_key: str; release_policy: Literal["manual", "expires_at"]; expires_at: datetime | None = None
@@ -72,7 +85,7 @@ def _utc_expiry(value: object, policy: str) -> tuple[datetime | None, str | None
     return instant, instant.isoformat()
 
 def _normalize_command(command: OrderLifecycleControlCommand, actual_start: object, *, validate_current_actual_start_date: bool = True) -> _NormalizedCommand:
-    if not isinstance(command, (CancellationControlCommand, ActualStartReconfirmationRequiredCommand, ActualStartReconfirmationConfirmedCommand, HumanHoldActivateCommand, HumanHoldReleaseCommand)): raise TypeError("command must be a typed order lifecycle control command")
+    if not isinstance(command, (CancellationControlCommand, ActualStartReconfirmationRequiredCommand, ActualStartReconfirmationConfirmedCommand, HumanHoldActivateCommand, HumanHoldReleaseCommand, ScheduledStartReconfirmationCarryCommand)): raise TypeError("command must be a typed order lifecycle control command")
     actor, reason, version, key = _text(command.actor, "actor", 100), _text(command.reason, "reason", 1000, allow_empty=True), _nonnegative(command.expected_version, "expected_version"), _text(command.idempotency_key, "idempotency_key", 255)
     if isinstance(command, CancellationControlCommand):
         if command.action not in {"activate", "clear"}: raise OrderLifecycleControlStateError("cancellation action is unsupported")
@@ -87,6 +100,20 @@ def _normalize_command(command: OrderLifecycleControlCommand, actual_start: obje
         if validate_current_actual_start_date and original != _date(actual_start, "command_envelope.actual_start_date"): raise OrderLifecycleControlConflict("original_actual_start_date must match the locked aggregate")
         settlement = _text(command.deposit_settlement_identity, "deposit_settlement_identity", 128)
         payload = {"original_actual_start_date": original, "new_actual_start_date": new, "deposit_settlement_identity": settlement, "preview_request_hash": _hash(command.preview_request_hash, "preview_request_hash"), "assignment_apply_receipt": json.loads(_canonical_json(command.assignment_apply_receipt, "assignment_apply_receipt"))}
+        return _NormalizedCommand("actual_start_reconfirmation", "actual_start_reconfirmation", "enter_service", "clear", actor, reason, version, key, payload, "cleared", None, None, new, hashlib.sha256(settlement.encode()).hexdigest())
+    if isinstance(command, ScheduledStartReconfirmationCarryCommand):
+        if validate_current_actual_start_date and command.prior_projected_start_date != actual_start:
+            raise OrderLifecycleControlConflict("scheduled start must match the locked aggregate")
+        new = command.projected_start_date.isoformat()
+        settlement = _text(command.deposit_settlement_identity, "deposit_settlement_identity", 128)
+        payload = {
+            "original_actual_start_date": _date(command.original_actual_start_date, "original_actual_start_date"),
+            "new_actual_start_date": new,
+            "deposit_settlement_identity": settlement,
+            "prior_projected_start_date": command.prior_projected_start_date.isoformat(),
+            "source_reconfirmation_event_id": command.source_event_id,
+            "schedule_adjustment_receipt_id": command.schedule_adjustment_receipt_id,
+        }
         return _NormalizedCommand("actual_start_reconfirmation", "actual_start_reconfirmation", "enter_service", "clear", actor, reason, version, key, payload, "cleared", None, None, new, hashlib.sha256(settlement.encode()).hexdigest())
     control_key, scope = _text(command.control_key, "control_key", 100), command.scope
     if control_key in {"order_cancelled", "actual_start_reconfirmation"}: raise OrderLifecycleControlStateError("human hold control_key is reserved")
@@ -117,16 +144,24 @@ def apply_order_lifecycle_control_command(cursor: object, command_envelope: obje
         return OrderLifecycleControlResult("existing", event_id, _projection(normalized, case_no, event_id))
     if getattr(command_envelope, "existing_lifecycle_event", None) is not None: raise OrderLifecycleControlConflict("lifecycle event exists without its required control event")
     if request_version != current_version: raise OrderLifecycleControlConcurrencyError("request expected version differs from locked aggregate version")
+    current = next((row for row in getattr(command_envelope, "control_states", ()) if row["control_type"] == normalized.control_type and row["control_key"] == normalized.control_key), None)
+    if isinstance(command, ScheduledStartReconfirmationCarryCommand) and (
+        current is None
+        or current["state"] != "cleared"
+        or current["current_event_id"] != command.source_event_id
+        or current["confirmed_start_date"] != command.prior_projected_start_date
+        or current["deposit_settlement_identity_hash"] != normalized.deposit_settlement_identity_hash
+    ):
+        raise OrderLifecycleControlConflict("scheduled start reconfirmation cannot carry the locked control")
     cursor.execute("INSERT INTO order_lifecycle_control_events (case_no, control_type, control_key, scope, action, actor, reason, expected_version, idempotency_key, payload_hash, payload_snapshot) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (case_no, normalized.control_type, normalized.control_key, normalized.scope, normalized.action, normalized.actor, normalized.reason, normalized.expected_version, normalized.idempotency_key, payload_hash, payload_json))
     if getattr(cursor, "rowcount", None) != 1: raise OrderLifecycleControlConcurrencyError("control event append did not affect exactly one row")
     event_id = _nonnegative(getattr(cursor, "lastrowid", None), "inserted control event id")
-    current = next((row for row in getattr(command_envelope, "control_states", ()) if row["control_type"] == normalized.control_type and row["control_key"] == normalized.control_key), None)
     if current is None:
         if normalized.action != "activate": raise OrderLifecycleControlStateError("a new control projection must be activated")
         cursor.execute("INSERT INTO order_lifecycle_control_state (case_no, control_type, control_key, scope, state, current_event_id, release_policy, expires_at_utc, confirmed_start_date, deposit_settlement_identity_hash, reason, changed_by, changed_at) SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, control_event.created_at FROM order_lifecycle_control_events AS control_event WHERE control_event.id = %s AND control_event.case_no = %s AND control_event.control_type = %s AND control_event.control_key = %s", (case_no, normalized.control_type, normalized.control_key, normalized.scope, normalized.state, event_id, normalized.release_policy, normalized.expires_at_utc, normalized.confirmed_start_date, normalized.deposit_settlement_identity_hash, normalized.reason, normalized.actor, event_id, case_no, normalized.control_type, normalized.control_key))
     else:
         if current["scope"] != normalized.scope: raise OrderLifecycleControlStateError("current control projection scope differs")
-        if normalized.action == "clear" and current["state"] != "active": raise OrderLifecycleControlStateError("control clear requires an active projection")
+        if normalized.action == "clear" and not isinstance(command, ScheduledStartReconfirmationCarryCommand) and current["state"] != "active": raise OrderLifecycleControlStateError("control clear requires an active projection")
         cursor.execute("UPDATE order_lifecycle_control_state AS current_state JOIN order_lifecycle_control_events AS control_event ON control_event.id = %s AND control_event.case_no = %s AND control_event.control_type = %s AND control_event.control_key = %s SET current_state.scope = %s, current_state.state = %s, current_state.current_event_id = %s, current_state.release_policy = %s, current_state.expires_at_utc = %s, current_state.confirmed_start_date = %s, current_state.deposit_settlement_identity_hash = %s, current_state.reason = %s, current_state.changed_by = %s, current_state.changed_at = control_event.created_at WHERE current_state.case_no = %s AND current_state.control_type = %s AND current_state.control_key = %s AND current_state.current_event_id = %s", (event_id, case_no, normalized.control_type, normalized.control_key, normalized.scope, normalized.state, event_id, normalized.release_policy, normalized.expires_at_utc, normalized.confirmed_start_date, normalized.deposit_settlement_identity_hash, normalized.reason, normalized.actor, case_no, normalized.control_type, normalized.control_key, current["current_event_id"]))
     if getattr(cursor, "rowcount", None) != 1: raise OrderLifecycleControlConcurrencyError("control projection CAS did not affect exactly one row")
     return OrderLifecycleControlResult("created", event_id, _projection(normalized, case_no, event_id))

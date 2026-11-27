@@ -4,6 +4,7 @@ import { calendarOccupancyDetailsByDate } from '../../../../../../../../../line/
 import { OrderServiceDatesPanel } from '../../../../../../../components/OrderServiceDatesPanel';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { OrderMutationConflictError } from '../../../../../../../api/orders/order_mutation_errors';
+import { mapSchedulingCurrentError } from '../../../../../../../api/scheduling/scheduling_current_errors';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import type { ServiceDateConfirmationQueryView, ServiceDateConfirmationPreviewView } from '../../../../../../../api/orders/order_mutation_schemas';
 import type { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
@@ -254,6 +255,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       order_version: 11, scheduling_version: 7, preview_fingerprint: fingerprint,
     });
     mocks.saveHistoricalSchedule.mockImplementation(async () => {
+      actualStart = initialDates[0];
       currentQuery = { ...currentQuery, order_version: 13, scheduling_version: 8,
         current_version: 1, current_dates: initialDates, bound_staff: [], historical_schedule_pending: false };
       return { case_no: CASE, scheduling_version: 8, generation_number: 2,
@@ -323,8 +325,10 @@ describe('服務日期自動讀取與單次儲存流程', () => {
   });
 
   it('一般案件帶入已確認日期並從原頁送出工會正式排班', async () => {
+    actualStart = '2026-09-30';
     currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
     mocks.saveHistoricalSchedule.mockImplementation(async () => {
+      actualStart = initialDates[0];
       currentQuery = { ...currentQuery, order_version: 12, scheduling_version: 8 };
       return { case_no: CASE, scheduling_version: 8, generation_number: 2, assignment_ids: [5] };
     });
@@ -345,7 +349,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.queryByText(initialDates.join('、'))).not.toBeInTheDocument();
     expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
-      expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
+      actual_start_date: '2026-09-30', expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
     }), expect.anything(), true);
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });
@@ -425,6 +429,19 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       { staffId: 12, rangeStart: '2026-10-31', rangeEnd: '2026-11-30' }, { signal: expect.any(AbortSignal) });
     expect(mocks.queryStaffCalendar.mock.calls[0][1].signal.aborted).toBe(true);
     expect(screen.queryByText('已有排班')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['staff_occupancy_conflict', '月嫂檔期有衝突，請核對既有排班與不可服務時段。', '無法讀取月嫂檔期。'],
+    ['scheduling_data_integrity_violation', '無法讀取月嫂檔期。', '月嫂檔期有衝突，請核對既有排班與不可服務時段。'],
+  ])('一般首排遇到 %s 時顯示對應的檔期提示', async (publicCode, expectedMessage, otherMessage) => {
+    currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
+    mocks.queryStaffCalendar.mockRejectedValueOnce(mapSchedulingCurrentError(new ApiHttpError(409, publicCode, '檔期資料異常')));
+    render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart
+      officeScheduleStaff={[{ staff_id: 12, staff_name: '王月嫂' }]} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(expectedMessage);
+    expect(screen.queryByText(otherMessage)).not.toBeInTheDocument();
   });
 
   it('多月嫂儲存受拒後可取消並重新讀取原日期', async () => {

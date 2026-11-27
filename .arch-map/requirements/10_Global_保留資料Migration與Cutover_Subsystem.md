@@ -5,11 +5,11 @@
 - 狀態：`current-spec`
 - Owner：Global Migration Infrastructure Subsystem
 - 單一負責範圍：跨環境資料庫保留升級（preserve-data migration）、Schema State Classification（`absent | exact | resumable_partial | drift`）、Release Manifest 與 Descriptor 驗證契約、Candidate Verification、Configuration Switch／Rollback，以及 Agent／開發者 DB 變更七道執行門（§9）與本機開發庫受控驗收規範（§9.1）。
-- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[NAS Fresh 初始化與維護復原規格](10A_NAS_Fresh初始化與維護復原規格.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[單機 Docker MySQL Fresh 初始化與維護復原規格](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)、[Controlled File Storage 正式規格](30_Controlled_File_Storage正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
 
 ## 2. 定位與 SSOT
 
-本 Subsystem 是 Global 基礎設施能力，不屬於任何業務 Domain。本檔擁有保留資料升級與切換契約：在不更動唯讀 source database 的前提下，建立、驗證並切換至新 candidate database，不負責業務資料補猜、ledger 修復或自動刪除來源庫。遷移是在新候選庫套用並驗證發行內容；切換是把應用程式指向已通過驗證的候選庫。只完成遷移或驗證，不代表已切換。Windows 備份復原另依 [同名復原契約](10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore)。
+本 Subsystem 是 Global 基礎設施能力，不屬於任何業務 Domain。本檔擁有保留資料升級與切換契約：在不更動唯讀 source database 的前提下，建立、驗證並切換至新 candidate database，不負責業務資料補猜、ledger 修復或自動刪除來源庫。遷移是在新候選庫套用並驗證發行內容；切換是把應用程式指向已通過驗證的候選庫。只完成遷移或驗證，不代表已切換。Windows 備份復原另依 [同名復原契約](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#windows-same-name-restore)。
 
 | 概念 | 唯一權威 |
 |---|---|
@@ -24,7 +24,7 @@
 
 ## 3. 核心安全不變量
 
-以下來源庫唯讀、candidate 保留與 `.env` 切換不變量適用於保留資料升級與切換；Windows 備份復原的目標替換與暫存物清理以 [同名復原契約](10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore) 為準。
+以下來源庫唯讀、candidate 保留與 `.env` 切換不變量適用於保留資料升級與切換；Windows 備份復原的目標替換與暫存物清理以 [同名復原契約](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#windows-same-name-restore) 為準。
 
 1. Source database 全程唯讀（禁止 DDL、`UPDATE`、`DELETE`、`TRUNCATE`、`DROP`），並與寫入 candidate 分採獨立權限主體（principal）。
 2. Candidate 必須是明確的新建 database，禁止以 `DROP candidate` 作為重跑或清場策略。
@@ -35,7 +35,7 @@
 7. Plan 至 switch 期間須持有 maintenance／write-freeze token（source 異動即判定 stale）。
 8. `.env` switch 僅原子修改唯一 `DB_DATABASE`，其餘 bytes 與註解不變；切換前重驗 fingerprint 與 config digest；切換後重啟 API、管理端前端、Watcher／worker 並完成 read smoke 方標記完成；Rollback 僅切回原庫而不刪 candidate。
 9. `db/schema.sql` 與 `scripts/init_db.py` 屬 fresh bootstrap 工具，preserve-data workflow 嚴禁呼叫；所有 receipt 不得包含 credential、完整 `.env`、PII 或銀行 raw payload。
-10. **本機受控清空重建（`scripts/launchers/reset_DB.bat`）**：僅於開發者明確捨棄 localhost `union_db` 資料時執行，強制輸入 exact `RESET` 與通過靜態 hash-locked compact schema（見 [共用精簡新庫結構規格](10A_NAS_Fresh初始化與維護復原規格.md#3-nas-新庫結構精簡與退役清單)）驗證，不載入業務 fixture；DROP 前必須使用 TOTP encryption keyring 建立加密之 root-only backup（完整保留 root 帳號、designation、encrypted MFA factor／key version／counter、recovery-code consumed facts、enrollment challenges 與必要 LINE identity parent FK，缺 key／factor 即 fail closed），重建後依 FK 還原驗證後方回 committed receipt；DDL 失敗保留加密備份並回報路徑。
+10. **本機受控清空重建（`scripts/launchers/reset_DB.bat`）**：僅於開發者明確捨棄 localhost `union_db` 資料時執行，強制輸入 exact `RESET` 與通過靜態 hash-locked compact schema（見 [共用精簡新庫結構規格](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#compact-fresh-retirements)）驗證，不載入業務 fixture；DROP 前必須使用 TOTP encryption keyring 建立加密之 root-only backup（完整保留 root 帳號、designation、encrypted MFA factor／key version／counter、recovery-code consumed facts、enrollment challenges 與必要 LINE identity parent FK，缺 key／factor 即 fail closed），重建後依 FK 還原驗證後方回 committed receipt；DDL 失敗保留加密備份並回報路徑。
 
 ## 4. Subsystems 與核心模組
 
@@ -50,7 +50,7 @@
 
 ### 4.2 Preflight、Backup、Schema State 與 Runner
 
-本機開發庫日常升級走 `scripts.update_local_database`。依 ordered release plan 判定已是現行版、可在本機原庫套用的純結構升級，或需另選隔離副本的保留資料升級。原庫直連須符合該版本資格、原庫身分、備份及續跑驗證；不以 NAS 候選、DSM 備份或部署切換為前置。既有 NAS 入口與中斷恢復規則屬相容邊界，不列入現行部署。
+本機開發庫日常升級走 `scripts.update_local_database`。依 ordered release plan 判定已是現行版、可在本機原庫套用的純結構升級，或需另選隔離副本的保留資料升級。原庫直連須符合該版本資格、原庫身分、備份及續跑驗證，不以部署切換為前置。
 
 正式部署依 [Global Deployment §3](18_Global_Deployment與治理正式規格.md#3-正式部署拓樸)，由工會 Windows 主機在維護期間透過 loopback 維護本機 Docker MySQL。選項 7 在 `APP_ENV=production` 時直接選擇保留資料升級。來源庫唯讀，依發行鏈規劃、備份、還原副本、升級及驗證。切換前須核對保留資料、精確結構及實際目標；切換後仍保留原庫及其資料。
 
@@ -64,7 +64,7 @@
   - Journal identity 綁定 `source_database + release_id`（不混用先前 release 鏈）；每次 Apply 前須建立該機器專屬之 release-scoped mysqldump 與 local backup receipt（缺原始備份／身分不符回 `backup_required`；schema 已 exact 但既有同 release journal 未完成回 `verification_incomplete`）。
   - **計時與逾時保護**：前置驗證上限 `300` 秒、更新後驗證上限 `300` 秒、單條 DDL 上限 `30` 秒、等鎖上限 `5` 秒、單次 socket 上限 `30` 秒；local receipt 與 completed journal 紀錄 `phase_timings`，超時回 `preparation_duration_exceeded`／`blocked_duration_exceeded`／`verification_duration_exceeded`。若 DDL 結果未明，須先核對該版本的 durable journal 與新讀取的 metadata；只有符合 §3 明定的可續跑邊界才續行，不盲目重跑。
   - schema-only fast path 限 `localhost` development／validation 非 MySQL 系統 schema，遠端與 production 一律拒絕。
-  - Windows 遠端 NAS 曾誤入 fast path 而中斷 1080 時，僅接受原 journal 的連續已驗證 canonical 前綴及完整原始備份。先驗證原備份的完整性、來源身分與資料指紋，再以該備份保存的原始 trigger 定義重建 1079 基線，須符合 journal 的原基線完整 schema SHA；不得假設伺服器保存的 SQL 排版與專案 SQL 原文相同。基線 trigger 順序須沿原 MySQL metadata 欄位的排序規則，包含原備份中已被 DROP 的名稱，不得改用 Python 字串排序。已套用 CREATE 的 trigger 以既有 canonical SQL 契約比較，再使用現況原始定義及快照原順序重建已驗證前綴，須符合現況完整 schema SHA。此證明只授權該次新副本恢復實際受影響的 guard parts，納入原 plan fingerprint 並於 Apply fresh-plan 再驗；不得改寫原庫或歷史紀錄、隱藏其他 partial／drift，或略過結果未明的 DDL。
+  - 若曾誤入 fast path 而中斷 1080 時，僅接受原 journal 的連續已驗證 canonical 前綴及完整原始備份。先驗證原備份的完整性、來源身分與資料指紋，再以該備份保存的原始 trigger 定義重建 1079 基線，須符合 journal 的原基線完整 schema SHA；不得假設伺服器保存的 SQL 排版與專案 SQL 原文相同。基線 trigger 順序須沿原 MySQL metadata 欄位的排序規則，包含原備份中已被 DROP 的名稱，不得改用 Python 字串排序。已套用 CREATE 的 trigger 以既有 canonical SQL 契約比較，再使用現況原始定義及快照原順序重建已驗證前綴，須符合現況完整 schema SHA。此證明只授權該次新副本恢復實際受影響的 guard parts，納入原 plan fingerprint 並於 Apply fresh-plan 再驗；不得改寫原庫或歷史紀錄、隱藏其他 partial／drift，或略過結果未明的 DDL。
 - **Candidate Backfill／Validation／Switch**：Backfill 先 dry-run 驗證 affected rows 與 before／after fingerprint；不可唯一轉換者進 bounded `legacy_unresolved`；Switch 使用 `SwitchStateReconciler` 核對 before／after `.env` hash 決定 crash window 狀態。
 
 ## 5. Commands、Stable Errors 與交易邊界
@@ -96,7 +96,7 @@
 - **月嫂暫停接案原因改為選填**。`labor_union_2026_11_13_staff_availability_optional_reason_v1.json`（`1076_staff_availability_optional_reason.sql`）將 `scheduling_staff_unavailability_blocks.chk_scheduling_staff_unavailability_reason` 放寬為僅檢查 `CHAR_LENGTH(TRIM(created_by)) > 0`，與既有 Domain／UI 選填備註契約一致，保留既有列與其餘約束；新建與保留資料升級採相同檢查條件。
 
 - **LINE 案件群組歷程刪除保護**。`labor_union_2026_11_15_line_order_group_history_delete_v1.json`（`1078_line_order_group_history_delete_guards.sql`）精確更新兩個群組事件刪除 trigger，保留既有案件刪除條件，並允許有同案、尚未完成的群組歷程刪除命令且目前無群組綁定時逐案刪除。升級本身不刪除任何既有資料。新建與保留資料升級採相同 trigger 契約。
-- **案件永久刪除支援已簽約案件**。`labor_union_2026_11_20_registry_case_deletion_signing_v1.json`（`1080_registry_case_deletion_signing_guards.sql`）移除 trigger 的簽回狀態判斷。更新包含 `1060` 的案件歷程 guard 及 `1078`、`1079` 後續覆蓋版本，保留 pending claim、資料歸屬、LINE 群組歷程及保留期清理條件。Fresh 與保留資料升級使用相同定義。升級只更新 schema，切換後須載入同版本 NAS 固定程序。
+- **案件永久刪除支援已簽約案件**。`labor_union_2026_11_20_registry_case_deletion_signing_v1.json`（`1080_registry_case_deletion_signing_guards.sql`）移除 trigger 的簽回狀態判斷。更新包含 `1060` 的案件歷程 guard 及 `1078`、`1079` 後續覆蓋版本，保留 pending claim、資料歸屬、LINE 群組歷程及保留期清理條件。Fresh 與保留資料升級使用相同定義。升級只更新 schema，切換後須載入同版本資料庫受限固定程序。
 
 - **成立後未服務狀態**。`labor_union_2026_11_23_order_established_unserved_v1.json` 以 `1081_order_established_unserved_status.sql` 在 Orders、Terms 收據與取消收據的狀態 enum 尾端追加「成立後未服務」，並擴充 lifecycle event 的 before／after 檢查限制。此版本只有 schema widening，不回填案件、不重做取消、收付款或 payroll。Fresh assembly 與保留資料升級使用同一 artifact；執行仍須通過上述七道門，正式切換前保留候選與來源回復證據。
 

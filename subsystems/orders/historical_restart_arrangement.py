@@ -238,6 +238,7 @@ class HistoricalRestartArrangementWorkflow:
             actor=ActorContext(actor),
             reason=reason,
             correlation_id=CorrelationId(correlation_id),
+            actual_start_date=preview.actual_start_date,
         )
         receipt = self._repository.persist_arrangement(command)
         self._repository.persist_arrangement_lifecycle(
@@ -263,10 +264,15 @@ class HistoricalRestartArrangementWorkflow:
         )
         if lifecycle_facts.order.version != facts.order_version:
             raise ValueError("historical_arrangement_stale_version")
-        adjusted_days = facts.date_adjustment.days if facts.date_adjustment else ()
+        adjusted_days = facts.first_schedule_adjusted_days
+        actual_start_date = min(
+            (day.service_date for day in adjusted_days) if adjusted_days else
+            (day for assignment in candidate.assignments for day in assignment.service_dates)
+        )
         effective_end = max((day.service_date for day in adjusted_days), default=None)
         lifecycle = build_historical_restart_arrangement_lifecycle_impact(
-            lifecycle_facts.lifecycle, lifecycle_facts.order.terms,
+            replace(lifecycle_facts.lifecycle, actual_start_date=actual_start_date),
+            lifecycle_facts.order.terms,
             candidate, self._clock.now(),
             effective_service_end=effective_end,
             coordinated_final_day=any(
@@ -285,10 +291,11 @@ class HistoricalRestartArrangementWorkflow:
             "confirmed_dates": tuple(item.isoformat() for item in facts.current_dates),
             "rate_fingerprint": rate_fingerprint.value,
             "lifecycle_fingerprint": lifecycle.fingerprint.value,
+            "actual_start_date": actual_start_date.isoformat(),
         })
         return HistoricalRestartArrangementPreview(
             candidate, facts.order_version, facts.current_version, fingerprint, lifecycle,
-            lifecycle_facts.lifecycle.actual_start_date,
+            actual_start_date,
         )
 
 

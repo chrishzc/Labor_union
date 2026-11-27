@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, substatusCodesForStage, type CoreStageCode, type CoreStageProjection } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
+import { ADMIN_VIEW_FRESH_MS, AdminOperationsViewProvider } from '../../../../../../../pages/admin_operations_view_cache';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import * as intakeClient from '../../../../../../../api/case_import/import_field_issues';
 
 const mocks = vi.hoisted(() => ({ core: vi.fn(), summaries: vi.fn() }));
 function Panel({ onObserved, onPoolReadback, onCommitted, onClose }: { onObserved?: () => void; onPoolReadback?: () => void; onCommitted?: () => void; onClose?: () => void }) {
@@ -68,6 +71,65 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     });
   });
 
+  it('同一登入範圍返回保留篩選，過期時顯示舊清單至新查詢完成', async () => {
+    const now = vi.spyOn(Date, 'now');
+    const start = now();
+    now.mockReturnValue(start);
+    const intake = vi.spyOn(intakeClient, 'loadCurrentImportFieldIssuesForCases').mockResolvedValue([{
+      case_no: 'CASE-REFRESH',
+      issues: [{ source: 'hcm', owner: 'client_profile', field: 'residence_type', source_field: '居住型態', code: 'invalid', message: '請確認居住型態' }],
+    }]);
+    const route = (visible: boolean, scope = 'first') => (
+      <AdminOperationsViewProvider key={scope}>
+        {visible && <OrderWorkbenchV2Page />}
+      </AdminOperationsViewProvider>
+    );
+    const { rerender } = render(route(true));
+    try {
+      await screen.findByRole('link', { name: '修正資料' });
+      fireEvent.change(screen.getByRole('textbox', { name: '搜尋案件編號或姓名' }), { target: { value: 'REFRESH' } });
+      const initialReads = mocks.core.mock.calls.length;
+
+      rerender(route(false));
+      rerender(route(true));
+      expect(screen.getByRole('textbox', { name: '搜尋案件編號或姓名' })).toHaveValue('REFRESH');
+      expect(screen.getByText('CASE-REFRESH')).toBeInTheDocument();
+      await act(async () => {});
+      expect(mocks.core).toHaveBeenCalledTimes(initialReads);
+
+      rerender(route(false));
+      now.mockReturnValue(start + ADMIN_VIEW_FRESH_MS + 1);
+      let fail!: (error: Error) => void;
+      mocks.core.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+      rerender(route(true));
+      expect(screen.getByText('CASE-REFRESH')).toBeInTheDocument();
+      expect(screen.getByText('清單更新中，暫時無法操作案件。')).toBeInTheDocument();
+      expect(screen.getByText('居住型態')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: '修正資料' })).not.toBeInTheDocument();
+      await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(initialReads + 1));
+      await act(async () => { fail(new Error('query unavailable')); });
+      expect(screen.getByText('CASE-REFRESH')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('顯示');
+
+      mocks.core.mockRejectedValueOnce(new ApiHttpError(403, 'forbidden', '權限不足'));
+      fireEvent.click(screen.getByRole('button', { name: '重試' }));
+      await waitFor(() => expect(screen.queryByText('CASE-REFRESH')).not.toBeInTheDocument());
+      expect(screen.getByRole('alert')).toHaveTextContent('權限不足');
+      fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+      await screen.findByText('CASE-REFRESH');
+
+      rerender(route(false));
+      mocks.core.mockImplementationOnce(() => new Promise(() => {}));
+      rerender(route(true, 'second'));
+      expect(screen.getByRole('textbox', { name: '搜尋案件編號或姓名' })).toHaveValue('');
+      expect(screen.queryByText('CASE-REFRESH')).not.toBeInTheDocument();
+      expect(screen.getByText('正在查詢訂單資料…')).toBeInTheDocument();
+    } finally {
+      now.mockRestore();
+      intake.mockRestore();
+    }
+  });
+
   it('清單更新中或更新失敗時，點擊與鍵盤都不能開啟舊案件列', async () => {
     render(<OrderWorkbenchV2Page />);
     const card = await screen.findByRole('row', { name: '開啟案件 CASE-REFRESH 案件處理' });
@@ -122,6 +184,20 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
     await waitFor(() => expect(input).toBeEnabled());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(input).toHaveValue('不可因錯誤遺失');
+  });
+
+  it('面板回讀收到拒絕存取時清除案件，重試成功後回到清單', async () => {
+    render(<OrderWorkbenchV2Page />);
+    await selectStage('formal_recommendation');
+    mocks.core.mockRejectedValueOnce(new ApiHttpError(403, 'forbidden', '權限不足'));
+    fireEvent.click(screen.getByRole('button', { name: '模擬正式 owner 回讀完成' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('權限不足');
+    expect(screen.queryByLabelText('整合測試面板草稿')).not.toBeInTheDocument();
+    expect(screen.queryByText('CASE-REFRESH')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    await screen.findByText('CASE-REFRESH');
+    expect(screen.queryByLabelText('整合測試面板草稿')).not.toBeInTheDocument();
   });
 
   it('Drawer 內成功 callback 更新清單及摘要而不關閉或重建 Drawer', async () => {

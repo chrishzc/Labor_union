@@ -63,6 +63,52 @@ function getInitialUser(): AdminPublic | null {
 
 let inMemoryToken: string | null = getInitialToken();
 let inMemoryUser: AdminPublic | null = getInitialUser();
+let sessionScopeRevision = 0;
+const sessionScopeListeners = new Set<() => void>();
+
+function sessionAuthority(user: AdminPublic | null): string {
+  return JSON.stringify(user && [user.id, user.username, user.role, user.is_root,
+    user.access_control_version, [...user.capabilities].sort()]);
+}
+
+function updateSessionMemory(token: string | null, user: AdminPublic | null, rotating = false): void {
+  const changed = (!rotating && inMemoryToken !== token)
+    || sessionAuthority(inMemoryUser) !== sessionAuthority(user);
+  inMemoryToken = token;
+  inMemoryUser = user;
+  if (!changed) return;
+  sessionScopeRevision += 1;
+  sessionScopeListeners.forEach(listener => listener());
+}
+
+function persistSession(): void {
+  const token = inMemoryToken;
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      if (token) {
+        window.sessionStorage.setItem(STORAGE_KEY_TOKEN, token);
+      } else {
+        window.sessionStorage.removeItem(STORAGE_KEY_TOKEN);
+      }
+      if (inMemoryUser) {
+        window.sessionStorage.setItem(STORAGE_KEY_USER, JSON.stringify(inMemoryUser));
+      } else {
+        window.sessionStorage.removeItem(STORAGE_KEY_USER);
+      }
+    }
+  } catch {
+    // ignore in environments without storage
+  }
+}
+
+export function subscribeAdminSessionScope(listener: () => void): () => void {
+  sessionScopeListeners.add(listener);
+  return () => { sessionScopeListeners.delete(listener); };
+}
+
+export function getAdminSessionScopeRevision(): number {
+  return sessionScopeRevision;
+}
 
 export const sessionClient = {
   async verifyEnrollment(challengeId: string, challengeToken: string, code: string) {
@@ -105,37 +151,16 @@ export const sessionClient = {
     token: string | null,
     user: AdminPublic | AdminPublicInput | null
   ): void {
-    inMemoryToken = token;
-    if (user) {
-      inMemoryUser = AdminPublicSchema.parse(user);
-    } else {
-      inMemoryUser = null;
-    }
+    updateSessionMemory(token, user ? AdminPublicSchema.parse(user) : null);
 
-    try {
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        if (token) {
-          window.sessionStorage.setItem(STORAGE_KEY_TOKEN, token);
-        } else {
-          window.sessionStorage.removeItem(STORAGE_KEY_TOKEN);
-        }
-        if (inMemoryUser) {
-          window.sessionStorage.setItem(STORAGE_KEY_USER, JSON.stringify(inMemoryUser));
-        } else {
-          window.sessionStorage.removeItem(STORAGE_KEY_USER);
-        }
-      }
-    } catch {
-      // ignore in environments without storage
-    }
+    persistSession();
   },
 
   /**
    * 清除記憶體與 sessionStorage 會話狀態
    */
   clearSession(): void {
-    inMemoryToken = null;
-    inMemoryUser = null;
+    updateSessionMemory(null, null);
     try {
       if (typeof window !== 'undefined' && window.sessionStorage) {
         window.sessionStorage.removeItem(STORAGE_KEY_TOKEN);
@@ -232,18 +257,19 @@ export const sessionClient = {
   async refreshSession(
     options?: Omit<RequestOptions, 'method' | 'body'>
   ): Promise<AdminRefreshResponse> {
-    if (!inMemoryToken) {
+    const requestedToken = inMemoryToken;
+    const revision = sessionScopeRevision;
+    if (!requestedToken) {
       throw new Error('未登入或 Session 已清除');
     }
     const raw = await transport.post('/api/v1/admin/auth/refresh', undefined, {
       ...options,
-      token: inMemoryToken,
+      token: requestedToken,
     });
     const refreshData = decodeEnvelope(AdminRefreshResponseSchema, raw);
-    this.setSession(
-      refreshData.access_token || inMemoryToken,
-      refreshData.admin || inMemoryUser
-    );
+    if (requestedToken !== inMemoryToken || revision !== sessionScopeRevision) throw new ApiAbortError();
+    updateSessionMemory(refreshData.access_token || requestedToken, refreshData.admin || inMemoryUser, true);
+    persistSession();
     return refreshData;
   },
 
@@ -293,8 +319,7 @@ export const sessionClient = {
     );
     const sessionData = decodeEnvelope(AdminSessionResponseSchema, raw);
 
-    inMemoryToken = sessionData.access_token;
-    inMemoryUser = sessionData.admin;
+    updateSessionMemory(sessionData.access_token, sessionData.admin);
 
     return sessionData;
   },

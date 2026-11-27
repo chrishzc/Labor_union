@@ -58,6 +58,7 @@ import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_
 import { Drawer } from '../components/Drawer';
 import { OfficialHolidayCsvImport } from '../components/scheduling/OfficialHolidayCsvImport';
 import { ServiceHandoverPage } from './ServiceHandoverPage';
+import { ADMIN_VIEW_FRESH_MS, isFresh, isViewAccessDenied, keepRecent, useAdminOperationsViews, useOperationsQuery, useOperationsScroll, viewTimestamp } from './admin_operations_view_cache';
 
 type SchedulingTab = 'calendar' | 'holidays';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
@@ -67,7 +68,19 @@ interface MonthSelection {
   month: number;
 }
 
+export interface SchedulingViewSelection {
+  tab: SchedulingTab;
+  month: MonthSelection;
+  staffId: number | null;
+  status: StatusFilter;
+  search: string;
+  caseNo: string;
+  scrollLeft: number;
+}
+
 const STAFF_PAGE_SIZE = 20;
+const CALENDAR_MONTH_CACHE_LIMIT = 600;
+const EMPTY_HOLIDAYS: readonly HolidayRow[] = [];
 
 function decodeHashComponent(value: string): string {
   return decodeURIComponent(value.replace(/\+/g, ' '));
@@ -290,7 +303,7 @@ function flowStateLabel(state: string): string {
   return labels[state] ?? '狀態待確認';
 }
 
-function HolidayPolicyWorkspace() {
+function HolidayPolicyWorkspace({ onHolidayChanged }: { onHolidayChanged: (datePrefix: string) => void }) {
   const [year, setYear] = useState(() => taipeiCalendarDate(new Date()).year);
   const [fromDate, setFromDate] = useState(`${year}-01-01`);
   const [toDate, setToDate] = useState(`${year}-12-31`);
@@ -332,6 +345,10 @@ function HolidayPolicyWorkspace() {
   const draft = holidayFlowStore.get();
   const machine = resolveHolidayMachineState(draft);
   const calendar = draft?.calendar ?? null;
+  const changedHolidayDate = draft?.receipt?.holiday_date;
+  useEffect(() => {
+    if (changedHolidayDate) onHolidayChanged(changedHolidayDate.slice(0, 7));
+  }, [changedHolidayDate, draft?.receipt, onHolidayChanged]);
   useEffect(() => { setObservedRows({}); }, [calendar]);
   const toggleDoublePay = async (holiday: HolidayRow): Promise<void> => {
     const date = holiday.holiday_date;
@@ -357,6 +374,7 @@ function HolidayPolicyWorkspace() {
         const receipt = await holidayClient.apply(pending.request, { idempotencyKey: pending.key });
         setAccountingResults(previous => ({ ...previous, [date]: receipt.case_results ?? [] }));
         pending.committed = true;
+        onHolidayChanged(date.slice(0, 7));
       }
       const readback = await holidayClient.query(horizon);
       const result = readback.holidays.find(item => item.holiday_date === date);
@@ -613,6 +631,7 @@ function HolidayPolicyWorkspace() {
       </header>
 
       <OfficialHolidayCsvImport disabled={busy} onImported={importYear => {
+        onHolidayChanged(`${importYear}-`);
         setYear(importYear);
         setFromDate(`${importYear}-01-01`);
         setToDate(`${importYear}-12-31`);
@@ -780,6 +799,11 @@ type CalendarCaseOptionsState =
   | { kind: 'ready'; options: readonly CalendarCaseOption[] }
   | { kind: 'error'; message: string };
 
+export interface CalendarCaseOptions {
+  options: readonly CalendarCaseOption[];
+  summaries: Record<string, OrderSummaryInfo>;
+  staffAssignments: ReadonlyMap<number, readonly StaffAssignmentOption[]>;
+}
 
 
 type SchedulingDiagnosticTone = 'unavailable' | 'active' | 'waiting' | 'leave';
@@ -1076,14 +1100,20 @@ interface CalendarMonthResult {
   overlays: readonly HistoricalAssignmentOverlay[];
   ranges: ReadonlyMap<string, HistoricalCaseRanges | null>;
   historicalError: string | null;
+  canonicalDenied?: true;
+  historicalDenied?: true;
 }
 
 type CalendarMonthState = { kind: 'unloaded' } | { kind: 'loading' } | CalendarMonthResult;
 
-interface CalendarMonthCacheEntry {
+export interface CalendarMonthCacheEntry {
   target: CalendarMonthTarget;
   result: CalendarMonthResult;
-  retry?: true;
+  updatedAt: number;
+  checkedAt: number;
+  invalidated: boolean;
+  previous?: CalendarMonthResult;
+  retry?: 'all' | 'failed';
 }
 
 function calendarMonthKey(staffId: number, year: number, month: number): string {
@@ -1092,6 +1122,16 @@ function calendarMonthKey(staffId: number, year: number, month: number): string 
 
 function calendarMonthFailed(result: CalendarMonthResult): boolean {
   return !result.canonical || result.historicalError !== null;
+}
+
+function calendarMonthDisplay(entry: CalendarMonthCacheEntry): CalendarMonthResult {
+  const { result, previous } = entry;
+  if (!previous) return result;
+  return {
+    ...result,
+    ...(result.canonical || result.canonicalDenied ? {} : { row: previous.row, canonical: previous.canonical }),
+    ...(result.monthly || result.historicalDenied ? {} : { monthly: previous.monthly, overlays: previous.overlays, ranges: previous.ranges }),
+  };
 }
 
 function orderServiceRange(start: string | null, end: string | null): OrderServiceRange | null {
@@ -1117,7 +1157,7 @@ async function loadCalendarMonth(
 ): Promise<CalendarMonthResult> {
   const { staff, year, month } = target;
   const { rangeStart, rangeEnd } = monthRange(target);
-  const readCanonical = async (): Promise<Pick<CalendarMonthResult, 'row' | 'canonical'>> => {
+  const readCanonical = async (): Promise<Pick<CalendarMonthResult, 'row' | 'canonical' | 'canonicalDenied'>> => {
     if (previous?.canonical) return { row: previous.row, canonical: previous.canonical };
     try {
       const canonical = await schedulingCurrentClient.queryCurrentCalendar(
@@ -1132,11 +1172,11 @@ async function loadCalendarMonth(
         && caught.publicCode === 'service_time_terms_incomplete'
         ? { kind: 'terms_incomplete' }
         : { kind: 'error', message: renderError(caught instanceof Error ? caught : new Error('排班日曆查詢失敗')) };
-      return { row };
+      return { row, canonicalDenied: isViewAccessDenied(caught) ? true : undefined };
     }
   };
 
-  const readHistorical = async (): Promise<Pick<CalendarMonthResult, 'monthly' | 'overlays' | 'ranges' | 'historicalError'>> => {
+  const readHistorical = async (): Promise<Pick<CalendarMonthResult, 'monthly' | 'overlays' | 'ranges' | 'historicalError' | 'historicalDenied'>> => {
     if (previous && previous.historicalError === null) {
       const { monthly, overlays, ranges } = previous;
       return { monthly, overlays, ranges, historicalError: null };
@@ -1156,6 +1196,7 @@ async function loadCalendarMonth(
     } catch (caught) {
       return {
         overlays: [], ranges,
+        historicalDenied: isViewAccessDenied(caught) ? true : undefined,
         historicalError: caught instanceof Error ? caught.message : '歷史指派月曆載入失敗。',
       };
     }
@@ -1494,33 +1535,35 @@ function ghostCaseSpan(
 
 const SchedulingWorkbench: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
-  const [activeTab, setActiveTab] = useState<SchedulingTab>('calendar');
-  const [staffList, setStaffList] = useState<StaffDirectoryCardViewModel[]>([]);
-  const [directoryLoading, setDirectoryLoading] = useState<boolean>(true);
+  const views = useAdminOperationsViews();
+  const cache = views.scheduling;
+  const [selection] = useState(() => cache.selection);
+  const invalidateHolidays = useCallback((datePrefix: string) => {
+    cache.holidays.invalidate(key => key.startsWith(datePrefix));
+  }, [cache]);
+  const directory = cache.directory.read('active');
+  const [activeTab, setActiveTab] = useState<SchedulingTab>(selection?.tab ?? 'calendar');
+  const [staffList, setStaffList] = useState<StaffDirectoryCardViewModel[]>(() => directory?.data.staff ?? []);
+  const [directoryLoading, setDirectoryLoading] = useState(() => !isFresh(directory));
   const [directoryError, setDirectoryError] = useState<string | null>(null);
-  const [directoryNextCursor, setDirectoryNextCursor] = useState<number | null>(null);
+  const [directoryNextCursor, setDirectoryNextCursor] = useState<number | null>(() => directory?.data.nextCursor ?? null);
   const [directoryLoadingMore, setDirectoryLoadingMore] = useState(false);
   const [directoryNextPageError, setDirectoryNextPageError] = useState<string | null>(null);
 
-  const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
-  const [month, setMonth] = useState<MonthSelection>(currentMonth);
-  const [monthHolidays, setMonthHolidays] = useState<readonly HolidayRow[]>([]);
-  const [holidayLoading, setHolidayLoading] = useState(true);
-  const [holidayError, setHolidayError] = useState<string | null>(null);
+  const [selectedStaffId, setSelectedStaffId] = useState<number | null>(selection?.staffId ?? null);
+  const [month, setMonth] = useState<MonthSelection>(() => selection?.month ?? currentMonth());
   const [holidayReload, setHolidayReload] = useState(0);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [searchKeyword, setSearchKeyword] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(selection?.status ?? 'all');
+  const [searchKeyword, setSearchKeyword] = useState(selection?.search ?? '');
 
-  const [calendarCache, setCalendarCache] = useState<ReadonlyMap<string, CalendarMonthCacheEntry>>(() => new Map());
-  const [orderSummariesByCaseNo, setOrderSummariesByCaseNo] = useState<Record<string, OrderSummaryInfo>>({});
+  const [calendarCache, setCalendarCache] = useState<ReadonlyMap<string, CalendarMonthCacheEntry>>(() => new Map(cache.months));
   const [availabilityRevision, setAvailabilityRevision] = useState(0);
   const [eligibilityCaseNo, setEligibilityCaseNo] = useState('');
   const [eligibilityState, setEligibilityState] = useState<EligibilityCollisionState>({ kind: 'idle' });
   const [collisionDrawerOpen, setCollisionDrawerOpen] = useState(false);
 
   // 🔮 洽談案件幽靈投影 (Ghost Projection) 狀態：預設沒有選擇案件
-  const [selectedCaseNo, setSelectedCaseNo] = useState('');
-  const [caseOptionsState, setCaseOptionsState] = useState<CalendarCaseOptionsState>({ kind: 'loading' });
+  const [selectedCaseNo, setSelectedCaseNo] = useState(selection?.caseNo ?? '');
   const [caseEligibilityRows, setCaseEligibilityRows] = useState<Record<number, CaseEligibilityRowState>>({});
   const [caseOptionsRetryGeneration, setCaseOptionsRetryGeneration] = useState(0);
   const [candidatePoolAdding, setCandidatePoolAdding] = useState<boolean>(false);
@@ -1534,7 +1577,13 @@ const SchedulingWorkbench: React.FC = () => {
   const calendarHeaderScrollRef = useRef<HTMLDivElement | null>(null);
   const calendarBodyScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingTodayScrollRef = useRef(false);
-  const [scrollLeftValue, setScrollLeftValue] = useState(0);
+  const restoreHorizontalScroll = useRef(selection?.scrollLeft);
+  const [scrollLeftValue, setScrollLeftValue] = useState(selection?.scrollLeft ?? 0);
+  useOperationsScroll(views, 'scheduling', true);
+  useLayoutEffect(() => {
+    cache.selection = { tab: activeTab, month, staffId: selectedStaffId, status: statusFilter,
+      search: searchKeyword, caseNo: selectedCaseNo, scrollLeft: scrollLeftValue };
+  }, [cache, activeTab, month, selectedStaffId, statusFilter, searchKeyword, selectedCaseNo, scrollLeftValue]);
   const [scrollMetrics, setScrollMetrics] = useState({
     max: GANTT_TOTAL_THIRDS * GANTT_THIRD_COL_WIDTH,
     thumbWidth: 160,
@@ -1543,8 +1592,6 @@ const SchedulingWorkbench: React.FC = () => {
     measuredZeroOverflow: false,
   });
   const calendarRequestsRef = useRef(new Map<string, { target: CalendarMonthTarget; controller: AbortController }>());
-  const caseOptionsControllerRef = useRef<AbortController | null>(null);
-  const assignmentOptionsByStaffRef = useRef(new Map<number, readonly StaffAssignmentOption[]>());
   const eligibilityControllerRef = useRef<AbortController | null>(null);
   const caseEligibilityControllerRef = useRef<AbortController | null>(null);
 
@@ -1554,8 +1601,17 @@ const SchedulingWorkbench: React.FC = () => {
       calendarRequestsRef.current.delete(key);
       request.controller.abort();
     }
-    setCalendarCache(current => new Map([...current].filter(([, entry]) => !matches(entry.target))));
-  }, []);
+    for (const [key, entry] of cache.months) {
+      if (matches(entry.target)) cache.months.set(key, { ...entry, invalidated: true });
+    }
+    setCalendarCache(current => {
+      const next = new Map(current);
+      for (const [key, entry] of current) {
+        if (matches(entry.target)) next.set(key, { ...entry, invalidated: true, retry: 'all' });
+      }
+      return next;
+    });
+  }, [cache]);
 
   useEffect(() => subscribeStaffAvailabilityChanges(staffId => {
     if (!staffList.some(staff => staff.id === staffId)) return;
@@ -1577,7 +1633,6 @@ const SchedulingWorkbench: React.FC = () => {
       mountedRef.current = false;
       directoryControllerRef.current?.abort();
       directoryPendingCursorRef.current = null;
-      caseOptionsControllerRef.current?.abort();
       eligibilityControllerRef.current?.abort();
       caseEligibilityControllerRef.current?.abort();
     };
@@ -1591,7 +1646,6 @@ const SchedulingWorkbench: React.FC = () => {
     setDirectoryLoading(true);
     setDirectoryError(null);
     setDirectoryNextPageError(null);
-    setDirectoryNextCursor(null);
     setDirectoryLoadingMore(false);
     directoryPendingCursorRef.current = null;
 
@@ -1605,20 +1659,25 @@ const SchedulingWorkbench: React.FC = () => {
       );
       if (!mountedRef.current || controller.signal.aborted) return;
       const sortedStaff = [...page.items].sort(compareStaffUnionNumbers);
+      cache.directory.write('active', { staff: sortedStaff, nextCursor: page.nextCursor }, cache.directory.revision);
       setStaffList(sortedStaff);
       setDirectoryNextCursor(page.nextCursor);
-      if (page.items.length > 0) {
-        setSelectedStaffId(sortedStaff[0].id);
-      }
+      setSelectedStaffId(current => sortedStaff.some(staff => staff.id === current) ? current : sortedStaff[0]?.id ?? null);
     } catch (error) {
       if (!mountedRef.current || controller.signal.aborted) return;
+      if (isViewAccessDenied(error)) {
+        cache.directory.forget('active');
+        setStaffList([]);
+        setDirectoryNextCursor(null);
+        setSelectedStaffId(null);
+      }
       setDirectoryError(error instanceof Error ? error.message : '服務人員摘要載入失敗');
     } finally {
       if (mountedRef.current && !controller.signal.aborted) {
         setDirectoryLoading(false);
       }
     }
-  }, []);
+  }, [cache]);
 
   const loadNextDirectoryPage = useCallback(async () => {
     const cursor = directoryNextCursor;
@@ -1637,11 +1696,11 @@ const SchedulingWorkbench: React.FC = () => {
         )
       );
       if (!mountedRef.current || controller.signal.aborted || directoryPendingCursorRef.current !== cursor) return;
-      setStaffList((current) => {
-        const byId = new Map(current.map((staff) => [staff.id, staff]));
-        page.items.forEach((staff) => byId.set(staff.id, staff));
-        return [...byId.values()].sort(compareStaffUnionNumbers);
-      });
+      const byId = new Map(staffList.map(staff => [staff.id, staff]));
+      page.items.forEach(staff => byId.set(staff.id, staff));
+      const staff = [...byId.values()].sort(compareStaffUnionNumbers);
+      cache.directory.write('active', { staff, nextCursor: page.nextCursor }, cache.directory.revision);
+      setStaffList(staff);
       setDirectoryNextCursor(page.nextCursor);
     } catch (error) {
       if (!mountedRef.current || controller.signal.aborted || directoryPendingCursorRef.current !== cursor) return;
@@ -1652,7 +1711,7 @@ const SchedulingWorkbench: React.FC = () => {
         setDirectoryLoadingMore(false);
       }
     }
-  }, [directoryNextCursor]);
+  }, [cache, directoryNextCursor, staffList]);
 
   useEffect(() => {
     const sentinel = directorySentinelRef.current;
@@ -1668,90 +1727,61 @@ const SchedulingWorkbench: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     queueMicrotask(() => {
-      if (!cancelled) void loadDirectory();
+      if (!cancelled && !isFresh(cache.directory.read('active'))) void loadDirectory();
     });
     return () => {
       cancelled = true;
       directoryControllerRef.current?.abort();
     };
-  }, [loadDirectory]);
+  }, [cache, loadDirectory]);
 
-  useEffect(() => {
-    caseOptionsControllerRef.current?.abort();
-    if (staffList.length === 0) {
-      setCaseOptionsState(directoryLoading ? { kind: 'loading' } : { kind: 'ready', options: [] });
-      return undefined;
-    }
-    const controller = new AbortController();
-    caseOptionsControllerRef.current = controller;
-    setCaseOptionsState({ kind: 'loading' });
-
-    const loadOptions = async () => {
-      try {
-        const [summaryPage, coreStagePage] = await Promise.all([
-          loadAllOrderSummaries(
-            ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
-            { page_size: 200, lifecycle_scope: 'unfinished' },
-            { signal: controller.signal },
-          ),
-          loadAllCoreStageTimelines(
-            { workbench_scope: 'in_progress', page_size: 200 },
-            { signal: controller.signal },
-          ),
-          loadStaffQueries(staffList, controller.signal, async (staff) => {
-            const cached = assignmentOptionsByStaffRef.current.get(staff.id);
-            if (cached) return cached;
-            const assignments = await staffAssignmentOptionsClient.getStaffAssignmentOptions(
-              staff.id,
-              { signal: controller.signal },
-            );
-            assignmentOptionsByStaffRef.current.set(staff.id, assignments);
-            return assignments;
-          }),
-        ]);
-        if (!mountedRef.current || controller.signal.aborted) return;
-        const nextOrderSummaries: Record<string, OrderSummaryInfo> = {};
-        summaryPage.items.forEach((summary) => {
-          nextOrderSummaries[summary.case_no] = {
-            clientName: summary.client_name,
-            startDate: summary.actual_start_date ?? summary.start_date,
-            endDate: summary.actual_end_date ?? summary.end_date,
-          };
-        });
-        setOrderSummariesByCaseNo(nextOrderSummaries);
-        const preDepositCaseNos = new Set(
-          coreStagePage.items
-            .filter((timeline) => (
-              timeline.current_core_stage_ordinal !== null
-              && timeline.current_core_stage_ordinal < 8
-            ))
-            .map((timeline) => timeline.case_no),
-        );
-        const options = summaryPage.items
-          .filter((summary) => (
-            preDepositCaseNos.has(summary.case_no)
-            && summary.start_date !== null
-            && summary.end_date !== null
-          ))
-          .map((summary) => ({
-            caseNo: summary.case_no,
-            label: `${summary.case_no}｜${summary.client_name}${summary.start_date ? `｜${summary.start_date}` : ''}`,
-            startDate: summary.start_date!,
-            endDate: summary.end_date!,
-          }));
-        setCaseOptionsState({ kind: 'ready', options });
-      } catch (error) {
-        if (!mountedRef.current || controller.signal.aborted) return;
-        setCaseOptionsState({
-          kind: 'error',
-          message: error instanceof Error ? error.message : '排查案件選項載入失敗',
-        });
-      }
-    };
-
-    queueMicrotask(() => void loadOptions());
-    return () => controller.abort();
-  }, [caseOptionsRetryGeneration, directoryLoading, staffList]);
+  const caseOptionsKey = staffList.map(staff => staff.id).join(',');
+  const readCaseOptions = useCallback(async (signal: AbortSignal): Promise<CalendarCaseOptions> => {
+    const [summaryPage, coreStagePage, assignmentPages] = await Promise.all([
+      loadAllOrderSummaries(
+        ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+        { page_size: 200, lifecycle_scope: 'unfinished' },
+        { signal },
+      ),
+      loadAllCoreStageTimelines(
+        { workbench_scope: 'in_progress', page_size: 200 },
+        { signal },
+      ),
+      loadStaffQueries(staffList, signal, staff => staffAssignmentOptionsClient.getStaffAssignmentOptions(staff.id, { signal })),
+    ]);
+    const summaries: Record<string, OrderSummaryInfo> = {};
+    summaryPage.items.forEach(summary => {
+      summaries[summary.case_no] = {
+        clientName: summary.client_name,
+        startDate: summary.actual_start_date ?? summary.start_date,
+        endDate: summary.actual_end_date ?? summary.end_date,
+      };
+    });
+    const preDepositCaseNos = new Set(coreStagePage.items
+      .filter(timeline => timeline.current_core_stage_ordinal !== null && timeline.current_core_stage_ordinal < 8)
+      .map(timeline => timeline.case_no));
+    const options = summaryPage.items.flatMap(summary =>
+      preDepositCaseNos.has(summary.case_no) && summary.start_date !== null && summary.end_date !== null
+        ? [{ caseNo: summary.case_no, label: `${summary.case_no}｜${summary.client_name}｜${summary.start_date}`,
+          startDate: summary.start_date, endDate: summary.end_date }]
+        : []);
+    const staffAssignments = new Map(staffList.map((staff, index) => [staff.id, assignmentPages[index]]));
+    return { options, summaries, staffAssignments };
+  }, [staffList]);
+  const caseOptions = useOperationsQuery({
+    cache: cache.options, queryKey: caseOptionsKey, read: readCaseOptions,
+    refreshKey: caseOptionsRetryGeneration, enabled: staffList.length > 0 && activeTab === 'calendar',
+  });
+  const caseOptionsData = caseOptions.snapshot?.data;
+  const caseOptionsState: CalendarCaseOptionsState = caseOptionsData
+    ? { kind: 'ready', options: caseOptionsData.options }
+    : staffList.length === 0 && !directoryLoading
+      ? { kind: 'ready', options: [] }
+      : caseOptions.status.kind === 'failed'
+        ? { kind: 'error', message: caseOptions.status.error instanceof Error
+          ? caseOptions.status.error.message : '排查案件選項載入失敗' }
+        : { kind: 'loading' };
+  const orderSummariesByCaseNo = caseOptionsData?.summaries ?? {};
 
   useEffect(() => {
     if (activeTab !== 'calendar') return;
@@ -1804,18 +1834,19 @@ const SchedulingWorkbench: React.FC = () => {
 
   const range = useMemo(() => monthRange(month), [month]);
 
-  useEffect(() => {
-    if (activeTab !== 'calendar') return;
-    const controller = new AbortController();
-    setMonthHolidays([]);
-    setHolidayLoading(true);
-    setHolidayError(null);
-    void holidayClient.query({ from_date: range.rangeStart, to_date: range.rangeEnd }, { signal: controller.signal })
-      .then(calendar => { if (!controller.signal.aborted) setMonthHolidays(calendar.holidays); })
-      .catch(error => { if (!controller.signal.aborted) setHolidayError(error instanceof Error ? error.message : '無法讀取國定假日。'); })
-      .finally(() => { if (!controller.signal.aborted) setHolidayLoading(false); });
-    return () => controller.abort();
-  }, [activeTab, range, holidayReload]);
+  const readHolidays = useCallback(async (signal: AbortSignal) => {
+    const result = await holidayClient.query({ from_date: range.rangeStart, to_date: range.rangeEnd }, { signal });
+    return result.holidays;
+  }, [range]);
+  const holidays = useOperationsQuery({
+    cache: cache.holidays, queryKey: range.rangeStart, read: readHolidays,
+    refreshKey: holidayReload, enabled: activeTab === 'calendar',
+  });
+  const monthHolidays = holidays.snapshot?.data ?? EMPTY_HOLIDAYS;
+  const holidayLoading = holidays.status.kind === 'loading';
+  const holidayError = holidays.status.kind === 'failed'
+    ? (holidays.status.error instanceof Error ? holidays.status.error.message : '無法讀取國定假日。')
+    : null;
 
   const queryEligibility = useCallback(async (overrideCaseNo?: string, overrideStaffId?: number | null) => {
     const caseNo = (overrideCaseNo ?? eligibilityCaseNo ?? selectedCaseNo).trim();
@@ -1933,6 +1964,11 @@ const SchedulingWorkbench: React.FC = () => {
 
   useLayoutEffect(() => {
     if (activeTab !== 'calendar') return;
+    if (restoreHorizontalScroll.current !== undefined) {
+      applyHorizontalScroll(restoreHorizontalScroll.current);
+      restoreHorizontalScroll.current = undefined;
+      return;
+    }
     if (!pendingTodayScrollRef.current) {
       scrollToMonthColumn(month.month);
       return;
@@ -1975,6 +2011,14 @@ const SchedulingWorkbench: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', refreshVisibleMonths);
   }, [activeTab, calendarTargets, invalidateCalendarMonths]);
 
+  const calendarAccessedAt = useMemo(() => Date.now(), [calendarTargets]);
+  const monthRefresh = (entry: CalendarMonthCacheEntry | undefined): 'all' | 'failed' | undefined => {
+    if (!entry || entry.invalidated) return 'all';
+    const expiredOnAccess = entry.checkedAt < calendarAccessedAt && calendarAccessedAt - entry.updatedAt >= ADMIN_VIEW_FRESH_MS;
+    if (expiredOnAccess) return 'all';
+    return entry.retry;
+  };
+
   useLayoutEffect(() => {
     const requests = calendarRequestsRef.current;
     for (const [key, request] of requests) {
@@ -1986,31 +2030,49 @@ const SchedulingWorkbench: React.FC = () => {
     for (const [key, target] of calendarTargets) {
       if (requests.size >= 3) break;
       const cached = calendarCache.get(key);
-      if (requests.has(key) || (cached && !cached.retry)) continue;
+      const refresh = monthRefresh(cached);
+      if (requests.has(key) || !refresh) continue;
       const request = { target, controller: new AbortController() };
       requests.set(key, request);
       queueMicrotask(() => {
         const { signal } = request.controller;
         if (signal.aborted) return;
-        void loadCalendarMonth(target, signal, cached?.result).then(result => {
+        const retryPartial = refresh === 'failed' ? cached?.result : undefined;
+        void loadCalendarMonth(target, signal, retryPartial).then(result => {
           if (signal.aborted || requests.get(key) !== request) return;
           requests.delete(key);
-          setCalendarCache(current => new Map(current).set(key, { target, result }));
+          const checkedAt = Date.now();
+          const failed = calendarMonthFailed(result);
+          const entry: CalendarMonthCacheEntry = { target, result, checkedAt, invalidated: false,
+            updatedAt: failed ? cached?.updatedAt ?? checkedAt : checkedAt,
+            previous: failed && cached && !(result.canonicalDenied && result.historicalDenied)
+              ? calendarMonthDisplay(cached) : undefined };
+          keepRecent(cache.months, key, entry, CALENDAR_MONTH_CACHE_LIMIT);
+          setCalendarCache(current => {
+            const next = new Map(current);
+            // Keep the visible months in the mounted calendar even when the
+            // number of staff exceeds the cross-route cache limit.
+            for (const storedKey of next.keys()) {
+              if (!calendarTargets.has(storedKey) && !cache.months.has(storedKey)) next.delete(storedKey);
+            }
+            return next.set(key, entry);
+          });
         });
       });
     }
-  }, [calendarCache, calendarTargets]);
+  }, [cache, calendarCache, calendarTargets, calendarAccessedAt]);
 
   const calendarMonthsByStaff = useMemo(() => {
     const entries = new Map<number, Map<number, CalendarMonthResult>>();
-    for (const { target, result } of calendarCache.values()) {
+    for (const entry of calendarCache.values()) {
+      const { target } = entry;
       if (target.year !== month.year) continue;
       let staffMonths = entries.get(target.staff.id);
       if (!staffMonths) {
         staffMonths = new Map();
         entries.set(target.staff.id, staffMonths);
       }
-      staffMonths.set(target.month, result);
+      staffMonths.set(target.month, calendarMonthDisplay(entry));
     }
     return entries;
   }, [calendarCache, month.year]);
@@ -2026,10 +2088,10 @@ const SchedulingWorkbench: React.FC = () => {
       if (keyword && !staff.displayName.toLowerCase().includes(keyword)
         && !(staff.unionNo ?? '').toLowerCase().includes(keyword)) return false;
       if (statusFilter === 'all') return true;
-      const state = getCalendarMonth(staff.id, diagnosticMonth);
-      return state.kind === 'settled' && state.row.kind === 'loaded' && matchesSchedulingFilter(state.row.row, statusFilter);
+      const state = calendarMonthsByStaff.get(staff.id)?.get(diagnosticMonth);
+      return state?.row.kind === 'loaded' && matchesSchedulingFilter(state.row.row, statusFilter);
     });
-  }, [staffList, searchKeyword, statusFilter, getCalendarMonth, diagnosticMonth]);
+  }, [staffList, searchKeyword, statusFilter, calendarMonthsByStaff, diagnosticMonth]);
 
   const selectedStaffMonth = selectedStaffId === null ? null : getCalendarMonth(selectedStaffId, diagnosticMonth);
   const selectedStaffRow = selectedStaffMonth?.kind === 'settled' ? selectedStaffMonth.row : null;
@@ -2040,10 +2102,16 @@ const SchedulingWorkbench: React.FC = () => {
     && !entry.monthly?.days.some(day => day.status !== 'available'));
   const failedCalendarStaff = new Set<number>();
   let calendarLoading = false;
+  let calendarUpdating = false;
+  let oldestFailedSnapshot: number | undefined;
   for (const [key, target] of calendarTargets) {
     const cached = calendarCache.get(key);
-    if (!cached || cached.retry) calendarLoading = true;
-    else if (calendarMonthFailed(cached.result)) failedCalendarStaff.add(target.staff.id);
+    if (!cached) calendarLoading = true;
+    else if (monthRefresh(cached)) calendarUpdating = true;
+    else if (calendarMonthFailed(cached.result)) {
+      failedCalendarStaff.add(target.staff.id);
+      if (cached.previous) oldestFailedSnapshot = Math.min(oldestFailedSnapshot ?? cached.updatedAt, cached.updatedAt);
+    }
   }
   const eligibilityResult = eligibilityState.kind === 'ready'
     ? eligibilityDisplay(eligibilityState.data)
@@ -2088,6 +2156,7 @@ const SchedulingWorkbench: React.FC = () => {
           end_date: endDate,
         },
       ]);
+      views.invalidateWorkbench();
       const staffObj = staffList.find((s) => s.id === selectedStaffId);
       setCandidatePoolSuccess(`🎉 已成功將 ${staffDisplayLabel(staffObj?.unionNo, staffObj?.displayName ?? '姓名未設定')} 加入案件 #${caseNo} 的候選人聯繫名冊！`);
     } catch (caught) {
@@ -2111,7 +2180,7 @@ const SchedulingWorkbench: React.FC = () => {
       const next = new Map(current);
       for (const key of calendarTargets.keys()) {
         const failed = current.get(key);
-        if (failed && calendarMonthFailed(failed.result)) next.set(key, { ...failed, retry: true });
+        if (failed && calendarMonthFailed(failed.result)) next.set(key, { ...failed, retry: 'failed' });
       }
       return next;
     });
@@ -2319,17 +2388,21 @@ const SchedulingWorkbench: React.FC = () => {
                   <option key={option.caseNo} value={option.caseNo}>{option.label}</option>
                 ))}
               </select>
-              {caseOptionsState.kind === 'error' && (
+              {caseOptionsData && caseOptions.status.kind === 'loading' && <span role="status">正在更新案件選項…</span>}
+              {caseOptions.status.kind === 'failed' && (
+                <>
+                {caseOptions.snapshot && <span role="alert">案件選項更新失敗，顯示 {viewTimestamp(caseOptions.snapshot.updatedAt)} 的選項。</span>}
                 <button
                   type="button"
                   className="btn-secondary-action"
                   onClick={() => {
-                    assignmentOptionsByStaffRef.current.clear();
+                    cache.options.invalidate();
                     setCaseOptionsRetryGeneration((generation) => generation + 1);
                   }}
                 >
                   重新載入案件選項
                 </button>
+                </>
               )}
             </div>
 
@@ -2407,18 +2480,20 @@ const SchedulingWorkbench: React.FC = () => {
 
           {/* Status Notifications */}
           {directoryLoading && (
-            <div className="scheduling-status" role="status">正在載入服務人員摘要…</div>
+            <div className="scheduling-status" role="status">{directory ? '正在更新服務人員摘要…' : '正在載入服務人員摘要…'}</div>
           )}
           {directoryError && (
             <div className="scheduling-status error" role="alert">
               {directoryError}
+              {directory && <span> 顯示 {viewTimestamp(directory.updatedAt)} 的服務人員摘要。</span>}
               <button onClick={() => void loadDirectory()}>重試摘要查詢</button>
             </div>
           )}
           {calendarLoading && (
             <div className="scheduling-status" role="status">正在載入排班月曆…</div>
           )}
-          {selectedRangeEmpty && !calendarLoading && failedCalendarStaff.size === 0 && (
+          {calendarUpdating && <div className="scheduling-status" role="status">正在更新排班月曆…</div>}
+          {selectedRangeEmpty && !calendarLoading && !calendarUpdating && failedCalendarStaff.size === 0 && (
             <div className="scheduling-status">目前範圍沒有排班資料。</div>
           )}
           {selectedStaffRow?.kind === 'terms_incomplete' && (
@@ -2426,12 +2501,16 @@ const SchedulingWorkbench: React.FC = () => {
               ⚠️ 該服務人員所屬訂單的每日服務時段尚未完整，請至本案客戶與訂單資料補齊。
             </div>
           )}
-          {holidayLoading && <p role="status">正在讀取當月國定假日…</p>}
-          {holidayError && <p role="alert">國定假日標示載入失敗：{holidayError} <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button></p>}
+          {holidayLoading && <p role="status">{holidays.snapshot ? '正在更新當月國定假日…' : '正在讀取當月國定假日…'}</p>}
+          {holidayError && <p role="alert">國定假日標示載入失敗：{holidayError}
+            {holidays.snapshot && <> 顯示 {viewTimestamp(holidays.snapshot.updatedAt)} 的資料。</>}
+            <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button>
+          </p>}
           {!holidayLoading && !holidayError && monthHolidays.length === 0 && <p className="scheduling-status">本月沒有已匯入的國定假日資料。</p>}
           {failedCalendarStaff.size > 0 && (
             <div className="scheduling-status error" role="alert">
               {`${failedCalendarStaff.size} 位服務人員的排班資料載入失敗，請查看各列狀態後重試。`}
+              {oldestFailedSnapshot !== undefined && <span> 部分顯示 {viewTimestamp(oldestFailedSnapshot)} 起的排班資料。</span>}
               <button
                 type="button"
                 data-control-id="scheduling.calendar.retry"
@@ -2548,7 +2627,7 @@ const SchedulingWorkbench: React.FC = () => {
                     if (entry.kind !== 'settled') continue;
                     const enrichmentContext: SpanEnrichmentContext = {
                       year: month.year, month: targetMonth, orderSummariesByCaseNo,
-                      staffAssignments: assignmentOptionsByStaffRef.current.get(staff.id) ?? [],
+                      staffAssignments: caseOptionsData?.staffAssignments.get(staff.id) ?? [],
                       projectionAssignments: entry.canonical?.assignments ?? [],
                     };
                     const merged = mergeStaffCalendarDays(entry.monthly, entry.canonical, staff.id, month.year, targetMonth);
@@ -2603,7 +2682,9 @@ const SchedulingWorkbench: React.FC = () => {
                           {Array.from({ length: endMonth - startMonth + 1 }, (_, offset) => {
                             const targetMonth = startMonth + offset;
                             const state = getCalendarMonth(staff.id, targetMonth);
-                            const text = state.kind === 'unloaded' ? '尚未載入'
+                            const cachedMonth = calendarCache.get(calendarMonthKey(staff.id, month.year, targetMonth));
+                            const text = cachedMonth && monthRefresh(cachedMonth) ? '更新中'
+                              : state.kind === 'unloaded' ? '尚未載入'
                               : state.kind === 'loading' ? '載入中'
                               : calendarMonthFailed(state) ? '載入失敗，可重試'
                               : (state.canonical?.days.some(day => day.entries.length > 0)
@@ -2781,7 +2862,7 @@ const SchedulingWorkbench: React.FC = () => {
       )}
 
       {activeTab === 'holidays' && (
-        <HolidayPolicyWorkspace />
+        <HolidayPolicyWorkspace onHolidayChanged={invalidateHolidays} />
       )}
       {/* 🔮 洽談檔期衝突檢測 暨 媒合排查 Slide-over Drawer (Unified wide size) */}
       <Drawer

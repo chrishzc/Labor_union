@@ -3,9 +3,9 @@
  * Description: 待辦看板案件統計元件：唯讀查詢三大補助資格六欄與非市民狀態統計。
  */
 import './WorkbenchCaseStatistics.css';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useAdminOperationsViews, useOperationsQuery, viewTimestamp } from '../pages/admin_operations_view_cache';
 import { caseStatisticsQueryClient } from '../api/reports/weekly_operations_report_query_client';
-import type { CaseStatisticsData } from '../api/reports/weekly_operations_report_schemas';
 
 const QUALIFICATION_LABELS = [
   '一般市民符合', '一般市民不符合',
@@ -20,33 +20,40 @@ const APPLICATION_STATUS_FIELDS = [
 const currentYear = () => Number(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Taipei', year: 'numeric' }).format(new Date()));
 const displayCount = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('zh-TW');
 
-export function WorkbenchCaseStatistics({ refreshKey = 0, caseCategory = 'subsidy' }: { refreshKey?: number; caseCategory?: 'subsidy' | 'non_citizen' }) {
+type WorkbenchViewCache = ReturnType<typeof useAdminOperationsViews>['workbench'];
+
+export function WorkbenchCaseStatistics({ refreshKey = 0, caseCategory = 'subsidy', viewCache }: {
+  refreshKey?: number;
+  caseCategory?: 'subsidy' | 'non_citizen';
+  viewCache?: WorkbenchViewCache;
+}) {
+  const views = useAdminOperationsViews();
+  const cache = viewCache ?? views.workbench;
   const nonCitizen = caseCategory === 'non_citizen';
   const titleId = `workbench-statistics-title-${caseCategory}`;
-  const [year, setYear] = useState(currentYear);
-  const [quarter, setQuarter] = useState(0);
-  const [month, setMonth] = useState(0);
-  const [availableYears, setAvailableYears] = useState<number[]>(() => [currentYear()]);
-  const [data, setData] = useState<CaseStatisticsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
+  const [year, setYear] = useState(() => cache.statisticsPeriods.get(caseCategory)?.year ?? currentYear());
+  const [quarter, setQuarter] = useState(() => cache.statisticsPeriods.get(caseCategory)?.quarter ?? 0);
+  const [month, setMonth] = useState(() => cache.statisticsPeriods.get(caseCategory)?.month ?? 0);
+  const [availableYears, setAvailableYears] = useState<number[]>(() => [year]);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setData(null);
-    setLoading(true);
-    setFailed(false);
-    void caseStatisticsQueryClient.query(year, quarter || null, month || null, { signal: controller.signal, caseCategory })
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        setData(result);
-        setAvailableYears(result.available_years);
-      })
-      .catch(() => { if (!controller.signal.aborted) setFailed(true); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [year, quarter, month, refreshKey, retryKey, caseCategory]);
+    cache.statisticsPeriods.set(caseCategory, { year, quarter, month });
+  }, [cache, caseCategory, year, quarter, month]);
+
+  const readStatistics = useCallback((signal: AbortSignal) =>
+    caseStatisticsQueryClient.query(year, quarter || null, month || null, { signal, caseCategory }),
+  [year, quarter, month, caseCategory]);
+  const stats = useOperationsQuery({
+    cache: cache.statistics,
+    queryKey: JSON.stringify([caseCategory, year, quarter, month]),
+    read: readStatistics,
+    refreshKey: refreshKey + retryKey,
+  });
+  const data = stats.snapshot?.data ?? null;
+  const loading = stats.status.kind === 'loading';
+  const failed = stats.status.kind === 'failed';
+  useEffect(() => { if (data) setAvailableYears(data.available_years); }, [data]);
 
   const firstMonth = month || (quarter ? (quarter - 1) * 3 + 1 : 1);
   const lastMonth = month || (quarter ? quarter * 3 : 12);
@@ -69,8 +76,11 @@ export function WorkbenchCaseStatistics({ refreshKey = 0, caseCategory = 'subsid
           <div className="workbench-statistics-title-line">
             <h2 id={titleId}>{nonCitizen ? '非市民案件統計' : '案件受理統計'}</h2>
             <span className="workbench-statistics-state" aria-live="polite">
-              {loading && '查詢中…'}
-              {failed && <button type="button" onClick={() => setRetryKey((value) => value + 1)}>統計讀取失敗・重試</button>}
+              {loading && (data ? '更新中…' : '查詢中…')}
+              {failed && <>
+                {stats.snapshot && <span>顯示 {viewTimestamp(stats.snapshot.updatedAt)} 的統計。</span>}
+                <button type="button" onClick={() => setRetryKey(value => value + 1)}>統計讀取失敗・重試</button>
+              </>}
               {!loading && !failed && summary && ((!nonCitizen && summary.unclassified_qualification_count > 0) || summary.other_status_count > 0) &&
                 <span title={`資格尚未分類 ${summary.unclassified_qualification_count} 件；其他或缺值狀態 ${summary.other_status_count} 件，均已納入案件總數。`}>部分資料待確認</span>}
             </span>

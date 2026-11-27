@@ -15,7 +15,7 @@
 - `infrastructure/file/contract_template_workbook.py`
 - `infrastructure/file/contract_template_images.py` — 原 XLSX raster anchor、尺寸與內嵌 bytes，供管理及 PDF renderer 共用。
 - `api/dependencies/contract_templates.py`
-- 正式路徑依[受控檔案正式規格 §8.2](../../../../../requirements/30_Controlled_File_Storage_NAS正式規格.md)：`CONTROLLED_FILE_STORAGE_ROOT/01_案件合約 (orders)/template-catalog`。查詢不建立目錄；保留既有明確指定的開發儲存路徑。
+- 正式路徑依[受控檔案正式規格 §8.2](../../../../../requirements/30_Controlled_File_Storage正式規格.md)：`CONTROLLED_FILE_STORAGE_ROOT/01_案件合約 (orders)/template-catalog`。查詢不建立目錄；保留既有明確指定的開發儲存路徑。
 - **待驗差異**：目前 Windows 管理器以 `APP_ENV=development` 啟動受管程序。程式碼顯示，在本機根目錄非 UNC 且仍有 `CONTRACT_DOCUMENT_ARCHIVE_ROOT` 時，模板解析可能選到舊目錄；兩值皆無時也可能選到專案內開發預設。這不是正式儲存契約；未核實部署設定或實際檔案位置。
 - `api/routes/contract_templates.py`
 - `api/schemas/contract_templates.py`

@@ -1,3 +1,56 @@
+const PHOTO_UPLOAD_TIMEOUT_MS = 120000;
+const MAX_CONCURRENT_PHOTO_UPLOADS = 3;
+const MAX_PHOTO_LONG_EDGE = 2048;
+const PHOTO_OPTIMIZE_THRESHOLD_BYTES = 1024 * 1024;
+const PHOTO_ENCODE_QUALITY = 0.85;
+const SUPPORTED_PHOTO_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+async function optimizePhotoForUpload(file) {
+  const mimeType = (file.type || "").toLowerCase();
+  if (
+    !SUPPORTED_PHOTO_MIMES.has(mimeType)
+    || file.size <= PHOTO_OPTIMIZE_THRESHOLD_BYTES
+    || typeof createImageBitmap !== "function"
+  ) {
+    return file;
+  }
+  let bitmap = null;
+  try {
+    bitmap = await createImageBitmap(file);
+    const maxDim = Math.max(bitmap.width, bitmap.height);
+    if (maxDim <= 0) return file;
+    const scale = maxDim > MAX_PHOTO_LONG_EDGE ? MAX_PHOTO_LONG_EDGE / maxDim : 1;
+    if (mimeType === "image/png" && scale === 1) return file;
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const quality = mimeType === "image/jpeg" || mimeType === "image/webp" ? PHOTO_ENCODE_QUALITY : undefined;
+    let blob = null;
+    if (typeof OffscreenCanvas !== "undefined") {
+      const canvas = new OffscreenCanvas(width, height);
+      const context = canvas.getContext("2d");
+      if (context && typeof canvas.convertToBlob === "function") {
+        context.drawImage(bitmap, 0, 0, width, height);
+        blob = await canvas.convertToBlob({ type: mimeType, quality });
+      }
+    } else if (typeof document !== "undefined") {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (context) {
+        context.drawImage(bitmap, 0, 0, width, height);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, quality));
+      }
+    }
+    if (!blob || blob.size <= 0 || blob.size >= file.size) return file;
+    return new File([blob], file.name, { type: blob.type || mimeType, lastModified: file.lastModified });
+  } catch {
+    return file;
+  } finally {
+    bitmap?.close?.();
+  }
+}
+
 function createProfilePhotoForm() {
   const templateSelect = document.getElementById("photo-template");
   const files = document.getElementById("photo-files");
@@ -102,6 +155,10 @@ function createProfilePhotoForm() {
       status.textContent = "每張申請最多 50 張照片，請減少檔案後再加入。";
       return;
     }
+    if (selected.some(file => file.size <= 0 || (file.type && !SUPPORTED_PHOTO_MIMES.has(file.type.toLowerCase())))) {
+      status.textContent = "只接受非空的 JPG、PNG 或 WebP 照片檔案。";
+      return;
+    }
     const replaces = template.category === "other"
       ? published.find(entry => entry.item.item_id === template.item_id)
       : undefined;
@@ -130,23 +187,55 @@ function createProfilePhotoForm() {
       if (new Set(replacements).size !== replacements.length) {
         throw new Error("同一張已發布照片在本次申請只能替換一次。");
       }
-      const contents = [];
-      for (const draft of drafts) {
-        if (!draft.fileId) {
-          const body = new FormData();
-          body.set("upload_id", draft.uploadId);
-          body.set("photograph", draft.file);
-          for (const [key, value] of Object.entries(identity)) body.set(key, value);
-          draft.fileId = await uploadProfilePhoto(body, draft.template.name);
+      const total = drafts.length;
+      if (total === 0) return [];
+      const contents = new Array(total);
+      const workers = Math.min(MAX_CONCURRENT_PHOTO_UPLOADS, total);
+      let nextIndex = 0;
+      let done = 0;
+      let hasError = false;
+      let firstError;
+      status.textContent = "正在上傳照片（0／" + total + "）…";
+
+      async function runWorker() {
+        while (!hasError) {
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= total) return;
+          const draft = drafts[index];
+          try {
+            if (!draft.fileId) {
+              const prepared = await optimizePhotoForUpload(draft.file);
+              const body = new FormData();
+              body.set("upload_id", draft.uploadId);
+              body.set("photograph", prepared);
+              for (const [key, value] of Object.entries(identity)) body.set(key, value);
+              draft.fileId = await uploadProfilePhoto(body, draft.template.name);
+            }
+            contents[index] = {
+              template_item_id: draft.template.item_id,
+              template_version: draft.template.version,
+              original_file_id: draft.fileId,
+              expiry_date: draft.expiry || null,
+              ...(draft.replaces ? { entry_id: draft.replaces.entry_id, entry_version: draft.replaces.version } : {}),
+            };
+            done += 1;
+            if (!hasError) {
+              status.textContent = "正在上傳照片（" + done + "／" + total + "）…";
+            }
+          } catch (error) {
+            if (!hasError) {
+              hasError = true;
+              firstError = error;
+            }
+            return;
+          }
         }
-        contents.push({
-          template_item_id: draft.template.item_id,
-          template_version: draft.template.version,
-          original_file_id: draft.fileId,
-          expiry_date: draft.expiry || null,
-          ...(draft.replaces ? { entry_id: draft.replaces.entry_id, entry_version: draft.replaces.version } : {}),
-        });
       }
+
+      await Promise.allSettled(Array.from({ length: workers }, () => runWorker()));
+      status.textContent = "";
+      if (hasError) throw firstError;
       return contents;
     },
     clear() {
@@ -159,12 +248,19 @@ function createProfilePhotoForm() {
 
 async function uploadProfilePhoto(body, itemName) {
   let response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PHOTO_UPLOAD_TIMEOUT_MS);
   try {
     response = await fetch("/api/v1/line/staff-self-service/profile-change/photos", {
-      method: "POST", cache: "no-store", body,
+      method: "POST", cache: "no-store", body, signal: controller.signal,
     });
-  } catch {
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      throw new Error(itemName + "的照片上傳逾時。草稿已保留，請稍後再送出。");
+    }
     throw new Error(itemName + "的照片上傳連線中斷。草稿已保留，請檢查網路後再送出。");
+  } finally {
+    clearTimeout(timer);
   }
   const result = await response.json().catch(() => null);
   const message = result?.detail?.error?.message;

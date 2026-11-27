@@ -94,23 +94,37 @@ beforeEach(() => {
 afterEach(() => sessionClient.clearSession());
 
 it('工作台用一次儲存建立正式班表並刷新指派', async () => {
+  const requestedStartDate = '2026-09-13';
+  const currentStartDate = () => schedulingVersion === 1 ? requestedStartDate : dates[0];
+  calls.detail.mockImplementation(async () => ({ case_no: CASE, client_id: 88, client_name: '測試客戶', staff_name: null,
+    order_status: '訂單成立', actual_start_date: currentStartDate(), start_date: '2026-09-21', service_days: 3, service_hours_per_day: 4 }));
+  calls.start.mockImplementation(async () => ({ case_no: CASE, current_actual_start_date: currentStartDate(), planned_start_date: '2026-09-21',
+    service_data_locked: false, order_version: 3, scheduling_version: schedulingVersion,
+    scheduling_generation: schedulingVersion, has_formal_assignments: schedulingVersion > 1 }));
   const observed = vi.fn();
   render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} onObserved={observed} />);
   const save = await screen.findByRole('button', { name: '儲存班表' });
   await waitFor(() => expect(save).toBeEnabled());
   expect(screen.getByText('承接月嫂')).toHaveTextContent('既定月嫂');
+  expect(screen.getByText(`實際開始日將儲存為 ${dates[0]}。`)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '建立正式安排' })).not.toBeInTheDocument();
 
   fireEvent.click(save);
   await screen.findByText('班表已儲存並回讀正式排班。');
-  await screen.findByText('1 段');
   expect(calls.saveSchedule).toHaveBeenCalledWith(CASE, expect.objectContaining({
+    actual_start_date: requestedStartDate,
     expected_confirmed_version: 2, expected_scheduling_version: 1, segments: [{ staff_id: 12, service_dates: dates }],
   }), expect.anything());
   expect(calls.applyDates).not.toHaveBeenCalled();
-  const assignmentDetails = screen.getByLabelText('第 1 段正式指派');
-  expect(within(assignmentDetails).getByText(`${dates[0]} ~ ${dates[2]}`)).toBeInTheDocument();
-  expect(within(assignmentDetails).getByText('3 天')).toBeInTheDocument();
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '案件摘要' })).getByText('實際開始').parentElement)
+    .toHaveTextContent(dates[0]));
+  const summary = within(screen.getByLabelText('此次選定服務日期摘要'));
+  expect(summary.getByText(dates[0])).toBeVisible();
+  expect(summary.getByText(dates[2])).toBeVisible();
+  expect(summary.getByText('3 / 3 天')).toBeVisible();
+  for (const date of dates) {
+    expect(screen.getByRole('button', { name: `服務日期 ${date}` })).toBeDisabled();
+  }
   expect(observed).toHaveBeenCalledTimes(1);
 });
 

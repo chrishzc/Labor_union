@@ -311,6 +311,7 @@ export async function applyHistoricalArrangement(
 
 const OfficeScheduleQuote = z.object({
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  actual_start_date: z.iso.date(),
   staff_entitlements: z.array(z.object({ staff_id: z.number().int(), amount_ntd: z.number().int(),
     funding: z.array(z.object({ kind: z.enum(['client', 'subsidy']), amount_ntd: z.number().int() })) })),
 });

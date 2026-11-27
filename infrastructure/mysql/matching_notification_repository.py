@@ -27,6 +27,7 @@ from infrastructure.mysql.line_repository_support import database_utc, aware_utc
 from infrastructure.mysql.replacement_matching_query import candidate_matching_blocker
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
+from subsystems.line.signing_reminder_dismissal import SIGNING_REMINDER, SIGNING_REMINDER_DISMISSED
 from subsystems.scheduling.matching_notification_contracts import (
     CustomerRecommendationFollowup,
     ManualCustomerProfilesEvidence,
@@ -589,11 +590,29 @@ class MySqlMatchingNotificationRepository:
             rows = tuple(cursor.fetchall() or ())
         return tuple(CustomerRecommendationFollowup(
             case_no=str(row["case_no"]), plan_id=int(row["plan_id"]),
-            status="response_failed" if row["response_failure"] else "awaiting_signing" if row["decision"] == "accepted" else "reply_reminder",
+            status="awaiting_signing" if row["decision"] == "accepted" else "response_failed" if row["response_failure"] else "reply_reminder",
             reminder_due_at=(aware_utc(row["sent_at_utc"]) + timedelta(days=7)) if row.get("sent_at_utc") else None,
             ticket_id=None,
-            failure_reason=row["response_failure"],
+            failure_reason=None if row["decision"] == "accepted" else row["response_failure"],
+            signing_reminder_occurrence=(row["signing_reminder_occurrence"] if row["decision"] == "accepted" else None),
         ) for row in rows)
+
+    def lock_recommendation_plan(self, plan_id: int) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT p.id FROM caregiver_matching_plans p JOIN orders ON orders.case_no=p.case_no "
+                "WHERE p.id=%s FOR UPDATE", (plan_id,),
+            )
+            cursor.fetchone()
+
+    def current_signing_reminder(self, plan_id: int, occurrence: str) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 " + _CUSTOMER_FOLLOWUPS_SOURCE_SQL
+                + " AND followup.plan_id=%s AND followup.signing_reminder_occurrence=%s AND followup.decision='accepted'",
+                (None, plan_id, occurrence),
+            )
+            return cursor.fetchone() is not None
 
     def _plan_row(self, cursor, case_no, plan_id, lock):
         suffix = " FOR UPDATE" if lock else ""
@@ -1109,7 +1128,7 @@ WHERE segment.plan_id=%s ORDER BY segment.segment_order"""
 __all__ = ["MySqlMatchingNotificationRepository"]
 
 
-_CUSTOMER_FOLLOWUPS_SOURCE_SQL = """FROM (
+_CUSTOMER_FOLLOWUPS_SOURCE_SQL = f"""FROM (
 SELECT p.id AS plan_id,p.case_no,
 (SELECT CASE WHEN inbox.processing_status='terminal_failed' THEN
   CASE WHEN inbox.error_message IN ('automatic_waiting_deposit_occupancy_conflict','正式方案中的月嫂目前檔期已有衝突，請重新確認。')
@@ -1130,27 +1149,26 @@ AND SHA2(SUBSTRING_INDEX(SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(inbox.payload
 WHERE interaction.plan_id=p.id AND interaction.action_scope='customer_decision'
 AND interaction.interaction_status<>'revoked'
 ORDER BY inbox.id DESC LIMIT 1) AS response_failure,
-COALESCE((SELECT response_value FROM matching_response_events r
-WHERE r.plan_id=p.id AND r.response_type='customer_decision'
-ORDER BY r.occurred_at_utc DESC,r.id DESC LIMIT 1),'pending') AS decision,
+COALESCE(latest_decision.response_value,'pending') AS decision,
+SHA2(CONCAT(p.id, ':', latest_decision.id, ':', COALESCE(orders.contract_identity,'')),256) AS signing_reminder_occurrence,
 (SELECT MAX(task.sent_at_utc) FROM matching_notification_intents i
 JOIN line_delivery_tasks task ON task.id=i.delivery_task_id
 WHERE i.plan_id=p.id AND i.notification_kind='customer_profiles'
 AND task.processing_status='sent') AS sent_at_utc,
-(EXISTS(SELECT 1 FROM contract_signing_events e
-JOIN contract_document_versions d ON d.id=e.document_version_id
-WHERE e.matching_plan_id=p.id AND e.event_type='signed_received'
-AND d.document_scope='client_contract')
-AND NOT EXISTS(SELECT 1 FROM caregiver_matching_plan_segments s
-WHERE s.plan_id=p.id AND NOT EXISTS(SELECT 1 FROM contract_signing_events e
-JOIN contract_document_versions d ON d.id=e.document_version_id
-WHERE e.matching_segment_id=s.id AND e.event_type='signed_received'
-AND d.document_scope='staff_segment'))) AS signing_complete
+EXISTS(SELECT 1 FROM order_contract_flow_events flow
+WHERE flow.case_no=orders.case_no AND flow.event_type='contract_completed'
+AND flow.contract_identity=orders.contract_identity) AS signing_complete
 FROM caregiver_matching_plans p JOIN orders ON orders.case_no=p.case_no
+LEFT JOIN matching_response_events latest_decision ON latest_decision.id=(
+SELECT r.id FROM matching_response_events r WHERE r.plan_id=p.id AND r.response_type='customer_decision'
+ORDER BY r.occurred_at_utc DESC,r.id DESC LIMIT 1)
 WHERE p.is_active=1 AND p.status IN ('proposed','accepted')
 AND orders.status IN ('洽談中','訂單成立')
-) followup WHERE (response_failure IS NOT NULL AND decision IN ('pending','contact_requested'))
-OR (decision='accepted' AND signing_complete=0)
-OR (decision IN ('pending','contact_requested') AND sent_at_utc<=%s)"""
+) followup WHERE ((response_failure IS NOT NULL AND decision IN ('pending','contact_requested'))
+OR (decision='accepted' AND signing_complete=0 AND NOT EXISTS (
+SELECT 1 FROM line_domain_audit_events dismissal
+WHERE dismissal.aggregate_type='{SIGNING_REMINDER}' AND dismissal.aggregate_identity=followup.signing_reminder_occurrence
+AND dismissal.action='{SIGNING_REMINDER_DISMISSED}'))
+OR (decision IN ('pending','contact_requested') AND sent_at_utc<=%s))"""
 
 _CUSTOMER_FOLLOWUPS_SQL = "SELECT * " + _CUSTOMER_FOLLOWUPS_SOURCE_SQL + " ORDER BY plan_id LIMIT %s OFFSET %s"

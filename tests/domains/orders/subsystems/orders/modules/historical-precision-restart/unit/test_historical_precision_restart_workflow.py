@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import date, datetime
 from types import SimpleNamespace
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -19,6 +20,7 @@ from subsystems.orders.historical_precision_restart_workflow import (
     HistoricalPrecisionRestartWorkflow,
     StoredHistoricalPrecisionRestartReceipt,
 )
+from shared_kernel.errors import ErrorCategory
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 
 
@@ -122,8 +124,25 @@ def _workflow(repository):
     )
 
 
-def test_query_reports_restart_to_normal_flow_without_dates_or_money_impacts():
-    result = _workflow(_Repository()).query("CASE-1")
+@pytest.mark.parametrize("has_repeated_evidence", [False, True])
+def test_query_reports_restart_to_normal_flow_without_dates_or_money_impacts(
+    has_repeated_evidence: bool,
+) -> None:
+    repository = _Repository()
+    if has_repeated_evidence:
+        assignment = repository.context.facts.assignments[0]
+        repository.context = replace(
+            repository.context,
+            facts=replace(
+                repository.context.facts,
+                assignments=(
+                    assignment,
+                    replace(assignment, assignment_identity="assignment:10", source_assignment_id=10, sequence=2),
+                ),
+            ),
+        )
+
+    result = _workflow(repository).query("CASE-1")
 
     assert result.domain.blockers == ()
     assert result.domain.target_status is OrderLifecycleStatus.ESTABLISHED
@@ -132,6 +151,71 @@ def test_query_reports_restart_to_normal_flow_without_dates_or_money_impacts():
     assert result.client_finance_impact is None
     assert result.payroll_impact is None
     assert result.lifecycle_impact.actual_end_date is None
+
+
+@pytest.mark.parametrize("operation", ["query", "preview"])
+@pytest.mark.parametrize("staff_ids", [(), (3, 4)], ids=["missing", "ambiguous"])
+def test_restart_requires_unique_original_caregiver(
+    operation: Literal["query", "preview"], staff_ids: tuple[int, ...],
+) -> None:
+    repository = _Repository()
+    repository.context = replace(
+        repository.context,
+        facts=replace(
+            repository.context.facts,
+            assignments=tuple(
+                HistoricalPrecisionRestartAssignmentFacts(
+                    f"assignment:{source_id}", source_id, staff_id, f"月嫂 {staff_id}", sequence,
+                )
+                for sequence, (source_id, staff_id) in enumerate(zip((9, 10), staff_ids), start=1)
+            ),
+        ),
+    )
+    workflow = _workflow(repository)
+
+    with pytest.raises(HistoricalPrecisionRestartError) as caught:
+        if operation == "query":
+            workflow.query("CASE-1")
+        else:
+            workflow.preview(HistoricalPrecisionRestartIntent("CASE-1"))
+
+    assert caught.value.error.category is ErrorCategory.DOMAIN_BLOCKED
+    assert caught.value.error.code == "historical_order_staff_not_unique"
+    assert caught.value.error.domain_blockers == ("historical_order_staff_not_unique",)
+    assert "核對歷史採納資料" in caught.value.error.message
+
+
+def test_apply_blocks_when_original_caregiver_evidence_disappears_after_preview() -> None:
+    repository = _PersistingRepository("CASE-1")
+    unit = _CommittedUnit()
+    workflow = HistoricalPrecisionRestartWorkflow(
+        repository,
+        lambda: unit,
+        lambda: datetime(2026, 9, 1, tzinfo=ZoneInfo("Asia/Taipei")),
+    )
+    intent = HistoricalPrecisionRestartIntent("CASE-1")
+    preview = workflow.preview(intent)
+    repository.context = replace(
+        repository.context,
+        facts=replace(repository.context.facts, assignments=()),
+    )
+    request = ApplyHistoricalPrecisionRestart(
+        intent,
+        1, 2, 0, None,
+        preview.fingerprint,
+        IdempotencyKey("restart-caregiver-evidence-race"),
+        ActorContext("operator"),
+        "重啟正常流程",
+        CorrelationId("restart-caregiver-evidence-race"),
+    )
+
+    with pytest.raises(HistoricalPrecisionRestartError) as caught:
+        workflow.apply(request)
+
+    assert caught.value.error.category is ErrorCategory.DOMAIN_BLOCKED
+    assert caught.value.error.code == "historical_order_staff_not_unique"
+    assert repository.persist_count == 0
+    assert unit.commits == 0
 
 
 def test_preview_fails_closed_when_historical_accounting_already_exists():

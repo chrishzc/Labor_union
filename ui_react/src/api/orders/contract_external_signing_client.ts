@@ -6,7 +6,7 @@ import { applicationFetch } from '../shared/application_fetch';
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
-import { ADMIN_SESSION_UNAUTHORIZED_EVENT, transport, type RequestOptions } from '../shared/transport';
+import { ADMIN_SESSION_UNAUTHORIZED_EVENT, transport, UPLOAD_TIMEOUT_MS, type RequestOptions } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
 
 const SessionIdSchema = z.string().regex(/^ces_[0-9a-f]{32}$/);
@@ -484,7 +484,7 @@ export const contractExternalSigningClient = {
       form.append('staff', row.file);
     }
     return decodePayload(envelope(SignedArchiveSchema), await transport.post(
-      basePath(caseNo) + '/signed-archive', form, stagingCommandOptions(identity),
+      basePath(caseNo) + '/signed-archive', form, { ...stagingCommandOptions(identity), timeoutMs: UPLOAD_TIMEOUT_MS },
     )).data.files;
   },
 
@@ -683,7 +683,7 @@ export const contractExternalSigningClient = {
     if (target.matching_segment_id !== null) form.set('matching_segment_id', String(target.matching_segment_id));
     return decodePayload(
       envelope(StagingEnvelopeDataSchema),
-      await transport.post(`${basePath(caseNo)}/final-document/staging`, form, stagingCommandOptions(identity)),
+      await transport.post(`${basePath(caseNo)}/final-document/staging`, form, { ...stagingCommandOptions(identity), timeoutMs: UPLOAD_TIMEOUT_MS }),
     ).data;
   },
 

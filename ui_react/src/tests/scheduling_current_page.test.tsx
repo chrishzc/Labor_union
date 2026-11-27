@@ -18,6 +18,7 @@ import { staffLeaveInboxClient } from '../api/scheduling/staff_leave_inbox_clien
 import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { sessionClient } from '../api/auth/session_client';
 import { SchedulingPage, taipeiCalendarDate } from '../pages/SchedulingPage';
+import { HOLIDAY_PREVIEW, HOLIDAY_RECEIPT } from './fixtures/holiday_contract_fixtures';
 import {
   SCHEDULING_PROJECTION_EMPTY,
   SCHEDULING_PROJECTION_READY,
@@ -170,28 +171,50 @@ describe('SchedulingPage query-only presentation', () => {
     expect(new URLSearchParams(window.location.hash.split('?')[1]).get('work')).toBe('service');
   });
 
-  it('排班月曆讀取當月假日，返回分頁後更新標示且不改正式排班', async () => {
+  it('返回排班月曆沿用近期假日，政策儲存後重讀受影響月份且不改正式排班', async () => {
+    const holidayDate = '2026-08-01';
     let holidayName = '測試國定假日';
     vi.mocked(holidayClient.query).mockImplementation(async query => {
       const horizon = 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate };
-      return { planning_horizon: horizon, source_identity: 'test', calendar_version: 'a'.repeat(64), holidays: [{ holiday_date: horizon.from_date, holiday_name: holidayName, is_double_pay_default: false }] };
+      return { planning_horizon: horizon, source_identity: 'test', calendar_version: 'a'.repeat(64), holidays: [{ holiday_date: holidayDate, holiday_name: holidayName, is_double_pay_default: false }] };
     });
-    const preview = vi.spyOn(holidayClient, 'preview');
-    const apply = vi.spyOn(holidayClient, 'apply');
+    vi.spyOn(holidayClient, 'accountingResults').mockResolvedValue([]);
+    const preview = vi.spyOn(holidayClient, 'preview').mockImplementation(async request => ({
+      ...HOLIDAY_PREVIEW,
+      command: { ...HOLIDAY_PREVIEW.command, ...request, holiday_date: holidayDate },
+    }));
+    const apply = vi.spyOn(holidayClient, 'apply').mockImplementation(async request => {
+      holidayName = request.holiday_name ?? '';
+      return { ...HOLIDAY_RECEIPT, holiday_date: holidayDate };
+    });
+    const monthReads = () => vi.mocked(holidayClient.query).mock.calls.filter(([query]) =>
+      ('from_date' in query ? query.from_date : query.fromDate) === holidayDate,
+    ).length;
     render(<SchedulingPage />);
     await waitFor(() => expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('測試國定假日'));
-    await waitFor(() => expect(document.querySelector('.gantt-spans-layer .span-active')).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('.gantt-spans-layer .span-active')).toHaveTextContent('排班客戶甲'));
     const spans = document.querySelector('.gantt-spans-layer')?.innerHTML;
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     await screen.findByRole('region', { name: '國定假日日曆' });
     expect(screen.queryByText(/預設雙薪|一般薪資/)).not.toBeInTheDocument();
-    expect(holidayClient.query).toHaveBeenCalledTimes(2);
-    holidayName = '匯入後的假日';
     fireEvent.click(screen.getByRole('button', { name: /排班月曆/ }));
-    await waitFor(() => expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('匯入後的假日'));
-    expect(document.querySelector('.gantt-spans-layer')?.innerHTML).toBe(spans);
+    expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('測試國定假日');
+    await act(async () => {});
+    expect(monthReads()).toBe(1);
     expect(preview).not.toHaveBeenCalled();
     expect(apply).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    const policy = await screen.findByRole('region', { name: '國定假日日曆' });
+    fireEvent.click(within(policy).getByRole('button', { name: /編輯/ }));
+    fireEvent.change(screen.getByLabelText('國定假日名稱'), { target: { value: '更新後的假日' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存國定假日變更' }));
+    await screen.findByText('已重新查詢並確認最新國定假日政策。');
+    expect(apply).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: /排班月曆/ }));
+    await waitFor(() => expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('更新後的假日'));
+    expect(monthReads()).toBe(2);
+    expect(document.querySelector('.gantt-spans-layer')?.innerHTML).toBe(spans);
   });
 
   it('人員清單為空仍顯示完整日期列與國定假日', async () => {

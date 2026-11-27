@@ -338,6 +338,7 @@ def _order_update_values(command) -> tuple[object, ...]:
         terms.service_time.end_time,
         terms.service_time.end_day_offset,
         command.actual_end_date,
+        command.actual_start_date,
         command.lifecycle_status.value,
         command.resulting_order_version,
         command.case_no,
@@ -550,6 +551,7 @@ _ORDER_UPDATE_SQL = (
     "UPDATE orders SET start_date=%s,end_date=%s,service_days=%s,"
     "service_hours_per_day=%s,requires_cooking=%s,floor_fee=%s,service_start_time=%s,"
     "service_end_time=%s,service_end_day_offset=%s,actual_end_date=%s,"
+    "actual_start_date=COALESCE(%s,actual_start_date),"
     "status=%s,lifecycle_version=%s "
     "WHERE case_no=%s AND lifecycle_version=%s"
 )

@@ -199,6 +199,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
     def _load_assignment_schedule_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
             "SELECT s.assignment_id,a.case_no,s.staff_id,s.work_date,o.actual_start_date,"
+            "a.assigned_start_date,a.assigned_end_date,"
             "o.service_start_time,o.service_end_time,o.service_end_day_offset FROM staff_schedule s "
             "INNER JOIN case_staff_assignments a ON a.id = s.assignment_id "
             "JOIN orders o ON o.case_no=a.case_no "

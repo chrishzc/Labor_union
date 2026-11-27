@@ -71,9 +71,10 @@ class MySqlServiceDateConfirmationRepository:
                 cursor, case_no, int(order["service_days"]), lock=lock
             )
             first_schedule_basis_dates = ()
+            first_schedule_adjusted_days = ()
             if current and not effective_dates and restart_generation is not None:
                 from infrastructure.mysql.service_date_adjustment_repository import load_first_schedule_dates
-                baseline, _ = load_first_schedule_dates(cursor, case_no, lock=lock)
+                baseline, first_schedule_adjusted_days = load_first_schedule_dates(cursor, case_no, lock=lock)
                 first_schedule_basis_dates = tuple(day.service_date for day in baseline)
         return ServiceDateConfirmationFacts(
             str(order["case_no"]),
@@ -90,6 +91,7 @@ class MySqlServiceDateConfirmationRepository:
             int(current["order_version"]) if current else None,
             effective_service_dates=effective_dates,
             first_schedule_basis_dates=first_schedule_basis_dates,
+            first_schedule_adjusted_days=first_schedule_adjusted_days,
         )
 
     def load_service_dates(
@@ -146,6 +148,7 @@ class MySqlServiceDateConfirmationRepository:
 
     def validate_arrangement_availability(self, candidate, *, lock: bool) -> None:
         staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
+        first_service_date = min(day for item in candidate.assignments for day in item.service_dates)
         with self._connection.cursor() as cursor:
             placeholders = ",".join("%s" for _ in staff_ids)
             cursor.execute(
@@ -161,7 +164,9 @@ class MySqlServiceDateConfirmationRepository:
                 for row in rows
             ):
                 raise ValueError("historical_arrangement_staff_ineligible_blocked")
-            occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock)
+            occupied, _ = load_occupancy_snapshot(
+                cursor, staff_ids, candidate.case_no, lock=lock, actual_start_date=first_service_date,
+            )
             service_time = load_case_service_time(cursor, candidate.case_no, lock=lock)
         if first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied):
             raise ValueError("historical_arrangement_occupancy_conflict")

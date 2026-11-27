@@ -9,6 +9,7 @@ import hashlib
 import os
 from datetime import timedelta
 from pathlib import Path
+import uuid
 
 import pytest
 
@@ -333,3 +334,47 @@ def test_staging_rejects_noncanonical_idempotency_keys(
 
     assert captured.value.code == "controlled_file_staging_idempotency_invalid"
     assert not captured.value.retryable
+
+
+def test_verify_staged_checks_valid_finalized_expired_missing_and_corrupted_payloads(tmp_path: Path) -> None:
+    current = [200.0]
+    storage = FileSystemControlledFileStorage(tmp_path, clock=lambda: current[0])
+    content = b"stream-verify-contract-bytes" * 10
+    digest = hashlib.sha256(content).hexdigest()
+    staged = storage.put_staged(
+        idempotency_key="controlled-file:verify-001",
+        filename="contract.pdf",
+        mime_type="application/pdf",
+        content=content,
+    )
+
+    verified = storage.verify_staged(staged.staging_id, expected_sha256=digest)
+    assert verified.staging_id == staged.staging_id
+    assert verified.size_bytes == len(content)
+    assert verified.sha256_digest == digest
+
+    storage.finalize_staged(staged.staging_id, expected_sha256=digest, object_reference="orders/CASE-V/final.pdf")
+    finalized_verified = storage.verify_staged(staged.staging_id, expected_sha256=digest)
+    assert finalized_verified.sha256_digest == digest
+
+    with pytest.raises(ControlledFileStorageError) as missing:
+        storage.verify_staged(f"cfs_{uuid.uuid4().hex}", expected_sha256=digest)
+    assert missing.value.code == "controlled_file_staging_not_found"
+
+    # Corrupt finalized payload keeping exact size
+    final_path = tmp_path / "orders/CASE-V/final.pdf"
+    final_path.write_bytes(b"X" * len(content))
+    with pytest.raises(ControlledFileStorageError) as mismatch:
+        storage.verify_staged(staged.staging_id, expected_sha256=digest)
+    assert mismatch.value.code == "controlled_file_staging_digest_mismatch"
+
+    expired_stage = storage.put_staged(
+        idempotency_key="controlled-file:verify-002",
+        filename="contract2.pdf",
+        mime_type="application/pdf",
+        content=content,
+    )
+    current[0] += 25 * 60 * 60
+    with pytest.raises(ControlledFileStorageError) as expired:
+        storage.verify_staged(expired_stage.staging_id, expected_sha256=digest)
+    assert expired.value.code == "controlled_file_staging_expired"

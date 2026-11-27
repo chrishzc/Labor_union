@@ -541,3 +541,37 @@ def test_stage_persists_metadata_in_one_outer_uow_and_download_hides_locator() -
     assert downloaded.object_reference == FILE_ID
     assert downloaded.content == CONTENT
     assert "storage_locator" not in repr(downloaded)
+
+
+def test_workflow_prefers_verify_staged_without_reading_payload_bytes() -> None:
+    from subsystems.controlled_files.contracts import ControlledFileStagingVerification
+
+    class VerifyOnlyStorage(FakeStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.verifies = 0
+            self.next_digest = DIGEST
+
+        def read_staged(self, staging_id: str, *, expected_sha256: str):
+            raise AssertionError("read_staged should not be called when verify_staged is available")
+
+        def verify_staged(self, staging_id: str, *, expected_sha256: str):
+            self.verifies += 1
+            return ControlledFileStagingVerification(
+                staging_id=staging_id,
+                size_bytes=len(self.content),
+                sha256_digest=self.next_digest,
+                expires_at=NOW + timedelta(hours=24),
+            )
+
+    storage = VerifyOnlyStorage()
+    workflow, _, _, _ = _workflow(storage=storage)
+    preview = workflow.preview(_intent())
+    receipt = workflow.apply(_command(preview))
+    assert storage.verifies == 2
+    assert receipt.outcome is ControlledFileApplyOutcome.CREATED
+
+    storage.next_digest = "0" * 64
+    with pytest.raises(ControlledFileWorkflowError) as captured:
+        workflow.preview(_intent())
+    assert captured.value.code == "controlled_file_staging_drift"

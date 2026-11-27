@@ -1,5 +1,5 @@
 import type { MatchingAvailability } from '../api/scheduling/matching_candidate_workflow_client';
-import { candidateDateStatus } from '../adapters/scheduling/candidate_date_status';
+import { candidateAssignmentDateRange, candidateDateStatus } from '../adapters/scheduling/candidate_date_status';
 import { calendarServicePeriod } from '../../../line/static/service-date-calendar.js';
 
 const reasonLabels: Record<string, string> = {
@@ -27,12 +27,15 @@ export function CandidateAvailabilityNotice({ availability, staffId, showAdvisor
   </p>;
   const hasConflict = candidateDateStatus(option, conflicts) === 'conflict';
   const datesByReason = new Map<string, Set<string>>();
-  for (const { reason_code, work_date, case_no, service_start_at, service_end_at } of conflicts) {
+  for (const conflict of conflicts) {
+    const { reason_code, work_date, case_no, service_start_at, service_end_at } = conflict;
     const dates = datesByReason.get(reason_code) ?? new Set<string>();
     const period = calendarServicePeriod(service_start_at, service_end_at);
     const dateWithUnknownTime = case_no || reason_code === 'active_lock' ? `${work_date}（服務時段待確認）` : work_date;
     const servicePeriod = period?.full ?? dateWithUnknownTime;
-    dates.add(case_no ? `案件 ${case_no}，${servicePeriod}` : servicePeriod);
+    const source = case_no ? `案件 ${case_no}，${servicePeriod}` : servicePeriod;
+    const assignmentDates = candidateAssignmentDateRange(conflict);
+    dates.add(assignmentDates ? `${source}，重疊日 ${work_date}，排班期間 ${assignmentDates}` : source);
     datesByReason.set(reason_code, dates);
   }
 

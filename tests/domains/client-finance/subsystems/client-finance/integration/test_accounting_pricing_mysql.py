@@ -1419,6 +1419,18 @@ def test_holiday_merge_and_restore_use_effective_eight_hours_and_preserve_paid_t
     staff_id = seed_assignment(case_no)
     connection = mysql_adapter.get_connection()
     path = f"/api/v1/accounting-pricing/cases/{case_no}"
+
+    def service_start_and_payment_dates() -> tuple[date | None, date, date | None]:
+        connection.commit()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.actual_start_date,t.first_payment_due_date,t.second_payment_due_date "
+                "FROM orders o JOIN client_payment_terms t ON t.case_no=o.case_no WHERE o.case_no=%s",
+                (case_no,),
+            )
+            row = cursor.fetchone()
+            return row["actual_start_date"], row["first_payment_due_date"], row["second_payment_due_date"]
+
     try:
         with connection.cursor() as cursor:
             cursor.execute("UPDATE orders SET service_hours_per_day=4,service_end_time='13:00:00' WHERE case_no=%s", (case_no,))
@@ -1442,16 +1454,24 @@ def test_holiday_merge_and_restore_use_effective_eight_hours_and_preserve_paid_t
                     (case_no, bank_id, case_no, case_no))
             connection.commit()
         workflow = ServiceDateAdjustmentWorkflow(MySqlServiceDateAdjustmentRepository(connection), lambda: MySqlUnitOfWork(connection))
+        _, first_payment, second_payment = service_start_and_payment_dates()
         intent = ServiceDateAdjustmentIntent((date(2026, 10, 1), date(2026, 10, 2)), (AdjustmentTarget(date(2026, 10, 25), staff_id),))
         preview = workflow.preview(case_no, intent)
         connection.rollback()
         receipt = workflow.apply(case_no, intent, versions=preview.facts.versions, preview_fingerprint=preview.fingerprint, key=case_no + ":merge", actor="pricing-test")
+        assert service_start_and_payment_dates() == (date(2026, 10, 3), first_payment, second_payment)
         impact = client.get(path).json()["data"]["impact"]
         assert (impact["case_total_amount"], impact["client_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == ((28000, 28000, 25600, 2400) if cash else (30800, 30800, 28160, 2640))
+        with MySqlUnitOfWork(connection) as unit:
+            repriced = MySqlHolidayRepricing(connection).reprice_case(case_no, case_no + ":after-merge", "pricing-test")
+            assert repriced.outcome == ("preserved_cash_history" if cash else "unchanged")
+            unit.commit()
+        assert service_start_and_payment_dates() == (date(2026, 10, 3), first_payment, second_payment)
         reverse = ServiceDateAdjustmentIntent((date(2026, 10, 25),), (), reverse_receipt_id=receipt.receipt_id)
         preview = workflow.preview(case_no, reverse)
         connection.rollback()
         workflow.apply(case_no, reverse, versions=preview.facts.versions, preview_fingerprint=preview.fingerprint, key=case_no + ":restore", actor="pricing-test")
+        assert service_start_and_payment_dates() == (date(2026, 10, 1), first_payment, second_payment)
         impact = client.get(path).json()["data"]["impact"]
         assert (impact["case_total_amount"], impact["client_amount"], impact["staff_total_amount"], impact["union_income_amount"]) == (28000, 28000, 25600, 2400)
     finally:

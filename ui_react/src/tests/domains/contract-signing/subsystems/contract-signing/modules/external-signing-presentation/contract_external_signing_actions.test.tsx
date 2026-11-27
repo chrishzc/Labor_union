@@ -800,4 +800,40 @@ describe('ContractExternalSigningActions', () => {
     expect(screen.queryByLabelText('需人工通知的簽約對象')).not.toBeInTheDocument();
     expect(contractExternalSigningClient.applyFinalDocument).not.toHaveBeenCalled();
   });
+
+  it('completes directly via querySignedArchive when an earlier timed-out archive actually succeeded', async () => {
+    const archived = [{ target: 'client', filename: 'customer.pdf', file_id: 'cf_' + 'a'.repeat(32) }];
+    const onCommitted = vi.fn();
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
+    vi.mocked(contractExternalSigningClient.querySignedArchive)
+      .mockResolvedValueOnce({ staff_segments: [], files: null })
+      .mockResolvedValueOnce({ staff_segments: [], files: archived });
+    vi.mocked(contractExternalSigningClient.archiveSignedFiles).mockRejectedValueOnce(new ApiTimeoutError(120000));
+
+    render(<ContractExternalSigningActions caseNo="CASE-001" onCommitted={onCommitted} />);
+    await screen.findByLabelText('客戶服務契約 PDF');
+    await prepareSignedReturns();
+    fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重新確認歸檔結果' }));
+
+    expect(await screen.findByText('簽約已完成')).toBeVisible();
+    expect(screen.getByText('customer.pdf')).toBeVisible();
+    expect(contractExternalSigningClient.archiveSignedFiles).toHaveBeenCalledTimes(1);
+    expect(onCommitted).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an oversized signed PDF before uploading', async () => {
+    vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
+    vi.mocked(contractExternalSigningClient.querySignedArchive).mockResolvedValue({ staff_segments: [], files: null });
+    render(<ContractExternalSigningActions caseNo="CASE-001" />);
+    const input = await screen.findByLabelText('客戶服務契約 PDF') as HTMLInputElement;
+    const oversized = new File(['%PDF-1.7'], 'oversized.pdf', { type: 'application/pdf' });
+    Object.defineProperty(oversized, 'size', { value: 20 * 1024 * 1024 + 1 });
+
+    fireEvent.change(input, { target: { files: fileList(oversized) } });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('請上傳 PDF 檔案，每份上限 20 MB。');
+    expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeDisabled();
+    expect(contractExternalSigningClient.archiveSignedFiles).not.toHaveBeenCalled();
+  });
 });

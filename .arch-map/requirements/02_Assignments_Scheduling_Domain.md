@@ -55,7 +55,7 @@
 - **Waiting Deposit Lock**：支持 Acquire（接受配對＋確認日期齊備時最後條件 Apply 自動執行）、Release-to-unbound、Cancel 與 Convert（首次正式排班必須轉換有效 waiting lock，缺鎖回 `assignment_plan_bootstrap.waiting_lock_required`；訂金逾期不自動釋放）；保留各服務日實際班次（不含週休，buffer 獨立）；等待訂金保留可與他案檔期並列，保留本身不構成正式排班衝突。
 - **鎖轉換入口**：首次正式排班在 Assignment Plan 內承接有效鎖，不另呼叫舊 Convert 端點；人工解除未收款保留，沿現行解除 Preview／Apply。入口與範圍見 [Scheduling 鎖架構](../domains/scheduling/subsystems/scheduling/modules/waiting-deposit-lock.md#waiting-deposit-lock-lifecycle)。
 - **Assignment Plan Query**：唯讀回傳現行版本與各 owner version（Finance／Payroll 未建立時回 `NULL`，禁止填 0）。
-- **Actual Start 已有有效排班重算**：以現行 effective assignments 之順序、月嫂與每段既有 `official-service-day count` 為不變輸入（禁止平移舊日或重分配天數），依序由新 `actual_start_date` 逐日重算各段（保留已核准之請假占用／代班 outcome 與假日事實，任一衝突或 lineage 無法承接回 typed conflict 零寫入，並交 Payroll 搬移 1-to-1 `source_assignment_id` 費率快照）。
+- **Actual Start 已有有效排班重算**：以現行 effective assignments 之順序、月嫂與每段既有 `official-service-day count` 為不變輸入，從送交的試算起點逐日重算各段。不得平移舊日或重分配天數。保留已核准的請假占用、代班 outcome 與假日事實。檔期衝突或無法承接 lineage 時回 typed conflict、零寫入。Payroll 依 `source_assignment_id` 一對一搬移費率快照。正式首日依 [Orders §3.5](01_Orders_Domain.md#35-actual-start-previewapply)。
 #### 年度假日設定 ^holiday-annual-settings
 
 - 年度清單每筆直接顯示雙倍狀態及「啟用雙倍」或「取消雙倍」按鈕，點擊沿既有權限、Query／Preview／Apply 與版本契約寫入，不開設定抽屜或確認視窗。送出只鎖住該列按鈕並防止連點重送；成功顯示後端讀回狀態，失敗保留原狀態、該列顯示錯誤並可重試。新增假日展開頁內表單；編輯既有假日由該列展開頁內表單，刪除也在頁內完成，不開抽屜。以上操作與列上的雙倍切換分開，仍沿用原 Query／Preview／Apply 與回執。全額免自備已排案件不新增警告或阻擋。
@@ -86,10 +86,10 @@
 - **核心條款（`SSTART-01～08`）**：
   - **月嫂群組選單與零 Push 額度**：月嫂於案件服務群組操作「月嫂專屬小幫手選單」（含【確認開工日】、【服務排程】、【雙方合意延期】、【專員協助】與【客戶常見疑問標準回答】），互動全程皆使用 Webhook `replyToken` 同步回覆，嚴禁呼叫 Push API 消耗額度。
   - **工會首次儲存班表**：一般案件已選定月嫂、簽約完成、符合訂金條件且尚無正式班表時，授權工會人員核對實際開始日與服務日，並依 [多月嫂排班 §3.4.1](#multi-caregiver-service-correction) 完成逐日分配。工會提交明確記錄為工會確認，由共同 Apply 在同一交易保存日期、正式指派、逐日班次與相關業務結果。若已有同方案人員的有效指派但完全沒有正式逐日班次，須核對該指派並接續建立班次，避免產生重複的有效指派。檔期、版本或承諾不符時整筆阻擋。
-  - **班表成立判定**：已確認日期以 Orders 日期版本表示。現行正式排班以有效指派及其有效逐日工作班次為準；存在有效指派且缺逐日工作班次時，顯示待處理並回傳可辨識的擋關原因。
+  - **班表成立判定**：已確認日期以 Orders 日期版本表示。現行正式排班以有效指派及其有效逐日工作班次為準。存在有效指派且缺逐日工作班次時，顯示待處理並回傳可辨識的擋關原因。首次建立與後續異動均依 [Orders 正式服務首日](01_Orders_Domain.md#35-actual-start-previewapply) 保存實際開始日。
   - **衝突處理**：開工確認遇到檔期衝突時，回覆可辨識的衝突原因，Orders 日期、正式指派、班表與帳務均維持原狀。系統不建立代班需求或待辦，不啟動替代人選意願、入群邀請或代班待辦通知。具排班操作權限的管理員依 [多月嫂排班 §3.4.1](#multi-caregiver-service-correction) 在原案件直接調整，確認時沿用既有 fresh-read、typed conflict 與單一外層交易契約。
   - 客戶提及服務日期或天數變更時，依 [客戶資料與訂單異動流程](20_LINE客服與月嫂自助服務正式規格.md#53-客戶資料與訂單異動流程) 處理。停用雙方「確認日期表／拒絕日期表」卡按鈕（確認日期表路由固定回 `410`）。
-  - 服務中局部代班保持全案原 `actual_start_date` 與第一期款到期日；只有全案實際開工日改變時同交易同步第一、二期到期日。未來開工日之排班先保存正式結果，到期由背景 canonical lifecycle worker 轉為 `服務中`。
+  - 服務中局部代班沿用原第一期款到期日，實際開始日依 [Orders 正式服務首日](01_Orders_Domain.md#35-actual-start-previewapply) 保存。全案開工確認改變日期時，同交易同步第一、二期到期日。未來開工日之排班先保存正式結果，到期由背景 canonical lifecycle worker 轉為 `服務中`。
   - **共用入口**：`POST /api/v1/line/staff-self-service/service-start/*`、工會 `POST /api/v1/line/mobile-admin/service-start/*` 及 `GET/POST /api/v1/scheduling/service-start/*`；一般具備權限工會人員皆可操作（不限 `system_admin`）。各入口的退役分支依 [入口治理](19_Global_Entry_Point_Governance.md#32-已停用移除之端點與替代邊界)。
 
 <a id="leave-substitution"></a>
@@ -127,7 +127,7 @@
 - **帳務承接**。國定假日服務時薪加成依 [PRICE-04](04_Client_Finance_Domain.md#holiday-service-pricing) 取調整後的有效日期與當日時數，兩個平日各 4 小時合到已開啟雙倍的假日，以當日 8 小時計價。實際服務日時數須由保存的來源／結果配對唯一回溯至各筆原財務明細；跨原指派合併不得只計當日排班人員名下的部分時數，也不得把原 B 的應付改掛給 A。無法唯一回溯時，保存可追蹤的缺少來源／配對原因並不改該案帳務，不按日期、指派或資料列順序猜測分攤。除此例外，本功能不新增、重算、重分配或更正客戶應收、月嫂應付、薪資費率快照、補助金額、核銷及付款到期日；既有受款人、款項來源及付款紀錄保留。跨月嫂合併也不得轉移既有款項，不要求先辦理帳務重開或補證，不觸發本節以外的服務歸屬帳務更正。原開工、完工事件與其帳務基準不由本功能改寫，排班起迄顯示取調整後的實際日期。
 - **變更開始日後恢復正常排班**。案件已有合併或分裂結果，再變更服務開始日時，只提供「取消合併／分裂結果並重新排班」這一種確認結果。確認後取消目前合併／分裂結果，以調整前的正常服務量及人員歸屬，依新開始日、原訂每日時數及目前適用的排休／假日規則重算；清除逐日時數覆寫，恢復原訂時段的正常排班模式。一般日曆與合併／分裂入口讀取同一份新日期，不沿用舊結果或其可復原配對。歷史操作紀錄保留。事前日期與已有正式班表都適用；沒有正式班表時不因此建立正式指派。只修改輸入、預覽或取消確認皆不保存，開始日未變時也不取消既有調整。沒有合併／分裂結果的案件維持原本開始日與人工選日流程。
 - **保存與讀回**。Query／Preview 零寫入。Apply 沿用相關 Orders／Scheduling 版本、單一 outer UoW 及正式排班 writer，重新核對來源日期、時數、當日唯一人員及總時數。正式班表只保留一個 effective generation；除本節明確取消結果並重排的開始日變更外，其他重排、請假或再次合併分裂仍承接逐日時數與異動配對，明確復原時依該次來源原值恢復。取消結果及新日期的保存須在同一交易完成。版本或同案同日歸屬衝突須可辨識，失敗整筆回滾，不留下部分日期。相同命令重送不重複合併、分裂、復原或取消重排，也不得因重送而來回切換狀態，不發送外部通知。日期調整回執及案件查詢須保留同次帳務重算結果與未重算原因，不能呼叫計價後丟棄結果；單案帳務失敗保留該案兩方原帳，不冒稱不需更動。成功後回讀目前生效的逐日結果，報表沿用 [營運報表](34_營運報表與統計口徑正式規格.md#weekly-service-daily-hours) 的口徑。
-  - 正式日期調整與復原在同一交易經 Orders writer 同步 `actual_end_date` 為最後有效服務日並推進 Orders lifecycle version，不改原開工／完工事件及付款基準；事前調整則於正式首排承接後同步。最後協調日的完工時點依 [Orders §3.2](01_Orders_Domain.md#32-autocompleteorderservice-與完工後日期更正) 採臺北日終，不能因合法日期筆數變動暫停完工。
+  - 正式日期調整與復原在同一交易經 Orders writer 保存實際結束日、依 [Orders §3.5](01_Orders_Domain.md#35-actual-start-previewapply) 保存實際開始日，並推進 Orders lifecycle version。原開工／完工事件及付款基準依本節契約留存。事前調整於正式首排承接後同步。最後協調日的完工時點依 [Orders §3.2](01_Orders_Domain.md#32-autocompleteorderservice-與完工後日期更正) 採臺北日終。合法的日期筆數變動不阻擋完工。
 
 下表帳務不變案例以前後假日加成相同為前提；加成不同時依上述例外及雙邊保護判定。
 

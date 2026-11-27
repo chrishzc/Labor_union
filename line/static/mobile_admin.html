@@ -93,6 +93,9 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
     .workstream-panel .toolbar { margin-top:8px; }
     .surface-list { border-top:1px solid var(--line); }
     .surface-list > .card { border-width:0 0 1px; border-radius:0; margin:0; padding:18px 4px; background:transparent; }
+    .group-binding-steps { padding-left:24px; line-height:1.5; }
+    .group-binding-steps li + li { margin-top:12px; }
+    .group-binding-steps p { margin:0 0 4px; }
     #serviceStartTodos label { display:grid; gap:6px; margin:14px 0; }
     #serviceStartTodos button { margin:6px 0; }
     .multi-select { width:100%; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
@@ -1083,6 +1086,7 @@ async function loadReviewWorkbench(preserveOperation=false) {
   if(sequence===notificationSequence && target==='staff_review'){
     updateNotificationCards(root);
     showStatus(failed?'部分通知事項未能載入，其他分類仍可使用。':'通知事項已更新',failed>0 && failed===sources.length);
+    return failed===0;
   }
 }
 
@@ -1100,6 +1104,27 @@ async function openNotificationItem(item,cursor) {
     const fresh=page.items.find(row=>row.id===item.id);
     if(!fresh){changed();return;}
     item=fresh;
+  }
+  const customerBinding = item.source === 'customer_binding';
+  if (item.can_dismiss && (!customerBinding || (item.reference_id && item.case_no))) {
+    let idempotencyKey;
+    root.appendChild(notificationButton('移除提醒', async () => {
+      idempotencyKey ??= crypto.randomUUID();
+      const command = customerBinding ? 'customer-binding-reminder/dismiss' : 'reminders/dismiss';
+      const body = customerBinding
+        ? { subject_reference: item.reference_id, case_no: item.case_no, reason: '使用者移除提醒' }
+        : { source: item.source, item_id: item.id };
+      const receipt = await postJson(`/api/v1/line/mobile-admin/notification-task-actions/${command}`, {
+        ...body, idempotency_key: idempotencyKey,
+      });
+      if (receipt?.dismissed !== true) throw new Error('尚未確認移除，請查詢原事項。');
+      if (!current()) return;
+      const refresh = loadReviewWorkbench();
+      const refreshSequence = notificationSequence;
+      if (await refresh && refreshSequence === notificationSequence && target === 'staff_review') {
+        showStatus(customerBinding ? '本案綁定提醒已移除。' : '本筆提醒已移除。');
+      }
+    }));
   }
   notificationSelection={item,cursor,matched:false};
   const original={
@@ -1135,22 +1160,6 @@ async function openNotificationItem(item,cursor) {
     }else root.appendChild(notificationText('p','尚無可用電話，請先核對聯絡資料。'));
     root.append(notificationButton('複製綁定提醒',async()=>{await navigator.clipboard.writeText(item.message || '');if(current())showStatus('已複製，請由您透過既有聯絡方式轉達。');}),
       notificationText('p','聯絡後仍保留此事項；完成綁定、月嫂停用或退役後，返回通知事項即重新查詢。'));
-  }else if(item.source==='customer_binding') {
-    if(item.can_dismiss && item.reference_id && item.case_no) {
-      let idempotencyKey;
-      root.appendChild(notificationButton('移除提醒',async()=>{
-        idempotencyKey ??= crypto.randomUUID();
-        const receipt=await postJson('/api/v1/line/mobile-admin/notification-task-actions/customer-binding-reminder/dismiss',{
-          subject_reference:item.reference_id,case_no:item.case_no,reason:'使用者移除提醒',idempotency_key:idempotencyKey,
-        });
-        if(receipt?.dismissed!==true)throw new Error('尚未確認移除，請查詢原事項。');
-        if(!current())return;
-        const refresh=loadReviewWorkbench();
-        const refreshSequence=notificationSequence;
-        await refresh;
-        if(refreshSequence===notificationSequence && target==='staff_review')showStatus('本案綁定提醒已移除。');
-      }));
-    }
   }else if(item.source==='registration') {
     const base=`/api/v1/line/mobile-admin/notification-task-actions/registrations/${item.reference_id}`;
     const view=await postJson(base+'/query',{});
@@ -1217,9 +1226,9 @@ async function renderNotificationDelivery(root,identity,current) {
 async function renderNotificationFailure(root,item,current) {
   const data=await postJson(`/api/v1/line/mobile-admin/notification-task-actions/notification-failures/${item.failure.issue_key}/query`,{});
   if(!current())return;
-  root.append(notificationText('p','群組問題請於本案原群組重新設定；身分問題請由本人在官方帳號完成綁定。通知內容與規則請回後台「通知與發送」核對。'),
-    notificationText('p',`本案群組設定格式：綁定訂單 ${data.case_no} 邀請網址。設定只保存，不會自動寄送。`),
-    notificationButton('複製案件編號',()=>navigator.clipboard.writeText(data.case_no)),
+  root.appendChild(notificationText('p','群組問題請於本案原群組重新設定。身分問題請由本人在官方帳號完成綁定。通知內容與規則請回後台「通知與發送」核對。'));
+  appendOrderGroupBindingSteps(root,data.case_no);
+  root.append(notificationButton('複製案件編號',()=>navigator.clipboard.writeText(data.case_no)),
     notificationButton('重新核對通知',()=>openNotificationItem(item,0)));
   for(const identity of data.related_task_ids){await renderNotificationDelivery(root,identity,current);if(!current())return;}
   for(const source of data.sources){
@@ -1285,6 +1294,40 @@ function requireMatchingFollowupPage(data) {
   return data;
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {string} caseNo
+ * @param {boolean} [showCopyButtons]
+ */
+function appendOrderGroupBindingSteps(root, caseNo, showCopyButtons = false) {
+  const steps = document.createElement('ol');
+  steps.className = 'group-binding-steps';
+  const replies = [
+    {instruction:'在群組輸入', value:'綁定群組', copyLabel:'複製綁定群組'},
+    {instruction:'收到提示後，回覆案件編號', value:caseNo, copyLabel:'複製案件編號'},
+  ];
+  for (const {instruction, value, copyLabel} of replies) {
+    const step = document.createElement('li');
+    const text = document.createElement('p');
+    text.append(instruction + '「', notificationText('code',value), '」。');
+    step.appendChild(text);
+    if (showCopyButtons) {
+      step.appendChild(notificationButton(copyLabel, async () => {
+        const current = notificationViewCurrent(step);
+        try {
+          await navigator.clipboard.writeText(value);
+          if (current()) showStatus(`已複製「${value}」。`);
+        } catch {
+          if (current()) showStatus(`無法自動複製，請從步驟文字手動複製「${value}」。`,true);
+        }
+      }));
+    }
+    steps.appendChild(step);
+  }
+  steps.appendChild(notificationText('li','收到提示後，從群組右上角的設定選擇「邀請」，複製「邀請網址」並貼回群組。綁定成功後，系統會依資格將客戶與已綁定 LINE 的指派月嫂的私人邀請排入發送。'));
+  root.append(notificationText('p','請由同一位有權限的工會人員在同一個案件群組依序操作。'),steps);
+}
+
 async function loadGroupTodos() {
   const notificationVersion=notificationSequence;
   const sequence=++groupTodoQuerySequence;
@@ -1305,14 +1348,9 @@ async function loadGroupTodos() {
     const card=document.createElement("article");card.className="card";
     const title=document.createElement("strong");title.textContent=`案件 ${item.case_no}`;
     const amount=document.createElement("p");amount.textContent=`訂金 NT$${Number(item.deposit_amount_ntd).toLocaleString("zh-TW")} 已核銷`;
-    const help=document.createElement("p");help.textContent="建群後，將下方的〈本群組邀請網址〉換成實際網址，再貼到群內。各項可用空白或換行分隔：";
-    const command=document.createElement("code");command.textContent=`綁定訂單 ${item.case_no} 〈本群組邀請網址〉`;
-    const copy=document.createElement("button");copy.type="button";copy.textContent="複製設定格式";
-    copy.addEventListener("click",async()=>{
-      try{await navigator.clipboard.writeText(command.textContent);showStatus("已複製設定格式，請先填入本群組邀請網址。設定完成後輸入「發送邀請」。");}
-      catch{showStatus("無法自動複製，請長按上方指令複製。",true);}
-    });
-    card.append(title,amount,help,command,copy);root.appendChild(card);
+    card.append(title,amount);
+    appendOrderGroupBindingSteps(card,item.case_no,true);
+    root.appendChild(card);
   });
 }
 
@@ -1419,7 +1457,12 @@ function appendManualReminder(card, kind, identity, body, canSend, unavailableRe
   button.disabled = !canSend && !pending;
   if (!canSend){
     status.textContent=unavailableReason || (body.payment_stage==='deposit'?'客戶尚無可用的 LINE 綁定，目前無法發送訂金提醒。':'本案尚無可用案件群組，目前無法發送提醒。');
-    card.appendChild(notificationText('p',body.payment_stage==='deposit'?'請先聯絡客戶完成 LINE 身分綁定，再重新核對。':'請先在原案件群組完成綁定，再重新核對。群組綁定格式：綁定訂單 '+body.case_no+' 邀請網址。'));
+    if (body.payment_stage==='deposit') {
+      card.appendChild(notificationText('p','請先聯絡客戶完成 LINE 身分綁定，再重新核對。'));
+    } else {
+      card.appendChild(notificationText('p','請先在原案件群組完成綁定，再重新核對。'));
+      appendOrderGroupBindingSteps(card,body.case_no);
+    }
     card.appendChild(notificationButton('重新核對提醒條件',()=>loadReviewWorkbench()));
     if(pending)card.appendChild(notificationText('p','先前提醒的結果尚未確認，仍可用「確認原提醒結果」查詢原操作，不另建提醒。'));
   }

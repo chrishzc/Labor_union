@@ -23,7 +23,7 @@ Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任
 
 - owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `.arch-map/` 指向的單一 owning Domain／Subsystem 正式規格；只有 currentness 或裁決仍不明時才讀 `.arch-map/requirements/15_正式規格索引與裁決總表.md`。
 - concurrency／fingerprint：只讀 `.arch-map/requirements/00_Global_共同契約.md` 的相關段落。
-- schema／migration／preserve-data／cutover：只讀 `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md`（NAS Fresh 初始化見 `.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md`）與直接相關 owner spec。
+- schema／migration／preserve-data／cutover：只讀 `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md`（單機 Docker MySQL Fresh 初始化見 `.arch-map/requirements/10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md`）與直接相關 owner spec。
 - entry point retirement／replacement：只讀 `19_Global_Entry_Point_Governance.md` 的相關段落。
 - 驗證情境、測試資料與 coverage ID：沿用 `document/資料庫、資料處理/新版測試資料規則矩陣_草案.md` 與 `document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md` 追溯情境／coverage 來源；兩者仍為草案，業務語意以對應 current 正式 owner spec 為準。
 - LINE 服務說明、客服分類與 Rich Menu audience：只讀 `29_LINE服務說明、客服互動與選單角色正式規格.md` 及其上位規格 `17`、`17A`、`20`。

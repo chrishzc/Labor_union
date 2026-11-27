@@ -254,7 +254,8 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     ], conflicts: [
       { segment_index: 0, staff_id: 4, work_date: '2026-09-01', reason_code: 'active_lock' },
       { segment_index: 0, staff_id: 5, work_date: '2026-09-02', reason_code: 'buffer' },
-      { segment_index: 0, staff_id: 5, work_date: '2026-09-03', reason_code: 'schedule', case_no: '115000205' },
+      { segment_index: 0, staff_id: 5, work_date: '2026-09-03', reason_code: 'schedule', case_no: '115000205',
+        assignment_start_date: '2026-08-25', assignment_end_date: '2026-09-10' },
       { segment_index: 1, staff_id: 3, work_date: '2026-09-04', reason_code: 'assignment' },
     ] }));
 
@@ -269,7 +270,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
       '加入候選池（兩項未符合）', '加入候選池（等待訂金警示）', '加入候選池（有正式排班）', '加入候選池（未覆蓋服務日）',
     ]);
     expect(within(groups[2]).getByText('空閒 4/5 天')).toBeVisible();
-    expect(within(groups[2]).getByText('已有正式排班：案件 115000205、2026-09-03')).toBeVisible();
+    expect(within(groups[2]).getByText('已有正式排班：案件 115000205、重疊日 2026-09-03、排班期間 2026-08-25 ～ 2026-09-10')).toBeVisible();
     expect(within(list).getAllByText(/^已有正式排班：/)).toHaveLength(1);
     expect(list).not.toHaveTextContent(/影響日期|查看(?:衝突|檔期)日期與原因|待公會協調|尚缺可用人選|僅提醒|2026-09-0[1245]/);
     for (const button of buttons) expect(button).toBeEnabled();

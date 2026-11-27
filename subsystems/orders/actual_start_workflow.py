@@ -679,13 +679,13 @@ class ActualStartWorkflow:
             )
             self._repository.validate_replacement_availability(
                 scheduling,
-                actual_start_date=new_date,
+                actual_start_date=actual_start.actual_start_date,
                 lock=lock_calendar,
             )
         client_settlement = _existing_client_settlement(facts)
         lifecycle = _actual_start_lifecycle(
             facts,
-            new_date,
+            actual_start.actual_start_date,
             scheduling,
             client_settlement,
             self._clock,
@@ -952,7 +952,7 @@ def _persist_order_projection(repository, request, preview, receipt):
     repository.update_actual_start(
         ActualStartPersistenceCommand(
             request.case_no,
-            request.new_actual_start_date,
+            preview.after_actual_start_date,
             preview.actual_start.actual_end_date,
             preview.lifecycle_impact.after_status,
             preview.order_version,
@@ -1055,7 +1055,7 @@ def _preview_result(
         payload["service_date_adjustment_reset"] = reset.fingerprint_payload()
     return ActualStartPreview(
         facts.lifecycle.actual_start_date,
-        actual_start.new_actual_start_date,
+        actual_start.actual_start_date,
         actual_start,
         scheduling,
         facts.order.version,
