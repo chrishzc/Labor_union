@@ -243,6 +243,8 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
   });
 
   it('清單更新中或更新失敗時，點擊與鍵盤都不能開啟舊案件列', async () => {
+    const response = { ...page('formal_service'), substatus_counts: {} };
+    mocks.core.mockResolvedValue(response);
     render(<OrderWorkbenchV2Page />);
     const card = await screen.findByRole('row', { name: '開啟案件 CASE-REFRESH 案件處理' });
     let reject!: (reason: Error) => void;
@@ -313,6 +315,8 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
   });
 
   it('Drawer 內成功 callback 更新清單及摘要而不關閉或重建 Drawer', async () => {
+    const response = { ...page('formal_service'), substatus_counts: {} };
+    mocks.core.mockResolvedValue(response);
     render(<OrderWorkbenchV2Page />); await screen.findByText('CASE-REFRESH');
     fireEvent.click(screen.getByRole('button', { name: '開啟案件 CASE-REFRESH 案件處理' }));
     const input = await screen.findByLabelText('整合測試面板草稿');

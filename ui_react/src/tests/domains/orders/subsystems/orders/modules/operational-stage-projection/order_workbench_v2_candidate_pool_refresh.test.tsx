@@ -212,10 +212,13 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
   });
 
   it('唯讀返回重用仍有效的正式摘要與階段，手動重新整理再回讀', async () => {
+    mocks.getCoreStageTimelines.mockResolvedValue(page(undefined, [timeline('matching_pool')]));
     mocks.loadSummaries.mockResolvedValueOnce(summaries()).mockResolvedValue(summaries(true));
     render(<OrderWorkbenchV2Page />);
     await screen.findByText('回讀前測試客戶');
-    fireEvent.click(screen.getByRole('button', { name: '開啟案件 CASE-READBACK 案件處理' }));
+    const row = screen.getByRole('row', { name: '開啟案件 CASE-READBACK 案件處理' });
+    expect(row).toHaveAttribute('aria-disabled', 'false');
+    fireEvent.click(row);
     const before = mocks.getCoreStageTimelines.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
 

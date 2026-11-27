@@ -613,6 +613,9 @@ describe('historical Drawer immutable evidence boundary', () => {
       order_information_2: [{ segment_id: 71, staff_id: 42, staff_name: '陳月嫂', text: '訂單資訊－2' }],
       weekly_service_rows: [{ serial_number: 1, staff_name: '陳月嫂', week_start_date: '2026-09-03', week_end_date: '2026-09-09', service_hours_per_day: 9, weekly_work_days: 5, weekly_hours: 45 }],
       caregiver_resumes: [{ staff_id: 42, staff_name: '陳月嫂', ready: true, filename: 'resume.pdf', version: 1, blocker: null }],
+      caregiver_web_profiles: [{
+        staff_id: 42, staff_name: '陳月嫂', admin_preview_url: '/api/v1/admin/staff-web-profile/42/preview',
+      }],
       blockers: [], send_allowed: true,
     });
     mocks.candidatePool.mockResolvedValue({

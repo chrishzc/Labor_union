@@ -155,10 +155,12 @@ describe('ClientRosterPage', () => {
     const target = new URLSearchParams(importFieldIssueHref(item.case_no, cookingIssue).split('?')[1]);
     render(<ClientRosterPage initialCaseNo={item.case_no} focusField={target.get('field') ?? undefined} />);
     const cooking = await screen.findByRole('combobox', { name: '下廚料理需求' });
-    expect(cooking).toBeDisabled();
+    expect(cooking).toBeEnabled();
     expect(cooking).toHaveAttribute('aria-invalid', 'true');
     expect(cooking).toHaveAccessibleDescription(cookingIssue.message);
-    expect(screen.getByLabelText('服務天數')).not.toHaveAttribute('aria-invalid');
+    const serviceDays = screen.getByLabelText('服務天數');
+    expect(serviceDays).toBeDisabled();
+    expect(serviceDays).not.toHaveAttribute('aria-invalid');
   });
 
   it('opens the formal cancellation for a non-root operator from the selected roster case', async () => {
