@@ -28,7 +28,7 @@
 - `staff_profile_photo`：月嫂個人網頁照片，由 Staff 個人網頁 owner 關聯模板項目及發布版本；bytes、格式驗證與存取仍經本受控檔案邊界。
 - `staff_certificate`：月嫂專業證照（PDF / JPG）
 - `staff_health_exam`：月嫂體檢合格證明與良民證（PDF / JPG）
-- `client_passbook_cover`：客戶存摺封面照片（JPG / PNG / WebP；由客戶需求 LIFF `register.html` 市民／非市民申請時必填上傳，供工會人員核對銀行帳號與分行代碼，並於人員審核／建檔時歸檔至受控檔案儲存）
+- `client_passbook_cover`：實際收到的客戶存摺封面照片（JPG / PNG / WebP），供工會人員核對銀行帳號與分行代碼。是否收集及必填資格只依 [Case Import §3.1 `NC-FORM-01～02`](17B_Case_Import與非市民Redis待審正式規格.md#31-非市民進件與配號nc-entrync-formnc-approvalnc-numbernc-stat)，切換前資料依該規格 §3.1.2；本檔不另定申請類型的收集規則。已合法收件且於核准時交付的圖片依 §5 納管並確認歸檔，實體定位依 §8.2，申請核准及有圖／無圖收尾由 [Case Import §3.2](17B_Case_Import與非市民Redis待審正式規格.md#32-核准前問卷不得進-mysql-與獨立-redis-7-架構reg-boundaryreg-redisreg-expiry) 決定。既有正式歸檔保留原 identity、版本與讀取位置，不因圖片收集資格改變而刪除、搬移或重寫。
 - `rich_menu_background`：LINE 圖文選單底圖（PNG）
 - `database_backup`：資料庫 SQL 快照備份（`SQL.GZ + SHA256`，排程、目的目錄與復原依 [單機 Docker MySQL 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md#windows-nas-maintenance) §5，本節不另定時間或硬體）
 

@@ -9,7 +9,7 @@ import re
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from shared_kernel.clock import SystemBusinessClock
 
 
@@ -157,7 +157,13 @@ class ProvisionalRegistrationPreviewRequest(BaseModel):
     baby_info: str | None = Field(default=None, max_length=255)
     notes: str | None = Field(default=None, max_length=1000)
     line_id: str | None = Field(default=None, max_length=50)
-    passbook_image_id: str = Field(min_length=1, max_length=128)
+    passbook_image_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def require_subsidy_passbook(self) -> ProvisionalRegistrationPreviewRequest:
+        if self.registration_kind == "subsidy" and self.passbook_image_id is None:
+            raise ValueError("passbook_image_id is required for subsidy registration")
+        return self
 
     @field_validator("id_number")
     @classmethod

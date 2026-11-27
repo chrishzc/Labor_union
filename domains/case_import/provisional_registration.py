@@ -79,7 +79,9 @@ def build_provisional_registration_candidate(
     expected_date = _required(intent.expected_date, "expected date", 100)
     address = _required(intent.address, "address", 255)
     service_days = _service_days(intent.service_days)
-    passbook_image_id = _required(intent.passbook_image_id, "passbook image", 128)
+    passbook_image_id = intent.passbook_image_id
+    if intent.registration_kind == "subsidy" or passbook_image_id is not None:
+        passbook_image_id = _required(passbook_image_id, "passbook image", 128)
     optional = _optional_payload(intent)
     survey_details = dict(_survey_details(intent.survey_details))
     survey_details["特殊計費:胎數"] = _required_multi_birth_count(survey_details)
@@ -154,7 +156,8 @@ def build_provisional_registration_candidate(
         beclass["survey_details"]["_liff_meta"].update(
             page="non_citizen_registration", registration_kind="non_citizen"
         )
-    beclass["survey_details"]["_liff_meta"]["passbook_image_id"] = passbook_image_id
+    if passbook_image_id is not None:
+        beclass["survey_details"]["_liff_meta"]["passbook_image_id"] = passbook_image_id
     return ProvisionalRegistrationCandidate(
         line_user_id,
         client,
