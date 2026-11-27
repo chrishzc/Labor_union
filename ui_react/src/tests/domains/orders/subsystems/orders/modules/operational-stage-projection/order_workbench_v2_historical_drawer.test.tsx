@@ -11,6 +11,7 @@ import { RECEIPT_RESPONSE } from '../../../../../../fixtures/finance/finance_que
 import { HistoricalOrderAdoptionEvidenceSchema } from '../../../../../../../api/orders/historical_adoption_evidence_schemas';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
+import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 
 const mocks = vi.hoisted(() => ({
@@ -515,6 +516,52 @@ describe('historical Drawer immutable evidence boundary', () => {
     fireEvent.click(await screen.findByRole('button', { name: '前往重啟正常流程' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('正式案件回讀尚未觀察到');
     expect(screen.queryByText(/已重啟正常流程並回讀確認/)).not.toBeInTheDocument();
+  });
+
+  it.each(['返回按鈕', '目前看板導覽'])('重啟收到收據但回讀失敗後，%s 仍重查清單和階段件數', async (entry) => {
+    const counts = (current: CoreStageCode) =>
+      Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, code === current ? 1 : 0]));
+    const first = {
+      items: [timeline()], stage_counts: counts('confirmed_service_dates'), substatus_counts: {},
+      historical_lifecycle_counts: { unserved: 1, in_service: 0, service_completed: 0, accounting_completed: 0 },
+      next_cursor: null, etag: 'b'.repeat(64),
+    };
+    mocks.core.mockResolvedValue(first);
+    mocks.summaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
+    mocks.restartApply.mockImplementation(async () => {
+      mocks.detail.mockRejectedValueOnce(new Error('正式案件回讀暫時失敗'));
+      mocks.core.mockResolvedValue({
+        ...first,
+        items: [{
+          ...timeline('訂單成立'), branch_type: 'normal', current_core_stage_code: 'matching_pool',
+          current_core_stage_ordinal: 2, historical_current_owner_stage_code: null,
+          historical_current_owner_stage_ordinal: null,
+        }],
+        stage_counts: counts('matching_pool'),
+        historical_lifecycle_counts: { ...first.historical_lifecycle_counts, unserved: 0 },
+      });
+      return { lifecycle_status: '訂單成立', replayed: false };
+    });
+    const countListQueries = () => mocks.core.mock.calls.filter(([query]) => query.workbench_scope === 'in_progress').length;
+    const { rerender } = render(<OrderWorkbenchV2Page />);
+    const row = await screen.findByRole('row', { name: '開啟案件 CASE-FUTURE 案件處理' });
+    expect(screen.getByRole('button', { name: /^9 待服務 1$/ })).toBeInTheDocument();
+    fireEvent.click(row);
+    const restart = await screen.findByRole('button', { name: '前往重啟正常流程' });
+    await waitFor(() => expect(restart).toBeEnabled());
+    fireEvent.click(restart);
+    await screen.findByText('正式案件回讀暫時失敗');
+    expect(screen.queryByText(/已重啟正常流程並正式回讀/)).not.toBeInTheDocument();
+    expect(mocks.restartApply).toHaveBeenCalledTimes(1);
+    expect(countListQueries()).toBe(1);
+
+    if (entry === '返回按鈕') fireEvent.click(screen.getByRole('button', { name: /返回待辦看板/ }));
+    else rerender(<OrderWorkbenchV2Page homeNavigationRequest={1} />);
+
+    expect(await screen.findByRole('button', { name: /^2 候選池 1$/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^9 待服務 0$/ })).toBeVisible();
+    expect(countListQueries()).toBe(2);
+    expect(mocks.restartApply).toHaveBeenCalledTimes(1);
   });
 
   it.each(['歷史訂單－服務完成', '歷史訂單－帳務完成'])('%s never exposes intake Apply or a restart rollback', async (status) => {

@@ -1,6 +1,6 @@
 import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedChanges';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { StrictMode, useState } from 'react';
+import { StrictMode, useState, useSyncExternalStore } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRegistryPage } from '../../../../../../../pages/ClientRegistryPage';
 import { ClientRegistryDetailEditor } from '../../../../../../../components/ClientRegistryDetailEditor';
@@ -12,6 +12,7 @@ import { historicalAdoptionEvidenceClient } from '../../../../../../../api/order
 import { accountingPricingClient } from '../../../../../../../api/client_finance/accounting_pricing_client';
 import { historicalServiceAccountingClient } from '../../../../../../../api/orders/historical_service_accounting_client';
 import { HistoricalServiceAccountingWorkbench } from '../../../../../../../components/HistoricalServiceAccountingWorkbench';
+import { AdminOperationsViewProvider, useAdminOperationsViews } from '../../../../../../../pages/admin_operations_view_cache';
 
 vi.mock('../../../../../../../components/CaseArchitectureBootstrapRepairPanel', () => ({
   CaseArchitectureBootstrapRepairPanel: ({ caseNo }: { caseNo: string }) => <div aria-label="案件初始資料修復">{caseNo}</div>,
@@ -243,9 +244,15 @@ describe('Client registry owner editing', () => {
     });
     function Harness() {
       const [current, setCurrent] = useState(initial);
-      return <ClientRegistryDetailEditor detail={current} onRefresh={async () => { const updated = structuredClone(stored); setCurrent(updated); return updated; }} onStateChange={() => undefined} />;
+      const views = useAdminOperationsViews();
+      const revision = useSyncExternalStore(views.subscribeWorkbench, views.getWorkbenchRevision);
+      return <>
+        <output aria-label="待辦快取版本">{revision}</output>
+        <ClientRegistryDetailEditor detail={current} onRefresh={async () => { const updated = structuredClone(stored); setCurrent(updated); return updated; }} onStateChange={() => undefined} />
+      </>;
     }
-    render(<Harness />);
+    render(<AdminOperationsViewProvider><Harness /></AdminOperationsViewProvider>);
+    expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
     const profile = screen.getByRole('region', { name: '客戶主檔' });
     fireEvent.change(within(profile).getByLabelText('姓名'), { target: { value: '已保存姓名' } });
     fireEvent.change(within(profile).getByLabelText('身分證字號'), { target: { value: 'invalid' } });
@@ -255,6 +262,7 @@ describe('Client registry owner editing', () => {
     expect(within(profile).getByLabelText('姓名')).toHaveValue('已保存姓名');
     expect(within(profile).getByLabelText('身分證字號')).toHaveValue('invalid');
     expect(screen.getByText('客戶主檔已儲存。')).toBeVisible();
+    expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('1');
   });
 
   it('opens the customer roster when an old profile review link is used', () => {
@@ -371,12 +379,19 @@ describe('Client registry owner editing', () => {
     candidateMocks.decision.mockImplementation(async () => { accepted = true; return { case_no: 'CASE-001', plan_id: 61, communication_version: 2, customer_decision: 'accepted' }; });
     mocks.query.mockImplementation(async () => structuredClone(detail));
     window.history.replaceState(null, '', '#clients?case=CASE-001');
-    render(<ClientRegistryPage />);
+    function Harness() {
+      const views = useAdminOperationsViews();
+      const revision = useSyncExternalStore(views.subscribeWorkbench, views.getWorkbenchRevision);
+      return <><output aria-label="待辦快取版本">{revision}</output><ClientRegistryPage /></>;
+    }
+    render(<AdminOperationsViewProvider><Harness /></AdminOperationsViewProvider>);
+    expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
     fireEvent.click(await screen.findByRole('button', { name: '選擇接任月嫂' }));
     await waitFor(() => expect(candidateMocks.search).toHaveBeenCalledOnce());
     fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 接任月嫂' }));
     fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
     const willingness = await screen.findByRole('button', { name: '記錄 接任月嫂 願意' });
+    expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('1');
     await waitFor(() => expect(willingness).toBeEnabled());
     fireEvent.click(willingness);
     await screen.findByText('回覆已儲存。');
@@ -391,8 +406,10 @@ describe('Client registry owner editing', () => {
     fireEvent.change(screen.getByLabelText('方案 61 客戶決策依據'), { target: { value: '電話確認客戶同意接任人選' } });
     const accept = screen.getByRole('button', { name: '記錄方案 61 客戶接受' });
     await waitFor(() => expect(accept).toBeEnabled());
+    const beforeDecision = Number(screen.getByLabelText('待辦快取版本').textContent);
     fireEvent.click(accept);
     await screen.findByText('客戶決定已完成正式回讀。');
+    expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent(String(beforeDecision + 1));
     expect(candidateMocks.decision).toHaveBeenCalledWith('CASE-001', 61, 1, 'accepted', '電話確認客戶同意接任人選', expect.any(String), 'registry-operator');
     expect(await screen.findByText('尚未建立正式指派。')).toBeInTheDocument();
     expect(screen.getByText(/推薦方案仍須完成客戶確認、契約與排班，才會列入上方正式指派。/)).toBeInTheDocument();

@@ -4,12 +4,16 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { useSyncExternalStore } from 'react';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
 import { importFieldIssueHref, loadCurrentImportFieldIssuesForCases, type ImportFieldIssue } from '../../../../../../../api/case_import/import_field_issues';
 import { orderCancellationClient, type OrderCancellationQuery } from '../../../../../../../api/orders/order_cancellation_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { orderTermsMutationClient, type OrderTermsQuery } from '../../../../../../../api/orders/order_terms_mutation_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import { AdminOperationsViewProvider, useAdminOperationsViews } from '../../../../../../../pages/admin_operations_view_cache';
+import { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
 const linkedOrderQuery = vi.hoisted(() => vi.fn());
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
   getAssignmentPlan: vi.fn().mockResolvedValue({ case_no: 'CASE-001', assignments: [] }),
@@ -32,6 +36,12 @@ vi.mock('../../../../../../../api/orders/order_intake_completion_client', () => 
   intakeBlockerMessage: (code: string) => code,
   intakeRepairErrorMessage: (error: unknown) => error instanceof Error ? error.message : '補件失敗',
 }));
+
+function WorkbenchRevision() {
+  const views = useAdminOperationsViews();
+  const revision = useSyncExternalStore(views.subscribeWorkbench, views.getWorkbenchRevision);
+  return <output aria-label="待辦快取版本">{revision}</output>;
+}
 
 const item = {
   client_id: 7, case_no: 'CASE-001', imported_virtual_accounts: ['009978160011500001', '009978160011500009'], built_in_virtual_account: '99781699115001', name: '王小明', phone: '0912345678', city: '新竹市', district: '東區',
@@ -193,6 +203,51 @@ describe('ClientRosterPage', () => {
     }
   });
 
+  it('名冊重開只在正式回讀生效後失效待辦，未知結果保留原操作', async () => {
+    orderMutationFlowStore.clearAll();
+    const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({
+      id: 7, username: 'operator', display_name: '測試人員', role: 'system_admin',
+      is_root: false, access_control_version: 1, capabilities: ['system.administration'],
+    });
+    mocks.list.mockResolvedValue({ items: [{ ...item, order_status: '訂單取消' }], next_cursor: null, next_offset: null });
+    const fingerprint = 'b'.repeat(64);
+    const preview = vi.spyOn(ordersMutationClient, 'previewReopen').mockResolvedValue({
+      case_no: item.case_no, order_version: 3, client_finance_version: 5, payroll_version: 6,
+      cancellation_event_id: 31, before_status: '訂單取消', after_status: '訂單成立',
+      requires_fresh_scheduling_preview: true, restored_assignment_ids: [], restored_schedule_ids: [],
+      restored_lock_ids: [], preview_fingerprint: fingerprint,
+    });
+    const apply = vi.spyOn(ordersMutationClient, 'applyReopen')
+      .mockRejectedValueOnce(new ApiHttpError(503, 'unavailable', '結果未確認', true))
+      .mockResolvedValue({ case_no: item.case_no, order_version: 4, lifecycle_status: '訂單成立',
+        cancellation_event_id: 31, requires_fresh_scheduling_preview: true, preview_fingerprint: fingerprint });
+    try {
+      render(<AdminOperationsViewProvider>
+        <WorkbenchRevision /><ClientRosterPage initialCaseNo={item.case_no} />
+      </AdminOperationsViewProvider>);
+      fireEvent.click(await screen.findByRole('button', { name: '重開訂單' }));
+      const panel = within(await screen.findByRole('region', { name: '案件 CASE-001 重開取消案件' }));
+      fireEvent.click(panel.getByRole('button', { name: '重開訂單' }));
+      const retry = await panel.findByRole('button', { name: '重試重開' });
+      expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
+
+      fireEvent.click(retry);
+      const observe = await panel.findByRole('button', { name: '查詢重開結果' });
+      expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
+      expect(apply.mock.calls[1]).toEqual(apply.mock.calls[0]);
+      linkedOrderQuery.mockResolvedValue({ case_no: item.case_no, order_status: '訂單成立' });
+      fireEvent.click(observe);
+      await panel.findByText(/訂單已重開為「訂單成立」/);
+      expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('1');
+      expect(apply).toHaveBeenCalledTimes(2);
+    } finally {
+      apply.mockRestore();
+      preview.mockRestore();
+      user.mockRestore();
+      orderMutationFlowStore.clearAll();
+    }
+  });
+
   it.each([true, false])('更正歷史零服務後回讀並更新案件詳情，是否在本頁：%s', async (listed) => {
     orderMutationFlowStore.clearAll();
     const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({
@@ -235,7 +290,9 @@ describe('ClientRosterPage', () => {
     const page = { items: listed ? [{ ...item, order_status: '訂單取消' }] : [], next_cursor: null, next_offset: null };
     mocks.list.mockResolvedValue(page);
     try {
-      render(<ClientRosterPage initialCaseNo={listed ? undefined : item.case_no} />);
+      render(<AdminOperationsViewProvider>
+        <WorkbenchRevision /><ClientRosterPage initialCaseNo={listed ? undefined : item.case_no} />
+      </AdminOperationsViewProvider>);
       const rosterRow = listed ? await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }) : null;
       if (rosterRow) fireEvent.click(rosterRow);
       const dialog = await screen.findByRole('dialog', { name: '案件 CASE-001 詳細資料' });
@@ -252,6 +309,7 @@ describe('ClientRosterPage', () => {
         historical_unserved_correction: { reason: '', evidence_source: '', confirmed_actual_service_day_count: 0 },
       });
       expect(apply).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
       const detail = await mocks.query();
       mocks.query.mockResolvedValue({ ...detail });
       mocks.list.mockResolvedValue({ ...page, items: listed ? [{ ...item, order_status: '成立後未服務' }] : [] });
@@ -260,6 +318,7 @@ describe('ClientRosterPage', () => {
       const orderReadsBeforeApply = linkedOrderQuery.mock.calls.length;
       fireEvent.click(confirmButton);
       await drawer.findByText('本案已完成更正，無須再次操作。');
+      expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('1');
       expect(query).toHaveBeenCalledTimes(2);
       const returnButton = drawer.getByRole('button', { name: '返回案件詳細資料' });
       await waitFor(() => expect(returnButton).toBeEnabled());
@@ -469,7 +528,9 @@ describe('ClientRosterPage', () => {
     };
     mocks.query.mockReset();
     mocks.query.mockResolvedValueOnce(unavailable).mockResolvedValue(unavailable);
-    render(<ClientRosterPage />);
+    render(<AdminOperationsViewProvider>
+      <WorkbenchRevision /><ClientRosterPage />
+    </AdminOperationsViewProvider>);
     fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
 
     const repair = await screen.findByLabelText('案件初始資料修復');
@@ -488,7 +549,9 @@ describe('ClientRosterPage', () => {
     );
     expect(bootstrapMocks.apply.mock.calls[0][4]).toMatch(/^case-bootstrap-repair-/);
     expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeDisabled();
+    expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('0');
     await act(async () => { finish?.(); });
+    expect(screen.getByLabelText('待辦快取版本')).toHaveTextContent('1');
     await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeEnabled());
   });

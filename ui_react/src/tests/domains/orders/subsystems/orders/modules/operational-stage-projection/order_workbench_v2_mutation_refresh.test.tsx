@@ -6,15 +6,25 @@ import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../a
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
 import { ADMIN_VIEW_FRESH_MS, AdminOperationsViewProvider } from '../../../../../../../pages/admin_operations_view_cache';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import { notifyCaseAccountingChanged } from '../../../../../../../api/shared/case_accounting_changes';
 import * as intakeClient from '../../../../../../../api/case_import/import_field_issues';
 
-const mocks = vi.hoisted(() => ({ core: vi.fn(), summaries: vi.fn() }));
-function Panel({ onObserved, onPoolReadback, onCommitted, onClose }: { onObserved?: () => void; onPoolReadback?: () => void; onCommitted?: () => void; onClose?: () => void }) {
+const mocks = vi.hoisted(() => ({ core: vi.fn(), summaries: vi.fn(), statistics: vi.fn() }));
+function Panel({ onObserved, onPoolReadback, onCommitted, onClose }: {
+  onObserved?: (scope?: 'actual-start-date') => void;
+  onPoolReadback?: () => void;
+  onCommitted?: () => void;
+  onClose?: (reason?: 'unconfirmed-operation') => void;
+}) {
   const [draft, setDraft] = useState('');
   return <section>
     <input aria-label="整合測試面板草稿" value={draft} onChange={(event) => setDraft(event.target.value)} />
-    <button type="button" onClick={onObserved ?? onPoolReadback ?? onCommitted}>模擬正式 owner 回讀完成</button>
-    {onClose && <button type="button" onClick={onClose}>關閉整合測試 Drawer</button>}
+    <button type="button" onClick={() => (onObserved ?? onPoolReadback ?? onCommitted)?.()}>模擬正式 owner 回讀完成</button>
+    {onClose && <>
+      <button type="button" onClick={() => onObserved?.('actual-start-date')}>模擬開工日期正式回讀完成</button>
+      <button type="button" onClick={() => onClose()}>關閉整合測試 Drawer</button>
+      <button type="button" onClick={() => onClose('unconfirmed-operation')}>保留結果未確認的操作並返回</button>
+    </>}
   </section>;
 }
 vi.mock('../../../../../../../components/OrderCandidateQueryPanel', () => ({ OrderCandidateQueryPanel: Panel }));
@@ -26,6 +36,9 @@ vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ Ord
 vi.mock('../../../../../../../components/OrderWorkbenchV2Drawer', () => ({ OrderWorkbenchV2Drawer: Panel }));
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ loadAllOrderSummaries: mocks.summaries, ordersQueryClient: { getOrderSummaries: vi.fn() } }));
+vi.mock('../../../../../../../api/reports/weekly_operations_report_query_client', () => ({
+  caseStatisticsQueryClient: { query: mocks.statistics },
+}));
 
 const labels: Readonly<Record<CoreStageCode, string>> = {
   intake_validation: '進件與資料完整性驗證', matching_pool: '建立候選月嫂池',
@@ -62,8 +75,9 @@ async function selectStage(code: CoreStageCode) {
 
 describe('Beta owner mutation 到清單與階段的完整 callback 接線', () => {
   beforeEach(() => {
-    mocks.core.mockReset(); mocks.summaries.mockReset();
+    mocks.core.mockReset(); mocks.summaries.mockReset(); mocks.statistics.mockReset();
     mocks.summaries.mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
+    mocks.statistics.mockImplementation(async (year: number) => ({ year, quarter: null, month: null, available_years: [year] }));
     mocks.core.mockImplementation(async (query: OrderCoreStageProjectionQueryParams) => {
       const result = page(query.stage ?? 'intake_validation');
       if (query.stage === undefined) result.substatus_counts = {};
@@ -128,6 +142,104 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
       now.mockRestore();
       intake.mockRestore();
     }
+  });
+
+  it('唯讀返回和目前頁導覽共用有效清單，抽屜開啟到過期則重查', async () => {
+    const now = vi.spyOn(Date, 'now');
+    const start = now();
+    now.mockReturnValue(start);
+    const route = (request: number) => (
+      <AdminOperationsViewProvider>
+        <OrderWorkbenchV2Page homeNavigationRequest={request} />
+      </AdminOperationsViewProvider>
+    );
+    const { rerender } = render(route(0));
+    try {
+      await screen.findByText('CASE-REFRESH');
+      fireEvent.change(screen.getByRole('textbox', { name: '搜尋案件編號或姓名' }), { target: { value: 'REFRESH' } });
+      await selectStage('formal_service');
+      const reads = mocks.core.mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: '關閉整合測試 Drawer' }));
+      expect(screen.getByRole('textbox', { name: '搜尋案件編號或姓名' })).toHaveValue('REFRESH');
+      expect(screen.getByRole('button', { name: /^10 / })).toHaveAttribute('aria-pressed', 'true');
+      rerender(route(1));
+      await act(async () => {});
+      expect(mocks.core).toHaveBeenCalledTimes(reads);
+
+      fireEvent.click(screen.getByRole('row', { name: '開啟案件 CASE-REFRESH 案件處理' }));
+      now.mockReturnValue(start + ADMIN_VIEW_FRESH_MS + 1);
+      fireEvent.click(await screen.findByRole('button', { name: '關閉整合測試 Drawer' }));
+      await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(reads + 1));
+      expect(mocks.core).toHaveBeenLastCalledWith(expect.objectContaining({ stage: 'formal_service' }), expect.anything());
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('開工日期正式回讀只重查受影響的清單與摘要，結果未確認返回仍刷新所有看板查詢', async () => {
+    const intake = vi.spyOn(intakeClient, 'loadCurrentImportFieldIssuesForCases').mockResolvedValue([]);
+    try {
+      render(<OrderWorkbenchV2Page />);
+      await selectStage('formal_service');
+      await act(async () => {});
+      const before = [mocks.core.mock.calls.length, mocks.summaries.mock.calls.length, intake.mock.calls.length, mocks.statistics.mock.calls.length];
+      fireEvent.click(screen.getByRole('button', { name: '模擬開工日期正式回讀完成' }));
+      await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(before[0]! + 1));
+      await waitFor(() => expect(screen.getByRole('button', { name: '關閉整合測試 Drawer' })).toBeEnabled());
+      expect(mocks.summaries).toHaveBeenCalledTimes(before[1]! + 1);
+      expect(intake).toHaveBeenCalledTimes(before[2]!);
+      expect(mocks.statistics).toHaveBeenCalledTimes(before[3]!);
+
+      fireEvent.click(screen.getByRole('button', { name: '關閉整合測試 Drawer' }));
+      await act(async () => {});
+      expect(mocks.core).toHaveBeenCalledTimes(before[0]! + 1);
+      expect(mocks.statistics).toHaveBeenCalledTimes(before[3]!);
+
+      fireEvent.click(screen.getByRole('row', { name: '開啟案件 CASE-REFRESH 案件處理' }));
+      fireEvent.click(await screen.findByRole('button', { name: '保留結果未確認的操作並返回' }));
+      await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(before[0]! + 2));
+      await waitFor(() => expect(intake).toHaveBeenCalledTimes(before[2]! + 1));
+      expect(mocks.summaries).toHaveBeenCalledTimes(before[1]! + 2);
+      expect(mocks.statistics).toHaveBeenCalledTimes(before[3]! + 2);
+    } finally {
+      intake.mockRestore();
+    }
+  });
+
+  it('帳務異動通知後重新查詢已快取的舊階段與新階段，顯示正式件數', async () => {
+    let currentStage: CoreStageCode = 'client_settlement';
+    mocks.core.mockImplementation(async ({ stage }: OrderCoreStageProjectionQueryParams) => {
+      const response = page(currentStage);
+      response.substatus_counts = stage ? Object.fromEntries(substatusCodesForStage(stage).map(code => [code, 0])) : {};
+      if (stage && stage !== currentStage) response.items = [];
+      return response;
+    });
+    const route = (visible: boolean) => (
+      <AdminOperationsViewProvider>{visible && <OrderWorkbenchV2Page />}</AdminOperationsViewProvider>
+    );
+    const { rerender } = render(route(true));
+    await screen.findByText('CASE-REFRESH');
+    const oldStage = () => screen.getByRole('button', { name: /^12 / });
+    const newStage = () => screen.getByRole('button', { name: /^13 / });
+    fireEvent.click(newStage());
+    await screen.findByText('目前沒有符合條件的案件。');
+    fireEvent.click(oldStage());
+    await screen.findByText('CASE-REFRESH');
+    const reads = mocks.core.mock.calls.length;
+
+    rerender(route(false));
+    currentStage = 'staff_payout';
+    await act(async () => notifyCaseAccountingChanged('CASE-REFRESH'));
+    expect(mocks.core).toHaveBeenCalledTimes(reads);
+    rerender(route(true));
+    await screen.findByText('目前沒有符合條件的案件。');
+    expect(oldStage()).toHaveAccessibleName(/^12 .* 0$/);
+    expect(newStage()).toHaveAccessibleName(/^13 .* 1$/);
+    expect(mocks.core).toHaveBeenCalledTimes(reads + 1);
+
+    fireEvent.click(newStage());
+    await screen.findByText('CASE-REFRESH');
+    expect(mocks.core).toHaveBeenCalledTimes(reads + 2);
   });
 
   it('清單更新中或更新失敗時，點擊與鍵盤都不能開啟舊案件列', async () => {
