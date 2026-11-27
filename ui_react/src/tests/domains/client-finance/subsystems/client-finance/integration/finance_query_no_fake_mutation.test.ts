@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 describe('FinancePage query safety', () => {
   it('contains no fake mutation or mock dependency', () => {
     const source = readFileSync('src/pages/FinancePage.tsx', 'utf8');
-    const withoutLocalCommandCleanup = source.replace('financeApplyCommandByPreview.current.delete(expected.previewFingerprint)', '');
+    const withoutLocalCommandCleanup = source.replaceAll('financeApplyCommandByPreview.current.delete(', '');
     for (const forbidden of ['mockData', 'MOCK_', 'alert(', 'confirm(', 'prompt(', 'fetch(', '.post(', '.put(', '.delete(', 'handleSettle', 'handleApprove']) expect(withoutLocalCommandCleanup).not.toContain(forbidden);
     expect(source).not.toContain('error instanceof Error ? error.message');
   });

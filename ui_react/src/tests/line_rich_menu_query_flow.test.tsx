@@ -67,7 +67,7 @@ describe('LINE Rich Menu query 接線', () => {
     expect(screen.queryByRole('button', { name: '發布' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /準備發布至 LINE|確認發布至 LINE/ })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '此版本已發布' })).toBeInTheDocument();
-    expect(screen.getByText(/這不是月嫂或工會人員的權限限制/)).toBeInTheDocument();
+    expect(screen.getByText('若要再次發布，請先編輯並儲存，建立下一版草稿。')).toBeInTheDocument();
     expect(richMenuDraft.query).toHaveBeenCalledTimes(1);
     expect(configuration.getRichMenuConfiguration).not.toHaveBeenCalled();
     expect(configuration.listRichMenuPublications).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe('LINE Rich Menu query 接線', () => {
     await screen.findByRole('heading', { name: '此版本已發布' });
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
 
-    expect(await screen.findByText('目前無法查詢發布結果；未重新送出發布。')).toBeVisible();
+    expect(await screen.findByText('目前無法查詢發布結果。系統尚未重送發布工作，請按上方「重新整理」核對原發布工作。')).toBeVisible();
     expect(history).toHaveBeenCalledWith({ menuId: 'customer_menu', page: 1, pageSize: 1 });
     expect(configuration.getRichMenuPublication).not.toHaveBeenCalled();
     expect(publication.publish).not.toHaveBeenCalled();

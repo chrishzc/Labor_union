@@ -245,7 +245,7 @@ def test_liff_submission_recovery_in_browser(scenario):
             expect(status).to_contain_text("本次申請未送出")
             expect(page.locator("#form")).to_be_hidden()
         else:
-            expect(status).to_have_text("申請 #17，待工會審核")
+            expect(status).to_have_text("申請 #17，待工會審核。重新開啟此頁後，可在「我的申請紀錄」查看進度。")
             expect(page.locator("#form")).to_be_hidden()
             assert page.evaluate("Object.values(sessionStorage)") == []
 

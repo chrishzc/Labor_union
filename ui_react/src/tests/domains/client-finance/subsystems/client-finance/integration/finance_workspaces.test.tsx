@@ -9,6 +9,7 @@ import { cashRequirementsQueryClient } from '../../../../../../api/accounts_paya
 import { staffPayoutRemediationClient } from '../../../../../../api/staff_payables/staff_payout_remediation_client';
 import { subsidyPeriodClient, type SubsidyPeriod } from '../../../../../../api/government_subsidy/period_reconciliation_client';
 import { subsidyAdvanceSettlementClient } from '../../../../../../api/client_finance/subsidy_advance_settlement_client';
+import { differenceResolutionClient } from '../../../../../../api/client_finance/difference_resolution_client';
 import { weeklyOperationsReportQueryClient } from '../../../../../../api/reports/weekly_operations_report_query_client';
 import { transport } from '../../../../../../api/shared/transport';
 import { WEEKLY_OPERATIONS_REPORT } from '../../../../../fixtures/reports/weekly_operations_report_contract_fixtures';
@@ -109,7 +110,8 @@ async function openCase(scope: ReturnType<typeof within>, selected: string, labe
 async function openGovernment() {
   openFinance('bank');
   fireEvent.click(await screen.findByRole('button', { name: '核對交易 G-9' }));
-  return within(await screen.findByRole('dialog', { name: '政府整期核對' }));
+  const drawer = within(await screen.findByRole('dialog', { name: '核對交易' }));
+  return within(await drawer.findByRole('region', { name: '政府補助整期核銷' }));
 }
 
 function changeCategory(category: AccountingRange['category']) {
@@ -187,10 +189,20 @@ describe('current finance workspaces', () => {
     vi.mocked(financeAccountingClient.query).mockResolvedValue(detail('HANDOVER', {
       staff_items: [{ ...overpaid, has_payment: true, version: '1' }],
     }));
+    vi.spyOn(differenceResolutionClient, 'staff').mockResolvedValue({
+      case_no: 'HANDOVER',
+      items: [{
+        identity: 'recovery:handover', staff_id: 22, party: overpaid.party, original_ntd: 700, remaining_ntd: 700,
+        noncash_ntd: 0, version: 1, status: 'open', related_cases: ['HANDOVER'],
+        source_obligation_identities: [overpaid.identity], has_source_cash_evidence: true,
+      }],
+      events: [],
+    });
     openFinance();
     expect(await screen.findByText('待付 NT$ 0')).toBeVisible();
     const drawer = await openCase(await monthDetails(), 'HANDOVER');
-    expect(await drawer.findByText('超付款待核對')).toBeVisible();
+    expect(await drawer.findByText(/正式未解除追償 NT\$ 700/)).toBeVisible();
+    expect(drawer.getByRole('button', { name: '核對追償' })).toBeVisible();
     expect(drawer.getByText('已核銷 NT$ 17,500')).toBeVisible();
   });
 
@@ -286,11 +298,13 @@ describe('current finance workspaces', () => {
     const recovery = vi.spyOn(subsidyAdvanceSettlementClient, 'apply');
     openFinance('government-list');
     const fromReport = await openCase(within(screen.getByRole('region', { name: '政府補助報表查詢工作區' })), caseNo, `開啟案件 ${caseNo}`);
-    expect(await fromReport.findByText('實撥 NT$ 12,000')).toBeVisible();
+    expect(await fromReport.findByText('本案補助 NT$ 12,000')).toBeVisible();
+    expect(fromReport.queryByText('實撥 NT$ 12,000')).not.toBeInTheDocument();
     fireEvent.click(fromReport.getAllByRole('button', { name: '關閉案件' })[0]);
     fireEvent.click(screen.getByRole('button', { name: '每月帳務' }));
     const fromPayable = await openCase(await monthDetails(), caseNo);
-    expect(await fromPayable.findByText('實撥 NT$ 12,000')).toBeVisible();
+    expect(await fromPayable.findByText('本案補助 NT$ 12,000')).toBeVisible();
+    expect(fromPayable.queryByText('實撥 NT$ 12,000')).not.toBeInTheDocument();
     expect(fromPayable.getByRole('columnheader', { name: '預計給付／退款日' })).toBeVisible();
     expect(fromPayable.getByText('客戶退款待結：', { exact: false })).toHaveTextContent('NT$ 8,000');
     expect(vi.mocked(financeAccountingClient.query).mock.calls.map(([selected]) => selected)).toEqual([caseNo, caseNo]);

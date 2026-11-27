@@ -100,6 +100,33 @@ describe('contractExternalSigningClient', () => {
     await expect(contractExternalSigningClient.query('CASE-001')).rejects.toThrow(/案件識別不一致/);
   });
 
+  it('reads the original signed archive result and rejects unbound or malformed proof', async () => {
+    const binding = { case_no: 'CASE-001', idempotency_key: 'archive-1' };
+    const file = { target: 'client', filename: 'original.pdf', file_id: 'cf_' + 'a'.repeat(32) };
+    const committed = { ...binding, state: 'committed', files: [file] };
+    const unresolved = { ...binding, state: 'unresolved' };
+    const get = vi.spyOn(transport, 'get')
+      .mockResolvedValueOnce(envelope(committed))
+      .mockResolvedValueOnce(envelope(unresolved));
+    const signal = new AbortController().signal;
+    const queryResult = () => contractExternalSigningClient.querySignedArchiveResult('CASE-001', 'archive-1', signal);
+    await expect(queryResult()).resolves.toEqual(committed);
+    expect(get).toHaveBeenCalledWith('/api/v1/orders/CASE-001/contract-external-signing/signed-archive/result', {
+      token: 'session-token', signal, cache: 'no-store', headers: { 'Idempotency-Key': 'archive-1' },
+    });
+    await expect(queryResult()).resolves.toEqual(unresolved);
+    for (const invalid of [
+      { ...committed, case_no: 'CASE-002' },
+      { ...committed, idempotency_key: 'another-key' },
+      { ...committed, files: [] },
+      { ...committed, files: [{ ...file, file_id: 'invalid' }] },
+      { ...unresolved, files: [file] },
+    ]) {
+      get.mockResolvedValueOnce(envelope(invalid));
+      await expect(queryResult()).rejects.toThrow();
+    }
+  });
+
   it('records a staff completion report with expected versions and stable command identity', async () => {
     const post = vi.spyOn(transport, 'post').mockResolvedValue(envelope(reportReceipt));
     const identity = createExternalSigningCommandIdentity('staff-report');

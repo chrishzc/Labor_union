@@ -65,7 +65,7 @@ describe('staff performance accepted UI', () => {
   it('shows a query error and retries without showing old results', async () => {
     vi.mocked(staffPerformanceClient.query).mockRejectedValueOnce(new Error('分析暫時無法載入'));
     render(<StaffPerformancePanel />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('分析暫時無法載入');
+    expect(await screen.findByRole('alert')).toHaveTextContent('暫時無法讀取月嫂表現分析。請按「重新查詢」。');
     expect(screen.getByRole('button', { name: '匯出 XLSX' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '重新查詢' }));
     expect(await screen.findByRole('table', { name: '月嫂表現比較' })).toBeInTheDocument();

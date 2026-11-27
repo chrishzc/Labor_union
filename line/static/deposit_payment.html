@@ -29,7 +29,7 @@ function show(text, error=false) { const node=document.getElementById("status");
 function put(id,text){document.getElementById(id).textContent=text;}
 async function initialize(){
   const caseNo = new URLSearchParams(location.search).get("case_no") || "";
-  if(!/^[A-Za-z0-9_-]{1,50}$/.test(caseNo)){show("連結無效，請從 LINE 重新開啟。",true);return;}
+  if(!/^[A-Za-z0-9_-]{1,50}$/.test(caseNo)){show("繳費連結缺少有效的案件編號。請回到 LINE 的訂金通知重新開啟。",true);return;}
   try{
     const configResponse=await fetch("/api/v1/line/identity/runtime-config",{cache:"no-store"});
     const config=await configResponse.json();
@@ -49,8 +49,8 @@ async function initialize(){
     }else if(data.due_date && /^[0-9]{3}$/.test(data.bank_code || "") && /^[0-9]{10,20}$/.test(data.virtual_account || "")){
       put("due",data.due_date);put("bank",data.bank_code);put("account",data.virtual_account);virtualAccount=data.virtual_account;
       document.getElementById("unpaid").hidden=false;show("工會還沒確認收到這筆錢。如果你已經匯款，請不要再匯一次。還沒匯款的話，請用下面的帳號。");
-    }else{show("工會還沒確認繳費資料。請先不要匯款。");}
-  }catch{show("目前查不到這筆訂金的繳費資料。請先不要匯款。請回 LINE 重新打開，還是不行就聯絡工會。",true);}
+    }else{show("工會還沒確認這筆訂金的繳費資料。請先不要匯款，回 LINE 聯絡工會確認。");}
+  }catch{show("目前無法確認這筆訂金的繳費資料。請先不要匯款，回到 LINE 的訂金通知重新開啟。若仍無法查看，請聯絡工會。",true);}
 }
 document.getElementById("copy").addEventListener("click",async()=>{
   if(!virtualAccount)return;

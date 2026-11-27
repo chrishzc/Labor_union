@@ -13,14 +13,17 @@ describe('Scheduling standalone matching entry cutover', () => {
     window.location.hash = '#';
   });
 
-  it('keeps only calendar, leave substitution and holiday tabs', () => {
+  it('keeps only the calendar and holiday policy tabs', () => {
     window.location.hash = '#scheduling';
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
 
     render(<SchedulingPage />);
 
     const navigation = screen.getByRole('navigation', { name: '排班工作區' });
-    expect(within(navigation).getAllByRole('button')).toHaveLength(3);
+    expect(within(navigation).getAllByRole('button')).toHaveLength(2);
+    expect(within(navigation).getByRole('button', { name: /排班月曆/ })).toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: /國定假日政策/ })).toBeInTheDocument();
+    expect(within(navigation).queryByRole('button', { name: /請假代班/ })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole('button', { name: /媒合協調/ })).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="scheduling.tab.matching"]')).toBeNull();
   });

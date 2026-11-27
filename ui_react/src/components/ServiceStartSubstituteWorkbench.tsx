@@ -35,25 +35,26 @@ export function ServiceHandoverWorkbench({caseNo,assignmentId}:{caseNo:string;as
   const [options,setOptions]=useState<{staff_id:number;name:string}[]>([]);
   const [keyword,setKeyword]=useState('');
   const [staff,setStaff]=useState('');
-  const [busy,setBusy]=useState(false);
+  const [activityMessage,setActivityMessage]=useState<string|null>(null);
+  const busy=activityMessage!==null;
   const [error,setError]=useState('');
   const key=`service-handover-command:${caseNo}:${assignmentId??''}`;
   const [pending,setPending]=useState<HandoverInquiry|null>(()=>{try{return JSON.parse(sessionStorage.getItem(key)??'null') as HandoverInquiry|null;}catch{return null;}});
-  const refresh=useCallback(async()=>{setBusy(true);setError('');try {
+  const refresh=useCallback(async()=>{setActivityMessage('正在讀取換人資料…');setError('');try {
     const [result,staffOptions]=await Promise.all([serviceStartClient.handoverContext(caseNo,assignmentId),serviceStartClient.options()]);
     setContext(result);setOptions(staffOptions.items);
-  }catch(e){setError(e instanceof Error?e.message:'換人資料載入失敗。');}finally{setBusy(false);}},[caseNo,assignmentId]);
+  }catch(e){setError(e instanceof Error?e.message:'暫時無法讀取換人資料。請點選「重新查詢換人資料」。');}finally{setActivityMessage(null);}},[caseNo,assignmentId]);
   useEffect(()=>{void refresh();},[refresh]);
-  const send=async(body:HandoverInquiry)=>{setBusy(true);setError('');setPending(body);sessionStorage.setItem(key,JSON.stringify(body));
+  const send=async(body:HandoverInquiry)=>{setActivityMessage(pending?'正在確認原詢問結果…':'正在送出意願詢問…');setError('');setPending(body);sessionStorage.setItem(key,JSON.stringify(body));
     try {const request=await serviceStartClient.inquireHandover(body);setContext(current=>current?{...current,request}:current);
       setPending(null);sessionStorage.removeItem(key);
     }catch(e){setError(e instanceof Error?e.message:'尚無法確認詢問結果。');
       if(e instanceof ApiHttpError && e.status>=400 && e.status<500){setPending(null);sessionStorage.removeItem(key);}
-    }finally{setBusy(false);}};
-  const search=async()=>{setBusy(true);setError('');try{setOptions((await serviceStartClient.options(keyword)).items);}catch(e){setError(e instanceof Error?e.message:'人選查詢失敗。');}finally{setBusy(false);}};
+    }finally{setActivityMessage(null);}};
+  const search=async()=>{setActivityMessage('正在查詢代班月嫂…');setError('');try{setOptions((await serviceStartClient.options(keyword)).items);}catch(e){setError(e instanceof Error?e.message:'人選查詢失敗。請再次點選「搜尋代班月嫂」。');}finally{setActivityMessage(null);}};
   return <section className="service-start-workbench" aria-label="服務中換人作業">
     <header><h2>案件 {caseNo}</h2><button type="button" disabled={busy} onClick={()=>void refresh()}>重新查詢換人資料</button></header>
-    {busy && <p role="status">正在處理…</p>}{error && <p role="alert">{error}</p>}
+    {activityMessage && <p role="status">{activityMessage}</p>}{error && <p role="alert">{error}</p>}
     {pending && <p>這筆詢問結果尚未確認。<button type="button" disabled={busy} onClick={()=>void send(pending)}>確認原操作結果</button></p>}
     {context && !context.request && <article className="service-start-card"><h3>原月嫂：{context.staff_name}</h3>
       <p>原區段剩餘 {context.service_dates.length} 個服務日：{context.service_dates.join('、')}</p>
@@ -157,7 +158,7 @@ function SubstituteCard({initial,options}:{initial:ServiceStartView;options:{sta
       completed=result.status==='applied';
       if(completed && pending) savePending({...pending,observeOnly:true});
       if(result.request_id!==initial.request_id || result.case_no!==initial.case_no || result.staff_id!==initial.staff_id
-        || result.workflow_kind!==initial.workflow_kind) throw new Error('回讀的服務安排與目前案件不一致。');
+        || result.workflow_kind!==initial.workflow_kind) throw new Error('查到的換人資料與目前案件不符。請重新查詢。');
       if(result.status==='applied') {
         const controller=new AbortController();observation.current=controller;
         await verifyCompletedAssignment(result,initial,controller.signal);

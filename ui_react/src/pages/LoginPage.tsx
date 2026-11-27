@@ -25,10 +25,10 @@ function getStage1ErrorMessage(err: unknown): string {
   if (err instanceof ApiHttpError) {
     if (['mfa_configuration_unavailable', 'admin_session_schema_not_ready'].includes(err.code)) return err.message;
     if (err.status === 403 || err.code === 'mfa_enrollment_required') {
-      return '此帳號需先完成 MFA 綁定；React 綁定流程尚未啟用。';
+      return '此帳號需先綁定驗證器。若未顯示綁定畫面，請聯絡系統管理員。';
     }
     if (err.status === 401 || err.code === 'invalid_credentials_or_factor') {
-      return '帳號或密碼錯誤';
+      return '帳號或密碼錯誤，請核對帳號並重新輸入密碼。';
     }
     if (err.status === 429 || err.code === 'login_rate_limited') {
       return '登入嘗試過於頻繁，請稍後再試';
@@ -41,7 +41,7 @@ function getStage1ErrorMessage(err: unknown): string {
       return '系統驗證服務暫時無法使用，請稍後再試';
     }
     if (err.status === 422 || err.code === 'VALIDATION_ERROR') {
-      return '輸入格式不符規定';
+      return '帳號或密碼的格式不符，請檢查輸入後重試。';
     }
     return err.message || '帳號或密碼錯誤';
   }
@@ -52,11 +52,11 @@ function getStage1ErrorMessage(err: unknown): string {
     return '請求逾時，請稍後再試';
   }
   if (err instanceof ApiDecodeError) {
-    return '伺服器回應結構異常';
+    return '目前無法確認登入結果，請稍後重新登入。';
   }
   const msg = extractErrorMessage(err);
   if (msg.includes('mfa_enrollment_required') || msg.includes('MFA')) {
-    return '此帳號需先完成 MFA 綁定；React 綁定流程尚未啟用。';
+    return '此帳號需先綁定驗證器。若未顯示綁定畫面，請聯絡系統管理員。';
   }
   if (
     msg.includes('401') ||
@@ -64,7 +64,7 @@ function getStage1ErrorMessage(err: unknown): string {
     msg.includes('admin_credentials_invalid') ||
     msg.includes('invalid_credentials_or_factor')
   ) {
-    return '帳號或密碼錯誤';
+    return '帳號或密碼錯誤，請核對帳號並重新輸入密碼。';
   }
   if (msg.includes('429') || msg.includes('login_rate_limited')) {
     return '登入嘗試過於頻繁，請稍後再試';
@@ -97,10 +97,10 @@ function getStage2ErrorMessage(
       return { message: '驗證嘗試過於頻繁，請稍後再試', expired: false };
     }
     if (err.status === 503 || err.code === 'admin_auth_unavailable') {
-      return { message: '驗證服務暫時無法使用', expired: false };
+      return { message: '驗證服務暫時無法使用，請稍後再試。', expired: false };
     }
     if (err.status === 401 || err.code === 'invalid_credentials_or_factor') {
-      return { message: '驗證碼錯誤或無效', expired: false };
+      return { message: '驗證碼錯誤或無效，請輸入驗證器目前顯示的 6 位數動態碼。', expired: false };
     }
     return { message: err.message || '驗證碼錯誤或無效', expired: false };
   }
@@ -111,7 +111,7 @@ function getStage2ErrorMessage(
     return { message: '請求逾時，請稍後再試', expired: false };
   }
   if (err instanceof ApiDecodeError) {
-    return { message: '伺服器回應結構異常', expired: false };
+    return { message: '目前無法確認驗證結果，請稍後再試。', expired: false };
   }
   const msg = extractErrorMessage(err);
   if (
@@ -126,14 +126,14 @@ function getStage2ErrorMessage(
     return { message: '驗證嘗試過於頻繁，請稍後再試', expired: false };
   }
   if (msg.includes('503') || msg.includes('admin_auth_unavailable')) {
-    return { message: '驗證服務暫時無法使用', expired: false };
+    return { message: '驗證服務暫時無法使用，請稍後再試。', expired: false };
   }
   if (
     msg.includes('401') ||
     msg.includes('invalid_credentials_or_factor') ||
     msg.includes('驗證碼錯誤')
   ) {
-    return { message: '驗證碼錯誤或無效', expired: false };
+    return { message: '驗證碼錯誤或無效，請輸入驗證器目前顯示的 6 位數動態碼。', expired: false };
   }
   return { message: msg, expired: false };
 }

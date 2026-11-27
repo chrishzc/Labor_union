@@ -556,7 +556,7 @@ function showReceipt(receipt) {
   form.reset();
   photoForm.clear();
   form.hidden = true;
-  show("申請 #" + receipt.id + "，" + applicationStatuses[receipt.status], "receipt");
+  show("申請 #" + receipt.id + "，" + applicationStatuses[receipt.status] + "。重新開啟此頁後，可在「我的申請紀錄」查看進度。", "receipt");
   window.scrollTo(0, 0);
 }
 
@@ -673,7 +673,7 @@ async function init() {
     } else {
       await loadForm();
     }
-  } catch (error) { show(error.message || "無法載入資料，請重新開啟。", "error"); }
+  } catch (error) { show(error.message || "無法開啟資料更新申請。請從 LINE 圖文選單重新開啟。", "error"); }
 }
 init();
 </script>

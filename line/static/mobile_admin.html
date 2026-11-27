@@ -500,7 +500,7 @@ async function init() {
     const configResponse = await fetch("/api/v1/line/identity/runtime-config");
     const configResult = await configResponse.json();
     const liffId = configResult.data?.liff_id;
-    if (!configResponse.ok || !liffId) throw new Error("LIFF 尚未完成設定");
+    if (!configResponse.ok || !liffId) throw new Error("手機工作台暫時無法開啟。請聯絡工會確認 LINE 入口設定。");
     await liff.init({liffId});
     if (!liff.isLoggedIn()) {
       const redirect = new URL("/line-identity", location.origin);
@@ -509,7 +509,7 @@ async function init() {
       return;
     }
     idToken = liff.getIDToken() || "";
-    if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");
+    if (!idToken) throw new Error("無法確認你的 LINE 登入身分。請關閉此頁，再從 LINE 圖文選單重新開啟。若仍無法開啟，請聯絡工會。");
     const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
     reminderActorId = profile.admin_user_id;
     managementEntryUrl = profile.management_entry_url;
@@ -910,7 +910,7 @@ async function previewSchedulingReview() {
         : `mobile-scheduling-review:${caseNo}:${Date.now().toString(36)}`,
     };
     renderSchedulingPreview();
-    showStatus("排班預覽已建立；尚未寫入。 ");
+    showStatus("排班預覽已建立，尚未儲存。請核對下方日期，填寫原因後按「確認套用此排班預覽」。");
   } catch (error) {
     if (previewSequence === schedulingPreviewSequence
         && formRevision === schedulingFormRevision
@@ -955,7 +955,7 @@ async function applySchedulingReview() {
     schedulingQuery = requireSchedulingQuery(data.readback, preview.case_no);
     schedulingPreview = null;
     renderSchedulingReview();
-    showStatus("排班已保存，並已重新讀回目前正式排班。 ");
+    showStatus("排班已保存，並已重新讀回目前正式排班。請在下方核對服務日期。");
   } catch (error) { showStatus(error.message, true); }
 }
 
@@ -1085,7 +1085,7 @@ async function loadReviewWorkbench(preserveOperation=false) {
   await Promise.all(jobs);
   if(sequence===notificationSequence && target==='staff_review'){
     updateNotificationCards(root);
-    showStatus(failed?'部分通知事項未能載入，其他分類仍可使用。':'通知事項已更新',failed>0 && failed===sources.length);
+    showStatus(failed?(failed===sources.length?'暫時無法讀取通知事項。請在各分類按「重新讀取」。':'部分通知事項未能載入。請在未載入的分類按「重新讀取」。'):'通知事項已更新',failed>0 && failed===sources.length);
     return failed===0;
   }
 }
@@ -1240,7 +1240,7 @@ async function renderNotificationFailure(root,item,current) {
       let key=sessionStorage.getItem(storageKey);if(!key){key=crypto.randomUUID();sessionStorage.setItem(storageKey,key);}
       await postJson(`/api/v1/line/mobile-admin/notification-task-actions/notification-sources/${source.source_event_id}/replay`,{reason:'',idempotency_key:key,correlation_id:key});
       sessionStorage.removeItem(storageKey);
-      if(current()){await loadReviewWorkbench();showStatus('已建立原通知補送工作，尚未證明送達。');}
+      if(current()){await loadReviewWorkbench();showStatus('原通知已排入補送。請等候系統寄送，稍後在待辦工作台核對結果。');}
     });button.disabled=!source.can_replay;card.appendChild(button);root.appendChild(card);
   }
 }
@@ -1303,7 +1303,7 @@ function appendOrderGroupBindingSteps(root, caseNo, showCopyButtons = false) {
   const steps = document.createElement('ol');
   steps.className = 'group-binding-steps';
   const replies = [
-    {instruction:'在群組輸入', value:'綁定群組', copyLabel:'複製綁定群組'},
+    {instruction:'在群組輸入', value:'綁定訂單', copyLabel:'複製綁定訂單'},
     {instruction:'收到提示後，回覆案件編號', value:caseNo, copyLabel:'複製案件編號'},
   ];
   for (const {instruction, value, copyLabel} of replies) {
@@ -1421,7 +1421,7 @@ async function loadDepositPayments() {
     if (!item.line_bound) status.textContent=item.settled ? "客戶未綁定 LINE，請人工通知已入帳。" : "客戶未綁定 LINE，請人工通知繳費。";
     else if (item.delivery_status) status.textContent=deliveryLabels[item.delivery_status] || "請確認寄送工作狀態。";
     else if (item.settled) status.textContent="已入帳，請於 LINE 官方帳號手動發送入帳通知並標記已通知。";
-    else if (!item.ready) status.textContent="繳費資料待確認，尚不能發送提醒。";
+    else if (!item.ready) status.textContent="目前無法發送提醒。請到管理後台的「帳務中心」核對本案繳費資料及到期日。";
     else {
       const button=document.createElement("button");button.type="button";button.textContent="發送訂金繳費提醒";
       let intent=null;
@@ -1430,7 +1430,7 @@ async function loadDepositPayments() {
         intent ||= {case_no:item.case_no,expected_version:item.expected_version,idempotency_key:`deposit-reminder:${crypto.randomUUID()}`};
         try{
           await postJson("/api/v1/line/mobile-admin/deposit-payments/remind",intent);
-          status.textContent="已建立寄送工作，尚未證明送達。";
+          status.textContent="提醒已排入寄送。請等待系統處理，稍後重新讀取待辦以核對結果。";
         }catch(error){status.textContent=error.message || "尚無法確認寄送結果，請重試。";button.disabled=false;}
       });
       card.appendChild(button);
@@ -1483,7 +1483,7 @@ function appendManualReminder(card, kind, identity, body, canSend, unavailableRe
       if(!current())return;
       const rejected = [400,403,409,422].includes(error.httpStatus);
       if (rejected) { sessionStorage.removeItem(storageKey); pending = null; }
-      status.textContent = rejected ? `${error.message} 請重新整理待辦。` : '寄送結果尚未確認，請使用原操作重新查詢。';
+      status.textContent = rejected ? `${error.message} 請重新整理待辦。` : '目前無法確認提醒是否已排入寄送。請按「確認原提醒結果」。';
       button.textContent = rejected ? '請重新整理待辦' : '確認原提醒結果';
       button.disabled = rejected;
     }

@@ -1224,7 +1224,7 @@ async function loadSchedule() {
     const data = await responseData(response);
     if (!response.ok || data.success === false || !data.data) {
       document.getElementById("calendar").replaceChildren();
-      show("calendarStatus", responseMessage(data, "查詢失敗"), true);
+      show("calendarStatus", responseMessage(data, "無法讀取班表。請稍後點上方的年月，再選一次要查的月份。"), true);
       showReauthenticationFor(data);
       return;
     }
@@ -1233,7 +1233,7 @@ async function loadSchedule() {
     renderCalendar(schedule);
   } catch (_) {
     document.getElementById("calendar").replaceChildren();
-    show("calendarStatus", "班表無法載入或資料格式不正確，請稍後重試；持續發生時請聯絡工會人員。", true);
+    show("calendarStatus", "無法讀取班表。請稍後點上方的年月，再選一次要查的月份。若仍無法查看，請聯絡工會。", true);
   } finally {
     button.disabled = !identityReady && !flowId;
     monthInput.disabled = false;
@@ -2025,7 +2025,7 @@ async function submitUnavailability() {
       throw new Error("目前查不到本次登記的有效紀錄。");
     }
     pendingUnavailability = null;
-    show("unavailStatus", "不接案日期已登記，您可以關閉頁面。");
+    show("unavailStatus", "不接案日期已登記。請在下方「已登記不接案紀錄」核對日期。");
     await loadSchedule();
   } catch (error) {
     if (pendingUnavailability?.receipt) {
@@ -2122,7 +2122,7 @@ async function init() {
         return;
       }
     } else {
-      show("calendarStatus", "LIFF 初始化失敗，請重新開啟頁面。", true);
+      show("calendarStatus", "無法確認 LINE 身分。請按「重新登入 LINE」。", true);
       document.getElementById("reauthenticate").hidden = false;
     }
   }

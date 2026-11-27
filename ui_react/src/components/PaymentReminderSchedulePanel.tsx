@@ -8,9 +8,9 @@ import './PaymentReminderSchedulePanel.css';
 type Stage='deposit'|'first'|'second';
 const names={deposit:'訂金',first:'第一期',second:'第二期'};
 const copyError=(error:unknown,saving=false)=>error instanceof ApiHttpError&&error.status===409
-  ?'排程已由其他人更新，已保留你的修改，請重新讀取後確認。'
-  :error instanceof ApiHttpError&&error.status===403?'目前帳號沒有維護提醒排程的權限。'
-  :saving?'儲存結果尚未確認，已保留原操作；重試會沿用相同操作識別。':'提醒排程暫時無法取得，請重新載入。';
+  ?'排程已由其他人更新。你的修改仍在畫面上，請按「重新讀取」核對最新排程。'
+  :error instanceof ApiHttpError&&error.status===403?'目前帳號沒有維護提醒排程的權限。請聯絡系統管理員確認權限。'
+  :saving?'儲存結果尚未確認。請按「儲存提醒排程」重試同一筆修改。':'提醒排程暫時無法取得，請按「重新載入提醒排程」。';
 
 function minutes(value:string){const [hour,minute]=value.split(':').map(Number);return hour*60+minute;}
 function day(value:string){const [year,month,date]=value.split('-').map(Number);return Date.UTC(year,month-1,date);}

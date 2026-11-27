@@ -626,7 +626,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 {multiOpened && <div hidden={matchingView !== 'multi'}>
                   <h3>多月嫂分段</h3>
                   <p>指定 2–4 位月嫂，查詢可銜接的服務日期。採用組合後會建立正式推薦方案，再接續各段意願與客戶確認。</p>
-                  {datesPending && <p role="status">開始日與服務日期尚未完成接續確認，請先到「服務安排 → 設定服務日期」完成，再規劃分段。</p>}
+                  {datesPending && <p role="status">開始日與服務日期尚未確認。請到「確認服務日期與排班」的「設定服務日期」完成確認，再規劃分段。</p>}
                   <fieldset disabled={multiBusy || datesPending} aria-label="分段媒合篩選條件"><legend>媒合篩選條件</legend>
                     {([
                       ['region', '服務地區'], ['cooking', '下廚料理'],
@@ -641,7 +641,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 </div>}
               </div>}
               {(activeGroup === 'recommendation' || visitedGroups.includes('recommendation')) && <div hidden={activeGroup !== 'recommendation'}>
-                {datesPending && <p role="status">開始日與服務日期尚未完成接續確認，請先到「服務安排 → 設定服務日期」完成；目前不能以舊日期繼續推薦確認。</p>}
+                {datesPending && <p role="status">開始日與服務日期尚未確認。請到「確認服務日期與排班」的「設定服務日期」確認新日期，再回到這裡辦理推薦。</p>}
                 <fieldset disabled={datesPending}>
                 <OrderFormalRecommendationPanel
                   caseNo={caseNo}

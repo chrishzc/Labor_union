@@ -53,7 +53,7 @@ export function LineDeliveryOperationsWorkbench() {
       {invalidIssue?<p role="alert">異常編號無效，請從通知事項重新開啟。</p>:issue && <div className="notification-task-operation"><LineNotificationFailureActions key={issue} issueKey={issue} onCommitted={refresh}/></div>}
       {error && <p role="alert">{error}</p>}{!result && !error && <p role="status">正在查詢通知建立異常…</p>}
       {result && <><div className="task-operation-selector">{result.items.map(item=><button className="np-button" key={item.id} aria-pressed={issue===item.failure?.issue_key} onClick={()=>navigate(true,'',item.failure!.issue_key)}>{item.case_no} · {item.summary}</button>)}</div>
-        {!result.items.length && <p>此頁沒有通知建立異常。</p>}{result.next_cursor!==null && <button className="np-button" onClick={()=>setCursor(result.next_cursor!)}>載入下一頁異常</button>}{cursor!==0 && <button className="np-button" onClick={()=>setCursor(0)}>回第一頁</button>}</>}
+        {!result.items.length && <p>此頁沒有通知建立異常。可切換至「寄送工作」查看已建立的通知。</p>}{result.next_cursor!==null && <button className="np-button" onClick={()=>setCursor(result.next_cursor!)}>載入下一頁異常</button>}{cursor!==0 && <button className="np-button" onClick={()=>setCursor(0)}>回第一頁</button>}</>}
     </>:<>
       {invalidTask?<p role="alert">寄送工作編號無效，請從通知事項重新開啟。</p>:task && <div className="notification-task-operation"><LineDeliveryTaskActions key={task} id={Number(task)} onCommitted={refresh}/></div>}
       <LineDeliveryTaskWorkbench reloadToken={revision} onOpenTask={id=>navigate(false,String(id))}/>

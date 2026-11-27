@@ -435,7 +435,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
                 )}
                 {!selectedItem.launchPath && (
                   <div className="line-warning liff-preview-warning" role="status">
-                    {selectedItem.launchNote ?? '入口與正式服務尚待建立；設計與功能需求保留，不導向不存在的頁面。'}
+                    {selectedItem.launchNote ?? '正式服務尚未開放。可先查看下方流程示意。'}
                   </div>
                 )}
                 {visualPreview}

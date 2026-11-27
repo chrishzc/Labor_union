@@ -39,7 +39,6 @@ import {
   adaptOrderCoreStageTimelinePage,
   CORE_STAGE_DEFINITIONS,
   coreStageDefinition,
-  ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE,
 } from '../adapters/orders/order_core_stage_projection_adapter';
 import {
   adaptOrderSummaryPage,
@@ -54,13 +53,6 @@ function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: 
   if (summaryLoading) return '正式案件摘要載入中。';
   if (summaryQueryFailed) return '案件摘要暫時無法載入，仍可查看辦理階段。';
   return '未取得與此案件編號相符的正式摘要。';
-}
-
-function coreQueryErrorMessage(error: unknown): string {
-  const detail = error instanceof Error && error.message.trim()
-    ? error.message.trim()
-    : '無法取得訂單資料';
-  return `${ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE} 原因：${detail}`;
 }
 
 export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ homeNavigationRequest = 0 }) => {
@@ -177,8 +169,10 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   const view = core.snapshot?.data ?? null;
   const loading = view === null && core.status.kind === 'loading';
   const refreshing = view !== null && core.status.kind === 'loading';
-  const error = core.status.kind === 'failed' ? coreQueryErrorMessage(core.status.error) : null;
   const coreAccessDenied = core.status.kind === 'failed' && isViewAccessDenied(core.status.error);
+  const error = core.status.kind === 'failed'
+    ? (coreAccessDenied ? '目前帳號無法查看案件清單。請聯絡系統管理員確認權限。' : '暫時無法讀取案件清單。請按「重試」。')
+    : null;
   useLayoutEffect(() => {
     if (coreAccessDenied) clearDrawer();
   }, [coreAccessDenied, clearDrawer]);
@@ -312,14 +306,15 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
         <div className="order-v2-summary-warning" role="status">
           {summaries.snapshot
             ? <>案件摘要更新失敗，顯示 {viewTimestamp(summaries.snapshot.updatedAt)} 的資料。 <button type="button" onClick={refreshProjection}>重試</button></>
-            : '仍可查看案件分類。客戶、日期與月嫂資料暫時無法載入。'}
+            : <>客戶、日期與月嫂資料暫時無法載入。可先查看案件分類。 <button type="button" onClick={refreshProjection}>重試</button></>}
         </div>
       )}
 
       {loading && <div className="order-v2-empty">正在查詢訂單資料…</div>}
       {error && <div className="order-v2-error" role="alert">
         {error}
-        {core.snapshot && <> 顯示 {viewTimestamp(core.snapshot.updatedAt)} 的資料。 <button type="button" onClick={refreshProjection}>重試</button></>}
+        {core.snapshot && <> 顯示 {viewTimestamp(core.snapshot.updatedAt)} 的資料。</>}
+        {' '}<button type="button" onClick={refreshProjection}>重試</button>
       </div>}
       {refreshing && (
         <div className="order-v2-summary-warning" role="status">清單更新中，暫時無法操作案件。</div>

@@ -392,7 +392,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
           <h3 ref={sidebarHeading} tabIndex={-1} className="notification-sidebar-heading">LINE 流程圖</h3>
           <label className="notification-search"><span className="sr-only">搜尋通知名稱或內容</span><Search aria-hidden="true" /><input type="search" value={search} maxLength={100} placeholder="搜尋訊息名稱或內容" onChange={event => onSearchChange(event.target.value)} /></label>
           {sidebarLoading ? <p className="notification-feedback" role="status">正在載入通知內容…</p>
-            : query && !allEntries.some(matchesSearch) ? <p className="notification-help" role="status">沒有符合條件的通知</p>
+            : query && !allEntries.some(matchesSearch) ? <p className="notification-help" role="status">沒有符合條件的通知。請調整搜尋文字。</p>
             : <div className="notification-sidebar-journeys">{sidebar.map(group => {
               if (query && !group.stages.some(stage => stage.entries.some(matchesSearch))) return null;
               const groupOpen = Boolean(query) || expandedGroup === group.id;

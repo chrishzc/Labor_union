@@ -156,7 +156,7 @@ function createProfilePhotoForm() {
       return;
     }
     if (selected.some(file => file.size <= 0 || (file.type && !SUPPORTED_PHOTO_MIMES.has(file.type.toLowerCase())))) {
-      status.textContent = "只接受非空的 JPG、PNG 或 WebP 照片檔案。";
+      status.textContent = "選到空的檔案或不支援的格式。請重新選擇 JPG、PNG 或 WebP 照片。";
       return;
     }
     const replaces = template.category === "other"

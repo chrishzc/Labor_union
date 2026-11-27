@@ -327,6 +327,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, sourceC
           </>}
           {(unknown || selected.status === 'approving') && <button type="button" disabled={busy} onClick={() => loadDetail(selected.registration_id)}>查詢原申請處理結果</button>}
           {selected.status !== 'pending' && <p>{statuses[selected.status]}</p>}
+          {(unknown || selected.status === 'approving') && <p>請按「查詢原申請處理結果」核對這筆申請，避免重複處理。</p>}
         </footer>
       </section> : <div className="registration-applications__placeholder">
         <h3>查看申請內容</h3>

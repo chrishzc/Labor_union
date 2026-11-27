@@ -61,7 +61,7 @@ export function AccountingParametersPage() {
     } catch (error) {
       if (!applied && error instanceof ApiHttpError && error.status < 500) {
         setPending(null); setStatus('error'); setMessage(error.status === 409 ? '政策已被其他人更新，請重新載入後核對草稿。' : '儲存未完成，請確認欄位與權限。');
-      } else { setStatus('unknown'); setMessage('儲存結果尚未確認。重試會沿用同一筆操作。'); }
+      } else { setStatus('unknown'); setMessage('儲存結果尚未確認。請按「重試原儲存」確認同一筆修改。'); }
     }
   };
   const historyPolicy = catalog?.versions.find(item => item.revision === viewVersion)?.policy;

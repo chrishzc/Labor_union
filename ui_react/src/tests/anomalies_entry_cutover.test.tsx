@@ -19,14 +19,18 @@ const PERFORMANCE = {
   data: { started_at: '2026-10-16T01:00:00Z', request_count: 1, average_response_time_ms: 12,
     p50_response_time_upper_bound_ms: 15, p95_response_time_upper_bound_ms: 20, maximum_response_time_ms: 20 },
 };
+const NOTIFICATION_CATALOG_ENDPOINT = '/api/v1/line/notification-tasks';
 
 beforeEach(() => {
   sessionClient.clearSession();
   window.history.replaceState(null, '', '#anomalies');
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const path = String(input).split('?')[0];
-    if (path !== SYSTEM_STATUS_ENDPOINT) throw new Error(`Unexpected request: ${path}`);
-    return new Response(JSON.stringify(PERFORMANCE), { status: 200, headers: { 'content-type': 'application/json' } });
+    const payload = path === SYSTEM_STATUS_ENDPOINT ? PERFORMANCE
+      : path === NOTIFICATION_CATALOG_ENDPOINT ? { success: true, data: [] }
+      : null;
+    if (!payload) throw new Error(`Unexpected request: ${path}`);
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
   });
 });
 afterEach(() => {
@@ -57,7 +61,7 @@ describe('Anomalies page retirement', () => {
     expect(await screen.findByRole('heading', { name: '待辦看板內容' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '異常審核' })).not.toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalled());
-    const paths = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-    expect(paths.every(path => path.split('?')[0] === SYSTEM_STATUS_ENDPOINT)).toBe(true);
+    const paths = vi.mocked(fetch).mock.calls.map(([input]) => String(input).split('?')[0]);
+    expect(new Set(paths)).toEqual(new Set([SYSTEM_STATUS_ENDPOINT, NOTIFICATION_CATALOG_ENDPOINT]));
   });
 });

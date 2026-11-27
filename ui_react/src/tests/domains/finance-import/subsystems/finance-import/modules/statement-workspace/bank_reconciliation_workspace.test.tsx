@@ -479,13 +479,19 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       expect(reopenedReview.queryByRole('button', { name: '確認核銷本筆交易' })).not.toBeInTheDocument();
       const second = within(group).getByRole('button', { name: /115000002.*8,000/ });
       expect(second).toHaveAttribute('aria-pressed', 'false');
-      fireEvent.click(second);
+      const countPendingListReads = () => readBankTransactions.mock.calls.filter(([query]) =>
+        query.transaction_status === 'pending' && query.row_id === undefined,
+      ).length;
+      const pendingReadsBeforeSelectedPreview = countPendingListReads();
+      // Flush the resolved Preview and its read-only refresh before measuring Apply.
+      await act(async () => { fireEvent.click(second); });
       expect(preview).toHaveBeenLastCalledWith(batchIdentity, expect.any(AbortSignal), { [rowIdentity]: selectedCaseNo }, false, rowIdentity);
       expect(await reopenedReview.findByRole('button', { name: /115000002.*8,000/, pressed: true })).toBeVisible();
+      expect(countPendingListReads()).toBeGreaterThan(pendingReadsBeforeSelectedPreview);
       const confirm = reopenedReview.getByRole('button', { name: '確認核銷本筆交易' });
       expect(post).not.toHaveBeenCalled();
       readBankTransactions.mockClear();
-      fireEvent.click(confirm);
+      await act(async () => { fireEvent.click(confirm); });
       await waitFor(() => expect(outcome).toHaveBeenCalledWith(jobId, expect.any(AbortSignal)));
       expect(post).toHaveBeenCalledTimes(1);
       expect(post).toHaveBeenCalledWith('/api/v1/finance-import/batches/apply', {
@@ -493,6 +499,8 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
         review_row_identity: rowIdentity, staff_subsidy_selections: { [rowIdentity]: selectedCaseNo },
       }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }));
       expect(reopenedReview.getByText('正在確認本筆核銷結果…')).toBeVisible();
+      expect(reopenedReview.queryByText('本筆交易已核銷。')).not.toBeInTheDocument();
+      expect(reopenedReview.getByRole('region', { name: '銀行原始交易事實' })).not.toHaveTextContent('已核銷');
       expect(readBankTransactions).not.toHaveBeenCalled();
       await act(async () => finishReceipt());
       expect(await reopenedReview.findByText('本筆交易已核銷。')).toBeVisible();
@@ -504,6 +512,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       expect(screen.queryByRole('button', { name: `核對交易 ${row.reference}` })).not.toBeInTheDocument();
       fireEvent.change(screen.getByRole('combobox', { name: '篩選處理狀態' }), { target: { value: 'posted' } });
       expect(await screen.findByRole('row', { name: /交易明細#3.*已核銷/ })).toBeVisible();
+      expect(post).toHaveBeenCalledTimes(1);
     } finally {
       [preview, token, post, outcome].forEach(mock => mock.mockRestore());
       window.location.hash = '';

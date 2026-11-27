@@ -458,22 +458,43 @@ function basePath(caseNo: string): string {
 }
 
 const SignedArchiveFileSchema = z.strictObject({
-  target: z.string(),
-  filename: z.string(),
+  target: z.string().regex(/^(client|staff:[1-9][0-9]*)$/),
+  filename: z.string().min(1),
   file_id: z.string().regex(/^cf_[0-9a-f]{32}$/),
 });
-const SignedArchiveSchema = z.strictObject({ files: z.array(SignedArchiveFileSchema) });
+const SignedArchiveSchema = z.strictObject({ files: z.array(SignedArchiveFileSchema).min(1) });
 const SignedArchiveStatusSchema = z.strictObject({
   staff_segments: z.array(z.strictObject({ segment_id: z.number().int().positive(), staff_id: z.number().int().positive() })),
   files: z.array(SignedArchiveFileSchema).nullable(),
 });
 export type SignedArchiveFile = z.infer<typeof SignedArchiveFileSchema>;
 
+const SignedArchiveResultBinding = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  idempotency_key: z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,190}$/),
+});
+const SignedArchiveResultSchema = z.discriminatedUnion('state', [
+  SignedArchiveResultBinding.extend({ state: z.literal('committed'), files: SignedArchiveSchema.shape.files }),
+  SignedArchiveResultBinding.extend({ state: z.literal('unresolved') }),
+]);
+
 export const contractExternalSigningClient = {
   async querySignedArchive(caseNo: string, signal?: AbortSignal) {
     return decodePayload(envelope(SignedArchiveStatusSchema), await transport.get(
       basePath(caseNo) + '/signed-archive', { token: authToken(), signal },
     )).data;
+  },
+
+  async querySignedArchiveResult(caseNo: string, idempotencyKey: string, signal?: AbortSignal) {
+    const expectedCaseNo = canonicalCaseNo(caseNo);
+    const result = decodePayload(envelope(SignedArchiveResultSchema), await transport.get(
+      basePath(expectedCaseNo) + '/signed-archive/result',
+      { token: authToken(), signal, cache: 'no-store', headers: { 'Idempotency-Key': idempotencyKey } },
+    )).data;
+    if (result.case_no !== expectedCaseNo || result.idempotency_key !== idempotencyKey) {
+      throw new ApiHttpError(409, 'SIGNED_ARCHIVE_RESULT_MISMATCH', '歸檔回執與原操作不一致。');
+    }
+    return result;
   },
 
   async archiveSignedFiles(caseNo: string, client: File, staff: { segmentId: number; file: File }[], identity: ExternalSigningCommandIdentity) {

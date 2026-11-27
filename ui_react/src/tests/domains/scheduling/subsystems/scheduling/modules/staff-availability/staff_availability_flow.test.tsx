@@ -163,9 +163,11 @@ describe('Staff availability flow', () => {
   });
   it('does not apply a blocked preview', async () => {
     await open(); await add();
-    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValue({ ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!, can_apply: false, blockers: ['staff_unavailability_overlap'] });
+    const blocker = 'unavailability:17:2026-10-22:2026-10-29';
+    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValue({ ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!, can_apply: false, blockers: [blocker] });
     fireEvent.click(area().getByRole('button', { name: '儲存新增' }));
-    expect(await area().findByText(/staff_unavailability_overlap/)).toBeVisible();
+    expect(await area().findByText('所選期間與既有不可服務期間（2026-10-22 至 2026-10-29）衝突。請在「排班日曆與調度」核對檔期，或在這裡調整日期後再儲存。')).toBeVisible();
+    expect(area().queryByText(blocker, { exact: false })).not.toBeInTheDocument();
     expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
   });
   it('keeps typed stale conflicts and requires a fresh record read', async () => {

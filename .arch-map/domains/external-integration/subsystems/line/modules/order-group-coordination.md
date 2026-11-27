@@ -29,7 +29,7 @@
 - display adapter: `ui_react/src/adapters/line_order_groups/line_order_group_query_adapter.ts`
 
 ## Contracts
-- `綁定群組` 用 Reply 引導同一操作人員依序輸入案號與邀請網址。前兩步由原群組、原事件的 Reply 工作記錄進度。有效網址通過資格重查後，綁定、網址與私人邀請工作一併提交。見 [群組指令與驗收](../../../../../requirements/17A_LINE_Gateway_Inbox與通知投遞正式規格.md#3-服務群組綁定待辦與代班邀請)。
+- 不帶參數的 `綁定訂單` 用 Reply 引導同一操作人員依序輸入案號與邀請網址，最後用 Reply 回報結果。前兩步由原群組、原事件的 Reply 工作記錄進度。有效網址通過資格重查後，綁定、網址與私人邀請工作一併提交。見 [群組指令與驗收](../../../../../requirements/17A_LINE_Gateway_Inbox與通知投遞正式規格.md#3-服務群組綁定待辦與代班邀請)。
 - 單行群組設定指令為 `綁定訂單 案件編號 邀請網址`，空白／全形空白／換行分隔；格式錯誤回覆原因與範例，零設定寫入。私有網址與綁定同交易保存，更新網址不清成員歷史。
 - `發送邀請` 讀取保存網址並重新驗證付清／身分資格，經 committed delivery 投遞；provider 前核對群組版本、網址及 audience，失效工作取消。
 - nullable `invitation_url` 由 `db/schema_parts/1053_line_order_group_invitation_url.sql` additive 保存；舊綁定不回填網址，管理 Query 不暴露。

@@ -287,7 +287,7 @@
             return;
         }
         if (!studioPreview && (targetPage === 'matching_resume' || /^\/line-matching-resume(?:\?|$)/.test(directPath))) {
-            document.getElementById('loaderText').textContent = '履歷下載已退役。請向工會索取新版確認資訊。';
+            document.getElementById('loaderText').textContent = '這個連結已停止提供月嫂履歷下載。如需查看履歷，請回 LINE 聯絡工會。';
             return;
         }
         try {
@@ -317,7 +317,7 @@
             const response = await fetch('/api/v1/line/identity/runtime-config');
             const result = await response.json();
             const liffId = result.data?.liff_id;
-            if (!response.ok || !liffId) throw new Error('LIFF 尚未完成設定，請聯絡工會人員。');
+            if (!response.ok || !liffId) throw new Error('目前無法使用 LINE 登入。請回 LINE 官方帳號聊天室聯絡工會。');
             const liff = await loadLiff();
             await liff.init({ liffId });
             
@@ -326,7 +326,7 @@
                 return;
             }
 
-            if (!liff.getIDToken()) throw new Error('無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。');
+            if (!liff.getIDToken()) throw new Error('無法確認您的 LINE 身分。請關閉此頁，再從原本的 LINE 選單或訊息開啟。');
             if (flowPurpose === 'staff_web_profile') {
                 if (!webProfileStaff || !webProfileInteraction) throw new Error('這個連結打不開。請回到工會傳給你的 LINE 訊息，再點一次月嫂連結。');
                 const query = new URLSearchParams({ staff_id: webProfileStaff, interaction: webProfileInteraction });

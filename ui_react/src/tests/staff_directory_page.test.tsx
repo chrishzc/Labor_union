@@ -90,7 +90,7 @@ describe('StaffPage directory presentation', () => {
     expect(within(drawer as HTMLElement).getByText('公會編號：A001')).toBeInTheDocument();
     expect(drawer).toHaveTextContent('聯絡電話：09********');
     await waitFor(() => expect(within(drawer as HTMLElement).getAllByText('在職').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByText(/整體狀態/)).toBeInTheDocument());
+    expect(within(drawer as HTMLElement).getByRole('heading', { name: /接案狀態管理/ })).toBeInTheDocument();
     expect(screen.queryByLabelText('查詢服務人員')).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
   });

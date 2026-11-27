@@ -28,13 +28,13 @@ const pending = <T,>(): QueryState<T> => ({ loading: true, value: null, error: n
 const states: LineOrderGroupStatus[] = ['attention', 'inviting', 'bound', 'active', 'unbound', 'replaced', 'released'];
 const memberLabels = { joined: '已加入', left: '已離開', pending: '尚未確認加入', unknown: '無法確認' };
 
-function queryError(error: unknown): string {
+function queryError(error: unknown, fallback: string): string {
   if (error instanceof LineOrderGroupQueryError) {
     if (error.status === 401) return '登入已失效，請重新登入後再試。';
     if (error.status === 403) return '目前帳號沒有查詢案件群組的權限。';
     if (error.status === 404) return '找不到此案件的案件群組，請重新整理清單。';
   }
-  return '案件群組資料讀取失敗，請稍後再試。';
+  return fallback;
 }
 function actionError(error: unknown): string {
   if (error instanceof LineOrderGroupQueryError) {
@@ -76,7 +76,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
         if (page > Math.max(1, value.total_pages)) { onPageChange(Math.max(1, value.total_pages)); return; }
         setList({ loading: false, value, error: null });
       }).catch(error => {
-        if (!controller.signal.aborted && generation === listGeneration.current) setList({ loading: false, value: null, error: queryError(error) });
+        if (!controller.signal.aborted && generation === listGeneration.current) setList({ loading: false, value: null, error: queryError(error, '案件群組資料讀取失敗，請按上方「重新整理」。') });
       });
     }, 150);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -92,7 +92,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
       if (eventPage > Math.max(1, value.total_pages)) { setEventPage(Math.max(1, value.total_pages)); return; }
       setEvents({ loading: false, value, error: null });
     }).catch(error => {
-      if (!controller.signal.aborted && generation === eventGeneration.current) setEvents({ loading: false, value: null, error: queryError(error) });
+      if (!controller.signal.aborted && generation === eventGeneration.current) setEvents({ loading: false, value: null, error: queryError(error, '群組歷程讀取失敗，請按「重試歷程」。') });
     });
     return () => controller.abort();
   }, [client, selected, eventPage, eventReload]);
