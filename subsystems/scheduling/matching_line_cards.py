@@ -150,7 +150,7 @@ def _caregiver_fact_rows(kind, facts):
 def _profile_bubble(profile):
     name = str(profile.get("name") or "月嫂")
     if profile.get("staff_web_url"):
-        return _bubble([_title(name)], [{
+        return _bubble([_title(name), _notice("開啟網頁後，照片可能需要一點時間才會顯示，請稍等。")], [{
             "type": "button", "style": "link",
             "action": {"type": "uri", "label": "查看月嫂個人網頁", "uri": profile["staff_web_url"]},
         }])
