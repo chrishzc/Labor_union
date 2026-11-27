@@ -17,6 +17,7 @@ from subsystems.scheduling.matching_notification_application import (
 )
 from subsystems.scheduling.matching_notification_contracts import MatchingContactState, MatchingSegmentContact
 from subsystems.scheduling.segmented_availability_query import (
+    search_candidate_inquiry_availability,
     search_segmented_caregiver_availability,
 )
 from api.routes.caregiver_segment_availability import CaregiverCandidateOption
@@ -242,6 +243,7 @@ def test_only_two_actual_start_cases_block_matching_and_retain_source_shift(curr
             facts["order"]["actual_start_date"] = current_actual
             facts["schedule_rows"] = [{"assignment_id": 90, "case_no": "OTHER", "staff_id": 7,
                 "work_date": "2026-08-02", "actual_start_date": other_actual,
+                "assigned_start_date": date(2026, 7, 30), "assigned_end_date": date(2026, 8, 7),
                 "service_time": ServiceTimeTerms(time(8), time(12), 0)}]
             return facts
     facts = Facts()
@@ -251,7 +253,22 @@ def test_only_two_actual_start_cases_block_matching_and_retain_source_shift(curr
     assert conflict["actual_start_date"] == other_actual
     assert conflict["service_start_at"] == "2026-08-02T08:00:00+08:00"
     assert conflict["service_end_at"] == "2026-08-02T12:00:00+08:00"
+    assert "assignment_start_date" not in conflict
+    assert "assignment_end_date" not in conflict
     assert result["feasibility"] == ("partial" if blocked else "complete")
+    inquiry = search_candidate_inquiry_availability(
+        "CASE-68", [{"staff_id": 7}], "2026-08-01", facts, include_assignment_dates=True,
+    )
+    assert inquiry["candidate_options"][0]["full_case_coverage"] is (not blocked)
+    inquiry_conflict, = [item for item in inquiry["conflicts"] if item.get("case_no") == "OTHER"]
+    assert inquiry_conflict["work_date"] == "2026-08-02"
+    assert inquiry_conflict["reason_code"] == ("schedule" if blocked else "historical_reservation")
+    if blocked:
+        assert inquiry_conflict["assignment_start_date"] == "2026-07-30"
+        assert inquiry_conflict["assignment_end_date"] == "2026-08-07"
+    else:
+        assert "assignment_start_date" not in inquiry_conflict
+        assert "assignment_end_date" not in inquiry_conflict
     segments = [{"staff_id": 7, "assigned_start_date": "2026-08-02", "assigned_end_date": "2026-08-04"}]
     if blocked:
         with pytest.raises(MatchingPlanAvailabilityConflict) as captured:

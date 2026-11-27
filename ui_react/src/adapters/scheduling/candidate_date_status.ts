@@ -15,3 +15,9 @@ export function candidateDateStatus(
   if (conflicts.length > 0) return 'advisory';
   return option?.full_case_coverage === true ? 'clear' : 'unverified';
 }
+
+export function candidateAssignmentDateRange({ reason_code, assignment_start_date, assignment_end_date }: CandidateConflict): string | null {
+  if (reason_code !== 'assignment' && reason_code !== 'schedule') return null;
+  if (!assignment_start_date || !assignment_end_date) return null;
+  return `${assignment_start_date} ～ ${assignment_end_date}`;
+}

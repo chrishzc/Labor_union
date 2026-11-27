@@ -117,6 +117,7 @@ def search_candidate_inquiry_availability(
     filter_policy: dict[str, Any] | None = None,
     *,
     include_waiting_deposit_locks: bool = True,
+    include_assignment_dates: bool = False,
 ) -> Dict[str, Any]:
     """Check the planned inquiry window, never project official service dates."""
     return _search_availability(
@@ -129,6 +130,7 @@ def search_candidate_inquiry_availability(
         inquiry=True,
         include_candidate_options=True,
         include_waiting_deposit_locks=include_waiting_deposit_locks,
+        include_assignment_dates=include_assignment_dates,
     )
 
 
@@ -144,6 +146,7 @@ def _search_availability(
     include_candidate_options,
     include_waiting_deposit_locks,
     include_occupancy_periods=False,
+    include_assignment_dates: bool = False,
 ):
     """Search for segmented caregiver availability for a single case."""
     if not case_no:
@@ -231,12 +234,18 @@ def _search_availability(
         if item["reason_code"] in {"assignment", "schedule"} and item["assignment_id"] is None:
             item["reason_code"] = "requires_review"
         key = (int(item["staff_id"]), item["work_date"], item["reason_code"])
-        evidence.setdefault(key, []).append({
+        detail = {
             "case_no": row.get("case_no"),
             "actual_start_date": _as_optional_date(row["actual_start_date"], "actual_start_date").isoformat() if row.get("actual_start_date") else None,
             "service_start_at": interval[0].isoformat() if interval else None,
             "service_end_at": interval[1].isoformat() if interval else None,
-        })
+        }
+        if include_assignment_dates and item["reason_code"] in {"assignment", "schedule"}:
+            start, end = row.get("assigned_start_date"), row.get("assigned_end_date")
+            if start is not None and end is not None:
+                detail["assignment_start_date"] = _as_optional_date(start, "assigned_start_date").isoformat()
+                detail["assignment_end_date"] = _as_optional_date(end, "assigned_end_date").isoformat()
+        evidence.setdefault(key, []).append(detail)
         assignment_schedule_days.append(item)
 
     def span(first, last, terms=None):

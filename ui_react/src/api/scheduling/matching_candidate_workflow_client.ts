@@ -74,6 +74,10 @@ const OccupancyConflictSchema = z.strictObject({
   service_start_at: z.iso.datetime({ offset: true }).nullish(),
   service_end_at: z.iso.datetime({ offset: true }).nullish(),
 });
+const AvailabilityConflictSchema = OccupancyConflictSchema.extend({
+  assignment_start_date: IsoDateSchema.nullish(),
+  assignment_end_date: IsoDateSchema.nullish(),
+});
 const MatchingPlanConflictResponseSchema = z.strictObject({
   detail: z.strictObject({ error: GlobalTypedErrorSchema, occupancy_conflicts: z.array(OccupancyConflictSchema) }),
 });
@@ -104,7 +108,7 @@ const AvailabilitySchema = z.strictObject({
   complete_combinations: z.array(z.array(SegmentCandidateSchema)),
   segment_candidates: z.array(SegmentCandidateSchema),
   candidate_options: z.array(CandidateOptionSchema),
-  conflicts: z.array(OccupancyConflictSchema),
+  conflicts: z.array(AvailabilityConflictSchema),
 });
 const FormalPlanSchema = z.strictObject({
   plan_id: z.number().int().positive(),
