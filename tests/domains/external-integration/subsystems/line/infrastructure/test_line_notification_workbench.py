@@ -770,3 +770,52 @@ def test_deposit_missing_details_share_exact_readonly_reason_between_desktop_and
     for label in ('客戶尚未綁定 LINE','繳費到期日','案件虛擬帳號','銀行代碼','LINE 繳費頁面設定'):
         assert label in desktop.unavailable_reason
     assert mobile.ready is False
+
+
+def test_registration_notice_uses_current_review_owner_without_pii_or_terminal_rows(monkeypatch):
+    from datetime import datetime, timezone
+    calls = []
+    rows = [
+        SimpleNamespace(registration_id=42, registration_kind='non_citizen', status='pending',
+                        submitted_at_utc=datetime(2026, 11, 27, tzinfo=timezone.utc)),
+        SimpleNamespace(registration_id=43, registration_kind='non_citizen', status='approving'),
+    ]
+    def pending(**kwargs):
+        calls.append(kwargs)
+        return rows
+    monkeypatch.setattr(query, 'get_registration_review_application', lambda: SimpleNamespace(pending_registrations=pending))
+    page = query.query_source(NotificationSource.REGISTRATION, 0, PRINCIPAL)
+    assert calls == [{'after_id': 0, 'limit': query.SIZE}]
+    assert [(row.id, row.reference_id, row.title, row.person, row.case_no) for row in page.items] == [
+        ('registration:42', 42, '非市民申請待審核', '', None)
+    ]
+    rows.clear()
+    assert not query.query_source(NotificationSource.REGISTRATION, 0, PRINCIPAL).items
+
+
+def test_notification_work_categories_share_the_owner_catalog(monkeypatch):
+    monkeypatch.setattr(query, 'has_required_capability', lambda principal, cap: True)
+    desktop = {item.source: item.category_id for item in query._catalog(PRINCIPAL)}
+    mobile = {item.source: item.category_id for item in query._catalog(PRINCIPAL, mobile=True)}
+    assert set(desktop.values()) == {'applications', 'identity', 'coordination', 'payments', 'groups'}
+    assert mobile == {key: value for key, value in desktop.items() if key not in {
+        NotificationSource.STAFF_PROFILE, NotificationSource.IMPORT_FIELDS,
+    }}
+
+
+def test_mobile_customer_binding_dismiss_reuses_permission_and_case_command(monkeypatch):
+    calls = []
+    def authorize(token, capability):
+        calls.append((token, str(capability)))
+        return PRINCIPAL
+    def dismiss(body, principal):
+        calls.append((body.subject_reference, body.case_no, body.reason, body.idempotency_key, principal))
+        return {'dismissed': True}
+    monkeypatch.setattr(actions, '_mobile', authorize)
+    monkeypatch.setattr(actions, 'dismiss_customer_binding_reminder', dismiss)
+    result = actions.mobile_dismiss_customer_binding_reminder(actions.MobileDismissCustomerBindingReminder(
+        line_id_token='synthetic', subject_reference=7, case_no='SYNTHETIC-7',
+        reason='舊案已結束', idempotency_key='same-command',
+    ))
+    assert result['dismissed']
+    assert calls == [('synthetic', 'line.identity.binding.manage'), (7, 'SYNTHETIC-7', '舊案已結束', 'same-command', PRINCIPAL)]

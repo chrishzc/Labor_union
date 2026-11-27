@@ -207,8 +207,8 @@ it('從設定頁返回時重讀待辦及計數，不沿用離頁前清單',async
   expect(screen.getByRole('button',{name:/款項與群組/})).toBeVisible();
 });
 
-it('本案綁定提醒可直接移除，不需填原因且不發送LINE',async()=>{
-  const reminder=item({id:'customer_binding:7',source:'customer_binding',reference_id:7,group:'review',title:'人工提醒綁定 LINE',person:'合成姓名',payment:null,unavailable_reason:null});
+it('本案綁定提醒能填原因後移除，不發送 LINE',async()=>{
+  const reminder=item({id:'customer_binding:7',source:'customer_binding',reference_id:7,group:'review',title:'人工提醒綁定 LINE',person:'合成姓名',payment:null,unavailable_reason:null,can_dismiss:true});
   vi.mocked(client.catalog).mockResolvedValue([{source:'customer_binding',label:'綁定提醒',group:'review'}]);
   vi.mocked(client.list).mockResolvedValue({items:[reminder],total:1,next_cursor:null});
   const dismiss=vi.spyOn(client,'dismissCustomerBinding').mockImplementation(async()=>{
@@ -217,10 +217,28 @@ it('本案綁定提醒可直接移除，不需填原因且不發送LINE',async()
   });
   const send=vi.spyOn(client,'send');render(<NotificationTasksPage/>);
   await screen.findByRole('heading',{name:'人工提醒綁定 LINE'});
-  const button=screen.getByRole('button',{name:'移除提醒'});expect(button).toBeEnabled();
-  expect(screen.queryByRole('textbox',{name:'消除原因'})).not.toBeInTheDocument();
+  const button=screen.getByRole('button',{name:'移除提醒'});expect(button).toBeDisabled();
+  fireEvent.change(screen.getByRole('textbox',{name:'移除原因'}),{target:{value:'歷史案已結束'}});
+  expect(button).toBeEnabled();
   fireEvent.click(button);
-  await waitFor(()=>expect(dismiss).toHaveBeenCalledWith(expect.objectContaining({reference_id:7,case_no:'116000001'}),'使用者移除提醒',expect.any(String)));
+  await waitFor(()=>expect(dismiss).toHaveBeenCalledWith(expect.objectContaining({reference_id:7,case_no:'116000001'}),'歷史案已結束',expect.any(String)));
   await waitFor(()=>expect(screen.queryByRole('heading',{name:'人工提醒綁定 LINE'})).not.toBeInTheDocument());
   expect(send).not.toHaveBeenCalled();
+});
+
+it('工作分類沿目錄的分類，戶籍申請連回原申請',async()=>{
+  vi.mocked(client.catalog).mockResolvedValue([
+    {source:'registration',label:'服務登記',group:'review',category_id:'applications',category_label:'申請與資料'},
+    {source:'overdue',label:'各期款項逾期',group:'reminder',category_id:'payments',category_label:'款項'},
+  ]);
+  vi.mocked(client.list).mockImplementation(async source=>({items:source==='registration'
+    ? [item({id:'registration:42',source:'registration',group:'review',reference_id:42,case_no:null,
+      title:'非市民申請待審核',payment:null,unavailable_reason:null})] : [item()],total:1,next_cursor:null}));
+  render(<NotificationTasksPage/>);
+  await screen.findByRole('button',{name:/申請與資料/});
+  fireEvent.click(screen.getByRole('button',{name:/申請與資料/}));
+  expect(screen.getByRole('heading',{name:'非市民申請待審核'})).toBeInTheDocument();
+  expect(screen.queryByRole('heading',{name:'訂金逾期未清'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'查看申請'}));
+  expect(window.location.hash).toBe('#clients?tab=applications&registration=42');
 });

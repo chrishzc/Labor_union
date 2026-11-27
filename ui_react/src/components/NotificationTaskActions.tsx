@@ -30,12 +30,13 @@ export function NotificationTaskActions({item,onCommitted}:{item:NotificationIte
 function BindingReminder({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>}) {
   const [notice,setNotice]=useState('');
   const [busy,setBusy]=useState(false);
+  const [reason,setReason]=useState('');
   const command=useRef<{key:string;reason:string}|null>(null);
   const locked=useRef(false);
   const dismiss=async()=>{
-    if(locked.current)return;
+    if(locked.current || !reason.trim())return;
     locked.current=true;setBusy(true);
-    command.current ??= {key:crypto.randomUUID(),reason:'使用者移除提醒'};
+    command.current ??= {key:crypto.randomUUID(),reason:reason.trim()};
     try {await notificationTasksClient.dismissCustomerBinding(item,command.current.reason,command.current.key);setNotice('本案綁定提醒已移除。');await onCommitted();}
     catch(error){setNotice(notificationFailure(error));}
     finally{locked.current=false;setBusy(false);}
@@ -47,7 +48,10 @@ function BindingReminder({item,onCommitted}:{item:NotificationItem;onCommitted:(
     <a className="np-button" href={`#line-management?tab=binding&binding_role=${item.source==='customer_binding'?'customer':'staff'}&binding_q=${encodeURIComponent(item.person)}`}>查看綁定狀態</a>
     {item.case_no && <a className="np-button" href={`#clients?case=${encodeURIComponent(item.case_no)}`}>查看本案資料</a>}
     <p>完成綁定{item.source==='customer_binding'?'、案件取消或完工':'、月嫂停用或退役'}後，重新整理即移除。</p>
-    {item.source==='customer_binding' && item.reference_id && item.case_no && <button type="button" className="np-button" disabled={busy} onClick={()=>void dismiss()}>{busy?'處理中…':'移除提醒'}</button>}
+    {item.source==='customer_binding' && item.can_dismiss && item.reference_id && item.case_no && <>
+      <label>移除原因<input value={reason} onChange={event=>setReason(event.target.value)} maxLength={500} disabled={busy || command.current !== null} /></label>
+      <button type="button" className="np-button" disabled={busy || !reason.trim()} onClick={()=>void dismiss()}>{busy?'處理中…':'移除提醒'}</button>
+    </>}
     {notice && <p role="status">{notice}</p>}
   </section>;
 }

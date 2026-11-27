@@ -95,6 +95,7 @@ class NotificationItem(BaseModel):
     recipient: str | None = None
     message: str | None = None
     unavailable_reason: str | None = None
+    can_dismiss: bool = False
     expected_version: int | None = None
     delivery_status: str | None = None
     payment: PaymentSnapshot | None = None
@@ -112,6 +113,8 @@ class NotificationPage(BaseModel):
 
 
 class NotificationSourceView(BaseModel):
+    category_id: str
+    category_label: str
     source: NotificationSource
     label: str
     group: Literal['review', 'reminder', 'support']

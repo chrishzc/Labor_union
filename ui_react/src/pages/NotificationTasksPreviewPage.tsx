@@ -16,7 +16,6 @@ import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { formatTaipeiDateTime } from '../shared/taipeiTime';
 import './NotificationTasksPreviewPage.css';
 
-type Group = 'review' | 'reminder' | 'support';
 const TASK_GROUPS = [
   { id: 'all', label: '全部事項', icon: Inbox },
   { id: 'review', label: '審核與協調', icon: ClipboardCheck },
@@ -45,7 +44,7 @@ function row(item:NotificationItem):Row {
 const PAGE_SIZE = 6;
 export function NotificationTasksPage() {
   const {requestLeave}=useUnsavedNavigation();
-  const [group,setGroup]=useState<Group|'all'>('all');
+  const [group,setGroup]=useState('all');
   const [search,setSearch]=useState('');
   const [page,setPage]=useState(1);const [selectedId,setSelectedId]=useState('');const [notice,setNotice]=useState('');
   const [catalog,setCatalog]=useState<NotificationCatalog>([]);
@@ -93,13 +92,21 @@ export function NotificationTasksPage() {
   const loaded=catalog.flatMap(source=>pools[source.source]?.items ?? []);
   const coveredTasks=new Set(loaded.flatMap(item=>item.failure?.related_task_ids ?? []));
   const allItems=[...new Map(loaded.filter(item=>item.source!=='delivery' || !coveredTasks.has(item.reference_id!)).map(value=>row(value)).map(item=>[item.id,item])).values()];
-  const filtered=allItems.filter(item=>(group==='all'||item.group===group) && [item.title,item.caseLabel,item.person,item.summary].join(' ').includes(search.trim()));
+  const sourceCategories = new Map(catalog.map(source => [source.source, source.category_id ?? source.group]));
+  const hasNewCategories = catalog.some(source => source.category_id && source.category_label);
+  const availableGroups = hasNewCategories ? [
+    TASK_GROUPS[0],
+    ...new Map(catalog.flatMap(source => source.category_id && source.category_label
+      ? [[source.category_id, { id: source.category_id, label: source.category_label, icon: ClipboardCheck }] as const] : [])).values(),
+  ] : TASK_GROUPS;
+  const itemCategory = (item: NotificationItem) => sourceCategories.get(item.source) ?? item.group;
+  const filtered=allItems.filter(item=>(group==='all'||itemCategory(item)===group) && [item.title,item.caseLabel,item.person,item.summary].join(' ').includes(search.trim()));
   const pages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
   const currentPage=Math.min(page,pages);
   const visible=filtered.slice((currentPage-1)*PAGE_SIZE,currentPage*PAGE_SIZE);
   const selected=visible.find(item=>item.id===selectedId) ?? visible[0];
   const selectedCaseNo=selected?.case_no;
-  const scopedSources=catalog.filter(s=>group==='all'||s.group===group);
+  const scopedSources=catalog.filter(s=>group==='all'||(s.category_id ?? s.group)===group);
   const pendingMore=scopedSources.filter(s=>pools[s.source]?.next_cursor!=null);
   const failedSources=scopedSources.filter(s=>failures[s.source]);
   const emptyLoading=loading;
@@ -151,7 +158,7 @@ export function NotificationTasksPage() {
     {(queryError || failedSources.length>0) && <div className="notification-preview-banner" role="alert"><strong>{queryError || failedSources.length===scopedSources.length?'目前無法讀取事項':'部分事項未能載入'}</strong>{queryError && <p>{queryError}</p>}{failedSources.map(s=><p key={s.source}>{s.label}：{failures[s.source]} <button type="button" className="np-button" onClick={()=>void refreshSource(s.source).catch(error=>setFailures(old=>({...old,[s.source]:notificationFailure(error)})))}>重試{s.label}</button></p>)}</div>}
     {loading && <p role="status">正在讀取待處理事項…</p>}
     <div className="notification-preview-toolbar">
-      <div className="notification-preview-groups" role="group" aria-label="事項分類">{TASK_GROUPS.map(({ id, label, icon: Icon }) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'active' : ''} onClick={() => requestLeave(() => { setGroup(id); setPage(1); setNotice(''); })}><Icon size={15} aria-hidden="true" />{label}<span>{allItems.filter(item => id === 'all' || item.group === id).length}</span></button>)}</div>
+      <div className="notification-preview-groups" role="group" aria-label="事項分類">{availableGroups.map(({ id, label, icon: Icon }) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'active' : ''} onClick={() => requestLeave(() => { setGroup(id); setPage(1); setNotice(''); })}><Icon size={15} aria-hidden="true" />{label}<span>{allItems.filter(item => id === 'all' || itemCategory(item) === id).length}</span></button>)}</div>
       <div className="notification-preview-searches"><label className="notification-preview-search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="搜尋通知事項" placeholder="搜尋已載入的事項" value={search} onChange={event => { const value=event.target.value;requestLeave(() => { setSearch(value); setPage(1); setNotice(''); }); }} /></label>
       </div>
     </div>

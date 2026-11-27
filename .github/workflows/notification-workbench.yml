@@ -1,0 +1,50 @@
+name: Notification workbench contracts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/notification-workbench.yml'
+      - 'api/routes/notification_task*.py'
+      - 'api/schemas/notification_tasks.py'
+      - 'line/static/mobile_admin.html'
+      - 'subsystems/case_import/registration_staging.py'
+      - 'ui_react/src/**/NotificationTask*.tsx'
+      - 'ui_react/src/api/line_notifications/notification_tasks_client.ts'
+      - 'ui_react/src/tests/**/notification_tasks_*.test.tsx'
+      - 'tests/**/test_line_notification_workbench.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-notification-workbench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workbench:
+    name: Notification workbench readback and actions
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: python -m pip install -r requirements.txt pytest httpx2==2.10.0
+      - run: npm ci --ignore-scripts
+        working-directory: ui_react
+      - name: Verify shared query contract and mobile action wiring
+        run: python -m pytest -vv tests/domains/external-integration/subsystems/line/infrastructure/test_line_notification_workbench.py
+      - name: Verify desktop controls
+        working-directory: ui_react
+        run: >-
+          npm test -- --reporter=verbose
+          src/tests/domains/external-integration/subsystems/line/integration/notification_tasks_page.test.tsx
+          src/tests/domains/external-integration/subsystems/line/integration/notification_tasks_sync.test.tsx

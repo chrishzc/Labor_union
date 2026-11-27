@@ -6,7 +6,8 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from api.dependencies.admin_auth import require_admin, admin_actor_context, has_required_capability
 from api.dependencies.import_field_issues import build_import_field_issues_query
-from api.dependencies.line_identity import get_line_identity_application, get_line_identity_review_application
+from api.dependencies.line_identity import get_line_identity_review_application
+from api.dependencies.registration_applications import get_registration_review_application
 from api.dependencies.staff_profile_change import staff_profile_change_staging
 from api.dependencies.line_runtime import get_line_order_group_query_application, get_line_delivery_task_admin_application
 from api.dependencies.service_start import get_service_start_application
@@ -72,12 +73,20 @@ _EXCLUDED_TODO_SOURCES = frozenset({
     Source.NOTIFICATION_FAILURE,
 })
 _DESKTOP_ONLY_SOURCES = frozenset({Source.STAFF_PROFILE, Source.IMPORT_FIELDS})
+_WORK_CATEGORIES = (
+    ("applications", "申請與資料", (Source.REGISTRATION, Source.STAFF_PROFILE, Source.IMPORT_FIELDS)),
+    ("identity", "LINE 身分", (Source.IDENTITY, Source.CUSTOMER_BINDING, Source.STAFF_BINDING)),
+    ("coordination", "媒合、簽約與交接", (Source.FOLLOWUP, Source.RECOMMENDATION, Source.SERVICE_START)),
+    ("payments", "款項", (Source.DEPOSIT, Source.RECEIPT, Source.OVERDUE)),
+    ("groups", "案件群組", (Source.GROUP,)),
+)
 
 
 def _catalog(principal, *, mobile=False):
-    return [NotificationSourceView(source=key, label=value[0], group=value[1])
-            for key, value in SOURCES.items()
-            if key not in _EXCLUDED_TODO_SOURCES
+    return [NotificationSourceView(source=key, label=SOURCES[key][0], group=SOURCES[key][1],
+                                   category_id=category_id, category_label=category_label)
+            for category_id, category_label, sources in _WORK_CATEGORIES
+            for key in sources if key not in _EXCLUDED_TODO_SOURCES
             and not (mobile and key in _DESKTOP_ONLY_SOURCES)
             and _allowed(principal, key)]
 
@@ -123,10 +132,12 @@ def _read_source(source, cursor, principal):
     items = []
     total = None
     if source == Source.REGISTRATION:
-        rows = get_line_identity_application().pending_registrations(after_id=cursor, limit=SIZE)
-        items = [_item(source, r.registration_id, '服務登記待審核', '已提交需求表單，請核對申請內容。',
-                       '核准後沿原流程建立客戶資料與綁定。', reference_id=r.registration_id,
-                       person=str(r.candidate.client_payload['name'])) for r in rows]
+        rows = get_registration_review_application().pending_registrations(after_id=cursor, limit=SIZE)
+        items = [_item(source, r.registration_id,
+                       '非市民申請待審核' if r.registration_kind == 'non_citizen' else '服務申請待審核',
+                       '工會已收到申請，請開啟這筆申請審核。',
+                       '審核結果以原申請為準。', reference_id=r.registration_id,
+                       time=r.submitted_at_utc.isoformat()) for r in rows if r.status == "pending"]
         return NotificationPage(items=items, next_cursor=rows[-1].registration_id if len(rows) == SIZE else None)
     if source == Source.IDENTITY:
         result = get_line_identity_review_application().list(LineReviewListQuery(
@@ -150,6 +161,7 @@ def _read_source(source, cursor, principal):
                        '請透過電話等既有聯絡方式，提醒本人加入官方帳號並完成身分綁定。',
                        '尚未綁定 LINE，需透過其他方式聯絡。' + exit_condition,
                        reference_id=int(r.subject_reference), case_no=r.case_no, person=r.subject_name,
+                       can_dismiss=role is LineBindingSubjectType.CUSTOMER and has_required_capability(principal, str(Cap.IDENTITY_BINDING_MANAGE)),
                        tag='待人工提醒', recipient=r.phone,
                        message=f'請加入工會 LINE 官方帳號並完成{label}身分綁定。{guidance}') for r in result.items]
     elif source == Source.STAFF_PROFILE:

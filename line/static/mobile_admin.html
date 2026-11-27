@@ -996,7 +996,7 @@ function updateNotificationCards(root) {
     if(previous) card.remove();
     else seen.set(card.dataset.notificationId,card);
   }
-  document.getElementById('reviewTotal').textContent=seen.size+(root.querySelector('[data-has-more="true"]')?' +':'');
+  document.getElementById('reviewTotal').textContent=root.querySelector('[data-load-failed="true"]') ? '未確認' : seen.size+(root.querySelector('[data-has-more="true"]')?' +':'');
 }
 function notificationButton(label,run) {
   const button=notificationText('button',label);button.type='button';let locked=false;
@@ -1016,12 +1016,16 @@ async function loadReviewWorkbench(preserveOperation=false) {
   if(sequence!==notificationSequence || target!=='staff_review')return;
   if(!Array.isArray(sources))throw new Error('通知事項來源格式不完整。');
   const filter=document.createElement('select');filter.setAttribute('aria-label','通知事項分類');
-  for(const [value,label] of Object.entries(notificationGroups)){const option=notificationText('option',label);option.value=value;filter.appendChild(option);}
+  const categories=sources.some(source=>source.category_id && source.category_label)
+     ? new Map([['all','全部事項'],...sources.filter(source=>source.category_id && source.category_label)
+       .map(source=>[source.category_id, source.category_label])])
+     : new Map(Object.entries(notificationGroups));
+   for(const [value,label] of categories){const option=notificationText('option',label);option.value=value;filter.appendChild(option);}
   root.appendChild(filter);
   const sections=[];let failed=0;
   filter.addEventListener('change',()=>sections.forEach(section=>section.classList.toggle('hidden',filter.value!=='all' && section.dataset.group!==filter.value)));
   const jobs=sources.map(async source=>{
-    const section=document.createElement('details');section.className='card';section.dataset.group=source.group;section.dataset.notificationSource=source.source;
+    const section=document.createElement('details');section.className='card';section.dataset.group=source.category_id || source.group;section.dataset.notificationSource=source.source;
     const heading=notificationText('summary',source.label);heading.style.cursor='pointer';heading.style.fontWeight='700';
     const list=document.createElement('div');const status=notificationText('small','讀取中…');status.style.marginLeft='10px';heading.appendChild(status);section.append(heading,list);root.appendChild(section);sections.push(section);
     let next=0;let initial=true;
@@ -1032,12 +1036,15 @@ async function loadReviewWorkbench(preserveOperation=false) {
         const data=await postJson(`/api/v1/line/mobile-admin/notification-tasks/${source.source}`,{cursor});
         if(sequence!==notificationSequence || target!=='staff_review')return;
         if(!Array.isArray(data.items) || !(data.total===null || Number.isInteger(data.total)))throw new Error('通知事項格式不完整。');
-        if(initial)list.replaceChildren();initial=false;
+        if(initial)list.replaceChildren();initial=false;delete section.dataset.loadFailed;
         for(const node of [...list.children])if(!node.matches('[data-notification-id]'))node.remove();
         data.items.forEach(item=>{
           const card=document.createElement('article');card.className='card';card.dataset.notificationId=item.id;if(item.failure)card.dataset.relatedTaskIds=JSON.stringify(item.failure.related_task_ids);
-          card.append(notificationText('strong',item.title),notificationText('p',[item.case_no,item.person].filter(Boolean).join('・')),
-            notificationText('p',item.summary));
+          const subject=item.source==='registration' ? `申請編號：${item.reference_id}` : [item.case_no,item.person].filter(Boolean).join('・');
+          card.append(notificationText('strong',item.title),notificationText('p',subject),notificationText('p',item.summary));
+          if(item.source==='registration' && item.time && Number.isFinite(Date.parse(item.time))) {
+            card.appendChild(notificationText('p','收件時間：'+new Date(item.time).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})));
+          }
           if(item.unavailable_reason)card.appendChild(notificationText('p',item.unavailable_reason));
           card.appendChild(notificationButton('開啟處理',()=>openNotificationItem(item,cursor)));
           list.appendChild(card);
@@ -1047,7 +1054,7 @@ async function loadReviewWorkbench(preserveOperation=false) {
         const loaded=list.querySelectorAll('[data-notification-id]').length;
         if(loaded || !list.children.length || next!==null)status.textContent=data.total===null?`已載入 ${loaded} 件${next===null?'':'，尚有其他事項'}`:`待處理 ${data.total} 件`;
         if(!loaded && next===null && !list.children.length)showEmpty(list,'目前沒有此類待辦。');
-      }catch(error){status.textContent=error.message || '此類事項暫時無法讀取。';section.open=true;more.classList.remove('hidden');more.textContent='重新讀取';throw error;}
+      }catch(error){status.textContent=error.message || '此類事項暫時無法讀取。';section.dataset.loadFailed='true';updateNotificationCards(root);section.open=true;more.classList.remove('hidden');more.textContent='重新讀取';throw error;}
     }
     try{await load(0);}catch{failed++;}
   });
@@ -1104,13 +1111,44 @@ async function openNotificationItem(item,cursor) {
     }else root.appendChild(notificationText('p','尚無可用電話，請先核對聯絡資料。'));
     root.append(notificationButton('複製綁定提醒',async()=>{await navigator.clipboard.writeText(item.message || '');if(current())showStatus('已複製，請由您透過既有聯絡方式轉達。');}),
       notificationText('p',`聯絡後仍保留此事項；完成綁定${item.source==='customer_binding'?'、案件取消或完工':'、月嫂停用或退役'}後，返回通知事項即重新查詢。`));
+    if(item.source==='customer_binding' && item.can_dismiss && item.reference_id && item.case_no) {
+      const label=notificationText('label','移除原因');
+      const reason=document.createElement('input');reason.maxLength=500;label.appendChild(reason);
+      let intent=null;
+      const button=notificationButton('移除提醒',async()=>{
+        const reasonText=reason.value.trim();
+        if(!reasonText){showStatus('請輸入移除原因。',true);return;}
+        intent ??= {subject_reference:item.reference_id,case_no:item.case_no,reason:reasonText,idempotency_key:crypto.randomUUID()};
+        reason.disabled=true;
+        const receipt=await postJson('/api/v1/line/mobile-admin/notification-task-actions/customer-binding-reminder/dismiss',intent);
+        if(receipt?.dismissed!==true)throw new Error('尚未確認移除，請查詢原事項。');
+        if(current()){await loadReviewWorkbench();showStatus('本案綁定提醒已移除。');}
+      });
+      root.append(label,button);
+    }
   }else if(item.source==='registration') {
     const base=`/api/v1/line/mobile-admin/notification-task-actions/registrations/${item.reference_id}`;
     const view=await postJson(base+'/query',{});
     if(!current())return;
     root.appendChild(notificationText('h3',view.name));
     for(const field of view.fields)root.appendChild(notificationText('p',`${field.label}：${field.value}`));
-    if(!view.approved)root.appendChild(notificationButton('核准並建立客戶',async()=>{await postJson(base+'/approve',{expected_version:view.version});if(current()){await loadReviewWorkbench();showStatus('需求申請已核准。');}}));
+    if(view.status==='pending') {
+      const approve=notificationButton('核准並建立客戶',async()=>{
+        approve.hidden=true;
+        let result;
+        try { result=await postJson(base+'/approve',{expected_version:view.version}); }
+        catch { /* A failed response does not prove that the approval was not submitted. */ }
+        if(!current())return;
+        if(result?.registration_id===item.reference_id && result.approved===true && result.status==='approved') {
+          await loadReviewWorkbench();showStatus('需求申請已核准。');
+        }else{
+          root.appendChild(notificationButton('查詢原申請',()=>openNotificationItem(item,cursor)));
+          showStatus('還不能確認申請是否核准，請先查詢原申請。',true);
+        }
+      });
+      root.appendChild(approve);
+    }
+    else if(view.status==='approving')root.appendChild(notificationText('p','工會正在處理這筆申請，請稍後再查，不用重新核准。'));
     else changed();
   }else if(item.source==='payment_receipt') {
     root.appendChild(notificationText('h3','帳款已入帳，待於官方帳號通知'));
