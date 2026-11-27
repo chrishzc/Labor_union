@@ -58,8 +58,9 @@
 
 - 非市民正式頁與表單工作室預覽依 `NC-FORM-01～02` 呈現。新非市民送件明確傳入 `registration_kind="non_citizen"`，省略 `passbook_image_id`，不選圖、不呼叫共用存摺上傳入口，也不以空字串或虛構圖片識別代替缺席欄位。銀行代號、分行代碼、帳號及其他必填資料仍須合法。
 - 共用 `POST /api/v1/line/identity/registration/preview` 與 `POST /api/v1/line/identity/registration/apply` 的 request schema 及收件檢核依申請類型分流。`non_citizen` 可省略圖片欄位，兩入口均不得要求對應暫存圖；一般市民的 `subsidy` 類型維持圖片識別必填及同一已驗證 LINE 主體的暫存圖檢查。未指定類型維持既有 `subsidy` 語意，不因共用欄位可省略而放寬市民規則。非法銀行文字資料仍經原領域驗證拒絕，圖片移除不改身分、版本及同鍵重送契約。
-- Preview 的 `status=ready` 僅證明輸入可供送件，不表示已保存申請。Apply 沿既有 `Idempotency-Key` 保存待審申請；以 `registration_id` 與 `status=pending`／`identity_status=pending_approval` 表示收件，`client_id`、`beclass_record_id`、`case_no` 此時均為 null，不表示正式建案或完成綁定。
-- 送件回應逾時或結果不明時，以原 LINE token 及原 `submission_id` 呼叫 `POST /api/v1/line/identity/registration/status` 唯讀查詢原申請。`not_received` 不等於已收件；取得原申請狀態後才依既有同鍵規則接續，不另換識別製造新申請。正式建案及核准收尾的判定依 §3.2。
+- Preview 的 `status=ready` 僅表示可供送件。Apply 使用既有 `Idempotency-Key`。專用 Redis 保存申請內容、申請編號及待審清單索引後，才回傳收件回執。待審回執的 `status=pending`／`identity_status=pending_approval` 與 `registration_id` 表示工會可讀回同一筆待審申請，此時 `client_id`、`beclass_record_id`、`case_no` 為 null。頁面取得有效收件回執即顯示「申請已收到」、申請編號及可關閉頁面。核准、正式建案及歸檔由 §3.2 接續處理。
+- Apply 結果不明時，保留當次送件資料與原識別，顯示「尚未確認送件成功」並提供「重新送出」。同一時間只執行一次送件或查詢。按下後以同一 LINE 身分及原 `submission_id` 呼叫唯讀 `POST /api/v1/line/identity/registration/status`。有原回執即顯示該申請的實際狀態與編號。查詢成功且回 `not_received` 時，才以原識別與原內容重送 Apply。查詢故障維持未確認與重送入口，不視為未收件。若重新開頁且只剩原識別，先查原結果，確認目前未收件後才可重新填寫。問卷與憑證不寫入瀏覽器持久儲存。
+- Apply 仍須驗證 LINE 身分及請求內容。同一主體、同一識別及同內容回原申請，不覆寫或重複建件。原申請已存在時，回執可讀性不受暫存圖後續清理影響；需要首次收件才重驗圖片與目前送件條件。同鍵異內容回衝突；重新送出不使用修改後內容或另換識別。保留原收件操作，直到確認結果或由工會協助確認。
 
 ### 3.1.1 原案資料帶入與獨立操作（`NC-MANUAL-01～04`、`NC-SEPARATE-01`）
 
@@ -158,3 +159,12 @@
    | NC-PASSBOOK-04 | 非市民缺少、空白或格式不合法的銀行帳號／分行代碼等既有必填文字資料 | 防止圖片移除放寬銀行驗證 | 省略圖片欄位，逐項以缺值、空白及非法格式經正式頁與 Preview／Apply 送出 | 仍依原欄位規則拒絕且不建立待審申請，不以取消圖片上傳為由略過銀行資料驗證。 |
 
    切換前資料另依 §3.1.2 逐類驗收。有圖舊待審須覆蓋 SQL 已提交、歸檔失敗時讀回 `approving` 及原正式案號，再以原操作恢復歸檔和清理，最終讀回 `approved` 且不重複建案。已正式歸檔者須能由受控 Query／Download 依原 identity 讀取。
+
+6. 收件確認與安全重送，依 §3.1「送件欄位與原申請查詢」。
+
+   | S 情境與前提 | T 使用者任務 | A 可重現操作 | R 可判定結果 |
+   | --- | --- | --- | --- |
+   | 資料合法，服務可用 | 送件後離頁 | 送出並查工會待審清單 | 已保存才顯示申請編號與可關頁提示，工會讀回同筆待審申請。 |
+   | Apply 已保存但回應中斷 | 確認原申請 | 按「重新送出」，另以同鍵同內容直接重送 Apply | 回原編號，只有一筆。市民暫存圖已清理也能讀回；同鍵異內容回衝突。 |
+   | Apply 未送達，或暫存服務不可用 | 接續原送件 | 中斷請求、令狀態查詢失敗，再恢復服務並重送 | 查詢故障期間維持未確認與重送入口；確認目前未收件後，以原資料與識別成功建立一筆。 |
+   | 已確認收件 | 接續工會處理 | 重啟使用同一隔離資料卷的 Redis 後查原識別及待審清單 | 同一申請仍可讀回，重送無第二筆。 |

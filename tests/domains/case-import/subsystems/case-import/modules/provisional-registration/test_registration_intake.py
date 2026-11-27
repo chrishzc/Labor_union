@@ -3,6 +3,7 @@ File: test_registration_intake.py
 Description: 驗證公開登記收件容器邊界與胎數閉鎖輸入之 422 拒收行為。
 """
 import ast
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
@@ -17,6 +18,9 @@ from fastapi.testclient import TestClient
 from api.registration_intake import app, get_staging, get_verifier
 from domains.case_import.provisional_registration import ProvisionalRegistrationCandidate
 from domains.line.identities import LineUserId
+from subsystems.case_import.provisional_registration_types import (
+    ProvisionalRegistrationConflictError, ProvisionalRegistrationStorageError,
+)
 from subsystems.case_import.registration_staging import StagedRegistration
 
 
@@ -156,22 +160,129 @@ def _registration_payload(kind: str | None) -> dict[str, object]:
     ],
 )
 def test_intake_rejects_missing_or_foreign_required_passbook(kind: str | None, image_id: str | None) -> None:
+    staged_for_preview = False
+
     def get_passbook_image(image: str, *, line_user_id: str) -> tuple[dict[str, str], bytes] | None:
         owners = {"pbk_foreign": "U-another-synthetic"}
-        if owners.get(image) == line_user_id:
+        if (staged_for_preview and line_user_id == "U-verified-synthetic") or owners.get(image) == line_user_id:
             return {"passbook_image_id": image}, b"image"
         return None
 
-    app.dependency_overrides[get_staging] = lambda: SimpleNamespace(get_passbook_image=get_passbook_image)
+    app.dependency_overrides[get_staging] = lambda: SimpleNamespace(
+        get_passbook_image=get_passbook_image, replay_submission=lambda _candidate, _key: None,
+    )
     app.dependency_overrides[get_verifier] = _verified_test_verifier
     try:
         with TestClient(app) as client:
             payload = _registration_payload(kind)
+            fingerprint = "a" * 64
             if image_id is not None:
                 payload["passbook_image_id"] = image_id
+                staged_for_preview = True
+                preview = client.post("/api/v1/line/identity/registration/preview", json=payload)
+                assert preview.status_code == 200
+                fingerprint = preview.json()["data"]["preview_fingerprint"]
+                staged_for_preview = False
             _assert_preview_and_apply_rejected(
-                client, payload, "registration_input_invalid" if image_id is None else "passbook_image_missing"
+                client, payload, "registration_input_invalid" if image_id is None else "passbook_image_missing",
+                fingerprint=fingerprint,
             )
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("concurrent", [False, True], ids=["persisted", "persisted-after-lookup"])
+def test_apply_replays_original_receipt_after_passbook_cleanup(concurrent: bool) -> None:
+    base = "/api/v1/line/identity/registration"
+    key = str(uuid4())
+    payload = {**_registration_payload("subsidy"), "passbook_image_id": "pbk_synthetic"}
+    saved: StagedRegistration | None = None
+    pending_image = True
+    commit_after_lookup = False
+
+    class Staging:
+        def get_passbook_image(self, image_id: str, *, line_user_id: str) -> tuple[dict[str, str], bytes] | None:
+            assert (image_id, line_user_id) == ("pbk_synthetic", "U-verified-synthetic")
+            if not pending_image:
+                assert concurrent, "Replay must not read the deleted image"
+                return None
+            return {"passbook_image_id": image_id}, b"image"
+
+        def replay_submission(self, candidate: ProvisionalRegistrationCandidate, submission_id: str) -> StagedRegistration | None:
+            nonlocal commit_after_lookup
+            if commit_after_lookup:
+                commit_after_lookup = False
+                return None
+            if submission_id != key or saved is None:
+                return None
+            assert saved.candidate is not None
+            if candidate.payload_fingerprint != saved.candidate.payload_fingerprint:
+                raise ProvisionalRegistrationConflictError("registration_active_application_conflict")
+            return replace(saved, replayed=True)
+
+        def submit(self, candidate: ProvisionalRegistrationCandidate, submission_id: str) -> StagedRegistration:
+            nonlocal saved
+            assert saved is None and submission_id == key
+            now = datetime.now(timezone.utc)
+            saved = StagedRegistration(234, 1, "pending", now, now + timedelta(days=14), "subsidy", candidate)
+            return saved
+
+    app.dependency_overrides[get_staging] = Staging
+    app.dependency_overrides[get_verifier] = _verified_test_verifier
+    try:
+        with TestClient(app) as client:
+            preview = client.post(f"{base}/preview", json=payload)
+            assert preview.status_code == 200
+            command = {**payload, "expected_binding_version": 0,
+                       "preview_fingerprint": preview.json()["data"]["preview_fingerprint"]}
+            headers = {"Idempotency-Key": key}
+            first = client.post(f"{base}/apply", json=command, headers=headers)
+            assert first.status_code == 200
+            assert first.json()["data"]["registration_id"] == 234
+            assert saved is not None
+            saved = replace(saved, status="approved", client_id=345, beclass_record_id=456)
+            pending_image = False
+            commit_after_lookup = concurrent
+
+            replay = client.post(f"{base}/apply", json=command, headers=headers)
+            assert replay.status_code == 200
+            assert replay.json()["data"]["registration_id"] == 234
+            assert replay.json()["data"]["status"] == "approved"
+            assert replay.json()["data"]["replayed"] is True
+
+            stale = client.post(f"{base}/apply", json={**command, "expected_binding_version": 1}, headers=headers)
+            assert stale.status_code == 409
+            assert stale.json()["detail"]["error"]["code"] == "registration_preview_stale"
+
+            edited_payload = {**payload, "name": "不同合成姓名"}
+            pending_image = True
+            edited_preview = client.post(f"{base}/preview", json=edited_payload)
+            assert edited_preview.status_code == 200
+            pending_image = False
+            changed = client.post(f"{base}/apply", json={
+                **edited_payload, "expected_binding_version": 0,
+                "preview_fingerprint": edited_preview.json()["data"]["preview_fingerprint"],
+            }, headers=headers)
+            assert changed.status_code == 409
+            assert changed.json()["detail"]["error"]["code"] == "registration_conflict"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_status_reports_store_failure_as_unconfirmed() -> None:
+    def unavailable(_line_user_id: str, _submission_id: str) -> StagedRegistration | None:
+        raise ProvisionalRegistrationStorageError("registration_redis_initialization_required")
+
+    app.dependency_overrides[get_staging] = lambda: SimpleNamespace(status_for_submission=unavailable)
+    app.dependency_overrides[get_verifier] = _verified_test_verifier
+    try:
+        with TestClient(app) as client:
+            result = client.post("/api/v1/line/identity/registration/status", json={
+                "line_id_token": "synthetic-token", "submission_id": str(uuid4()),
+            })
+            assert result.status_code == 503
+            assert result.json()["detail"]["error"]["code"] == "registration_unavailable"
+            assert "not_received" not in result.text
     finally:
         app.dependency_overrides.clear()
 
@@ -195,7 +306,9 @@ def test_non_citizen_without_passbook_still_rejects_invalid_bank_fields(field: s
         app.dependency_overrides.clear()
 
 
-def _assert_preview_and_apply_rejected(client: TestClient, payload: dict[str, object], code: str) -> None:
+def _assert_preview_and_apply_rejected(
+    client: TestClient, payload: dict[str, object], code: str, *, fingerprint: str = "a" * 64,
+) -> None:
     base = "/api/v1/line/identity/registration"
     preview = client.post(f"{base}/preview", json=payload)
     assert preview.status_code == 422, preview.text
@@ -203,7 +316,7 @@ def _assert_preview_and_apply_rejected(client: TestClient, payload: dict[str, ob
     assert detail.get("error", detail)["code"] == code
     apply = client.post(
         f"{base}/apply",
-        json={**payload, "expected_binding_version": 0, "preview_fingerprint": "a" * 64},
+        json={**payload, "expected_binding_version": 0, "preview_fingerprint": fingerprint},
         headers={"Idempotency-Key": str(uuid4())},
     )
     assert apply.status_code == 422, apply.text

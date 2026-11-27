@@ -9,7 +9,7 @@ from functools import lru_cache
 import os
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, Header, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -173,9 +173,22 @@ def preview(payload: ProvisionalRegistrationPreviewRequest, staging=Depends(get_
 def submit(payload: ProvisionalRegistrationRequest, submission_id: str = Header(alias="Idempotency-Key"),
            staging=Depends(get_staging), verifier=Depends(get_verifier)):
     candidate = _candidate(payload, verifier)
-    _require_passbook_staged(staging, payload.passbook_image_id, candidate)
     if payload.expected_binding_version != 0 or payload.preview_fingerprint != candidate.payload_fingerprint.value:
         raise typed_http_error(409, "conflict", "registration_preview_stale", "申請內容已變更，請重新確認。", uuid4().hex)
+    if payload.passbook_image_id is not None:
+        saved = _translate(lambda: staging.replay_submission(candidate, submission_id))
+        if saved is not None:
+            return BaseResponse(data=_result(saved))
+        try:
+            _require_passbook_staged(staging, payload.passbook_image_id, candidate)
+        except HTTPException as error:
+            if error.status_code != 422:
+                raise
+            # A concurrent attempt can commit while the original attachment is removed.
+            saved = _translate(lambda: staging.replay_submission(candidate, submission_id))
+            if saved is None:
+                raise
+            return BaseResponse(data=_result(saved))
     return BaseResponse(data=_translate(lambda: _result(staging.submit(candidate, submission_id))))
 
 

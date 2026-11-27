@@ -53,7 +53,7 @@
 ## Current implementation
 
 - 候選版本 `9dd304bc70b1922058b9bb5d854ca37b3bec5365` 的 `api/schemas/line_identity.py` 以 `registration_kind` 區分圖片必填條件。`non_citizen` 可省略 `passbook_image_id`；`subsidy` 及未指定類型仍由 model validator 要求非空圖片識別。Domain builder 同步允許非市民無圖，且不將缺席圖片寫入 `_liff_meta`，銀行文字驗證保留。
-- `api/registration_intake.py::preview`／`submit` 均以後端建立的 candidate 呼叫 `_require_passbook_staged`。僅無圖的 `non_citizen` 略過圖片查詢；只要實際提供圖片識別，仍驗證同一已驗證 LINE 主體的暫存圖。兩入口已對齊 [Case Import §3.1「送件欄位與原申請查詢」](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#送件欄位與原申請查詢)，共用上傳入口及已送件舊案流程保留。
+- `api/registration_intake.py` 依後端建立的 candidate 驗證收件。無圖 `non_citizen` 免查圖片。有圖 Preview 及首次 Apply 檢查同一已驗證 LINE 主體的暫存圖。Apply 在有圖重送時先依原送件識別與內容讀回既有回執，狀態查詢也由原識別回讀。收件、重送及儲存失敗的契約見 [Case Import §3.1「送件欄位與原申請查詢」](../../../../../requirements/17B_Case_Import與非市民Redis待審正式規格.md#送件欄位與原申請查詢)。
 
 ## Handoff boundaries
 
