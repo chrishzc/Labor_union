@@ -655,3 +655,65 @@ def test_calendar_month_reminder_queues_once_and_revoked_binding_blocks_delivery
         assert reminders.staff_web_expiry_delivery_is_current(unit, task, now)
         binding.status = LineIdentityBindingStatus.REVOKED
         assert not reminders.staff_web_expiry_delivery_is_current(unit, task, now)
+
+
+def test_staff_profile_photo_viewer_supports_mobile_pinch_and_reuses_published_image():
+    from pathlib import Path
+
+    playwright_api = pytest.importorskip("playwright.sync_api")
+    expect, sync_playwright = playwright_api.expect, playwright_api.sync_playwright
+
+    static = next(parent / "line/static" for parent in Path(__file__).resolve().parents
+                  if (parent / "line/static/staff_web_profile.html").is_file())
+    thumbnail = BytesIO()
+    Image.new("RGB", (1000, 700), "#c76542").save(thumbnail, format="PNG")
+    image_calls = []
+
+    def serve(request_route):
+        path = request_route.request.url.split("?", 1)[0]
+        if path.endswith("/staff_web_profile.html"):
+            request_route.fulfill(path=static / "staff_web_profile.html", content_type="text/html")
+        elif path.endswith("/static/staff_web_profile.js"):
+            request_route.fulfill(path=static / "staff_web_profile.js", content_type="text/javascript")
+        elif path.endswith("/website/images/9/2"):
+            image_calls.append(path)
+            request_route.fulfill(body=thumbnail.getvalue(), content_type="image/png")
+        elif path.endswith("/website"):
+            request_route.fulfill(json={"data": {"name": "測試月嫂", "groups": [
+                {"category": "certificate", "images": [
+                    {"item_name": "測試證照", "image_entry": 9, "image_version": 2},
+                ]},
+            ]}})
+        else:
+            request_route.abort()
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+        page.route("https://profile.test/**", serve)
+        page.add_init_script("sessionStorage.setItem('union_admin_session_token', 'fixture');")
+        page.goto("https://profile.test/staff_web_profile.html?mode=admin&staff_id=7")
+        opener = page.get_by_role("button", name="放大履歷圖片")
+        opener.click()
+        dialog = page.get_by_role("dialog", name="履歷照片大圖")
+        large = dialog.locator("img")
+        expect(dialog).to_be_visible()
+        assert large.get_attribute("src") == opener.locator("img").get_attribute("src")
+        page.wait_for_function("document.getElementById('photo-large').naturalWidth > 0")
+
+        client = page.context.new_cdp_session(page)
+        client.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [
+            {"x": 150, "y": 400, "id": 0}, {"x": 240, "y": 400, "id": 1},
+        ]})
+        client.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [
+            {"x": 70, "y": 400, "id": 0}, {"x": 320, "y": 400, "id": 1},
+        ]})
+        client.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        expect(dialog.get_by_role("button", name="縮小圖片")).to_be_enabled()
+        assert large.evaluate("(node) => node.getBoundingClientRect().width > node.clientWidth")
+        dialog.get_by_role("button", name="關閉大圖").click()
+        expect(dialog).not_to_be_visible()
+        opener.click()
+        expect(dialog.get_by_role("button", name="縮小圖片")).to_be_disabled()
+        assert len(image_calls) == 1
+        browser.close()

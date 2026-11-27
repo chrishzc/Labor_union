@@ -41,6 +41,19 @@ jobs:
         run: python -m pip install -r requirements.txt pytest httpx2==2.10.0 playwright
       - name: Install Chromium for the LIFF browser contract
         run: python -m playwright install --with-deps chromium
+      - name: Verify staff profile photo viewer and storage layout
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -vv --junitxml=staff-profile-protection.xml \
+            tests/domains/staff/subsystems/staff/modules/staff-roster-profile/contract/test_staff_web_profile.py::test_staff_profile_photo_viewer_supports_mobile_pinch_and_reuses_published_image \
+            tests/test_controlled_file_storage.py::test_staff_profile_finalize_does_not_create_unused_staff_directories
+          python - <<'PY'
+          from xml.etree import ElementTree
+
+          cases = ElementTree.parse('staff-profile-protection.xml').findall('.//testcase')
+          assert len(cases) == 2 and all(case.find(tag) is None for case in cases for tag in ('failure', 'error', 'skipped')), 'Staff photo protection tests did not both pass'
+          PY
       - name: Verify original receipts and protected LIFF writes
         run: |
           set -euo pipefail
