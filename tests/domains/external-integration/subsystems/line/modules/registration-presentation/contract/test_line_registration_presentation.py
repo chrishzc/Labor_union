@@ -31,6 +31,9 @@ ROOT = next(
         pytest.param("/line-non-citizen-registration", "non_citizen", False, None, id="non-citizen"),
         pytest.param("/line-non-citizen-registration", "non_citizen", False, "receipt_lost", id="receipt-lost"),
         pytest.param("/line-non-citizen-registration", "non_citizen", False, "conflict", id="receipt-conflict"),
+        pytest.param(
+            "/line-non-citizen-registration", "non_citizen", False, "conflict_not_received", id="conflict-not-received",
+        ),
         pytest.param("/line-non-citizen-registration", "non_citizen", False, "not_received", id="not-received"),
         pytest.param("/line-non-citizen-registration", "non_citizen", False, "reload", id="reload"),
         pytest.param(
@@ -53,6 +56,7 @@ def test_registration_passbook_controls_and_submission_in_browser(
     pages.include_router(public_router)
     origin = "https://registration.example.test"
     registration_api = "/api/v1/line/identity/registration"
+    conflict = interruption in {"conflict", "conflict_not_received"}
     requests: list[tuple[str, str | None]] = []
     apply_keys: list[str] = []
     status_requests: list[dict[str, str]] = []
@@ -94,7 +98,7 @@ def test_registration_passbook_controls_and_submission_in_browser(
                                              "preview_fingerprint": "a" * 64}})
             elif endpoint == "apply":
                 apply_keys.append(route.request.headers["idempotency-key"])
-                if interruption == "conflict" and len(apply_keys) == 1:
+                if conflict:
                     route.fulfill(status=409, json={"detail": {"error": {"code": "registration_conflict"}}})
                 elif interruption and len(apply_keys) == 1:
                     route.abort()
@@ -104,6 +108,8 @@ def test_registration_passbook_controls_and_submission_in_browser(
                 status_requests.append(route.request.post_data_json)
                 if interruption in {"receipt_lost", "conflict"}:
                     route.fulfill(json={"data": receipt})
+                elif interruption == "conflict_not_received":
+                    route.fulfill(json={"data": {"status": "not_received"}})
                 elif len(status_requests) == 1:
                     route.fulfill(status=503, json={"detail": {"code": "registration_unavailable"}})
                 elif interruption == "not_received" and len(status_requests) == 2:
@@ -195,18 +201,20 @@ def test_registration_passbook_controls_and_submission_in_browser(
             expect(retry).to_be_visible()
             expect(submit).to_be_disabled()
             expect(page.locator("#successCard")).to_be_hidden()
-            if interruption == "conflict":
-                expect(page.locator("#statusMessage")).to_contain_text("查詢原申請")
-            else:
+            action_label = retry.inner_text()
+            if not conflict:
                 expect(page.locator("#statusMessage")).to_contain_text("尚未確認送件成功")
             expect(page.locator("#name")).to_have_value("合成申請")
             assert [endpoint for endpoint, _ in requests] == ["preview", "apply"]
-            assert page.evaluate("Object.values(sessionStorage)") == apply_keys
+            if conflict:
+                assert page.evaluate("sessionStorage.getItem('registration-submission:non-citizen')") == apply_keys[0]
+            else:
+                assert page.evaluate("Object.values(sessionStorage)") == apply_keys
 
             if interruption == "reload":
                 page.reload()
 
-            if interruption not in {"receipt_lost", "conflict"}:
+            if not conflict and interruption != "receipt_lost":
                 if interruption != "reload":
                     retry.click()
                 expect(retry).to_be_enabled()
@@ -232,6 +240,25 @@ def test_registration_passbook_controls_and_submission_in_browser(
                 expect(page.locator("#successCard")).to_be_hidden()
                 expect(page.locator("#statusMessage")).to_contain_text("目前尚未收到")
                 assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status", "status"]
+            elif interruption == "conflict_not_received":
+                page.wait_for_function("!registrationSubmissionPending")
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status"]
+                assert "查詢原申請" in action_label
+                expect(page.locator("#statusMessage")).to_contain_text("本次申請未送出")
+                expect(page.locator("#statusMessage")).to_contain_text("待審申請")
+                expect(retry).to_be_hidden()
+                expect(submit).to_be_disabled()
+                expect(page.locator("#reapplyButton")).to_be_hidden()
+                expect(page.locator("#successCard")).to_be_hidden()
+                page.reload()
+                expect(page.locator("#statusMessage")).to_contain_text("本次申請未送出")
+                expect(retry).to_be_hidden()
+                expect(submit).to_be_disabled()
+                expect(page.locator("#reapplyButton")).to_be_hidden()
+                expect(page.locator("#successCard")).to_be_hidden()
+                assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status", "status"]
+                assert len(apply_keys) == 1
+                assert page.evaluate("sessionStorage.getItem('registration-submission:non-citizen')") == apply_keys[0]
             elif interruption in {"receipt_lost", "conflict"}:
                 expect(page.locator(".success-desc")).to_contain_text("申請編號：234")
                 assert [endpoint for endpoint, _ in requests] == ["preview", "apply", "status"]
@@ -246,7 +273,7 @@ def test_registration_passbook_controls_and_submission_in_browser(
             endpoints = [endpoint for endpoint, _ in requests]
             assert endpoints == (["passbook", "preview", "apply"] if kind == "subsidy" else ["preview", "apply"])
 
-        if interruption != "reload":
+        if interruption not in {"reload", "conflict_not_received"}:
             expect(page.locator(".success-title")).to_have_text("申請已收到")
             expect(page.locator(".success-desc")).to_contain_text("您可以關閉頁面")
             expect(retry).to_be_hidden()

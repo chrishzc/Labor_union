@@ -40,9 +40,9 @@ def stores():
         client.close()
 
 
-def candidate():
+def candidate(*, line_user_id=None, name="合成待審申請"):
     return build_provisional_registration_candidate(ProvisionalRegistrationIntent(
-        line_user_id="U-synthetic-" + uuid4().hex, name="合成待審申請", phone="0900000000",
+        line_user_id=line_user_id or "U-synthetic-" + uuid4().hex, name=name, phone="0900000000",
         expected_date="2026-11-20", service_days=10, address="合成地址", gender="女",
         email="synthetic@example.com", birth_date="1990-01-01", tel=None, ext=None, city="新竹市", zip_code=None,
         id_number=None, liff_config_revision=None, registration_kind="non_citizen", service_start_date="2026-11-20",
@@ -219,6 +219,13 @@ def test_unknown_acknowledgement_can_only_be_resolved_by_original_submission(sto
         intake.replay_submission(replace(value, payload_fingerprint=type(value.payload_fingerprint)("a" * 64)), key)
     assert intake.submit(value, key).registration_id == saved.registration_id
     assert intake.status_for_submission("U-other-synthetic", key) is None
+    conflicting_key = str(uuid4())
+    different_candidate = candidate(line_user_id=value.line_user_id, name="不同內容申請")
+    counter = admin.client.get(PREFIX + "counter")
+    with pytest.raises(ProvisionalRegistrationConflictError, match="registration_active_application_conflict"):
+        intake.submit(different_candidate, conflicting_key)
+    assert intake.status_for_submission(value.line_user_id, conflicting_key) is None
+    assert admin.client.get(PREFIX + "counter") == counter
     pending = admin.pending(after_id=saved.registration_id - 1)
     assert [item.registration_id for item in pending] == [saved.registration_id]
     assert pending[0].candidate == value
