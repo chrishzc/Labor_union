@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from errno import EIO
 from io import BytesIO
 import json
+from os.path import samestat
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import Mock, call
@@ -234,19 +235,51 @@ def test_integrity_reports_unavailable_root_and_mount_disappearance_as_unavailab
 ) -> None:
     photos.allow_reader()
     file_id = photos.store(31)
+    missing = photos.store(32)
+    original_root = photos.root.stat()
+    photos.payload(missing).unlink()
+    assert photos.report(_published(41, missing)) == [_outcome(41, "missing", "payload_missing")]
+    assert samestat(original_root, photos.root.stat())
+
     original_resolve = photos.storage._resolve_target
     old_mount = photos.root.with_name("old-mount")
+    published = _published(40, file_id)
+    expected = [_outcome(40, "unavailable", "read_unconfirmed")]
+    payload_path = photos.payload(file_id).relative_to(photos.root)
 
-    def resolve(root: Path, reference: PurePosixPath) -> Path:
+    def resolve_on_empty_mount(root: Path, reference: PurePosixPath) -> Path:
         root.rename(old_mount)
         root.mkdir()
         return original_resolve(root, reference)
 
-    monkeypatch.setattr(photos.storage, "_resolve_target", resolve)
-    assert photos.report(_published(40, file_id)) == [_outcome(40, "unavailable", "read_unconfirmed")]
+    with monkeypatch.context() as mount:
+        mount.setattr(photos.storage, "_resolve_target", resolve_on_empty_mount)
+        assert photos.report(published) == expected
     photos.root.rmdir()
-    assert photos.report(_published(40, file_id)) == [_outcome(40, "unavailable", "read_unconfirmed")]
-    assert (old_mount / "fixture" / f"{file_id}.png").read_bytes() == photos.image
+    assert photos.report(published) == expected
+    assert (old_mount / payload_path).read_bytes() == photos.image
+    old_mount.rename(photos.root)
+
+    metadata_path = photos.staging_path(file_id, "metadata.json").relative_to(photos.root)
+    original_metadata = (photos.root / metadata_path).read_bytes()
+    replacement = photos.root.with_name("replacement-mount")
+    (replacement / metadata_path).parent.mkdir(parents=True)
+    (replacement / metadata_path).write_bytes(original_metadata)
+
+    def resolve_on_replacement_mount(root: Path, reference: PurePosixPath) -> Path:
+        root.rename(old_mount)
+        replacement.rename(root)
+        return original_resolve(root, reference)
+
+    with monkeypatch.context() as mount:
+        mount.setattr(photos.storage, "_resolve_target", resolve_on_replacement_mount)
+        report = photos.report(published)
+    assert samestat(original_root, old_mount.stat())
+    assert not samestat(original_root, photos.root.stat())
+    assert (photos.root / metadata_path).read_bytes() == original_metadata
+    assert not (photos.root / payload_path).exists()
+    assert (old_mount / payload_path).read_bytes() == photos.image
+    assert report == expected
 
 
 def test_integrity_keeps_missing_metadata_and_unconfirmed_staging_distinct_from_missing_payload(
