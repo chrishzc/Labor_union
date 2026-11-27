@@ -608,6 +608,8 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     const submissionStorageKey = `registration-submission:${isNonCitizen ? 'non-citizen' : 'subsidy'}`;
     let registrationSubmissionId = studioPreview ? '' : sessionStorage.getItem(submissionStorageKey);
     const hadSubmission = Boolean(registrationSubmissionId);
+    const registrationConflictStorageKey = submissionStorageKey + ':conflict';
+    let registrationConflict = hadSubmission && sessionStorage.getItem(registrationConflictStorageKey) === registrationSubmissionId;
     let registrationResultUnknown = hadSubmission;
     if (!studioPreview && !hadSubmission) {
         registrationSubmissionId = crypto.randomUUID();
@@ -1369,7 +1371,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
 
     document.getElementById("registerForm").addEventListener("submit", async function(e) {
         e.preventDefault();
-        if (studioPreview || !currentIdToken || registrationSubmissionPending || registrationResultUnknown) return;
+        if (studioPreview || !currentIdToken || registrationSubmissionPending || registrationResultUnknown || registrationConflict) return;
         const validation = validateRegistrationForm();
         if (!validation.ok || !validateCustomFields()) {
             const requiredMessage = document.getElementById("statusMessage");
@@ -1529,15 +1531,19 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     }
 
     function showRegistrationRetry() {
-        showRegistrationMessage('尚未確認送件成功，請按「重新送出」。看到申請編號後即可關閉頁面。', true);
+        const message = registrationConflict
+            ? '申請發生衝突，可能已有待審申請。請按「查詢原申請」或聯絡工會確認。'
+            : '尚未確認送件成功，請按「重新送出」。看到申請編號後即可關閉頁面。';
+        showRegistrationMessage(message, true);
     }
 
     function updateRegistrationControls() {
         const form = document.getElementById('registerForm');
         const retry = document.getElementById('registrationStatusButton');
-        const formLocked = registrationSubmissionPending || registrationResultUnknown;
+        const formLocked = registrationSubmissionPending || registrationResultUnknown || registrationConflict;
         form.inert = formLocked;
         document.getElementById('registrationPreviewButton').disabled = studioPreview || formLocked;
+        retry.textContent = registrationConflict ? '查詢原申請' : '重新送出';
         retry.hidden = !registrationResultUnknown || studioPreview;
         retry.disabled = registrationSubmissionPending;
     }
@@ -1567,7 +1573,10 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         }
         const errorCode = result?.detail?.error?.code || result?.detail?.code || result?.error?.code;
         if (response.status === 409 && errorCode === 'registration_conflict') {
-            showRegistrationMessage('申請狀態已變更或已有待審申請。請按「重新送出」查詢原申請。若仍無法確認，請聯絡工會。', true);
+            registrationConflict = true;
+            pendingRegistrationApply = null;
+            sessionStorage.setItem(registrationConflictStorageKey, submissionId);
+            showRegistrationRetry();
             return;
         }
         if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status) && result.detail) {
@@ -1608,7 +1617,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     }
 
     async function queryRegistrationStatus() {
-        if (studioPreview || !currentIdToken || registrationSubmissionPending) return;
+        if (studioPreview || !currentIdToken || registrationSubmissionPending || (registrationConflict && !registrationResultUnknown)) return;
         registrationSubmissionPending = true;
         registrationResultUnknown = true;
         updateRegistrationControls();
@@ -1624,8 +1633,15 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
             }
             if (result.data.status !== 'not_received') {
                 renderRegistrationSuccess(result.data);
+                if (registrationConflict) {
+                    registrationConflict = false;
+                    sessionStorage.removeItem(registrationConflictStorageKey);
+                }
             } else if (Object.keys(result.data).length !== 1) {
                 showRegistrationRetry();
+            } else if (registrationConflict) {
+                registrationResultUnknown = false;
+                showRegistrationMessage('本次申請未送出。已有待審申請或申請狀態已變更，請聯絡工會確認。', true);
             } else if (pendingRegistrationApply) {
                 showRegistrationMessage('正在重新送出，請稍候。', false);
                 await applyRegistration(pendingRegistrationApply);
@@ -1642,6 +1658,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     }
 
     function startNewRegistration() {
+        if (registrationConflict) return;
         registrationSubmissionId = crypto.randomUUID();
         sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
         registrationResultUnknown = false;
