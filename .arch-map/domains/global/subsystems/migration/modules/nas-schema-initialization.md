@@ -28,7 +28,7 @@
   - `db/cutover_releases/labor_union_validation_schema_v1.json`
 
 ## Contracts
-- owning spec: `.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md`
+- owning spec: `.arch-map/requirements/10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md`
 - compact final CREATE/seed，hash-bound source/SQL；retired tables 不進新庫，舊庫不刪表，保留物件結構與系統資料等價。
 - Python／Unix 無參數唯讀預檢；低階 Python 明確 --interactive 仍保留 fresh/test 確認流程。Windows 日常 batch 已改由 preserve-data owner 提供 upgrade，不再提供 reset/create。
 - dry-run 零連線，--apply fresh-read 空庫後才執行；除明確 --interactive 外，命令列參數不進入互動流程。

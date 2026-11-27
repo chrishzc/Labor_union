@@ -31,7 +31,7 @@
 
 - **工會 Windows 主機（應用層與管理入口）**：以根目錄 `Windows管理.bat`（`scripts/launchers/manage_windows.ps1` → `supervise_local_runtime.ps1`）統一先啟動根目錄 `docker-compose.yml` 內的本機 MySQL 8.0 與 Redis 7 容器，通過唯讀 schema 檢查後啟動並監督 FastAPI、React 入口、背景 Workers、LINE Webhook 與 Cloudflare Tunnel（詳見 `scripts/launchers/WINDOWS-REMOTE.md`）。主機間程式交付使用 `scripts/package_windows_runtime.py` 產生排除秘密與 runtime 資料的來源雜湊部署包。
 - **本機 Docker 容器（MySQL 8.0、Redis 7 與公開 LINE 待審隔離專區）**：透過根目錄 `docker-compose.yml` 統一編排 MySQL 8.0（`db` 服務／`mysql_db` 容器與 `mysql-data` 持久化資料卷）、Redis 7（`redis` 服務／`union_redis` 容器），以及 `registration` profile 的公開 LINE 待審專區（`registration-redis`、`registration-intake` 與 `registration-token-verifier`），所有對主機暴露之通訊埠均強制只綁定 `127.0.0.1` loopback（`3306`、`6379`、`6380`、`8080`），不對區域網路或網際網路公開。
-- **本機 SQL 備份與保留資料升級**：遠端維護人員登入工會 Windows 主機後，在該主機操作 Windows 管理入口。選項 `6 備份`、`7 安全升級`、`8 復原備份` 透過 `127.0.0.1` 連線到該主機的 Docker MySQL。正式升級依[保留資料升級契約](10_Global_保留資料Migration與Cutover_Subsystem.md#42-preflightbackupschema-state-與-runner)備份來源庫、還原新副本並驗證，通過後才切換。備份由維護人員配置本機儲存目錄，並定期異地複製。復原另依[同名復原契約](10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore)。
+- **本機 SQL 備份與保留資料升級**：遠端維護人員登入工會 Windows 主機後，在該主機操作 Windows 管理入口。選項 `6 備份`、`7 安全升級`、`8 復原備份` 透過 `127.0.0.1` 連線到該主機的 Docker MySQL。正式升級依[保留資料升級契約](10_Global_保留資料Migration與Cutover_Subsystem.md#42-preflightbackupschema-state-與-runner)備份來源庫、還原新副本並驗證，通過後才切換。備份由維護人員配置本機儲存目錄，並定期異地複製。復原另依[同名復原契約](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#windows-same-name-restore)。
 - **API 組成與啟動補齊**：Windows 正式部署從 `api.main:app` 啟動管理與公開 LINE 路由，並以 `api/routes/admin_setup.py` 提供首次 root 建帳。管理端啟動時會補齊缺少的 5 份基準 LINE JSON 設定，並在已有 root 帳號時自動匯入內建知識庫內容。
 
 ### 3.1 Public edge、Application zone 與 Data zone

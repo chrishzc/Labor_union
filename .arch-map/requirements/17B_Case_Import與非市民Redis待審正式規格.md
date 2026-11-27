@@ -46,7 +46,7 @@
 ### 3.1 非市民進件與配號（`NC-ENTRY`、`NC-FORM`、`NC-APPROVAL`、`NC-NUMBER`、`NC-STAT`）
 
 - **進件獨立性（`NC-ENTRY-01～03`）**：非市民可由 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 的「非新竹市民 → 尚未申請」進入專屬 LINE LIFF 合併表單，經工會審核取得新 `A` 案號；亦可由承辦人依 §3.1.1 從既有案件帶入資料，透過後台手動非市民建案取得新 `A` 案號。原 HCM 報名及其審核結果保留，禁止沿用原 HCM 案號或假借補件覆活已作廢之補助案件。
-- **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆於銀行帳號欄位固定備註「**請填入產婦本人銀行帳號**」，一般需求調查須必填上傳「**存摺封面**」圖片（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼並一併歸檔至 Windows 主機受控根目錄下的存摺封面專區（實體路徑見[受控檔案正式規格 §8.2](30_Controlled_File_Storage_NAS正式規格.md#82-本機受控儲存目錄架構與檔案命名規範)）。非市民服務申請不提供「銀行存摺／存摺封面」圖片上傳控制項、預覽或上傳提示，管理端表單工作室的非市民唯讀預覽套用相同呈現規則；非市民送件不收集或上傳該圖片，Preview／Apply 不得因缺少該圖片而拒絕，核准建案亦不得要求補交。銀行帳號與分行代碼等文字欄位仍依既有規則填寫及驗證，既有圖片與正式歸檔資料依 §3.1.2、§3.2 及受控檔案規格保留；皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
+- **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆於銀行帳號欄位固定備註「**請填入產婦本人銀行帳號**」，一般需求調查須必填上傳「**存摺封面**」圖片（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼並一併歸檔至 Windows 主機受控根目錄下的存摺封面專區（實體路徑見[受控檔案正式規格 §8.2](30_Controlled_File_Storage正式規格.md#82-本機受控儲存目錄架構與檔案命名規範)）。非市民服務申請不提供「銀行存摺／存摺封面」圖片上傳控制項、預覽或上傳提示，管理端表單工作室的非市民唯讀預覽套用相同呈現規則；非市民送件不收集或上傳該圖片，Preview／Apply 不得因缺少該圖片而拒絕，核准建案亦不得要求補交。銀行帳號與分行代碼等文字欄位仍依既有規則填寫及驗證，既有圖片與正式歸檔資料依 §3.1.2、§3.2 及受控檔案規格保留；皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
 - **後台手動新案必填**。客戶姓名、連絡電話、預計服務開始日、服務天數、服務時段、胎數、電子郵件、退款銀行代號（含分行共 7 碼）及退款銀行帳號均為必填。胎數只接受單胞胎或雙胞胎；同一建案交易寫入 BeClass「特殊計費:胎數」，並以此胎數初始化客戶帳務及月嫂薪資。後台表單與建案 API 均拒絕缺漏或只有空白的值。
 - **需求調查時薪**。市民與非市民 LIFF 在單胞胎及雙胞胎選項旁顯示 [Client Finance 計價政策](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 的服務時薪。市民以一般市民費率為參考，區分補助內及用盡後費率。非市民顯示自費費率。
 - **代購食材**。市民與非市民 LIFF 均必填，僅接受「需月嫂代購(實報實銷)」或「自行準備」，保存於 BeClass `survey_details` 的「代購食材」。後台 BeClass 可顯示及修正；歷史未填資料維持未登錄，不猜補答案。
@@ -91,7 +91,7 @@
 | 資料情境 | 權威與處理規則 | 可觀察結果 |
 | --- | --- | --- |
 | 切換前已送件、待審申請已有暫存圖 | 依 §3.2 的既有有圖核准流程，由 Controlled File 納管，不因新表單移除圖片而刪除既有附件或要求重填。 | 核准以原申請／操作取得正式案號；圖片歸檔確認後才完成待審終態及暫存清理。若歸檔失敗，原申請可回讀已有的 SQL 回執，但不顯示核准完成。 |
-| 已正式歸檔的存摺圖片 | 依[受控檔案規格 §3](30_Controlled_File_Storage_NAS正式規格.md#3-file_purpose_registry-與排除範圍)及 §8.2 保存既有 identity、版本與讀取位置；移除新非市民收集不觸發刪除、搬移或重寫。 | 具權限者仍可經受控 Query／Download 讀取原正式檔案；正式歸檔不受 Redis 問卷及暫存圖清理影響。 |
+| 已正式歸檔的存摺圖片 | 依[受控檔案規格 §3](30_Controlled_File_Storage正式規格.md#3-file_purpose_registry-與排除範圍)及 §8.2 保存既有 identity、版本與讀取位置；移除新非市民收集不觸發刪除、搬移或重寫。 | 具權限者仍可經受控 Query／Download 讀取原正式檔案；正式歸檔不受 Redis 問卷及暫存圖清理影響。 |
 
 <a id="registration-storage-refund-projection"></a>
 
@@ -104,7 +104,7 @@
   - 查到待審申請只表示收件，不表示已建正式案件。核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
   - 對外收件容器 `registration-intake` 僅持 LIFF token 驗證與專用 `registration-redis` 受限 ACL（僅可讀寫待審內容與計數器命名空間，完全不配置 MySQL 憑證、網路路徑或審核決策權限）；瀏覽器僅呼叫 bounded API。
   - 管理員以 `POST /api/v1/admin/registration-applications/{registration_id}/approve` 及目前 `expected_version` 核准原申請。MySQL 唯一 outer UoW 透過各 owning Domain writer 原子建立正式 Client／BeClass（含同步保存 `beclass_records.refund_bank_code` 與 `refund_account_no`，依 `REG-REFUND-01～03`）／Orders（含非市民建檔）與 LINE binding，並在同次交易保存原申請／操作的核准回執。SQL commit 與圖片歸檔、Redis 收尾是不同完成點，不以歸檔失敗宣稱 SQL 已回滾。
-  - **有圖適用條件**：已合法收件且原待審申請含暫存圖，包含切換前已附圖的申請。SQL 提交後，透過 [Controlled File §5](30_Controlled_File_Storage_NAS正式規格.md#5-previewapplyidempotency-與-querydownload) 確認受控歸檔完成，實體定位依該規格 §8.2；僅有檔案登錄或 finalize intent 不足以清理原圖。歸檔確認後才完成 Redis `approved` 終態並清除問卷原文，再刪除暫存圖；正式歸檔仍保留。
+  - **有圖適用條件**：已合法收件且原待審申請含暫存圖，包含切換前已附圖的申請。SQL 提交後，透過 [Controlled File §5](30_Controlled_File_Storage正式規格.md#5-previewapplyidempotency-與-querydownload) 確認受控歸檔完成，實體定位依該規格 §8.2；僅有檔案登錄或 finalize intent 不足以清理原圖。歸檔確認後才完成 Redis `approved` 終態並清除問卷原文，再刪除暫存圖；正式歸檔仍保留。
   - **無圖適用條件**：依 §3.1 合法送件、沒有存摺圖片識別的新非市民申請。SQL 提交及原核准回執確認後，直接完成 Redis `approved` 終態與問卷清理，不建立或等待圖片歸檔結果，也沒有暫存圖刪除工作。無圖不得妨礙原申請收尾，其他儲存失敗仍依既有故障恢復處理。
   - **原申請與正式建案讀回**：承辦在非市民申請明細使用「查詢原申請處理結果」，經唯讀 `GET /api/v1/admin/registration-applications/{registration_id}` 查同一申請。SQL 已提交而收尾未完成時可回 `status=approving`、`approved=false`、原 `case_no` 與 `approved_at_utc`，不回問卷欄位；案號與核准時間只證明正式交易回執存在，不證明歸檔或 Redis 已完成。僅在該申請適用的有圖／無圖收尾條件完成後，原申請讀回 `status=approved`、`approved=true`，並保留同一正式案號。正式案件可再從案件／客戶名冊依該案號查詢，與原申請回執核對，不以待審申請編號冒充正式案號；LINE 通知投遞另依其 owner 契約判定。
 - **`REG-REDIS-01～04`（持久化設定與編號）**：專用 `registration-redis`（Redis 7 獨立實例＋持久化卷，禁與 cache 共用；僅綁定 `127.0.0.1` loopback 供本機 Windows 管理端連線，禁止對外公開；設定 `appendonly yes`、`appendfsync always`、`noeviction`、`maxmemory 256mb`、`auto-aof-rewrite-percentage 100`、`auto-aof-rewrite-min-size 64mb`）。容量滿或 AOF 錯誤一律拒收而不退回 MySQL。專用 Redis 持久化計數器須於還原後與 MySQL 核對最大已用編號（禁擅自以空庫或已核准值重設）。

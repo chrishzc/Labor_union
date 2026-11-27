@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：Global Entry Point / Shell Governance
-- 單一負責範圍：管理端 React 正式導航／render 路由、相容 hash alias、已停用 API（410 Gone）邊界、本機標準開發入口與 NAS 維護腳本契約。
+- 單一負責範圍：管理端 React 正式導航／render 路由、相容 hash alias、已停用 API（410 Gone）邊界、本機標準開發入口與本機資料庫維護腳本契約。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md)
 
 ## 2. 管理端 React 正式入口
@@ -29,7 +29,7 @@
 - `finance`
 - `accounting-parameters`
 - `payment-reminder-settings` — 帳務通知排程與通知條件
-- `database-backup` — 每日備份時間與狀態（owner 為 [NAS Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md)）
+- `database-backup` — 每日備份時間與狀態（owner 為 [單機 Docker MySQL Fresh 初始化與維護復原](10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md)）
 - `account-management`
 - `contract-templates`
 

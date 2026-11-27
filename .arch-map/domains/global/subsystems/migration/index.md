@@ -9,7 +9,7 @@ qualification、candidate verification 與 developer-local DB maintenance bounda
 
 ## Modules
 - `nas-runtime-permissions` — 固定刪除程序、獨立 runtime 帳號與唯讀 plan／明確安裝；path: `modules/nas-runtime-permissions.md`
-- `nas-schema-initialization` — remote 已存在空白 union_db 的 canonical fresh bootstrap；path:
+- `nas-schema-initialization` — 本機 Docker 或指定空白 union_db 的 canonical fresh bootstrap；path:
   `modules/nas-schema-initialization.md`
 - `local-database-fresh-reset` — explicit local canonical empty-schema reset；path:
   `modules/local-database-fresh-reset.md`

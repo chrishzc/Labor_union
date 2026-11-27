@@ -52,7 +52,7 @@
 - `.arch-map/requirements/07_跨Domain交易與pytest驗收架構.md`
 - `.arch-map/requirements/09_Finance_Import_Domain.md`
 - `.arch-map/requirements/10_Global_保留資料Migration與Cutover_Subsystem.md`
-- `.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md`
+- `.arch-map/requirements/10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md`
 - `.arch-map/requirements/12_Global_效能與UX體感架構.md`
 - `.arch-map/requirements/14_Government_Subsidy_Domain.md`
 - `.arch-map/requirements/15_正式規格索引與裁決總表.md`
@@ -75,7 +75,7 @@
 - `.arch-map/requirements/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md`
 - `.arch-map/requirements/27_歷史訂單生命週期與服務天數帳務正式規格.md`
 - `.arch-map/requirements/29_LINE服務說明、客服互動與選單角色正式規格.md`
-- `.arch-map/requirements/30_Controlled_File_Storage_NAS正式規格.md`
+- `.arch-map/requirements/30_Controlled_File_Storage正式規格.md`
 - `.arch-map/requirements/31_MultiCaregiver_Admin_UI正式規格.md`
 - `.arch-map/requirements/33_案件與月嫂整合名冊正式規格.md`
 - `.arch-map/requirements/34_營運報表與統計口徑正式規格.md`

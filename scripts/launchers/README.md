@@ -100,7 +100,7 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 
 日常可直接雙擊根目錄 **`Windows管理.bat`**，選 **6 備份資料庫、7 安全升級資料庫、8 復原資料庫備份**，不必另外尋找腳本。以下三個獨立入口仍保留相同功能與確認流程。
 
-正式部署由同一台 Windows 主機執行應用與本機 Docker MySQL／Redis。三個維護入口依指定 `.env` 連線，不使用 SSH；腳本名稱中的 `nas` 為相容名稱。設定以[正式維護規格 §5](../../.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-nas-maintenance)為準。
+正式部署由同一台 Windows 主機執行應用與本機 Docker MySQL／Redis。三個維護入口依指定 `.env` 連線，不使用 SSH；腳本名稱中的 `nas` 為相容名稱。設定以[正式維護規格 §5](../../.arch-map/requirements/10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#windows-database-maintenance)為準。
 **目前開發電腦不會自動啟用或安裝正式排程。**
 
 | 需要做的事 | 雙擊腳本 | 操作方式 |
@@ -125,12 +125,12 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 復原可由預設備份區或 Windows 選檔窗選取已驗證的 ZIP；舊 `.sql.gz` 須保留完整同名 `.sha256` 和對應 `_receipts/` 成功紀錄。選檔等待操作人員，不設 30 秒時限；取消不連線或修改資料庫。技術人員也可用 `--backup-file` 指定來源。手動來源唯讀、不搬移、不改 `.env`。同名復原不在備份區寫入跨次紀錄。損壞、不完整或經 symlink／junction 的來源不匯入；詳細前提見下方同名復原流程。
 一般手動備份不由復原流程覆蓋或刪除；請維護人員定期確認成功備份、可用容量及獨立設備副本。備份有完整個資，僅授權人員可存取，不提供網頁下載。
 
-合約、模板及其他業務附件的根目錄另依[受控檔案正式規格 §8.2](../../.arch-map/requirements/30_Controlled_File_Storage_NAS正式規格.md)；上方 SQL 備份的專案路徑預設不適用於業務附件。部署切換不自動搬移既有附件。
+合約、模板及其他業務附件的根目錄另依[受控檔案正式規格 §8.2](../../.arch-map/requirements/30_Controlled_File_Storage正式規格.md)；上方 SQL 備份的專案路徑預設不適用於業務附件。部署切換不自動搬移既有附件。
 首次寫入會自動建立規格的 01～05 與 `_staging`；案件／日期／月嫂子目錄在新檔確認後依資料建立。上傳與產生的選單底圖都在 `04_LINE選單資源 (media)/rich_menus`，未綁定的 LINE 原始媒體在 `_staging/line_media`。
-新受控附件由背景 worker 在原交易提交後驗證並歸檔；舊檔的識別與下載不改，失敗保留暫存供核對。本機開發使用非 NAS 根目錄時，保留既有明確合約／媒體路徑及舊 staging 讀取；不會自動搬移現存資料，此調整不修改現有 `.env`。
+新受控附件由背景 worker 在原交易提交後驗證並歸檔；舊檔的識別與下載不改，失敗保留暫存供核對。本機開發使用自訂受控儲存根目錄時，保留既有明確合約／媒體路徑及舊 staging 讀取；不會自動搬移現存資料，此調整不修改現有 `.env`。
 
 升級會先備份，再在新的資料庫副本執行既有 migration 與資料保留驗證。通過驗證及原帳號連線測試後，才切換正式電腦 `.env` 的資料庫名稱。**升級時的原庫、舊備份及失敗副本都保留。**
-復原依[同名復原流程](../../.arch-map/requirements/10A_NAS_Fresh初始化與維護復原規格.md#windows-same-name-restore)進行，庫名與 `.env` 不變，選定備份 A 保留；暫存庫及系統暫存目錄無論成功、失敗都清理；不新增備份 B、跨次進度檔或 `_maintenance/`。替換前驗證未過時保留原庫，不執行替換。
+復原依[同名復原流程](../../.arch-map/requirements/10A_單機Docker_MySQL_Fresh初始化與維護復原規格.md#windows-same-name-restore)進行，庫名與 `.env` 不變，選定備份 A 保留；暫存庫及系統暫存目錄無論成功、失敗都清理；不新增備份 B、跨次進度檔或 `_maintenance/`。替換前驗證未過時保留原庫，不執行替換。
 完成後重新啟動工會系統，使用原帳號及 MFA 確認登入、資料查詢與操作。升級切換後已產生新資料時，不能直接切回舊庫而忽略新資料。
 失敗時不要清空或重複執行，保留畫面與備份紀錄交給維護人員；備份版本不符會停止切換。
 
