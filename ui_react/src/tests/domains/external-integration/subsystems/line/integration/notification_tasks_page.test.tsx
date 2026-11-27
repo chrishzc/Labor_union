@@ -79,6 +79,51 @@ describe('通知事項實際接線',()=>{
     expect(screen.getByRole('link',{name:/希望服務天數尚未完成/})).toBeInTheDocument();
     expect(apply).toHaveBeenCalledWith(preview,expect.any(String),true);
   });
+  it.each([
+    {outcome: '保留必修欄位', hasRequired: true},
+    {outcome: '移除已無待修欄位的案件', hasRequired: false},
+  ])('第二個來源分頁確認略過 email 後$outcome', async ({hasRequired}) => {
+    const caseNo = 'CASE-26';
+    const firstPage = Array.from({length: 25}, (_, index) => importTodo(`CASE-${index + 1}`));
+    const task = importTodo(caseNo);
+    const required = task.import_field_issues?.[1];
+    if (!required) throw new Error('Missing required-field fixture');
+    const email = {source: 'hcm', owner: 'client_profile', field: 'email', source_field: 'email',
+      code: 'hcm_field_invalid:email', message: 'email 尚未完成。', optional_skip_review_identity: 'review-26'} as const;
+    const reviewedTask = {...task, import_field_issues: hasRequired ? [email, required] : [email]};
+    let applied = false;
+
+    vi.mocked(client.catalog).mockResolvedValue([importSource]);
+    vi.mocked(client.list).mockImplementation(async (_source, cursor = 0) => {
+      const total = applied && !hasRequired ? 25 : 26;
+      if (cursor === 0) return {items: firstPage, total, next_cursor: total > 25 ? 1 : null};
+      const items = applied ? (hasRequired ? [{...task, import_field_issues: [required]}] : []) : [reviewedTask];
+      return {items, total, next_cursor: null};
+    });
+    vi.spyOn(hcmResubmissionClient, 'previewFieldSkip').mockResolvedValue({
+      review_identity: 'review-26', case_no: caseNo, source_field: 'email', review_version: 1, preview_fingerprint: 'a'.repeat(64),
+    });
+    vi.spyOn(hcmResubmissionClient, 'applyFieldSkip').mockImplementation(async () => {
+      applied = true;
+      return {event_identity: 'event-26', review_identity: 'review-26', case_no: caseNo,
+        target_fields: ['review.skip_field:email'], resulting_review_version: 2, replayed: false};
+    });
+
+    render(<NotificationTasksPage />);
+    fireEvent.change(screen.getByRole('searchbox', {name: '搜尋通知事項'}), {target: {value: caseNo}});
+    fireEvent.click(await screen.findByRole('button', {name: '載入更多事項'}));
+    fireEvent.click(await screen.findByRole('button', {name: '略過此欄'}));
+    fireEvent.click(await screen.findByRole('button', {name: '確認略過此欄'}));
+
+    await waitFor(() => expect(screen.queryByText(email.message)).not.toBeInTheDocument());
+    if (hasRequired) {
+      expect(screen.getByRole('button', {name: new RegExp(caseNo)})).toBeVisible();
+      expect(screen.getByRole('link', {name: required.message})).toHaveAttribute('href', `#clients?case=${caseNo}&field=intake&from=workbench`);
+    } else {
+      expect(screen.getByRole('heading', {name: '沒有符合搜尋條件的事項'})).toBeVisible();
+      expect(screen.queryByRole('button', {name: new RegExp(caseNo)})).not.toBeInTheDocument();
+    }
+  });
   it('進件資料讀取失敗保持未確認，讀回成功後才顯示零筆',async()=>{
     vi.mocked(client.catalog).mockResolvedValue([importSource]);
     vi.mocked(client.list).mockRejectedValue(new ApiHttpError(503,'notification_source_unavailable','此類事項暫時無法讀取，請重新整理。'));
