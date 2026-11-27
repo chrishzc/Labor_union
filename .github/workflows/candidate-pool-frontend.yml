@@ -117,6 +117,7 @@ jobs:
           src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_roster_page.test.tsx
           src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
           src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_historical_drawer.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/operational-stage-projection/order_workbench_v2_drawer.test.tsx
       - name: Typecheck and build frontend
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run build
