@@ -298,9 +298,9 @@ export const AiEventStudio: React.FC = () => {
     } catch (err: any) {
       const msg = err.message || '';
       if (msg.includes('alias_conflict')) {
-        setAliasEditError('部分指令已屬於其他引導動作，無法重複設定。');
+        setAliasEditError('部分指令已用於其他引導動作。請修改或移除重複指令，再儲存變更。');
       } else {
-        setAliasEditError(msg || '儲存指令失敗，請稍後再試。');
+        setAliasEditError('無法確認觸發指令是否已儲存。請先記下修改內容，再重新整理核對目前的指令。');
       }
     } finally {
       setAliasSaveBusy(false);
@@ -330,8 +330,8 @@ export const AiEventStudio: React.FC = () => {
       setIsEditingAliases(false);
       setRouterNotice(`已恢復「${selectedRule.aliases[0] || selectedRule.routeKey}」的預設觸發指令。`);
       setRouterNoticeKind('info');
-    } catch (err: any) {
-      setAliasEditError(err.message || '恢復預設失敗，請稍後再試。');
+    } catch {
+      setAliasEditError('無法確認指令是否已恢復預設。請重新整理，核對目前的觸發指令。');
     } finally {
       setAliasSaveBusy(false);
     }
@@ -453,7 +453,7 @@ export const AiEventStudio: React.FC = () => {
               </button>
             );
           })}
-          {catalog && filteredRules.length === 0 && <p className="studio-empty" role="status">沒有符合條件的引導動作。</p>}
+          {catalog && filteredRules.length === 0 && <p className="studio-empty" role="status">沒有符合條件的引導動作。請調整搜尋或篩選條件。</p>}
         </div>
         <p className="studio-readonly-note"><ShieldCheck aria-hidden="true" />自訂觸發指令儲存後立即於 LINE 生效</p>
       </aside>
@@ -645,7 +645,7 @@ export const AiEventStudio: React.FC = () => {
                 <Play aria-hidden="true" />{routerBusy ? '預覽中…' : '預覽引導動作'}
               </button>
             </div>
-            {!routerNotice && !routerPreview && <p className="ai-router-empty">尚未預覽引導動作。</p>}
+            {!routerNotice && !routerPreview && <p className="ai-router-empty">輸入要測試的文字，即可預覽會觸發的引導動作。</p>}
             {routerNotice && <div className={`ai-router-notice is-${routerNoticeKind ?? 'info'}`} role="status">{routerNotice}</div>}
             {previewedRule && (
               <div aria-label="問句處理預覽結果">

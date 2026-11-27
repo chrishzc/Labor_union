@@ -90,7 +90,7 @@ describe('AI 事件工作室正式規則 readback', () => {
     mockReadback();
     render(React.createElement(AiEventStudio));
 
-    expect(screen.getByText('尚未預覽引導動作。')).toBeInTheDocument();
+    expect(screen.getByText('輸入要測試的文字，即可預覽會觸發的引導動作。')).toBeInTheDocument();
     expect(screen.queryByText(/新竹市月子補助計算與收費說明/)).not.toBeInTheDocument();
     expect(screen.queryByText(/客戶資料與服務異動申請/)).not.toBeInTheDocument();
     expect(screen.queryByText(/服務態度與爭議客訴/)).not.toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('AI 事件工作室正式規則 readback', () => {
     const search = screen.getByRole('searchbox', { name: '搜尋引導動作' });
     for (const command of ['恢復自動回答', '開啟異常中心']) {
       fireEvent.change(search, { target: { value: command } });
-      expect(screen.getByText('沒有符合條件的引導動作。')).toBeInTheDocument();
+      expect(screen.getByText('沒有符合條件的引導動作。請調整搜尋或篩選條件。')).toBeInTheDocument();
     }
     fireEvent.change(search, { target: { value: '綁定訂單' } });
     expect(list.getByRole('button', { name: /綁定訂單.*一對一聊天室/ })).toBeInTheDocument();
