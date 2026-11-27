@@ -72,7 +72,21 @@ export function FinanceCaseList({
       const byCase = new Map(timelines.items.map(item => [item.case_no, item]));
       const eligible = page.items;
       setUnknownScope(page.items.filter(order => !byCase.has(order.case_no)).length);
-      const collected: Row[] = new Array(eligible.length);
+      const collected: Array<Row | undefined> = new Array(eligible.length);
+      let completed = 0;
+      let nextPublication = 1;
+      const publishCompletedRows = (): void => {
+        if (controller.signal.aborted) return;
+        const snapshot = collected.slice();
+        setRows(previous => {
+          if (controller.signal.aborted) return previous;
+          const previousByCase = new Map(previous.map(row => [row.order.case_no, row]));
+          return eligible.flatMap((order, current) => {
+            const row = snapshot[current] ?? previousByCase.get(order.case_no);
+            return row ? [row] : [];
+          });
+        });
+      };
       let index = 0;
       await Promise.all(Array.from({ length: Math.min(4, eligible.length) }, async () => {
         while (index < eligible.length && !controller.signal.aborted) {
@@ -98,9 +112,14 @@ export function FinanceCaseList({
           } else {
             collected[current] = { order, timeline };
           }
+          completed += 1;
+          if (completed >= nextPublication) {
+            nextPublication *= 2;
+            publishCompletedRows();
+          }
         }
       }));
-      if (!controller.signal.aborted) setRows(collected);
+      if (!controller.signal.aborted) setRows(collected.filter((row): row is Row => row !== undefined));
     }).catch(() => {
       if (!controller.signal.aborted) setError('暫時無法讀取案件帳務或案件進度。請按「查詢案件」重試。');
     }).finally(() => {
@@ -307,7 +326,7 @@ export function FinanceCaseList({
       )}
 
       <div className="finance-row-actions">
-        <span>搜尋範圍共 {matched.length} 案；已顯示全部{subTab === 'ongoing' ? '進行中案件' : '案件'}</span>
+        <span>{loading ? '正在讀取完整搜尋結果…' : <>搜尋範圍共 {matched.length} 案；已顯示全部{subTab === 'ongoing' ? '進行中案件' : '案件'}</>}</span>
       </div>
     </section>
   );

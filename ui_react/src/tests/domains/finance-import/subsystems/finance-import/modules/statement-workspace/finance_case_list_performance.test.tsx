@@ -183,6 +183,13 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.use
 afterAll(() => {
   if (!process.env.FINANCE_EVIDENCE_DIR) return;
   mkdirSync(process.env.FINANCE_EVIDENCE_DIR, { recursive: true });
+  writeFileSync(`${process.env.FINANCE_EVIDENCE_DIR}/browser-fixtures.json`, JSON.stringify({
+    digest,
+    fixtures: [16, 160].map(size => {
+      const data = synthetic(size);
+      return { size, orders: data.orders, timelines: data.timelines, accounting: [...data.accounting], notices: [...data.notices], expectedRows: expectedRows(size), expectedRefreshRows: expectedRows(size, 76544) };
+    }),
+  }));
   writeFileSync(`${process.env.FINANCE_EVIDENCE_DIR}/frontend-${process.env.FINANCE_SIDE ?? 'unknown'}-${process.env.FINANCE_REPETITION ?? '0'}.json`, JSON.stringify({ surface: 'happy-dom real component and typed HTTP clients; synthetic fetch; browser/API/DB end-to-end not_run', sha: process.env.FINANCE_CHECKOUT_SHA, node: process.version, measurements }, null, 2));
 });
 
