@@ -52,6 +52,8 @@
 
 本機開發庫日常升級走 `scripts.update_local_database`。依 ordered release plan 判定已是現行版、可在本機原庫套用的純結構升級，或需另選隔離副本的保留資料升級。原庫直連須符合該版本資格、原庫身分、備份及續跑驗證；不以 NAS 候選、DSM 備份或部署切換為前置。既有 NAS 入口與中斷恢復規則屬相容邊界，不列入現行部署。
 
+正式部署依 [Global Deployment §3](18_Global_Deployment與治理正式規格.md#3-正式部署拓樸)，由工會 Windows 主機在維護期間透過 loopback 維護本機 Docker MySQL。選項 7 在 `APP_ENV=production` 時直接選擇保留資料升級。來源庫唯讀，依發行鏈規劃、備份、還原副本、升級及驗證。切換前須核對保留資料、精確結構及實際目標；切換後仍保留原庫及其資料。
+
 - **Preflight／Backup**：`DatabaseIdentityReader`、`SourceReadOnlyGuard`、`CandidateAbsenceGuard`、`CutoverPlanFingerprint`、`MySqlDumpCommandBuilder`、`AtomicBackupPublisher`、`RestoreEvidenceValidator` 產生 zero-write plan 與驗證備份還原。
 - **Schema State Classification**：Descriptor 須同時列明新表及 `altered_tables` 新增／修改欄位與完整 metadata（type、nullability、default、generated expr、index、FK、check）。Parent-table ALTER 不擁有 parent 既有物件；較早 artifact 遇到後續 canonical release 加入的物件僅依「successor artifact identity ＋ 完整契約」allowlist 視為相容，契約不符仍判 `drift`。1060 條件式 trigger 採 hash-bound predecessor／successor 定義（`db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json`），共用 SQL loader 採 quote／comment-aware `DELIMITER`。
 - **Additive Migration Runner**：
@@ -99,6 +101,9 @@
 - **成立後未服務狀態**。`labor_union_2026_11_23_order_established_unserved_v1.json` 以 `1081_order_established_unserved_status.sql` 在 Orders、Terms 收據與取消收據的狀態 enum 尾端追加「成立後未服務」，並擴充 lifecycle event 的 before／after 檢查限制。此版本只有 schema widening，不回填案件、不重做取消、收付款或 payroll。Fresh assembly 與保留資料升級使用同一 artifact；執行仍須通過上述七道門，正式切換前保留候選與來源回復證據。
 
 - **月嫂有效應付 0 元投影**。`labor_union_2026_11_24_staff_payable_projection_zero_v1.json` 以 `1084_staff_payable_projection_zero.sql` 替換同名金額 CHECK。有效應付允許 0 元，淨實付仍須為非負，差額仍須等於有效應付減淨實付。升級保留狀態 CHECK、付款資料與所有既有列。Fresh 與保留資料升級使用同一 artifact。精確舊 CHECK 待升級，精確新 CHECK 重跑零寫入。已存在的應付投影表若缺少金額 CHECK、未啟用或定義不符，停止升級。產生有效應付 0 元列後，應保留新版 CHECK 及資料並向前修復。
+
+- **FAQ 永久刪除**。`labor_union_2026_11_27_faq_permanent_delete_guard_v1.json`（`1088_faq_permanent_delete_guard.sql`）更新知識版本的刪除觸發器。新建庫及現行 Windows Docker MySQL 的保留資料升級採相同定義，完成升級時須確認既有題目、版本及事件仍在。1087 來源的觸發器符合發行描述才套用 1088。已符合 1088 的副本重跑時跳過該項 DDL。需套用 1087 的來源依發行鏈先執行該版既有的 FAQ 回填與驗證。題庫刪除另經 Knowledge 交易執行，規則見 [LINE FAQ](29_LINE服務說明、客服互動與選單角色正式規格.md#41-共用問答與聊天室版面)。
+- **1088 中斷續跑**。隔離副本在移除既有觸發器後中斷，須核對原備份、同一來源及副本的識別、發行與 DDL 收據、資料指紋和目前結構。證據證明僅該移除步驟已生效時，續行建立觸發器，再走正常的副本驗證。證據不足或有其他結構差異時停止該副本，保留來源及維護記錄供重新規劃。驗收以隔離 MySQL 注入中斷後走同一續跑入口，並在同一驗證完成的副本核對合法 FAQ 刪除、原有生效答案及其他題目。
 
 ### 6.1 本機開發 DB 受控驗收（§9.1）
 

@@ -21,6 +21,7 @@ interface KnowledgeItem {
   lifecycle_status: LifecycleStatus;
   current_version: number;
   published_version?: number | null;
+  faq_delete_eligible?: 0 | 1 | boolean;
   source_uri: string | null;
   content: string;
 }
@@ -80,7 +81,9 @@ async function apiError(response: Response): Promise<string> {
   const code = typeof payload.detail === 'string' ? payload.detail : payload.detail?.code;
   const messages: Record<string, string> = {
     knowledge_qa_answer_required: '標準回答尚未完成，不能發布。',
-    knowledge_qa_line_reply_too_long: '答案加上來源與固定提示後超過 LINE 上限，請縮短答案再發布。',
+    knowledge_qa_line_reply_too_long: '答案原文超過 LINE 上限，請縮短答案再發布。',
+    knowledge_faq_delete_published: '這則問答仍有生效的正式答案，請先停用再刪除。',
+    knowledge_faq_identity_deleted: '這個題目編號曾被永久刪除，請使用其他編號。',
     knowledge_item_version_conflict: '內容已被其他人更新，請重新整理後再操作。',
     knowledge_review_required: '目前狀態不能執行這個動作，請重新整理確認。',
     knowledge_state_conflict: '目前狀態不能執行這個動作，請重新整理確認。',
@@ -154,6 +157,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
   }, [items, query, statusFilter]);
 
   const isPublished = (item: ManagedQa) => item.published_version != null || item.lifecycle_status === 'published';
+  const canDelete = (item: ManagedQa) => !isPublished(item) && Boolean(item.faq_delete_eligible ?? true);
   const publishedCount = items.filter(isPublished).length;
 
   async function loadCategories() {
@@ -232,6 +236,23 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
       const visible = data.items.find((row) => row.qa_id === item.qa.id);
       if (action === 'publish' ? visible?.version !== result.version : Boolean(visible)) {
         throw new Error('操作已受理，正式題庫讀回的版本與本次操作不同。請重新整理確認。');
+      }
+    });
+  };
+
+  const deleteFaq = (item: ManagedQa) => {
+    if (!window.confirm(`要永久刪除「${item.qa.question}」（${item.qa.id}）及其內容版本嗎？刪除後無法復原。`)) return;
+    const identity = operationIdentity('qa-delete');
+    const path = `/api/v1/knowledge/items/${item.id}`;
+    return runMutation(() => applicationFetch(`${path}/delete-faq`, {
+      method: 'POST',
+      headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
+      credentials: 'include',
+      body: JSON.stringify({ expected_version: item.current_version, reason: `永久刪除 LINE 常見問答 ${item.qa.id}` }),
+    }), '已永久刪除這則問答。', async () => {
+      const readback = await applicationFetch(path, { headers: requestHeaders(), credentials: 'include' });
+      if (readback.status !== 404) {
+        throw new Error('無法確認刪除結果，請重新整理題庫。');
       }
     });
   };
@@ -365,6 +386,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
               <div className="qa-catalog-actions">
                 {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={() => void transition(item, 'publish')}>發布</button>}
                 {isPublished(item) && <button type="button" className="line-danger-btn" disabled={busy} onClick={() => void transition(item, 'retire')}>停用</button>}
+                {canDelete(item) && <button type="button" className="line-danger-btn" disabled={busy} onClick={() => void deleteFaq(item)}>永久刪除</button>}
               </div>
             </div>
           </details>

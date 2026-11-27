@@ -1,13 +1,13 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-shared-line-faq-v1",
+  "release_id": "labor-union-validation-schema-faq-permanent-delete-guard-v1",
   "source_bindings": {
-    "assembly_sha256": "0ce1e1080039f3715758e3ae6eebf140334a03a17d85fe0747ff5089fc3b082a",
-    "validation_manifest_sha256": "fd2694dc45cf74b6bf836c6bf2497b314b5a76cd588ef97e4053f66f52a9d56b",
+    "assembly_sha256": "81e308a2decee8bd5f4404e67c674cc432ca32614cf88ee8a7fe2d7bd582b8e6",
+    "validation_manifest_sha256": "14860131d58b1388d25c3e619db29aeb73a8a839b0c67274af1785374872c9ea",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
-  "sql_sha256": "831e98f69ca7dba734cf6969b236b71a149bbe454b638df47da07b93f1e1cfca",
+  "sql_sha256": "2a5c86de61e8cc2cb923e691950f5263ba3882b467b0274ded067d6b6207de71",
   "objects": {
     "tables": 405,
     "views": 2,

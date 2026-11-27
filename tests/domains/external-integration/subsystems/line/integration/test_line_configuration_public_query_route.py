@@ -550,13 +550,13 @@ def test_faq_01_layout_draft_published_preview_and_invalid_writes_with_fake_port
 
     item = store.answers["QA-001"]
     original_answer = item.answer
-    item.answer = "答" * 5000
+    item.answer = "答" * 4999 + "😀"
     too_long = client.post(publish_url, json={"expected_revision": 2}, headers=_faq_headers("oversize"))
     assert too_long.status_code == 422
     assert too_long.json()["detail"]["error"]["field_errors"][0]["code"] == "faq_line_reply_too_long"
     assert "oversize" not in store.operations
     assert query()["published_layout"] is None
-    item.answer = original_answer
+    item.answer = "答" * 4998 + "😀"
 
     published = client.post(publish_url, json={"expected_revision": 2}, headers=_faq_headers("publish"))
     assert published.status_code == 200
@@ -564,6 +564,7 @@ def test_faq_01_layout_draft_published_preview_and_invalid_writes_with_fake_port
     assert client.post(
         publish_url, json={"expected_revision": 2}, headers=_faq_headers("publish"),
     ).json()["data"] == published.json()["data"]
+    item.answer = original_answer
     reopened = _faq_client(store)
     assert reopened.get(_FAQ_LAYOUT_URL).json()["data"]["published_layout"] == draft
     assert reopened.post(

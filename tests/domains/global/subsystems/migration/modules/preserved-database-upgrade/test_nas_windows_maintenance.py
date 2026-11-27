@@ -210,6 +210,79 @@ def test_internal_upgrade_main_has_no_extra_confirmation_and_keeps_failure_visib
     assert (tmp_path / "local-upgrade").is_dir()
 
 
+@pytest.mark.parametrize("configured,override,host,expected", [
+    ('APP_ENV="production" # formal host', None, "localhost", "candidate"),
+    ("APP_ENV=development", " PRODUCTION ", "127.0.0.1", "candidate"),
+    ("APP_ENV=production", "development", "127.0.0.1", "direct"),
+    ("", None, "::1", "direct"),
+    ("APP_ENV=production", " ", "127.0.0.2", "blocked_candidate"),
+    ("APP_ENV=production", "staging", "127.0.0.1", "invalid_mode"),
+])
+def test_internal_loopback_upgrade_uses_the_windows_application_environment(
+    settings: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], configured: str, override: str | None,
+    host: str, expected: str,
+) -> None:
+    from scripts import update_local_database as updater
+
+    runtime = settings["environment_file"]
+    runtime.write_text(
+        f"DB_HOST={host}\nDB_DATABASE=union_db\nDB_USER=fixture_app\n"
+        f"NAS_BACKUP_DIR={tmp_path / 'local-upgrade'}\n{configured}\n",
+        encoding="utf-8",
+    )
+    if override is not None:
+        monkeypatch.setenv("APP_ENV", override)
+    monkeypatch.setattr(nas, "maintenance_lock", lambda *_: nullcontext())
+    monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: pytest.fail("no database connection"))
+    monkeypatch.setattr(nas, "backup", lambda *_: pytest.fail("preflight must not start backup"))
+    paths: list[str] = []
+
+    def direct_upgrade(**arguments: object) -> dict[str, object]:
+        paths.append("direct")
+        assert arguments == {
+            "environment_file": runtime,
+            "apply": True,
+            "confirm_configured_database": True,
+        }
+        return {"status": "current"}
+
+    def candidate_plan(
+        config: nas.migration.SeparateDatabaseConfig, source: str, candidate: str,
+        *, source_recovery_root: Path,
+    ) -> dict[str, object]:
+        paths.append("candidate")
+        assert source == config.source.database == "union_db"
+        assert candidate == config.candidate.database and candidate.startswith("lu_nas_upgrade_")
+        assert isinstance(config.source.config, nas.ConnectionConfig) and config.source.config.readonly
+        assert isinstance(config.candidate.config, nas.ConnectionConfig) and config.candidate.config.candidate == candidate
+        assert source_recovery_root == updater.DEFAULT_RECEIPT_ROOT
+        if expected == "blocked_candidate":
+            raise nas.migration.UpgradeBlocked("synthetic candidate preflight failure")
+        return {"status": "ready", "candidate_exists": False, "source_objects": {"fixture.sql": "exact"}}
+
+    monkeypatch.setattr(updater, "update_local_database", direct_upgrade)
+    monkeypatch.setattr(nas.migration, "build_plan", candidate_plan)
+    monkeypatch.setattr(updater, "build_additive_preview", lambda *_: {"status": "current"})
+    monkeypatch.setattr(updater, "require_current_database", lambda preview: preview)
+
+    before = runtime.read_bytes()
+    status = nas.main(["upgrade", "--environment-file", str(runtime),
+                       "--settings-file", str(tmp_path / "absent-maintenance-settings")])
+    assert runtime.read_bytes() == before
+    output = capsys.readouterr().out
+    if expected == "blocked_candidate":
+        assert status == 2 and paths == ["candidate"]
+        assert "synthetic candidate preflight failure" in output
+    elif expected == "invalid_mode":
+        assert status == 2 and paths == []
+        assert "APP_ENV" in output
+    else:
+        assert status == 0 and paths == [expected]
+        assert "資料庫結構已是最新版本" in output
+
+
 def test_missing_shared_storage_root_accepts_explicit_backup_directory(settings):
     path = settings["environment_file"]
     path.write_text('\n'.join(line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith("CONTROLLED_FILE_STORAGE_ROOT=")), encoding="utf-8")
@@ -717,7 +790,7 @@ def test_candidate_config_refuses_source_connection_and_keeps_tls(settings, monk
     assert calls[0]["ssl"]["check_hostname"] is True
 
 
-@pytest.mark.parametrize("deployment", ["pinned_remote", "unpinned_remote", "local_test"])
+@pytest.mark.parametrize("deployment", ["pinned_remote", "unpinned_remote", "local_test", "windows_production"])
 @pytest.mark.parametrize("verified", [False, True])
 def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedures_fail(
     settings, monkeypatch, tmp_path, request, deployment, verified,
@@ -726,6 +799,7 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
 
     steps = []
     local_test = deployment == "local_test"
+    production = deployment == "windows_production"
     if deployment == "unpinned_remote":
         settings = request.getfixturevalue("unpinned_remote_settings")
     monkeypatch.setattr(nas, "is_nas_destination", lambda _: False)
@@ -734,13 +808,21 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
     monkeypatch.setattr(nas, "protect_account_receipts", lambda *_args, **_kwargs: 0)
     if local_test:
         settings.update(host="127.0.0.1", database="lu_nas_fixture", settings_file=tmp_path / "absent")
+    if production:
+        monkeypatch.setenv("APP_ENV", "production")
+        settings.update(host="127.0.0.1", database="lu_nas_upgrade_previous", settings_file=tmp_path / "absent")
 
     def candidate_preview(_config, database, _receipt_root):
         assert verified and database.startswith("lu_nas_upgrade_")
         steps.append("startup_check")
-        return {"status": "blocked"}
+        return {"status": "current"} if production else {"status": "blocked"}
 
     monkeypatch.setattr(updater, "build_additive_preview", candidate_preview)
+    if production:
+        def require_current(preview):
+            assert preview == {"status": "current"}
+            return preview
+        monkeypatch.setattr(updater, "require_current_database", require_current)
     monkeypatch.setattr(nas.shutil, "which", lambda name: name)
     source_connect = Mock(side_effect=AssertionError("upgrade must not read raw questionnaire answers"))
     monkeypatch.setattr(nas.pymysql, "connect", source_connect)
@@ -777,15 +859,24 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
     monkeypatch.setattr(nas.migration.SeparateDatabaseConfig, "connect", lambda *_args: connection)
     from infrastructure.mysql import nas_mutations
     def install_procedures(actual):
+        assert not production, "Windows production must not install NAS compatibility procedures"
         assert actual is connection
         steps.append("procedures")
         raise ValueError("NAS security procedure drift; no changes applied")
     monkeypatch.setattr(nas_mutations, "ensure_nas_procedures", install_procedures)
-    monkeypatch.setattr(nas.migration, "switch_environment", lambda *_args, **_kw: pytest.fail("failed validation must not switch"))
+    def switch(_environment, source, candidate, *_receipts, config, environment_writer):
+        assert production and verified
+        assert source == "lu_nas_upgrade_previous"
+        assert config.source.config.readonly
+        assert config.candidate.config.candidate == candidate
+        steps.append("switch")
+    monkeypatch.setattr(nas.migration, "switch_environment", switch)
     before = settings["environment_file"].read_bytes()
     if verified and local_test:
         with pytest.raises(updater.LocalDatabaseUpdateError, match="release chain is not current"):
             nas.upgrade(settings)
+    elif verified and production:
+        assert nas.upgrade(settings)
     elif verified:
         with pytest.raises(ValueError, match="NAS security procedure drift"):
             nas.upgrade(settings)
@@ -793,7 +884,10 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
         with pytest.raises(nas.MaintenanceBlocked, match="驗證未通過"):
             nas.upgrade(settings)
     assert steps == ["plan", "backup", "restore", "apply", "verify"] + (
-        ["startup_check"] if verified and local_test else ["prepare", "procedures", "close"] if verified else [])
+        ["startup_check"] if verified and local_test
+        else ["startup_check", "prepare", "switch"] if verified and production
+        else ["prepare", "procedures", "close"] if verified
+        else [])
     source_connect.assert_not_called()
     assert settings["environment_file"].read_bytes() == before
 

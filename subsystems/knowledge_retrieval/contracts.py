@@ -42,6 +42,17 @@ class RetireKnowledgeItemCommand(ReviewKnowledgeItemCommand):
 
 
 @dataclass(frozen=True, slots=True)
+class DeleteFaqKnowledgeItemCommand(ReviewKnowledgeItemCommand):
+    pass
+
+
+class DeletedFaqIdentity(RuntimeError):
+    def __init__(self, item_id: int) -> None:
+        super().__init__("knowledge_faq_identity_deleted")
+        self.item_id = item_id
+
+
+@dataclass(frozen=True, slots=True)
 class AskKnowledgeQuestionCommand:
     question: str
     requester_line_user_id: str | None
@@ -58,6 +69,8 @@ class KnowledgeAnswerReceipt:
 
 __all__ = [
     "AskKnowledgeQuestionCommand",
+    "DeleteFaqKnowledgeItemCommand",
+    "DeletedFaqIdentity",
     "IngestKnowledgeSourceCommand",
     "KnowledgeAnswerReceipt",
     "PublishKnowledgeItemCommand",
