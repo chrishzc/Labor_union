@@ -214,3 +214,174 @@ def test_management_models_read_current_templates_without_renaming_formal_ids():
     parsed = MessageTemplatesConfig.model_validate(templates)
     assert [item.id for item in parsed.templates] == [item['id'] for item in templates['templates']]
     LineMenusConfig.model_validate_json((root / 'config/line_menu.json').read_text(encoding='utf-8'))
+
+
+class _SyncConfigurationRepository(ConfigurationRepository):
+    def __init__(self, snapshots) -> None:
+        super().__init__(snapshots)
+        self.by_key = {}
+
+    def get_by_idempotency_key(self, kind, key):
+        snapshot = self.by_key.get(key.value)
+        if snapshot is None or snapshot.kind is not kind:
+            return None
+        return snapshot
+
+    def apply(self, command):
+        result = super().apply(command)
+        self.snapshots[command.candidate.kind] = result.snapshot
+        self.by_key[command.idempotency_key.value] = result.snapshot
+        return result
+
+
+class _PublicationListRepository:
+    def __init__(self, publications=()) -> None:
+        self.publications = tuple(publications)
+
+    def list_for_configuration_revision(self, _revision):
+        return self.publications
+
+
+def test_sync_rich_menu_from_definition_updates_stale_revision_once_and_preserves_ui_edits() -> None:
+    from domains.line.rich_menu import LineRichMenuPublicationStatus
+    from domains.line.rich_menu_draft import normalize_rich_menu_draft, project_saved_staff_menu
+
+    current_file = _definition("line_menu")
+    stale_definition = json.loads(json.dumps(current_file))
+    for menu in stale_definition["menus"]:
+        if menu["id"] == "customer_menu":
+            menu["buttons"] = [
+                {
+                    "id": "old_profile",
+                    "label": "修改登記資料",
+                    "text_color": "#FFFFFF",
+                    "background_color": "#2563EB",
+                    "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
+                    "action": {"type": "uri", "uri": "?target=profile_update", "uri_source": "liff"},
+                    "border_radius": 54,
+                },
+                {
+                    "id": "old_order",
+                    "label": "修改訂單資訊",
+                    "text_color": "#FFFFFF",
+                    "background_color": "#0D9488",
+                    "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
+                    "action": {"type": "uri", "uri": "?target=order_update", "uri_source": "liff"},
+                    "border_radius": 54,
+                },
+                {
+                    "id": "old_faq",
+                    "label": "常見問答",
+                    "text_color": "#FFFFFF",
+                    "background_color": "#3B82F6",
+                    "bounds": {"x": 0, "y": 843, "width": 2500, "height": 843},
+                    "action": {"type": "message", "text": "常見問答"},
+                    "border_radius": 54,
+                },
+            ]
+    repository = _SyncConfigurationRepository({
+        LineConfigurationKind.RICH_MENUS: LineConfigurationSnapshot(
+            LineConfigurationKind.RICH_MENUS,
+            LineConfigurationRevision(9),
+            canonical_line_payload_json(stale_definition),
+        )
+    })
+    audit = RecordingRepository()
+    publications = _PublicationListRepository((
+        SimpleNamespace(status=LineRichMenuPublicationStatus.PUBLISHED),
+    ))
+    uow = FakeUow(configurations=repository, audit=audit, rich_menu_publications=publications)
+    application = LineConfigurationApplication(lambda: uow)
+    actor = ActorContext("system:sync", ("line.config.manage",))
+
+    synced = application.sync_rich_menu_from_definition(
+        current_file,
+        actor,
+        reason="啟動同步新版選單",
+        correlation_id=CorrelationId("sync-test-1"),
+    )
+
+    assert synced is not None
+    assert synced.snapshot.revision == LineConfigurationRevision(10)
+    assert audit.items[0].action == "line.rich_menu.repo_sync"
+    synced_menus = json.loads(synced.snapshot.definition_json)["menus"]
+    customer = next(m for m in synced_menus if m["id"] == "customer_menu")
+    assert [b["label"] for b in customer["buttons"]] == ["案件資訊", "常見問題"]
+
+    # Subsequent UI edit must not be overwritten when the repo file digest is unchanged.
+    ui_edited = normalize_rich_menu_draft(project_saved_staff_menu(current_file))
+    for menu in ui_edited["menus"]:
+        if menu["id"] == "customer_menu":
+            menu["chat_bar_text"] = "客戶即時區"
+    repository.snapshots[LineConfigurationKind.RICH_MENUS] = LineConfigurationSnapshot(
+        LineConfigurationKind.RICH_MENUS,
+        LineConfigurationRevision(11),
+        canonical_line_payload_json(ui_edited),
+    )
+
+    repeated = application.sync_rich_menu_from_definition(
+        current_file,
+        actor,
+        reason="啟動同步新版選單",
+        correlation_id=CorrelationId("sync-test-2"),
+    )
+    assert repeated is None
+    assert repository.get(LineConfigurationKind.RICH_MENUS).revision == LineConfigurationRevision(11)
+
+
+def test_sync_rich_menu_from_definition_noops_when_matching_or_publishing() -> None:
+    from domains.line.rich_menu import LineRichMenuPublicationStatus
+    from domains.line.rich_menu_draft import normalize_rich_menu_draft, project_saved_staff_menu
+
+    current_file = _definition("line_menu")
+    normalized = normalize_rich_menu_draft(project_saved_staff_menu(current_file))
+    matching_repo = _SyncConfigurationRepository({
+        LineConfigurationKind.RICH_MENUS: LineConfigurationSnapshot(
+            LineConfigurationKind.RICH_MENUS,
+            LineConfigurationRevision(14),
+            canonical_line_payload_json(normalized),
+        )
+    })
+    matching_uow = FakeUow(
+        configurations=matching_repo,
+        audit=RecordingRepository(),
+        rich_menu_publications=_PublicationListRepository(),
+    )
+    actor = ActorContext("system:sync", ("line.config.manage",))
+    assert (
+        LineConfigurationApplication(lambda: matching_uow).sync_rich_menu_from_definition(
+            current_file,
+            actor,
+            reason="已相符不新增版本",
+            correlation_id=CorrelationId("sync-noop-match"),
+        )
+        is None
+    )
+    assert matching_repo.applied == []
+
+    stale_definition = json.loads(json.dumps(current_file))
+    stale_definition["menus"][1]["chat_bar_text"] = "舊選單列"
+    publishing_repo = _SyncConfigurationRepository({
+        LineConfigurationKind.RICH_MENUS: LineConfigurationSnapshot(
+            LineConfigurationKind.RICH_MENUS,
+            LineConfigurationRevision(9),
+            canonical_line_payload_json(stale_definition),
+        )
+    })
+    publishing_uow = FakeUow(
+        configurations=publishing_repo,
+        audit=RecordingRepository(),
+        rich_menu_publications=_PublicationListRepository((
+            SimpleNamespace(status=LineRichMenuPublicationStatus.PUBLISHING),
+        )),
+    )
+    assert (
+        LineConfigurationApplication(lambda: publishing_uow).sync_rich_menu_from_definition(
+            current_file,
+            actor,
+            reason="發布中跳過同步",
+            correlation_id=CorrelationId("sync-noop-publishing"),
+        )
+        is None
+    )
+    assert publishing_repo.applied == []

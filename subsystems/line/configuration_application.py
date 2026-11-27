@@ -20,7 +20,7 @@ from domains.line.rich_menu_draft import (
     project_saved_staff_menu,
 )
 from domains.line.rich_menu import LineRichMenuPublicationStatus
-from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.configuration_contracts import (
@@ -386,6 +386,85 @@ class LineConfigurationApplication:
                 "line.configuration.repair_empty_rich_menus", actor.actor_id,
                 "line_configuration", f"rich_menus:{result.snapshot.revision.value}",
             ))
+            unit_of_work.commit()
+        return result
+
+    def sync_rich_menu_from_definition(
+        self,
+        definition: Mapping[str, object],
+        actor: ActorContext,
+        *,
+        reason: str,
+        correlation_id: CorrelationId,
+    ):
+        """Idempotently append a revision when the repo Rich Menu file changes."""
+        require_line_capability(actor, LineCapability.CONFIG_MANAGE)
+        normalized = normalize_rich_menu_draft(project_saved_staff_menu(definition))
+        sync_key = IdempotencyKey(
+            f"line-config-sync:rich_menus:{fingerprint_payload(normalized).value}"
+        )
+        with self._unit_of_work_factory() as unit_of_work:
+            current = unit_of_work.configurations.get(LineConfigurationKind.RICH_MENUS)
+            if current.revision.value == 0:
+                return None
+            if (
+                unit_of_work.configurations.get_by_idempotency_key(
+                    LineConfigurationKind.RICH_MENUS,
+                    sync_key,
+                )
+                is not None
+            ):
+                return None
+            current_normalized = None
+            if current.definition_json != "{}":
+                try:
+                    current_normalized = normalize_rich_menu_draft(
+                        project_saved_staff_menu(json.loads(current.definition_json))
+                    )
+                except (TypeError, ValueError, KeyError):
+                    current_normalized = None
+            if current_normalized == normalized:
+                return None
+            publications = unit_of_work.rich_menu_publications.list_for_configuration_revision(
+                current.revision
+            )
+            if any(
+                publication.status
+                in {
+                    LineRichMenuPublicationStatus.QUEUED,
+                    LineRichMenuPublicationStatus.PUBLISHING,
+                }
+                for publication in publications
+            ):
+                return None
+            _validate_rich_menu_media_assets(
+                normalized,
+                unit_of_work,
+                for_update=True,
+            )
+            candidate = build_configuration_candidate(
+                kind=LineConfigurationKind.RICH_MENUS,
+                current_revision=current.revision,
+                expected_revision=current.revision,
+                definition=normalized,
+            )
+            result = unit_of_work.configurations.apply(
+                ApplyLineConfigurationCommand(
+                    candidate,
+                    actor,
+                    reason.strip(),
+                    sync_key,
+                    correlation_id,
+                )
+            )
+            unit_of_work.audit.append(
+                LineAuditIntent(
+                    "line.rich_menu.repo_sync",
+                    actor.actor_id,
+                    "line_configuration",
+                    f"rich_menus:{result.snapshot.revision.value}",
+                )
+            )
             unit_of_work.commit()
         return result
 

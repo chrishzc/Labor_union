@@ -83,6 +83,14 @@ def ensure_development_line_configuration() -> None:
                 reason="啟動時自動補齊基準 LINE 設定",
                 correlation_id=CorrelationId("line-configuration-bootstrap"),
             )
+            rich_menu_sync = getattr(app, "sync_rich_menu_from_definition", None)
+            if callable(rich_menu_sync):
+                rich_menu_sync(
+                    definitions[LineConfigurationKind.RICH_MENUS],
+                    actor,
+                    reason="啟動時自動同步 Git 最新圖文選單設定",
+                    correlation_id=CorrelationId("line-rich-menu-repo-sync"),
+                )
     except Exception:
         pass
 
