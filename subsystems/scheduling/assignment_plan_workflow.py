@@ -20,6 +20,7 @@ from domains.scheduling.assignment_plan import (
 )
 from domains.scheduling.commitment_execution import CommitmentExecutionMismatch
 from domains.scheduling.generation import SchedulingGenerationCandidate
+from domains.scheduling.service_date_adjustment import ServiceDay
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
@@ -74,6 +75,7 @@ class AssignmentPlanWorkflowFacts:
     client_finance: ClientFinanceTermsSourceFacts
     payroll: PayrollTermsSourceFacts
     lifecycle: OrderLifecycleRootFacts
+    first_schedule_adjusted_days: tuple[ServiceDay, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

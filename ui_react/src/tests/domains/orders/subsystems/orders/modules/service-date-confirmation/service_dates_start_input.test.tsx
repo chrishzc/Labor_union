@@ -323,12 +323,12 @@ it('完工且有帳務更正擋關時仍可透過純日期操作分裂', async (
   expect(mocks.applyLegacyCorrection).not.toHaveBeenCalled();
 });
 
-async function input(date: string) {
+async function input(date: string, firstServiceDate = date) {
   await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
   await waitFor(() => expect(screen.getByLabelText('實際開始日')).toBeEnabled());
   fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: date } });
   await waitFor(() => expect(mocks.calculate).toHaveBeenLastCalledWith(expect.objectContaining({ actual_start_date: date })));
-  await waitFor(() => expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent(date));
+  await waitFor(() => expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent(firstServiceDate));
 }
 
 it('calculates an empty calendar without writing and saves the unchanged default start through the owner flow', async () => {
@@ -540,7 +540,7 @@ describe('#335 direct start input and existing writer integration', () => {
 
   it('需正式重排時呈現 owner 候選日期，人工選日不一致則零寫入拒絕', async () => {
     mocks.previewStart.mockResolvedValue({ ...startCandidate('2026-09-28'), operation: 'reschedule',
-      scheduling_version: 0, actual_start: { case_no: CASE, official_service_dates: ['2026-09-28', '2026-09-30', '2026-10-02'] } });
+      scheduling_version: 0, actual_start: { case_no: CASE, new_actual_start_date: '2026-09-28', official_service_dates: ['2026-09-28', '2026-09-30', '2026-10-02'] } });
     render(<OrderServiceDatesPanel caseNo={CASE} />); await input('2026-09-28');
     expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('2026-10-02');
     fireEvent.click(screen.getByRole('button', { name: '下一個月' }));
@@ -552,22 +552,26 @@ describe('#335 direct start input and existing writer integration', () => {
 
   it('採用正式重排日期時沿用重排 writer，接續確認使用回讀後的新排班版本', async () => {
     let schedulingVersion = 4;
+    const requestedDate = '2026-09-27';
     const dates = ['2026-09-28', '2026-09-30', '2026-10-02'];
     mocks.getDates.mockImplementation(async () => ({ ...datesQuery(), scheduling_version: schedulingVersion }));
     mocks.getStart.mockImplementation(async () => ({ ...startQuery(), scheduling_version: schedulingVersion, has_formal_assignments: true }));
     mocks.previewStart.mockResolvedValue({ ...startCandidate(dates[0]), operation: 'reschedule',
-      scheduling_version: schedulingVersion, actual_start: { case_no: CASE, official_service_dates: dates } });
+      scheduling_version: schedulingVersion, actual_start: { case_no: CASE, new_actual_start_date: requestedDate, official_service_dates: dates } });
     mocks.applyStart.mockImplementation(async (_case, payload) => {
-      expect(payload).toEqual(expect.objectContaining({ operation: 'reschedule', expected_order_version: 1, expected_scheduling_version: 4 }));
-      actual = payload.new_actual_start_date; orderVersion++; schedulingVersion++;
+      expect(payload).toEqual(expect.objectContaining({ operation: 'reschedule', new_actual_start_date: requestedDate, expected_order_version: 1, expected_scheduling_version: 4 }));
+      actual = dates[0]; orderVersion++; schedulingVersion++;
       return { operation: 'reschedule', case_no: CASE, order_version: orderVersion, scheduling_version: schedulingVersion, preview_fingerprint: fp };
     });
     const normalPreview = mocks.previewDates.getMockImplementation()!;
     const normalApply = mocks.applyDates.getMockImplementation()!;
     mocks.previewDates.mockImplementation(async (...args) => ({ ...await normalPreview(...args), scheduling_version: schedulingVersion }));
     mocks.applyDates.mockImplementation(async (...args) => ({ ...await normalApply(...args), scheduling_version: schedulingVersion }));
-    render(<OrderServiceDatesPanel caseNo={CASE} />); await input(dates[0]); await confirm();
+    render(<OrderServiceDatesPanel caseNo={CASE} />); await input(requestedDate, dates[0]);
+    expect(screen.getByText(`實際開始日將儲存為 ${dates[0]}。`)).toBeInTheDocument();
+    await confirm();
     await screen.findByText('服務日期已確認。');
+    expect(screen.getByLabelText('實際開始日')).toHaveValue(dates[0]);
     expect(mocks.applyStart).toHaveBeenCalledTimes(1);
     expect(mocks.applyDates).toHaveBeenCalledWith(CASE, expect.objectContaining({
       expected_order_version: 2, expected_scheduling_version: 5, service_dates: dates,

@@ -77,6 +77,7 @@ class MySqlServiceDateAdjustmentRepository:
             first_schedule_days,
             (HolidayCaseRepricingResult(**{**latest_result, "missing_mapping": tuple(latest_result.get("missing_mapping", ()))}) if receipts and
                 (latest_result := _parse_snapshot(receipts[-1]["result_snapshot"]).get("case_result")) else None),
+            actual_start_date=order["actual_start_date"],
         )
 
     def lock_case_and_staff(self, case_no, staff_ids):
@@ -112,7 +113,15 @@ class MySqlServiceDateAdjustmentRepository:
 
     def validate_availability(self, facts, change, *, lock):
         with self._connection.cursor() as cursor:
-            _validate_formal_targets(cursor, facts.case_no, change.inserted, lock=lock)
+            days = change.inserted
+            actual_start_date = None
+            if facts.generation_id is not None:
+                actual_start_date = min(day.service_date for day in change.days)
+                if facts.actual_start_date is None:
+                    days = change.days
+            _validate_formal_targets(
+                cursor, facts.case_no, days, lock=lock, actual_start_date=actual_start_date,
+            )
 
     def save(self, preview, request, *, key, fingerprint, actor):
         facts, change = preview.facts, preview.change
@@ -135,18 +144,6 @@ class MySqlServiceDateAdjustmentRepository:
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("service_date_adjustment_stale_version")
-                from infrastructure.mysql.order_lifecycle_impact_writer import persist_order_scheduled_end_projection
-
-                try:
-                    persist_order_scheduled_end_projection(
-                        cursor, case_no=facts.case_no,
-                        actual_end_date=max(day.service_date for day in change.days),
-                        expected_order_version=facts.order_version,
-                    )
-                except RuntimeError as error:
-                    if str(error) == "order_version_conflict":
-                        raise ValueError("service_date_adjustment_stale_version") from error
-                    raise
             snapshot = {
                 "frozen_case_total_amount": frozen_total,
                 "removed": [service_day_payload(day) for day in change.removed],
@@ -165,7 +162,23 @@ class MySqlServiceDateAdjustmentRepository:
                     raise ValueError("service_date_adjustment_idempotency_conflict") from error
                 raise
             receipt_id = int(cursor.lastrowid)
-            case_result = repricing.reprice_case(facts.case_no, key, actor) if facts.generation_id is not None else None
+            if facts.generation_id is not None:
+                from infrastructure.mysql.order_lifecycle_impact_writer import persist_order_scheduled_date_projection
+
+                try:
+                    persist_order_scheduled_date_projection(
+                        cursor, case_no=facts.case_no, previous_actual_start_date=facts.actual_start_date,
+                        actual_start_date=min(day.service_date for day in change.days),
+                        actual_end_date=max(day.service_date for day in change.days),
+                        expected_order_version=facts.order_version, adjustment_receipt_id=receipt_id, actor=actor,
+                    )
+                except RuntimeError as error:
+                    if str(error) == "order_version_conflict":
+                        raise ValueError("service_date_adjustment_stale_version") from error
+                    raise
+            case_result = repricing.reprice_case(
+                facts.case_no, key, actor, preserve_payment_due_dates=True,
+            ) if facts.generation_id is not None else None
             snapshot["case_result"] = asdict(case_result) if case_result is not None else None
             cursor.execute("UPDATE service_date_adjustment_receipts SET result_snapshot=%s WHERE id=%s",
                 (json.dumps(snapshot), receipt_id))
@@ -466,9 +479,14 @@ def _cancellation_floor_identities(cursor, generation_id, service_days, rows, *,
     )) for row in rows)
 
 
-def _validate_formal_targets(cursor, case_no, days, *, lock):
+def _validate_formal_targets(
+    cursor, case_no: str, days: tuple[ServiceDay, ...], *, lock: bool,
+    actual_start_date: date | None = None,
+) -> None:
     staff_ids = tuple(sorted({day.staff_id for day in days if day.staff_id is not None}))
-    current, _ = load_occupancy_snapshot(cursor, staff_ids, case_no, lock=lock)
+    current, _ = load_occupancy_snapshot(
+        cursor, staff_ids, case_no, lock=lock, actual_start_date=actual_start_date,
+    )
     terms = load_case_service_time(cursor, case_no, lock=lock)
     for day in days:
         for item in current:
@@ -682,7 +700,7 @@ def carry_first_schedule_dates(cursor, case_no, generation_id, days):
         after = {key: day if day.staff_id is not None else before.get(key, day) for key, day in after.items()}
     removed = tuple(day for key, day in before.items() if day != after.get(key))
     inserted = tuple(day for key, day in after.items() if day != before.get(key))
-    _validate_formal_targets(cursor, case_no, inserted, lock=True)
+    _validate_formal_targets(cursor, case_no, inserted, lock=True, actual_start_date=min(after))
     _write_formal(cursor, case_no, generation_id, ServiceDateAdjustment(removed, inserted, (), Decimal(0)), restore=False)
 
 

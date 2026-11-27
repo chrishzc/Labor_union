@@ -70,6 +70,19 @@ def load_frozen_holiday_case_total(
     return None
 
 
+def _has_current_service_date_adjustment(cursor: DictCursor, case_no: str) -> bool:
+    """Match the receipt for a pure date edit to the current formal schedule."""
+    cursor.execute(
+        "SELECT 1 FROM scheduling_aggregates aggregate "
+        "JOIN service_date_adjustment_receipts receipt ON receipt.case_no=aggregate.case_no "
+        "WHERE aggregate.case_no=%s AND aggregate.effective_generation_id IS NOT NULL "
+        "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.scheduling_version')) AS UNSIGNED) "
+        "=aggregate.aggregate_version ORDER BY receipt.id DESC LIMIT 1 FOR UPDATE",
+        (case_no,),
+    )
+    return cursor.fetchone() is not None
+
+
 class MySqlHolidayRepricing:
     def __init__(self, connection: Connection) -> None:
         self._connection = connection
@@ -130,11 +143,15 @@ class MySqlHolidayRepricing:
             cases = tuple(str(row["case_no"]) for row in cursor.fetchall())
             return tuple(self.reprice_case(case_no, key, actor) for case_no in cases)
 
-    def reprice_case(self, case_no: str, key: str, actor: str) -> HolidayCaseRepricingResult:
+    def reprice_case(
+        self, case_no: str, key: str, actor: str, *, preserve_payment_due_dates: bool = False,
+    ) -> HolidayCaseRepricingResult:
         with self._connection.cursor(DictCursor) as cursor:
             cursor.execute("SAVEPOINT holiday_case_repricing")
             try:
-                result = self._reprice_case(case_no, key, actor)
+                result = self._reprice_case(
+                    case_no, key, actor, preserve_payment_due_dates=preserve_payment_due_dates,
+                )
             except Exception as error:
                 cursor.execute("ROLLBACK TO SAVEPOINT holiday_case_repricing")
                 result = HolidayCaseRepricingResult(case_no, "failed", reason_code=_reason_code(error),
@@ -142,7 +159,9 @@ class MySqlHolidayRepricing:
             cursor.execute("RELEASE SAVEPOINT holiday_case_repricing")
             return result
 
-    def _reprice_case(self, case_no: str, key: str, actor: str) -> HolidayCaseRepricingResult:
+    def _reprice_case(
+        self, case_no: str, key: str, actor: str, *, preserve_payment_due_dates: bool,
+    ) -> HolidayCaseRepricingResult:
         from infrastructure.mysql.pricing_configuration_repository import find_service_shortening_pricing_basis
 
         with self._connection.cursor(DictCursor) as cursor:
@@ -161,7 +180,12 @@ class MySqlHolidayRepricing:
                     missing_mapping=preparation.missing_mapping if preparation else ())
             if case_no in self._prepare_errors:
                 return self._prepare_errors[case_no]
-            facts, _ = load_calculable_client_finance_facts(cursor, order, lock=True, allow_planned=False)
+            facts, _ = load_calculable_client_finance_facts(
+                cursor, order, lock=True, allow_planned=False,
+                preserve_payment_due_dates=(
+                    preserve_payment_due_dates or _has_current_service_date_adjustment(cursor, case_no)
+                ),
+            )
             if facts is None:
                 return HolidayCaseRepricingResult(case_no, "blocked", reason_code="service_facts_unavailable")
             premium_exists = any(day.is_double_pay or day.holiday_hours for day in facts.charge_days)

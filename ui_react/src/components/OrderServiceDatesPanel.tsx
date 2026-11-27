@@ -29,7 +29,7 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import type { ActualStart } from '../api/orders/order_query_schemas';
-import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDateReset, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
+import { actualStartPreviewInputDate, assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDateReset, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
 import { historicalScheduleSegments, HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
 import { coordinatedServiceTime, OrderReadOnlyServiceDateCalendar, OrderServiceDateCalendar } from './OrderServiceDateCalendar';
 import { OrderCaregiverScheduleCalendars } from './OrderCaregiverScheduleCalendars';
@@ -362,7 +362,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         const nextReset = nextStartPreview?.service_date_adjustment_reset;
         if (nextStartPreview) {
           if ((nextStartPreview.operation === 'date_only' ? nextStartPreview.case_no : nextStartPreview.actual_start.case_no) !== caseNo
-            || nextStartPreview.after_actual_start_date !== basis.date || nextStartPreview.order_version !== serviceDates.order_version
+            || actualStartPreviewInputDate(nextStartPreview) !== basis.date || nextStartPreview.order_version !== serviceDates.order_version
             || (nextStartPreview.scheduling_version ?? 0) !== serviceDates.scheduling_version
             || (nextReset && (nextReset.confirmed_version !== serviceDates.current_version
               || nextReset.service_dates.length !== serviceDates.contracted_service_days
@@ -489,6 +489,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     setHasManualChanges(false); setManualNeedsReview(false); setInputInvalid(false);
     orderMutationFlowStore.setServiceDatesCalculation(caseNo, undefined);
     if (completedStart) {
+      setStartDate(completedStart.after_actual_start_date);
       setActualStart((value) => value ? { ...value, current_actual_start_date: completedStart.after_actual_start_date } : value);
       setBasisNotice('實際開始日與服務日期已儲存。');
     }
@@ -542,7 +543,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         candidate = await orderActualStartClient.preview(caseNo, { new_actual_start_date: startDate });
         if (!stillCurrent()) return;
         const previewCase = candidate.operation === 'date_only' ? candidate.case_no : candidate.actual_start.case_no;
-        if (previewCase !== caseNo || candidate.after_actual_start_date !== startDate
+        if (previewCase !== caseNo || actualStartPreviewInputDate(candidate) !== startDate
           || candidate.order_version !== queryView?.order_version
           || (candidate.scheduling_version ?? 0) !== queryView?.scheduling_version) {
           throw new ApiHttpError(409, 'stale_preview', '開始日資料已變更，請重新讀取後核對。');
@@ -623,7 +624,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
   const applyReset = async (candidate?: ActualStartPreview) => {
     if (actionInFlight.current.has(caseNo) || working !== null || isRecoveryActive || actualStart?.service_data_locked
-      || (candidate && candidate.after_actual_start_date !== startDate)) return;
+      || (candidate && actualStartPreviewInputDate(candidate) !== startDate)) return;
     actionInFlight.current.add(caseNo);
     const request = calculationSequence.current;
     const current = () => renderedCaseNo.current === caseNo && calculationSequence.current === request;
@@ -743,6 +744,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     expected_confirmed_version: queryView.current_version,
     reason: reason.trim(),
   } : null;
+  const firstScheduleDate = scheduleBasis ? adjustment?.days[0]?.service_date : scheduleDates[0];
   const cancelOfficeEditing = () => {
     setOfficeEditingOverride(false);
     setOfficeStaff(null);
@@ -777,12 +779,14 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         ? saveHistoricalSchedule(caseNo, request.payload, { idempotencyKey: request.key }, true)
         : saveHistoricalSchedule(caseNo, request.payload, { idempotencyKey: request.key }));
       request.receipt = receipt;
-      const [observed, plan] = await Promise.all([
+      const [observed, plan, observedStart] = await Promise.all([
         ordersMutationClient.getServiceDates(caseNo),
         ordersQueryClient.getAssignmentPlan(caseNo),
+        ordersQueryClient.getActualStart(caseNo),
       ]);
       const expected = request.payload.segments;
       const expectedDates = request.adjustedDates?.map(day => day.service_date) ?? expected.flatMap(segment => segment.service_dates);
+      const expectedStart = [...expectedDates].sort()[0];
       const assignmentDatesMatch = request.adjustedDates
         ? sameServiceDates(plan.assignments.flatMap(segment => segment.official_service_dates), expectedDates)
           && request.adjustedDates.every(day => observed.date_adjustment?.days.some(saved =>
@@ -793,6 +797,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           && receipt.assignment_ids.includes(assignment.assignment_id)
           && sameServiceDates(assignment.official_service_dates, segment.service_dates)));
       if (receipt.case_no !== caseNo || observed.case_no !== caseNo || plan.case_no !== caseNo
+        || observedStart.case_no !== caseNo || observedStart.order_version !== observed.order_version
+        || observedStart.current_actual_start_date !== expectedStart
         || observed.historical_schedule_pending || observed.arrangement_pending
         || observed.scheduling_version !== receipt.scheduling_version
         || plan.scheduling_version !== receipt.scheduling_version
@@ -809,10 +815,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       setQueryView(observed);
       setSelectedDates(observed.current_dates);
       setStartPreview(null);
-      setActualStart(value => value ? {
-        ...value, current_actual_start_date: request.payload.actual_start_date,
-        order_version: observed.order_version, has_formal_assignments: true,
-      } : value);
+      setActualStart(observedStart);
+      setStartDate(expectedStart);
       setSuccess('班表已儲存並回讀正式排班。');
       setOfficeEditingOverride(false);
       setOfficeStaff(null);
@@ -949,6 +953,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
               disabled={saving || !!scheduleRecovery || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
               onChange={(event) => changeStartDate(event.target.value)} />
           </label>
+          {schedulePayload && firstScheduleDate && firstScheduleDate !== startDate
+            && <p>實際開始日將儲存為 {firstScheduleDate}。</p>}
           {!resetPending && !schedulePending && actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
             disabled={working !== null || saving || isRecoveryActive || needsBasisUpdate || startUnresolved || actualStart.service_data_locked}
             onClick={() => void runApply(false)}>儲存實際開始日</button>}
@@ -991,6 +997,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             onClick={() => void applyReset(startPreview)}>取消合併／分裂結果並重新排班</button>}
       </>}
       {!resetPending && startPreview?.operation === 'reschedule' && <p role="status">本案確認開始日會同步建立或重排既定人員的正式服務安排。以下建議為後端正式重排日期，請核對後再保存。</p>}
+      {startPreview?.operation === 'reschedule' && startPreview.after_actual_start_date !== startDate
+        && <p>實際開始日將儲存為 {startPreview.after_actual_start_date}。</p>}
       {!resetPending && startUnresolved && !saving && <div role="status">
         <p>實際開始日的儲存結果待確認。請先確認開始日，再繼續設定服務日期。</p>
         {startPreview && <button type="button" onClick={() => void runApply()}>讀取開始日結果並接續保存</button>}

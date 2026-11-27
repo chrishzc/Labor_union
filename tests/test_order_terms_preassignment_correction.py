@@ -898,6 +898,9 @@ def test_assigned_start_date_shift_rebuilds_owned_impacts_and_replays_receipt():
     assert preview.payroll_impact.resulting_payroll_version == 8
     assert preview.payroll_impact.actions
     assert preview.lifecycle_impact.actual_end_date == date(2026, 9, 17)
+    assert preview.actual_start_date == assignment.service_dates[0]
+    assert repository.pending_order_terms.actual_start_date == assignment.service_dates[0]
+    assert preview.client_finance_impact.payment_terms.first_payment_due_date == assignment.service_dates[0]
     assert preview.confirmed_service_date_candidate is not None
     assert preview.confirmed_service_date_candidate.service_dates == assignment.service_dates
     assert repository.writes == [

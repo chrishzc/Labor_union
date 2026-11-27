@@ -38,17 +38,24 @@ export function assertStartDates(preview: ActualStartPreview, dates: string[]): 
   }
 }
 
+export function actualStartPreviewInputDate(preview: ActualStartPreview): string {
+  return preview.operation === 'reschedule'
+    ? preview.actual_start.new_actual_start_date
+    : preview.after_actual_start_date;
+}
+
 function commandFor(preview: ActualStartPreview, reason = ''): ActualStartCommand {
   const reset = preview.service_date_adjustment_reset ? { reset_service_date_adjustments: true as const } : {};
   return {
     idempotencyKey: `service-dates-start-${crypto.randomUUID()}`,
+    expectedActualStartDate: preview.after_actual_start_date,
     ...(preview.service_date_adjustment_reset ? { resetPreview: preview } : {}),
     payload: preview.operation === 'date_only' ? {
       operation: 'date_only', new_actual_start_date: preview.after_actual_start_date,
       expected_order_version: preview.order_version, preview_fingerprint: preview.preview_fingerprint,
       ...reset,
     } : {
-      operation: 'reschedule', new_actual_start_date: preview.after_actual_start_date,
+      operation: 'reschedule', new_actual_start_date: preview.actual_start.new_actual_start_date,
       expected_order_version: preview.order_version, expected_scheduling_version: preview.scheduling_version,
       preview_fingerprint: preview.preview_fingerprint, reason, ...reset,
     },

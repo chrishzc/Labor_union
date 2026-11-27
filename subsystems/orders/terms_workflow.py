@@ -157,6 +157,7 @@ class OrderTermsPreview:
     fingerprint: Any
     requires_formal_apply: bool = True
     historical_correction: Any | None = None
+    actual_start_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +217,7 @@ class OrderTermsPersistenceCommand:
     planned_end_date: Any
     actual_end_date: Any
     lifecycle_status: Any
+    actual_start_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,9 +455,10 @@ class OrderTermsWorkflow:
                 fingerprint_payload({'historical_floor_fee_correction': asdict(plan), 'before': facts.order.terms.canonical_payload(),
                     'after': proposed_terms.canonical_payload(), 'order_version': facts.order.version,
                     'scheduling_version': facts.scheduling.aggregate_version}), True, plan)
+        replacement_start = min(facts.planned_service_dates, default=facts.lifecycle.actual_start_date)
         candidate_facts = _replacement_facts(
             facts, proposed_terms, replacement_service_dates, replacement_allocations,
-            actual_start_date=facts.lifecycle.actual_start_date if allow_started_service_change else None,
+            actual_start_date=replacement_start if allow_started_service_change else None,
             assignment_dates=replacement_assignment_dates,
         )
         scheduling = _scheduling_candidate(
@@ -465,6 +468,10 @@ class OrderTermsWorkflow:
         reuses_assignments = bool(scheduling.assignments) and (
             proposed_terms.service_time == facts.order.terms.service_time
             and not _scheduling_replacement_required(facts.scheduling, scheduling, facts.planned_service_dates))
+        actual_start = (
+            min((day for assignment in scheduling.assignments for day in assignment.service_dates), default=None)
+            if not reuses_assignments else None
+        )
         if reuses_assignments:
             change_identity = f"terms:{facts.order.case_no}:order:{facts.order.version + 1}"
         if floor_fee_correction:
@@ -506,16 +513,21 @@ class OrderTermsWorkflow:
         else:
             if facts.client_finance is None or facts.payroll is None:
                 raise ValueError("assigned_terms_downstream_facts_required")
+            lifecycle_facts = facts.lifecycle
+            finance_facts = facts.client_finance
+            if actual_start is not None:
+                lifecycle_facts = replace(lifecycle_facts, actual_start_date=actual_start)
+                finance_facts = replace(finance_facts, effective_start_date=actual_start)
             client_finance = build_client_finance_terms_impact(
-                facts.client_finance, proposed_terms, scheduling, change_identity
+                finance_facts, proposed_terms, scheduling, change_identity
             )
             payroll_builder = build_payroll_rate_correction_impact if reuses_assignments else build_payroll_terms_impact
             payroll = payroll_builder(
                 facts.payroll, scheduling, proposed_terms, change_identity
             )
             lifecycle = build_terms_lifecycle_impact(
-                replace(facts.lifecycle, deposit_gate_override_active=
-                        deposit_gate_override_survives_terms_impact(facts.client_finance, client_finance)),
+                replace(lifecycle_facts, deposit_gate_override_active=
+                        deposit_gate_override_survives_terms_impact(finance_facts, client_finance)),
                 proposed_terms,
                 scheduling,
                 client_finance.settlement,
@@ -526,6 +538,7 @@ class OrderTermsWorkflow:
                 facts.lifecycle, facts.actual_end_date, self._clock.now())
         result = _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle,
                                  replacement_service_dates)
+        result = replace(result, actual_start_date=actual_start)
         if floor_fee_correction:
             if result.scheduling_replacement_required:
                 raise ValueError("floor_fee_correction_service_facts_conflict")
@@ -572,6 +585,7 @@ class OrderTermsWorkflow:
                     correlation_id=request.correlation_id,
                     service_time=request.proposed_terms.service_time,
                     preserve_leave_occupancy=request.allow_started_service_change,
+                    actual_start_date=preview.actual_start_date,
                 )
             )
             scheduling_receipt_id = scheduling_result.scheduling_receipt_id
@@ -620,6 +634,7 @@ class OrderTermsWorkflow:
                 reason=request.reason,
                 correlation_id=request.correlation_id,
                 trigger_event="terms_changed",
+                actual_start_date=preview.actual_start_date,
             )
         )
         self._repository.update_order_terms(
@@ -631,6 +646,7 @@ class OrderTermsWorkflow:
                 planned_end_date=preview.planned_end_date,
                 actual_end_date=preview.lifecycle_impact.actual_end_date,
                 lifecycle_status=preview.lifecycle_impact.after_status,
+                actual_start_date=preview.actual_start_date,
             )
         )
         if preview.confirmed_service_date_candidate is not None:

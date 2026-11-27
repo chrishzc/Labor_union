@@ -11,6 +11,7 @@ import pymysql
 import pytest
 
 import infrastructure.mysql.official_service_date_correction_repository as correction_repository_module
+from infrastructure.mysql.nas_mutations import PROCEDURES, collated_signature
 from infrastructure.mysql.official_service_date_correction_repository import (
     MySqlOfficialServiceDateCorrectionRepository,
 )
@@ -53,6 +54,12 @@ def _connect(database):
 
 def _seed(connection):
     with connection.cursor() as cursor:
+        procedure = "lu_nas_cancel_occupancy_v1"
+        signature, body, _ = PROCEDURES[procedure]
+        cursor.execute(
+            f"CREATE PROCEDURE IF NOT EXISTS `{procedure}`({collated_signature(signature)}) "
+            f"SQL SECURITY INVOKER MODIFIES SQL DATA BEGIN\n{body.strip()}\nEND"
+        )
         cursor.execute(
             "INSERT INTO payroll_rate_policies(policy_version,policy_kind,hourly_rate_ntd,effective_from) "
             "VALUES ('issue346-rate','citizen',300,'2026-01-01')"
@@ -273,7 +280,7 @@ def _snapshot(connection):
         for table in ("client_obligations", "staff_obligations", "order_service_data_locks", "order_lifecycle_state_events"):
             cursor.execute(f"SELECT COUNT(*) total FROM {table} WHERE case_no='ISSUE-346'")
             counts[table] = int(cursor.fetchone()["total"])
-        cursor.execute("SELECT actual_end_date,lifecycle_version,status FROM orders WHERE case_no='ISSUE-346'")
+        cursor.execute("SELECT actual_start_date,actual_end_date,lifecycle_version,status FROM orders WHERE case_no='ISSUE-346'")
         order = cursor.fetchone()
     return generations, dates, counts, order
 
@@ -311,6 +318,7 @@ def test_completed_date_correction_updates_effective_workdays_and_fresh_weekly_r
         assignment_id, old_generation_id, completion_event_id = _seed(connection)
         # A real completed case retained these stale markers from its pre-service buffer.
         with connection.cursor() as cursor:
+            cursor.execute("UPDATE orders SET actual_start_date='2026-09-18' WHERE case_no='ISSUE-346'")
             cursor.execute("SELECT staff_id FROM case_staff_assignments WHERE id=%s", (assignment_id,))
             staff_id = cursor.fetchone()["staff_id"]
             cursor.executemany(
@@ -329,6 +337,11 @@ def test_completed_date_correction_updates_effective_workdays_and_fresh_weekly_r
         facts = workflow.query("ISSUE-346")
         assert facts.monetary_change_blocker is False
         assert facts.monetary_blockers == ()
+        assert facts.actual_start_date == date(2026, 9, 18)
+        with pytest.raises(ValueError, match="official_date_actual_start_change_unsupported"):
+            workflow.preview("ISSUE-346", (
+                OfficialDateSelection(assignment_id, (date(2026, 9, 20), date(2026, 9, 21))),
+            ))
         selection = (OfficialDateSelection(assignment_id, (date(2026, 9, 19), date(2026, 9, 21))),)
         preview = workflow.preview("ISSUE-346", selection)
         assert _snapshot(connection) == before
@@ -358,6 +371,7 @@ def test_completed_date_correction_updates_effective_workdays_and_fresh_weekly_r
         assert history[1].recorded_at.utcoffset() == timedelta(0)
         assert _monetary_snapshot(connection) == monetary_before
         assert order["status"] == "訂單完成" and order["actual_end_date"] == date(2026, 9, 21)
+        assert order["actual_start_date"] == dates[0]
         assert _weekly(connection) == {date(2026, 9, 14): (1, 8), date(2026, 9, 21): (1, 8)}
         assert _weekly(connection, date(2026, 9, 19), date(2026, 9, 20)) == {date(2026, 9, 14): (1, 8)}
         with connection.cursor() as cursor:

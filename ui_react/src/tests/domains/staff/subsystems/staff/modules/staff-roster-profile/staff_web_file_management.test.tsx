@@ -134,7 +134,13 @@ it('uploads multi-photo batches with bounded concurrency, preserves order, and s
   post.mockImplementation((path: string, body: FormData | Record<string, unknown>, options: { timeoutMs?: number }) => {
     if (path.endsWith('/uploads')) {
       expect(options.timeoutMs).toBe(UPLOAD_TIMEOUT_MS);
-      const photo = body.get('photograph') as File;
+      if (!(body instanceof FormData)) {
+        throw new Error('Expected the upload body to be FormData');
+      }
+      const photo = body.get('photograph');
+      if (!(photo instanceof File)) {
+        throw new Error('Expected a photograph file in FormData');
+      }
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       const id = `cf_${String(selected.findIndex(f => f.name === photo.name) + 1).repeat(32)}`;

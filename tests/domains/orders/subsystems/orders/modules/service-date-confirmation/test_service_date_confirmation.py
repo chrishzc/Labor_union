@@ -480,6 +480,7 @@ def test_save_historical_schedule_commits_start_dates_and_multi_staff_generation
             assert command.candidate.actual_end_date == original.current_dates[-1]
             if fail_lifecycle:
                 raise ValueError("historical_arrangement_stale_version")
+            self.actual_start = command.actual_start_date
 
     repository = Repository(initial)
 
@@ -508,7 +509,7 @@ def test_save_historical_schedule_commits_start_dates_and_multi_staff_generation
         receipt = workflow.save_schedule(initial.case_no, segments, **kwargs)
         assert receipt == workflow.save_schedule(initial.case_no, segments, **kwargs)
         assert repository.commits == 1
-        assert repository.actual_start == start
+        assert repository.actual_start == date(2026, 9, 8)
         assert repository.facts.current_dates == original.current_dates
 
 
@@ -550,18 +551,13 @@ def test_historical_arrangement_preview_apply_and_replay_keep_one_generation(adj
                     contracted_service_days=4)
     segment = ArrangementSegmentIntent(12, facts.current_dates)
     if adjusted_final_day:
-        from decimal import Decimal
         from domains.scheduling.service_date_adjustment import ServiceDay
-        from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentFacts
-
-        adjusted = (*tuple(ServiceDay(day, 12, None) for day in facts.current_dates[:-1]),
-                    ServiceDay(date(2026, 9, 12), 12, 4), ServiceDay(date(2026, 9, 13), 12, 4))
-        adjustment = ServiceDateAdjustmentFacts(
-            facts.case_no, facts.order_version, facts.scheduling_version, facts.current_version,
-            None, Decimal(str(facts.service_hours_per_day)), adjusted, ((12, "Staff"),), (), 4, (),
-        )
+        adjusted = (ServiceDay(date(2026, 9, 10), 12, None),
+                    ServiceDay(date(2026, 9, 11), 12, None),
+                    ServiceDay(date(2026, 9, 12), 12, 8),
+                    ServiceDay(date(2026, 9, 13), 12, 8))
         facts = replace(facts, first_schedule_basis_dates=facts.current_dates,
-                        current_dates=tuple(day.service_date for day in adjusted), date_adjustment=adjustment)
+                        current_dates=tuple(day.service_date for day in adjusted), first_schedule_adjusted_days=adjusted)
 
     class Repository:
         def __init__(self):
@@ -627,7 +623,9 @@ def test_historical_arrangement_preview_apply_and_replay_keep_one_generation(adj
     assert lifecycle.candidate.actual_end_date == facts.current_dates[-1]
     if adjusted_final_day:
         assert lifecycle.candidate.completion_instant == datetime(2026, 9, 13, 23, 59, 59, 999999, TAIPEI_TIME_ZONE)
-    assert lifecycle.actual_start_date == date(2026, 9, 6)
+    expected_start = date(2026, 9, 10) if adjusted_final_day else date(2026, 9, 8)
+    assert preview.actual_start_date == expected_start
+    assert lifecycle.actual_start_date == expected_start
     assert lifecycle.expected_order_version == 3
     assert lifecycle.resulting_order_version == 4
     assert not lifecycle.candidate.service_completion_reached

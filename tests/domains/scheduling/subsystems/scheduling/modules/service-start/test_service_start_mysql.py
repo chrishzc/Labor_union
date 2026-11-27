@@ -172,6 +172,81 @@ def test_normal_start_atomic_dates_finance_group_result_and_replay(http):
     assert checked(http.get('/api/v1/scheduling/service-start/todos',params={'case_no':case}))['total']==0
 
 
+def test_formal_adjustment_preserves_valid_opening_reconfirmation(http):
+    from domains.scheduling.service_date_adjustment import AdjustmentTarget
+    from infrastructure.mysql.service_date_adjustment_repository import MySqlServiceDateAdjustmentRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.orders.order_lifecycle_command_envelope import lock_order_lifecycle_command_envelope
+    from subsystems.orders.order_lifecycle_control_commands import (
+        ActualStartReconfirmationConfirmedCommand,
+        ActualStartReconfirmationRequiredCommand,
+        apply_order_lifecycle_control_command,
+    )
+    from subsystems.scheduling.service_date_adjustment import ServiceDateAdjustmentIntent, ServiceDateAdjustmentWorkflow
+
+    case_no, staff, segments = seed_case(http, hours=4)
+    response, _ = submit(http, case_no, staff[0], segments[0])
+    assert checked(response)["status"] == "applied"
+    connection = mysql_adapter.get_connection()
+    try:
+        workflow = ServiceDateAdjustmentWorkflow(
+            MySqlServiceDateAdjustmentRepository(connection), lambda: MySqlUnitOfWork(connection),
+        )
+        facts = workflow.query(case_no)
+        initial = facts.days[0].service_date
+        next_start = facts.days[2].service_date
+        assert facts.actual_start_date == initial
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT settlement_identity FROM client_deposit_settlement_projection WHERE case_no=%s", (case_no,))
+            settlement_identity = cursor.fetchone()["settlement_identity"]
+            cursor.execute("SELECT id FROM scheduling_command_receipts WHERE case_no=%s ORDER BY id DESC LIMIT 1", (case_no,))
+            assignment_receipt_id = cursor.fetchone()["id"]
+            activate_key = f"test-reconfirmation-required:{case_no}"
+            apply_order_lifecycle_control_command(
+                cursor, lock_order_lifecycle_command_envelope(cursor, case_no, facts.order_version, activate_key),
+                ActualStartReconfirmationRequiredCommand(
+                    "admin", "test delayed settlement", facts.order_version, activate_key, initial, settlement_identity,
+                ),
+            )
+            confirm_key = f"test-reconfirmation-cleared:{case_no}"
+            confirmed = apply_order_lifecycle_control_command(
+                cursor, lock_order_lifecycle_command_envelope(cursor, case_no, facts.order_version, confirm_key),
+                ActualStartReconfirmationConfirmedCommand(
+                    "admin", "test confirmed opening", facts.order_version, confirm_key, initial, initial,
+                    settlement_identity, "a" * 64, {"scheduling_command_receipt_id": assignment_receipt_id},
+                ),
+            )
+        connection.commit()
+
+        intent = ServiceDateAdjustmentIntent(
+            (initial, facts.days[1].service_date),
+            (AdjustmentTarget(facts.days[-1].service_date + timedelta(days=1), staff[0][0]),),
+        )
+        preview = workflow.preview(case_no, intent)
+        arguments = dict(versions=facts.versions, preview_fingerprint=preview.fingerprint, key="merge-after-opening", actor="admin")
+        receipt = workflow.apply(case_no, intent, **arguments)
+        assert workflow.apply(case_no, intent, **arguments) == receipt
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT entry.actual_start_date, control.state, control.confirmed_start_date, "
+                "control.deposit_settlement_identity_hash, event.payload_snapshot "
+                "FROM orders entry JOIN order_lifecycle_control_state control ON control.case_no=entry.case_no "
+                "JOIN order_lifecycle_control_events event ON event.id=control.current_event_id "
+                "WHERE entry.case_no=%s AND control.control_type='actual_start_reconfirmation'", (case_no,),
+            )
+            row = cursor.fetchone()
+            snapshot = json.loads(row["payload_snapshot"])
+            assert row["actual_start_date"] == row["confirmed_start_date"] == next_start
+            assert row["state"] == "cleared"
+            assert row["deposit_settlement_identity_hash"] == confirmed.projection.deposit_settlement_identity_hash
+            assert snapshot["source_reconfirmation_event_id"] == confirmed.event_id
+            assert snapshot["schedule_adjustment_receipt_id"] == receipt.receipt_id
+            cursor.execute("SELECT payload_snapshot FROM order_lifecycle_control_events WHERE id=%s", (confirmed.event_id,))
+            assert json.loads(cursor.fetchone()["payload_snapshot"])["new_actual_start_date"] == initial.isoformat()
+    finally:
+        connection.close()
+
+
 @pytest.mark.parametrize(('placeholder', 'interleaved'), [(False, False), (True, False), (False, True)],
                          ids=['first-assignment', 'empty-assignment', 'interleaved'])
 def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder, interleaved):
@@ -207,7 +282,7 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder, inte
         allocations[0] = allocations[0][:-1]
         allocations[1] = tuple(sorted(allocations[1]))
     body = {
-        'actual_start_date': str(days[0]), 'expected_order_version': before['order_version'],
+        'actual_start_date': '2027-01-04', 'expected_order_version': before['order_version'],
         'expected_scheduling_version': before['scheduling_version'],
         'expected_confirmed_version': before['current_version'], 'reason': '',
         'segments': [{'staff_id': staff[i][0], 'service_dates': list(map(str, dates))}
@@ -225,6 +300,7 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder, inte
     observed = checked(http.get(endpoint))
     assert observed['current_dates'] == list(map(str, days))
     assert observed['scheduling_version'] == saved['scheduling_version']
+    assert rows('SELECT actual_start_date FROM orders WHERE case_no=%s', (case,))[0]['actual_start_date'] == date(2027, 1, 5)
     work_days = rows("SELECT staff_id,work_date FROM staff_schedule WHERE case_no=%s "
                      "AND effective_marker=1 AND is_work_day=1 ORDER BY work_date", (case,))
     expected_by_day = {day: staff[index][0] for index, allocation in enumerate(allocations) for day in allocation}

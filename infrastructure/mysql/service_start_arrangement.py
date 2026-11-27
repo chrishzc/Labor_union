@@ -423,6 +423,10 @@ def preview_office_schedule(
         dates = _office_schedule_dates(segments, actual_start_date)
         if len(dates) != facts.order.terms.service_days:
             raise ValueError('office_schedule_dates_invalid')
+        baseline, adjusted = load_first_schedule_dates(cursor, case_no, lock=lock)
+        if adjusted and tuple(day.service_date for day in baseline) != dates:
+            raise ValueError('service_date_adjustment_first_schedule_ownership_conflict')
+        first_service_date = min((day.service_date for day in adjusted), default=dates[0])
         intent = _office_assignment_intent(segments, dates, actual_start_date)
         _require_retired_staff_assignment_preservation(cursor, facts, intent, lock=lock)
         existing_staff = {item.staff_id for item in facts.scheduling.segments}
@@ -439,7 +443,9 @@ def preview_office_schedule(
             facts.scheduling.aggregate_version + 1, tuple(existing.values()), assignments, (),
         )
         impacted_staff = tuple(sorted(set(staff_ids) | set(preflight_staff_ids(cursor, case_no))))
-        occupied, lock_ids = load_occupancy_snapshot(cursor, impacted_staff, case_no, lock=lock)
+        occupied, lock_ids = load_occupancy_snapshot(
+            cursor, impacted_staff, case_no, lock=lock, actual_start_date=first_service_date,
+        )
         execution_days = _office_execution_days(segments)
 
         def preview_execution(_cursor, _case, _plan, *, lock):
@@ -480,10 +486,12 @@ def preview_office_schedule(
             'case_no': case_no, 'order_version': facts.order.version,
             'scheduling_version': facts.scheduling.aggregate_version, 'payroll_version': facts.payroll.payroll_version,
             'start': actual_start_date.isoformat(), 'reason': reason.strip(),
+            'actual_start_date': first_service_date.isoformat(),
             'segments': [(item.staff_id, tuple(d.isoformat() for d in item.service_dates)) for item in assignments],
             'payroll': payroll.fingerprint.value,
         })
-    return {'preview_fingerprint': fingerprint.value, 'staff_entitlements': amounts}
+    return {'preview_fingerprint': fingerprint.value, 'staff_entitlements': amounts,
+            'actual_start_date': first_service_date.isoformat()}
 
 
 def save_office_schedule(

@@ -255,6 +255,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       order_version: 11, scheduling_version: 7, preview_fingerprint: fingerprint,
     });
     mocks.saveHistoricalSchedule.mockImplementation(async () => {
+      actualStart = initialDates[0];
       currentQuery = { ...currentQuery, order_version: 13, scheduling_version: 8,
         current_version: 1, current_dates: initialDates, bound_staff: [], historical_schedule_pending: false };
       return { case_no: CASE, scheduling_version: 8, generation_number: 2,
@@ -324,8 +325,10 @@ describe('服務日期自動讀取與單次儲存流程', () => {
   });
 
   it('一般案件帶入已確認日期並從原頁送出工會正式排班', async () => {
+    actualStart = '2026-09-30';
     currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
     mocks.saveHistoricalSchedule.mockImplementation(async () => {
+      actualStart = initialDates[0];
       currentQuery = { ...currentQuery, order_version: 12, scheduling_version: 8 };
       return { case_no: CASE, scheduling_version: 8, generation_number: 2, assignment_ids: [5] };
     });
@@ -346,7 +349,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.queryByText(initialDates.join('、'))).not.toBeInTheDocument();
     expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
-      expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
+      actual_start_date: '2026-09-30', expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
     }), expect.anything(), true);
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });

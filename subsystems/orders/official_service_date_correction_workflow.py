@@ -439,7 +439,7 @@ def _attribution_preview(facts, terms, payable_versions, change, manual_amounts=
     resulting_dates = (set(official_days) - set(selected)) | set(replacement)
     if len(resulting_dates) != facts.service_days:
         raise ValueError("official_date_service_days_changed")
-    if change.scope == "upcoming" and facts.order_status == "服務中" and min(resulting_dates) != facts.actual_start_date:
+    if change.scope == "upcoming" and facts.order_status == "服務中" and min(resulting_dates) != min(official_days):
         raise ValueError("official_date_actual_start_change_unsupported")
     if terms.payroll is None:
         raise ValueError("service_attribution_payroll_required")
@@ -655,7 +655,9 @@ def _preview(facts: OfficialDateFacts, selections: tuple[OfficialDateSelection, 
         all_dates.extend(dates)
     if len(set(all_dates)) != facts.service_days or len(all_dates) != facts.service_days:
         raise ValueError("official_date_service_days_changed")
-    if facts.actual_start_date is None or min(all_dates) != facts.actual_start_date:
+    if facts.actual_start_date is None or min(all_dates) != min(
+        day for item in facts.assignments for day in item.service_dates
+    ):
         raise ValueError("official_date_actual_start_change_unsupported")
     if max(all_dates) > datetime.now(ZoneInfo("Asia/Taipei")).date():
         raise ValueError("official_date_future_completed_service_blocked")

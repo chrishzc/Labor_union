@@ -44,8 +44,12 @@ def build_client_finance_assignment_impact(
     facts: AssignmentPlanWorkflowFacts,
     scheduling: SchedulingGenerationCandidate,
 ) -> AssignmentPlanDomainImpact:
+    actual_start_date = _first_formal_service_date(facts, scheduling)
+    client_finance = facts.client_finance
+    if actual_start_date is not None:
+        client_finance = replace(client_finance, effective_start_date=actual_start_date)
     candidate = build_client_finance_terms_impact(
-        facts.client_finance,
+        client_finance,
         facts.order_terms,
         scheduling,
         _change_identity(scheduling),
@@ -87,16 +91,17 @@ def build_orders_assignment_impact(
     scheduling: SchedulingGenerationCandidate,
     client_finance: VersionedImpactCandidate,
     evaluation_at: datetime,
-    *,
-    effective_service_end: date | None = None,
-    coordinated_final_day: bool = False,
 ) -> AssignmentPlanDomainImpact:
+    actual_start_date = _first_formal_service_date(facts, scheduling)
+    adjusted_days = facts.first_schedule_adjusted_days
+    effective_service_end = max((day.service_date for day in adjusted_days), default=None)
     settlement = client_finance.payload.settlement
     override_active = deposit_gate_override_survives_terms_impact(
         facts.client_finance, client_finance.payload,
     )
     facts = replace(facts, lifecycle=replace(
         facts.lifecycle, deposit_gate_override_active=override_active,
+        actual_start_date=actual_start_date or facts.lifecycle.actual_start_date,
     ), client_finance=replace(
         facts.client_finance, deposit_gate_override_active=override_active,
     ))
@@ -109,7 +114,10 @@ def build_orders_assignment_impact(
         evaluation_at,
         blockers,
         effective_service_end=effective_service_end,
-        coordinated_final_day=coordinated_final_day,
+        coordinated_final_day=any(
+            day.service_date == effective_service_end and day.hours_override is not None
+            for day in adjusted_days
+        ),
     )
     fingerprint = fingerprint_payload(
         {
@@ -117,6 +125,7 @@ def build_orders_assignment_impact(
             "waiting_lock_ids": facts.assignment_plan.current_waiting_lock_ids,
             "waiting_lock_conversion_blockers": blockers,
             "staff_payment_due_date": payment_due_date.isoformat() if payment_due_date else None,
+            **({"actual_start_date": actual_start_date.isoformat()} if actual_start_date else {}),
         }
     )
     version = facts.assignment_plan.order_version
@@ -129,8 +138,20 @@ def build_orders_assignment_impact(
             lifecycle,
             client_finance.payload.settlement.fingerprint,
             payment_due_date,
+            actual_start_date=actual_start_date,
         ),
     )
+
+
+def _first_formal_service_date(
+    facts: AssignmentPlanWorkflowFacts,
+    scheduling: SchedulingGenerationCandidate,
+) -> date | None:
+    if facts.first_schedule_adjusted_days and not any(
+        item.official_service_dates for item in facts.assignment_plan.effective_assignments
+    ):
+        return min(day.service_date for day in facts.first_schedule_adjusted_days)
+    return min((day for item in scheduling.assignments for day in item.service_dates), default=None)
 
 
 def _staff_payment_due_date(facts, scheduling, client_finance):

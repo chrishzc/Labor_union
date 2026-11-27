@@ -10,6 +10,7 @@ from domains.orders.service_date_confirmation import (
     ConfirmedServiceDateCandidate,
     group_service_dates_by_calendar_week,
 )
+from domains.scheduling.service_date_adjustment import ServiceDay
 from shared_kernel.fingerprints import PreviewFingerprint
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ class ServiceDateConfirmationFacts:
     effective_service_dates: tuple[date, ...] = ()
     date_adjustment: ServiceDateAdjustmentFacts | None = None
     first_schedule_basis_dates: tuple[date, ...] = ()
+    first_schedule_adjusted_days: tuple[ServiceDay, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
