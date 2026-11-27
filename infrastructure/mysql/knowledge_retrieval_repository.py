@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
+from pymysql.cursors import DictCursor
 from pymysql.err import IntegrityError
 
 from domains.knowledge_retrieval.knowledge import (
@@ -18,7 +19,7 @@ from domains.knowledge_retrieval.knowledge import (
     transition_item_status,
 )
 from domains.knowledge_retrieval.qa_catalog import (
-    QA_SOURCE_PREFIX, decode_governed_qa, format_line_faq_reply, line_faq_reply_fits,
+    QA_SOURCE_PREFIX, decode_governed_qa, is_faq_id, line_faq_reply_fits,
 )
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
@@ -37,6 +38,8 @@ from subsystems.access.authentication_session import (
     has_required_capability,
 )
 from subsystems.knowledge_retrieval.contracts import (
+    DeleteFaqKnowledgeItemCommand,
+    DeletedFaqIdentity,
     IngestKnowledgeSourceCommand,
     PublishKnowledgeItemCommand,
     RetireKnowledgeItemCommand,
@@ -200,7 +203,7 @@ class MySqlKnowledgeRetrievalRepository:
         self._delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
 
     # A knowledge root and its first immutable version must never commit separately.
-    def ingest(self, command):
+    def ingest(self, command: IngestKnowledgeSourceCommand) -> tuple[int, bool]:
         digest = source_digest(command.content)
         governed_qa = decode_governed_qa(command.content)
         if governed_qa is not None:
@@ -210,38 +213,57 @@ class MySqlKnowledgeRetrievalRepository:
             raise ValueError("knowledge_qa_content_invalid")
         actor_id = _admin_actor_id(command.actor.actor_id)
         with self._connection.cursor() as cursor:
-            receipt = _claim_governance_receipt(cursor, command)
-            if receipt is not None:
-                return int(receipt["knowledge_item_id"]), bool(receipt.get("created", True))
-            if command.expected_version is not None:
-                return self._revise_existing(command, digest, actor_id)
-            try:
-                cursor.execute(
-                    "INSERT INTO knowledge_items "
-                    "(source_identity,source_uri,source_trust_tier,title,content,"
-                    "content_digest,state,version,created_by_admin_user_id) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,'draft',1,%s)",
-                    (
-                        command.source_identity, command.source_uri,
-                        command.source_trust_tier, command.title,
-                        command.content, digest, actor_id,
-                    ),
-                )
-            except IntegrityError as error:
-                if mysql_error_code(error) != 1062:
-                    raise
-                return self._revise_existing(command, digest, actor_id)
-
-            item_id = int(cursor.lastrowid)
-            cursor.execute(_INSERT_VERSION, (
-                item_id, 1, command.content, digest, "ingested", actor_id,
-                None, command.idempotency_key.value, command.title,
-                command.source_uri, command.source_trust_tier,
-            ))
-            _insert_governance_event(
-                cursor, command, item_id, actor_id, "ingested", 0, 1,
-                "draft", digest,
+            identity_key = (
+                _faq_identity_key(command.source_identity) if governed_qa is not None else None
             )
+            if identity_key is not None:
+                deleted_item_id = _reserve_faq_identity(cursor, identity_key)
+                if deleted_item_id is not None:
+                    raise DeletedFaqIdentity(deleted_item_id)
+            result = self._ingest(cursor, command, actor_id, digest)
+            if identity_key is not None:
+                _release_faq_identity(cursor, identity_key)
+        return result
+
+    def _ingest(
+        self,
+        cursor: DictCursor,
+        command: IngestKnowledgeSourceCommand,
+        actor_id: int,
+        digest: str,
+    ) -> tuple[int, bool]:
+        receipt = _claim_governance_receipt(cursor, command)
+        if receipt is not None:
+            return int(receipt["knowledge_item_id"]), bool(receipt.get("created", True))
+        if command.expected_version is not None:
+            return self._revise_existing(command, digest, actor_id)
+        try:
+            cursor.execute(
+                "INSERT INTO knowledge_items "
+                "(source_identity,source_uri,source_trust_tier,title,content,"
+                "content_digest,state,version,created_by_admin_user_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,'draft',1,%s)",
+                (
+                    command.source_identity, command.source_uri,
+                    command.source_trust_tier, command.title,
+                    command.content, digest, actor_id,
+                ),
+            )
+        except IntegrityError as error:
+            if mysql_error_code(error) != 1062:
+                raise
+            return self._revise_existing(command, digest, actor_id)
+
+        item_id = int(cursor.lastrowid)
+        cursor.execute(_INSERT_VERSION, (
+            item_id, 1, command.content, digest, "ingested", actor_id,
+            None, command.idempotency_key.value, command.title,
+            command.source_uri, command.source_trust_tier,
+        ))
+        _insert_governance_event(
+            cursor, command, item_id, actor_id, "ingested", 0, 1,
+            "draft", digest,
+        )
         return item_id, True
 
     def review(self, command) -> int:
@@ -253,6 +275,55 @@ class MySqlKnowledgeRetrievalRepository:
 
     def retire(self, command) -> int:
         return self._transition(command, KnowledgeItemStatus.RETIRED, "retired")
+
+    def delete_faq(self, command: DeleteFaqKnowledgeItemCommand) -> int:
+        actor_id = _admin_actor_id(command.actor.actor_id)
+        item_id = command.item_id
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT source_identity FROM knowledge_items WHERE id=%s", (item_id,))
+            identity = cursor.fetchone()
+            identity_key = _faq_identity_key(identity["source_identity"]) if identity else None
+            deleted_item_id = (
+                _reserve_faq_identity(cursor, identity_key) if identity_key is not None else None
+            )
+            receipt = _claim_governance_receipt(cursor, command)
+            if receipt is not None:
+                if identity_key is not None and deleted_item_id is None:
+                    _release_faq_identity(cursor, identity_key)
+                return int(receipt["knowledge_item_id"])
+            if identity is None or deleted_item_id is not None:
+                raise LookupError("knowledge_item_not_found")
+            if identity_key is None:
+                raise ValueError("knowledge_faq_delete_item_required")
+
+            cursor.execute(_LOCK_ITEM, (item_id,))
+            item = cursor.fetchone()
+            if item is None:
+                raise LookupError("knowledge_item_not_found")
+            if int(item["version"]) != command.expected_version.value:
+                raise RuntimeError("knowledge_item_version_conflict")
+            if _has_effective_faq_publication(cursor, item):
+                raise RuntimeError("knowledge_faq_delete_published")
+
+            cursor.execute(
+                "UPDATE knowledge_apply_receipts SET receipt_json=JSON_OBJECT("
+                "'deleting_faq_item_id',%s,'deleting_connection_id',CONNECTION_ID()) "
+                "WHERE idempotency_key=%s",
+                (item_id, identity_key),
+            )
+            cursor.execute("DELETE FROM knowledge_item_events WHERE knowledge_item_id=%s", (item_id,))
+            cursor.execute("DELETE FROM knowledge_item_versions WHERE item_id=%s", (item_id,))
+            cursor.execute("DELETE FROM knowledge_items WHERE id=%s", (item_id,))
+            cursor.execute(
+                "UPDATE knowledge_apply_receipts SET receipt_json=%s WHERE idempotency_key=%s",
+                (json.dumps({"deleted_faq_item_id": item_id}), identity_key),
+            )
+            _finish_governance_receipt(cursor, command, {
+                "knowledge_item_id": item_id,
+                "actor_admin_user_id": actor_id,
+                "correlation_id": command.correlation_id.value,
+            })
+        return item_id
 
     def request_index_build(self, actor_id: str, idempotency_key: str) -> int:
         with self._connection.cursor() as cursor:
@@ -681,7 +752,7 @@ class MySqlKnowledgeRetrievalRepository:
                 transition_item_status(current_state, target)
                 if governed_qa is not None and target is KnowledgeItemStatus.PUBLISHED:
                     governed_qa.require_publishable()
-                    if not line_faq_reply_fits(format_line_faq_reply(governed_qa.answer, governed_qa.source_ref)):
+                    if not line_faq_reply_fits(governed_qa.answer):
                         raise ValueError("knowledge_qa_line_reply_too_long")
 
                 actor_id = _admin_actor_id(command.actor.actor_id)
@@ -1039,6 +1110,8 @@ def _command_fingerprint(command) -> str:
 
 def _claim_governance_receipt(cursor, command) -> dict | None:
     key = command.idempotency_key.value
+    if key.casefold().startswith(_FAQ_DELETED_KEY_PREFIX):
+        raise RuntimeError("knowledge_idempotency_conflict")
     fingerprint = _command_fingerprint(command)
     try:
         cursor.execute(
@@ -1074,6 +1147,54 @@ def _finish_governance_receipt(cursor, command, snapshot: dict) -> None:
     )
 
 
+def _faq_identity_key(source_identity: str | None) -> str | None:
+    if source_identity is None or not source_identity.startswith(QA_SOURCE_PREFIX):
+        return None
+    if not is_faq_id(source_identity.removeprefix(QA_SOURCE_PREFIX)):
+        return None
+    digest = hashlib.sha256(source_identity.lower().encode("ascii")).hexdigest()
+    return _FAQ_DELETED_KEY_PREFIX + digest
+
+
+def _reserve_faq_identity(cursor: DictCursor, key: str) -> int | None:
+    # A keyed write locks one FAQ identity even when that identity has no current item row.
+    fingerprint = key.removeprefix(_FAQ_DELETED_KEY_PREFIX)
+    cursor.execute(
+        "INSERT INTO knowledge_apply_receipts (idempotency_key,command_fingerprint,receipt_json) "
+        "VALUES (%s,%s,'{}') ON DUPLICATE KEY UPDATE idempotency_key=idempotency_key",
+        (key, fingerprint),
+    )
+    cursor.execute(
+        "SELECT command_fingerprint,receipt_json FROM knowledge_apply_receipts "
+        "WHERE idempotency_key=%s FOR SHARE",
+        (key,),
+    )
+    row = cursor.fetchone()
+    if row is None or row["command_fingerprint"] != fingerprint:
+        raise RuntimeError("knowledge_idempotency_conflict")
+    marker = json.loads(row["receipt_json"])
+    if marker == {}:
+        return None
+    if isinstance(marker, dict) and isinstance(marker.get("deleted_faq_item_id"), int):
+        return marker["deleted_faq_item_id"]
+    raise RuntimeError("knowledge_idempotency_conflict")
+
+
+def _release_faq_identity(cursor: DictCursor, key: str) -> None:
+    cursor.execute("DELETE FROM knowledge_apply_receipts WHERE idempotency_key=%s", (key,))
+
+
+def _has_effective_faq_publication(cursor: DictCursor, item: dict[str, Any]) -> bool:
+    if item["published_version"] is not None or item["state"] == KnowledgeItemStatus.PUBLISHED:
+        return True
+    if item["state"] == KnowledgeItemStatus.RETIRED:
+        return False
+    cursor.execute(_LOCK_LATEST_FAQ_TRANSITION, (item["id"],))
+    latest = cursor.fetchone()
+    return latest is not None and latest["event_type"] == "published"
+
+
+_FAQ_DELETED_KEY_PREFIX = "faq-deleted:"
 _INSERT_VERSION = """INSERT INTO knowledge_item_versions
 (item_id,item_version,content,source_digest,event_type,actor_admin_user_id,reason,idempotency_key,
 title,source_uri,source_trust_tier)
@@ -1107,21 +1228,31 @@ FROM knowledge_items i LEFT JOIN knowledge_item_versions v
 ON v.item_id=i.id AND v.item_version=i.published_version AND v.event_type='published'"""
 _PUBLISHED_FAQ = f"{_FAQ_SNAPSHOT} WHERE {_IS_FAQ} AND i.published_version IS NOT NULL"
 _FAQ_ID_ORDER = "i.source_identity COLLATE utf8mb4_bin"
+_LATEST_FAQ_TRANSITION = """FROM knowledge_item_versions previous
+WHERE previous.item_id={item_id} AND previous.event_type IN ('published','retired')
+ORDER BY previous.item_version DESC LIMIT 1"""
+_LATEST_FAQ_TRANSITION_FOR_ROW = _LATEST_FAQ_TRANSITION.format(item_id="i.id")
+_LOCK_LATEST_FAQ_TRANSITION = (
+    f"SELECT previous.event_type {_LATEST_FAQ_TRANSITION.format(item_id='%s')} FOR SHARE"
+)
 _PREDECESSOR_PUBLISHED_FAQ = f"""
 SELECT i.source_identity,v.item_version AS source_version,v.content,
     CASE WHEN i.version=v.item_version THEN i.source_uri END AS source_uri
 FROM knowledge_items i
 JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=(
-    SELECT previous.item_version FROM knowledge_item_versions previous
-    WHERE previous.item_id=i.id AND previous.event_type IN ('published','retired')
-    ORDER BY previous.item_version DESC LIMIT 1
+    SELECT previous.item_version {_LATEST_FAQ_TRANSITION_FOR_ROW}
 )
 WHERE {_IS_FAQ} AND i.state<>'retired' AND v.event_type='published'
 """
-_LIST_ITEMS = """SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
+_LIST_ITEMS = f"""SELECT i.id,i.source_identity,i.source_trust_tier,i.title,
 i.state AS lifecycle_status,i.version AS current_version,i.published_version,
 i.content_digest AS source_digest,i.source_uri,i.updated_at AS updated_at_utc,
-v.content
+v.content,
+CASE WHEN {_IS_FAQ} AND i.published_version IS NULL AND i.state<>'published' THEN
+    i.state='retired' OR COALESCE((
+        SELECT previous.event_type {_LATEST_FAQ_TRANSITION_FOR_ROW}
+    ), '')<>'published'
+ELSE 0 END AS faq_delete_eligible
 FROM knowledge_items i
 JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.version
 WHERE (%s IS NULL OR i.state=%s)

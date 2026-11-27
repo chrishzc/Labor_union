@@ -1,11 +1,11 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommonQaCatalogPanel } from '../../../../../../pages/line_management/CommonQaCatalogPanel';
 
 
 const qaContent = (id: string, answer: string) => JSON.stringify({
-  schema: 'line.common_qa.v1', id, category: '月嫂媒合', tag: '常見問題',
+  schema: 'line.common_qa.v1', id, category: '月嫂媒合', category_id: 'service_flow', tag: '常見問題',
   question: `${id} 的標準問題`, aliases: [`${id} 的別名`], answer,
   source_ref: 'document/line/QA問答集.xlsx', notes: null, migration_status: 'ready',
 
@@ -21,6 +21,13 @@ function mockKnowledgeApi() {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
     const path = String(url);
     if (path.includes('/catalogs/builtin-line-common-qa/import')) return new Response(JSON.stringify({ catalog_count: 54, imported_count: 51, skipped_existing_count: 3, published_count: 39, index_job_id: 88 }), { status: 200 });
+    if (path.endsWith('/knowledge/items/1/publish')) return Response.json({ version: 2 });
+    if (path.includes('/faq-layout/published-questions')) {
+      return Response.json({ data: { items: path.endsWith('qa_id=QA-001') ? [{ qa_id: 'QA-001', version: 2 }] : [] } });
+    }
+    if (path.endsWith('/knowledge/faq-categories')) {
+      return Response.json({ data: { categories: [{ category_id: 'service_flow', name: '月嫂媒合' }] } });
+    }
     if (path.includes('/knowledge/items?')) return new Response(JSON.stringify(items), { status: 200 });
     if (path.includes('/knowledge/indexes?')) return new Response(JSON.stringify([{ index_version: 4, index_status: 'stale', built_at_utc: null }]), { status: 200 });
     return new Response(JSON.stringify({}), { status: 200 });
@@ -79,7 +86,7 @@ describe('正式 Knowledge QA 管理 panel', () => {
     fireEvent.click(screen.getByText('QA-001 的標準問題'));
     fireEvent.click(screen.getAllByRole('button', { name: '發布' })[0]);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/publish', expect.objectContaining({ method: 'POST', credentials: 'include', body: JSON.stringify({ expected_version: 1, reason: 'LINE 常見問答：publish QA-001' }) })));
-    expect(await screen.findByText('新答案已發布，搜尋資料更新後才會生效。')).toBeInTheDocument();
+    expect(await screen.findByText('已讀回正式答案。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('QA-003 的標準問題'));
     fireEvent.click(screen.getByRole('button', { name: '停用' }));
@@ -105,6 +112,55 @@ describe('正式 Knowledge QA 管理 panel', () => {
     expect(payload.source_identity).toBe('line-common-qa:QA-003');
     expect(JSON.parse(payload.content).answer).toBe('調整後的正式草稿答案');
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/publish'))).toBe(false);
+  });
+
+  it('只顯示未生效題目的永久刪除，確認及正式讀回後移除題目', async () => {
+    const confirmed = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const catalog = [
+      ...items,
+      { ...items[0], id: 4, lifecycle_status: 'retired', content: qaContent('QA-004', '已停用答案') },
+      { ...items[0], id: 5, published_version: 1, content: qaContent('QA-005', '仍有正式答案') },
+      { ...items[0], id: 6, faq_delete_eligible: 0, content: qaContent('QA-006', '舊版正式答案') },
+    ];
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const path = String(url);
+      if (path.includes('/knowledge/items?')) return Response.json(catalog);
+      if (path.endsWith('/knowledge/items/1/delete-faq') && init?.method === 'POST') {
+        catalog.shift();
+        return Response.json({ item_id: 1 });
+      }
+      if (path.endsWith('/knowledge/items/1')) {
+        return Response.json({ detail: { code: 'knowledge_item_not_found' } }, { status: 404 });
+      }
+      return Response.json([]);
+    });
+    render(<CommonQaCatalogPanel />);
+    await screen.findByText('QA-001 的標準問題');
+    const row = (id: string) => within(screen.getByText(`${id} 的標準問題`).closest('article')!);
+    for (const id of ['QA-001', 'QA-002', 'QA-003', 'QA-004', 'QA-005', 'QA-006']) {
+      fireEvent.click(screen.getByText(`${id} 的標準問題`));
+    }
+    for (const id of ['QA-001', 'QA-002', 'QA-004']) {
+      expect(row(id).getByRole('button', { name: '永久刪除' })).toBeVisible();
+    }
+    for (const id of ['QA-003', 'QA-005']) {
+      expect(row(id).queryByRole('button', { name: '永久刪除' })).toBeNull();
+      expect(row(id).getByRole('button', { name: '停用' })).toBeVisible();
+    }
+    expect(row('QA-006').queryByRole('button', { name: '永久刪除' })).toBeNull();
+
+    const remove = row('QA-001').getByRole('button', { name: '永久刪除' });
+    fireEvent.click(remove);
+    expect(confirmed).toHaveBeenCalledWith(expect.stringContaining('QA-001'));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/delete-faq'))).toBe(false);
+    fireEvent.click(remove);
+    expect(await screen.findByText('已永久刪除這則問答。')).toBeInTheDocument();
+    expect(screen.queryByText('QA-001 的標準問題')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/delete-faq', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ expected_version: 1, reason: '永久刪除 LINE 常見問答 QA-001' }),
+    }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1', expect.objectContaining({ credentials: 'include' }));
   });
 
   it('從知識缺口帶入問題時只開啟新草稿，不會自動寫入或發布', async () => {

@@ -142,6 +142,8 @@ def test_faq_01_playwright_add_preview_publish_reopen():
         preview.get_by_role("button", name="服務異動").click()
         preview.get_by_role("button", name=answer["question"]).click()
         expect(preview.get_by_text(answer["answer"])).to_be_visible()
+        expect(preview.get_by_text(answer["question"], exact=True)).to_have_count(0)
+        expect(preview.get_by_role("button", name="返回卡片")).to_be_visible()
         assert len(receipts) == 3
         assert len(operation_writes) == len(set(operation_writes)) == 3
         publish_key = next(key for key, receipt in receipts.items() if "published_revision" in receipt)

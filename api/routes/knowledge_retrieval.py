@@ -20,8 +20,10 @@ from api.schemas.knowledge_retrieval import (
     KnowledgeTransitionBody,
 )
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.knowledge_retrieval.contracts import (
     AskKnowledgeQuestionCommand,
+    DeleteFaqKnowledgeItemCommand,
     IngestKnowledgeSourceCommand,
     PublishKnowledgeItemCommand,
     RetireKnowledgeItemCommand,
@@ -176,6 +178,23 @@ def retire_knowledge_item(
         "index_job_id": index_job_id,
         "index_status": "requested",
     }
+
+
+@router.post("/items/{item_id}/delete-faq")
+def delete_faq_knowledge_item(
+    item_id: int,
+    body: KnowledgeTransitionBody,
+    request: Request,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    correlation_id: str = Header(..., alias="X-Correlation-ID"),
+    principal: AdminPrincipal = Depends(require_knowledge_manager),
+) -> dict[str, int]:
+    command = _transition_command(
+        DeleteFaqKnowledgeItemCommand, item_id, body, idempotency_key, correlation_id, principal,
+    )
+    deleted_item_id = _call_knowledge(lambda: get_knowledge_application().delete_faq(command))
+    _set_knowledge_audit(request, "delete_faq", "knowledge_item", deleted_item_id, body.reason)
+    return {"item_id": deleted_item_id}
 
 
 @router.post("/indexes")

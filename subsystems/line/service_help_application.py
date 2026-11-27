@@ -18,7 +18,7 @@ from typing import Callable
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
-from domains.knowledge_retrieval.qa_catalog import format_line_faq_reply, line_faq_reply_fits
+from domains.knowledge_retrieval.qa_catalog import line_faq_reply_fits
 from domains.line.faq_chat_layout import FAQ_ID_PATTERN, FaqCardView, FaqCategory, faq_short_label
 from domains.line.legacy_faq import LEGACY_FAQ_CATEGORIES, LEGACY_FAQ_POLICY_LABELS
 from domains.line.identity_flow import LineIdentityFlowPurpose
@@ -247,7 +247,7 @@ class LineServiceHelpApplication:
             self._faq_guidance(inbox, unit_of_work, line_user_id, predecessor=predecessor is not None)
             return True
         self._reply_or_enqueue(
-            inbox, unit_of_work, line_user_id, _qa_answer_payload(matches[0], predecessor=predecessor is not None),
+            inbox, unit_of_work, line_user_id, _qa_answer_payload(matches[0]),
             "knowledge", reason_code="catalog_match",
         )
         return True
@@ -551,19 +551,10 @@ def _flex_action_button(action):
     return {"type": "button", "style": "secondary", "height": "sm", "action": action}
 
 
-def _qa_answer_payload(item: PublishedFaq, *, predecessor=False):
-    text = format_line_faq_reply(item.answer, item.source_ref)
-    if not line_faq_reply_fits(text):
-        text = "這則常見問答目前無法完整顯示。如需解答，請直接在此留言。"
-    return {
-        "type": "text",
-        "text": text,
-        "quickReply": {
-            "items": [
-                *_faq_back_quick_reply(predecessor=predecessor)["items"],
-            ]
-        },
-    }
+def _qa_answer_payload(item: PublishedFaq) -> dict[str, str]:
+    if not line_faq_reply_fits(item.answer):
+        return _text_payload("這則常見問答目前無法完整顯示。如需解答，請直接在此留言。")
+    return _text_payload(item.answer)
 
 
 def _profile_update_payload():

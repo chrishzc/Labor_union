@@ -397,11 +397,17 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_24_staff_web_file_management_v1.json",
     "labor_union_2026_11_24_staff_web_feedback_v1.json",
     "labor_union_2026_11_26_shared_line_faq_v1.json",
+    "labor_union_2026_11_27_faq_permanent_delete_guard_v1.json",
 )
 _STAFF_WEB_PROFILE_ARTIFACT = "1083_staff_web_profile.sql"
 _STAFF_WEB_FILE_MANAGEMENT_ARTIFACT = "1085_staff_web_file_management.sql"
 _SHARED_LINE_FAQ_ARTIFACT = "1087_shared_line_faq.sql"
 _SHARED_LINE_FAQ_RELEASE = "labor-union-shared-line-faq-2026-11-26-v1"
+_FAQ_PERMANENT_DELETE_GUARD_ARTIFACT = "1088_faq_permanent_delete_guard.sql"
+_FAQ_PERMANENT_DELETE_TRIGGER = "trg_knowledge_item_versions_before_delete"
+_FAQ_PERMANENT_DELETE_GUARD_DESCRIPTORS = (
+    ROOT / "db/migration_releases/labor_union_2026_11_27_faq_permanent_delete_guard_v1.descriptors.json"
+)
 SHARED_LINE_FAQ_BACKFILL_ID = "shared-line-faq-cutover-v1"
 SHARED_LINE_FAQ_BACKFILL_CONTRACT = "shared-line-faq-cutover-backfill/v1"
 _STAFF_WEB_FEEDBACK_ARTIFACT = "1086_staff_web_feedback.sql"
@@ -2286,7 +2292,12 @@ def local_additive_target_state(
         "indexes": [row for row in snapshot.get("indexes", ()) if row.get("table_name") in owned_tables],
         "foreign_keys": [row for row in snapshot.get("foreign_keys", ()) if row.get("table_name") in owned_tables],
         "checks": [row for row in snapshot.get("constraints", ()) if row.get("table_name") in owned_tables and row.get("constraint_type") == "CHECK"],
-        "triggers": [row for row in snapshot.get("triggers", ()) if row.get("event_object_table") in owned_tables],
+        "triggers": [
+            row for row in snapshot.get("triggers", ())
+            if row.get("event_object_table") in owned_tables
+            or (artifact == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT
+                and row.get("trigger_name") == _FAQ_PERMANENT_DELETE_TRIGGER)
+        ],
     }
     if descriptor.get("views"):
         target["views"] = [
@@ -2602,6 +2613,46 @@ def _registry_guard_metadata():
         path = ROOT / "db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json"
         _REGISTRY_GUARD_METADATA = json.loads(path.read_text(encoding="utf-8"))
     return _REGISTRY_GUARD_METADATA
+
+
+@lru_cache(maxsize=1)
+def _faq_permanent_delete_guard_contracts() -> tuple[dict[str, str], dict[str, str]]:
+    catalog = json.loads(_FAQ_PERMANENT_DELETE_GUARD_DESCRIPTORS.read_text(encoding="utf-8"))
+    return (
+        catalog["predecessor_triggers"][_FAQ_PERMANENT_DELETE_TRIGGER],
+        catalog["successor_triggers"][_FAQ_PERMANENT_DELETE_TRIGGER],
+    )
+
+
+def _faq_permanent_delete_guard_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    *,
+    defer_missing_triggers: bool,
+) -> str:
+    predecessor, successor = _faq_permanent_delete_guard_contracts()
+    if descriptor["triggers"] != {_FAQ_PERMANENT_DELETE_TRIGGER: successor}:
+        raise UpgradeBlocked("FAQ deletion guard descriptor differs from canonical SQL")
+    row = next((
+        row for row in snapshot["triggers"]
+        if row["trigger_name"] == _FAQ_PERMANENT_DELETE_TRIGGER
+    ), None)
+    if row is None:
+        if defer_missing_triggers and not any(
+            column["table_name"] == successor["event_object_table"]
+            for column in snapshot["columns"]
+        ):
+            return "absent"
+        return "partial"
+    actual = {key: row.get(key) for key in successor}
+    action = actual["action_statement"]
+    if isinstance(action, str) and action not in (
+        predecessor["action_statement"], successor["action_statement"],
+    ):
+        actual["action_statement"] = _normalize_sql_contract(action)
+    if actual == successor:
+        return "exact"
+    return "absent" if actual == predecessor else "drift"
 
 
 _LINE_GROUP_HISTORY_DELETE_ARTIFACT = "1078_line_order_group_history_delete_guards.sql"
@@ -6326,6 +6377,8 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         (path for path in SCHEMA_PARTS if path.name == part_name),
         None,
     )
+    if path is None and part_name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT:
+        path = ROOT / "db/schema_parts" / part_name
     if path is None:
         if part_name == "109_scheduling_generations.sql" and any(
             item.name == "1047_scheduling_buffer_advisory.sql" for item in SCHEMA_PARTS
@@ -6553,7 +6606,11 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         r"`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+?)(?=;\s*(?:$|\n))",
         re.I | re.S,
     )
-    if part_name in {"1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT, _LINE_DELIVERY_RETENTION_ARTIFACT, _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT}:
+    if part_name in {
+        "1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT,
+        _LINE_DELIVERY_RETENTION_ARTIFACT, _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT,
+        _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT,
+    }:
         complete_pattern = re.compile(r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+)", re.I | re.S)
         trigger_matches = [match for statement in split_sql(sql) if (match := complete_pattern.fullmatch(statement))]
     else:
@@ -8306,6 +8363,10 @@ def _artifact_metadata_state(
     defer_missing_triggers: bool = False,
     owned_tables: frozenset[str] | None = None,
 ) -> str:
+    if part_name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT:
+        return _faq_permanent_delete_guard_state(
+            snapshot, descriptor, defer_missing_triggers=defer_missing_triggers,
+        )
     snapshot, registry_state = _registry_guard_snapshot(snapshot, part_name)
     if registry_state is not None:
         return registry_state
@@ -8513,6 +8574,14 @@ def _artifact_metadata_state(
             continue
         owned_presence.append(actual is not None)
         if actual is not None and actual != expected:
+            if (
+                part_name == "163_knowledge_runtime.sql"
+                and name == _FAQ_PERMANENT_DELETE_TRIGGER
+                and _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT in OWNED_OBJECTS
+            ):
+                predecessor, successor = _faq_permanent_delete_guard_contracts()
+                if expected == predecessor and actual == successor:
+                    continue
             return "drift"
     if part_name == "1082_service_date_adjustments.sql":
         # 109 created this parent index. 1082 replaces it so inactive dates can
@@ -9024,6 +9093,11 @@ def schema_statements_for_state(
     state: str,
     snapshot: Mapping[str, Any],
 ) -> list[str]:
+    if part.name == _FAQ_PERMANENT_DELETE_GUARD_ARTIFACT:
+        if state == "exact":
+            return []
+        if state != "absent":
+            raise UpgradeBlocked(f"FAQ deletion guard cannot be applied from {state} state")
     statements = split_sql(part.read_text(encoding="utf-8"))
     if part.name == _SHARED_LINE_FAQ_ARTIFACT and state == "partial":
         completed = _shared_faq_ddl_prefix(snapshot, _canonical_artifact_descriptor(part.name))
