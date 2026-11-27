@@ -28,6 +28,7 @@ import {
   type ExternalSigningHandoffCommand,
   type ExternalSigningHandoffFlowState,
 } from '../adapters/orders/order_mutation_flow_store';
+import { signedArchiveRecovery, type SignedArchiveRecovery } from '../adapters/orders/signed_archive_recovery';
 
 export interface ContractExternalSigningActionsProps {
   caseNo: string;
@@ -129,6 +130,15 @@ function assertFinalReadbackMatchesCase(caseNo: string, readback: FinalDocumentR
 
 const MAX_SIGNED_PDF_BYTES = 20 * 1024 * 1024;
 
+type SignedArchiveActivity =
+  | { type: 'initializing' | 'blocked' | 'submitting' | 'checking' }
+  | { type: 'idle'; caseNo: string; actorId: number | null }
+  | { type: 'committed'; files: SignedArchiveFile[] }
+  | { type: 'unresolved'; operation: SignedArchiveRecovery };
+
+const archiveRecoveryUnavailable = '目前無法保留或讀取原歸檔操作，暫停儲存簽署文件。';
+const archiveUnresolved = '本次歸檔結果尚未確認，請重新查詢原操作。';
+
 function outcomeCouldBeUnknown(error: unknown): boolean {
   return error instanceof ApiTimeoutError
     || error instanceof ApiNetworkError
@@ -177,11 +187,17 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   const [preparationSegments, setPreparationSegments] = useState<number[]>([]);
   const [uiState, setUiState] = useState<ContractExternalSigningUiState>({ type: 'querying' });
   const [archiveSegments, setArchiveSegments] = useState<{ segment_id: number; staff_id: number }[] | null>(null);
-  const [archivedFiles, setArchivedFiles] = useState<SignedArchiveFile[] | null>(null);
+  const [latestArchivedFiles, setLatestArchivedFiles] = useState<SignedArchiveFile[] | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
-  const [archiveBusy, setArchiveBusy] = useState(false);
-  const [archiveUnknown, setArchiveUnknown] = useState(false);
+  const [archiveActivity, setArchiveActivity] = useState<SignedArchiveActivity>({ type: 'initializing' });
+  const archiveActorId = sessionClient.getUser()?.id ?? null;
+  const archiveIdle = archiveActivity.type === 'idle'
+    && archiveActivity.caseNo === caseNo && archiveActivity.actorId === archiveActorId;
+  const archiveBusy = archiveActivity.type === 'submitting' || archiveActivity.type === 'checking';
+  const archiveRecoveryVisible = archiveBusy || archiveActivity.type === 'unresolved';
+  const archivedFiles = archiveActivity.type === 'committed' ? archiveActivity.files : latestArchivedFiles;
   const archiveRequest = useRef<AbortController | null>(null);
+  const onArchiveCommitted = useRef(onCommitted);
   const [notice, setNotice] = useState<string | null>(null);
   const [fileReturns, setFileReturns] = useState<Record<string, File | null>>({});
   const [contractMetadata, setContractMetadata] = useState<Record<string, ContractMetadata>>({});
@@ -194,29 +210,72 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     subscribeExternalSigningHandoff,
     () => orderMutationFlowStore.getExternalSigningHandoff(caseNo),
   );
+  useEffect(() => { onArchiveCommitted.current = onCommitted; }, [onCommitted]);
+
+  const completeSignedArchive = useCallback(async (files: SignedArchiveFile[], signal: AbortSignal) => {
+    setFileReturns({});
+    setArchiveActivity({ type: 'committed', files });
+    try {
+      await onArchiveCommitted.current?.();
+    } catch (error) {
+      if (!signal.aborted) setArchiveError(safeErrorMessage(error));
+    }
+  }, []);
+
+  const confirmSignedArchive = useCallback(async (operation: SignedArchiveRecovery, signal: AbortSignal) => {
+    if (signal.aborted || sessionClient.getUser()?.id !== operation.actorId) return;
+    setArchiveActivity({ type: 'checking' });
+    setArchiveError(null);
+    try {
+      const result = await contractExternalSigningClient.querySignedArchiveResult(
+        operation.caseNo, operation.idempotencyKey, signal,
+      );
+      if (signal.aborted || sessionClient.getUser()?.id !== operation.actorId) return;
+      if (result.state === 'committed') {
+        signedArchiveRecovery.clear(operation);
+        await completeSignedArchive(result.files, signal);
+      } else {
+        setArchiveActivity({ type: 'unresolved', operation });
+      }
+    } catch (error) {
+      if (signal.aborted || sessionClient.getUser()?.id !== operation.actorId) return;
+      setArchiveActivity({ type: 'unresolved', operation });
+      setArchiveError(safeErrorMessage(error));
+    }
+  }, [completeSignedArchive]);
+
   useEffect(() => {
     const controller = new AbortController();
     archiveRequest.current = controller;
     setArchiveSegments(null);
-    setArchivedFiles(null);
+    setLatestArchivedFiles(null);
     setArchiveError(null);
-    setArchiveBusy(false);
-    setArchiveUnknown(false);
+    try {
+      const operation = signedArchiveRecovery.load(caseNo, archiveActorId);
+      if (operation === null) {
+        setArchiveActivity({ type: 'idle', caseNo, actorId: archiveActorId });
+      } else {
+        void confirmSignedArchive(operation, controller.signal);
+      }
+    } catch {
+      setArchiveError(archiveRecoveryUnavailable);
+      setArchiveActivity({ type: 'blocked' });
+    }
     return () => controller.abort();
-  }, [caseNo]);
+  }, [caseNo, archiveActorId, confirmSignedArchive]);
 
   useEffect(() => {
-    if (archiveBusy || archiveUnknown) return;
+    if (!archiveIdle) return;
     const controller = new AbortController();
     void contractExternalSigningClient.querySignedArchive(caseNo, controller.signal).then(value => {
       if (controller.signal.aborted) return;
       setArchiveSegments(value.staff_segments);
-      setArchivedFiles(previous => value.files ?? previous);
+      setLatestArchivedFiles(previous => value.files ?? previous);
     }).catch(error => {
       if (!controller.signal.aborted) setArchiveError(safeErrorMessage(error));
     });
     return () => controller.abort();
-  }, [caseNo, revision, archiveBusy, archiveUnknown]);
+  }, [caseNo, revision, archiveIdle]);
 
   const loadQuery = useCallback(async (signal?: AbortSignal): Promise<ContractExternalSigningQuery | null> => {
     const generation = ++requestGeneration.current;
@@ -687,7 +746,12 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     ...(archiveSegments ?? []).map(segment => ({ scope: 'staff' as const, matching_segment_id: segment.segment_id })),
   ];
   const saveSignedArchive = async () => {
-    if (archiveBusy || archiveSegments === null || archivedFiles !== null) return;
+    const signal = archiveRequest.current?.signal;
+    if (!signal || signal.aborted || !archiveIdle || archiveSegments === null || archivedFiles !== null) return;
+    if (archiveActorId === null || sessionClient.getUser()?.id !== archiveActorId) {
+      setArchiveError(archiveRecoveryUnavailable);
+      return;
+    }
     const client = fileReturns.client;
     if (!client) return;
     const staff = archiveSegments.flatMap(segment => {
@@ -696,44 +760,39 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     });
     if (staff.length !== archiveSegments.length) return;
     const identity = currentIdentity(identities.current, 'signed-archive');
-    const signal = archiveRequest.current?.signal;
-    const wasUnknown = archiveUnknown;
-    setArchiveBusy(true);
+    const operation = { caseNo, actorId: archiveActorId, idempotencyKey: identity.idempotencyKey };
+    try {
+      signedArchiveRecovery.start(operation);
+    } catch {
+      setArchiveError(archiveRecoveryUnavailable);
+      setArchiveActivity({ type: 'blocked' });
+      return;
+    }
+    setArchiveActivity({ type: 'submitting' });
     setArchiveError(null);
     try {
-      let files: SignedArchiveFile[] | null = null;
-      if (wasUnknown) {
-        const existing = await contractExternalSigningClient.querySignedArchive(caseNo, signal);
-        if (signal?.aborted) return;
-        setArchiveSegments(existing.staff_segments);
-        if (existing.files !== null) {
-          files = existing.files;
-        }
-      }
-      if (files === null) {
-        files = await contractExternalSigningClient.archiveSignedFiles(caseNo, client, staff, identity);
-      }
-      if (signal?.aborted) return;
-      setArchivedFiles(files);
-      setFileReturns({});
-      setArchiveUnknown(false);
+      const files = await contractExternalSigningClient.archiveSignedFiles(caseNo, client, staff, identity);
+      if (signal.aborted || sessionClient.getUser()?.id !== operation.actorId) return;
+      signedArchiveRecovery.clear(operation);
+      await completeSignedArchive(files, signal);
     } catch (error) {
-      if (signal?.aborted) return;
-      setArchiveUnknown(wasUnknown || outcomeCouldBeUnknown(error));
+      if (signal.aborted || sessionClient.getUser()?.id !== operation.actorId) return;
+      const rejected = error instanceof ApiHttpError
+        && error.status >= 400 && error.status < 500 && error.status !== 408
+        && !outcomeCouldBeUnknown(error);
+      setArchiveActivity(rejected && signedArchiveRecovery.clear(operation)
+        ? { type: 'idle', caseNo, actorId: archiveActorId }
+        : { type: 'unresolved', operation });
       setArchiveError(safeErrorMessage(error));
-      return;
-    } finally {
-      if (!signal?.aborted) setArchiveBusy(false);
     }
-    try { await onCommitted?.(); }
-    catch (error) { if (!signal?.aborted) setArchiveError(safeErrorMessage(error)); }
   };
   const selectedCount = returnTargets.filter(row => fileReturns[signedTargetKey(row)]).length;
-  const testingCompleted = completedReadback?.filename.startsWith('TEST-ONLY-') ?? false;
+  const testingCompleted = archivedFiles === null && (completedReadback?.filename.startsWith('TEST-ONLY-') ?? false);
   const handoffRecorded = query?.handoff_recorded || query?.handoff_logged || preparation?.handoff_logged;
-  const phase = archivedFiles !== null || query?.state === 'completed' ? 3 : handoffRecorded ? 2 : 1;
+  const phase = archiveRecoveryVisible ? 2 : archivedFiles !== null || query?.state === 'completed' ? 3 : handoffRecorded ? 2 : 1;
   const testingSkipAllowed = query?.handoff_recorded && query.testing_skip_allowed;
-  const returnActionsAvailable = archiveSegments !== null && archivedFiles === null && !completedReadback && query?.state !== 'completed';
+  const returnActionsAvailable = archiveIdle
+    && archiveSegments !== null && archivedFiles === null && !completedReadback && query?.state !== 'completed';
   const renderReturn = (target: Pick<SignedDocumentTarget, 'scope' | 'matching_segment_id'>) => {
     const key = signedTargetKey(target), file = fileReturns[key], meta = contractMetadata[key];
     const name = metadataLabel(key) || (target.scope === 'staff' ? staffIdentity.label(archiveSegments?.find(segment => segment.segment_id === target.matching_segment_id)?.staff_id ?? null) : undefined);
@@ -741,7 +800,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     return <article className="contract-return-row" key={key} aria-label={`${title}簽回${name ? ` ${name}` : ''}`}>
       <header><div><strong>{name || title}</strong><p>{meta?.period || '服務期間待核對'}</p></div><span className={`contract-document-status ${file ? 'complete' : ''}`}>{file ? '已選擇' : '待回收'}</span></header>
       <label className="contract-return-file">{target.scope === 'client' ? '客戶服務契約 PDF' : `${name || '月嫂'} 委任契約 PDF`}
-        {!file && <input type="file" accept="application/pdf,.pdf" disabled={archiveBusy || archiveUnknown} onChange={event => {
+        {!file && <input type="file" accept="application/pdf,.pdf" onChange={event => {
           const selected = event.target.files?.item(0) ?? null;
           if (selected) {
             const validMime = !selected.type || selected.type.toLowerCase() === 'application/pdf';
@@ -756,13 +815,13 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
           identities.current.delete('signed-archive');
         }} />}
       </label>
-      {file && <div className="contract-return-actions"><strong>{file.name}</strong><button type="button" disabled={archiveBusy || archiveUnknown} onClick={() => {
+      {file && <div className="contract-return-actions"><strong>{file.name}</strong><button type="button" onClick={() => {
         setFileReturns(previous => ({ ...previous, [key]: null }));
         identities.current.delete('signed-archive');
       }}>重新選擇檔案</button></div>}
     </article>;
   };
-  useUnsavedDraft('紙本契約回傳', { '待確認文件': returnTargets.flatMap(target => { const file = fileReturns[signedTargetKey(target)]; return file ? [file.name] : []; }) }, { baseline: { '待確認文件': [] }, busy: busy || archiveBusy || finalProtected, enabled: !completedReadback && archivedFiles === null });
+  useUnsavedDraft('紙本契約回傳', { '待確認文件': returnTargets.flatMap(target => { const file = fileReturns[signedTargetKey(target)]; return file ? [file.name] : []; }) }, { baseline: { '待確認文件': [] }, busy: busy || archiveBusy || finalProtected, enabled: returnActionsAvailable || archiveBusy });
 
 
 
@@ -799,19 +858,28 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
           <h3>回收簽署文件</h3>
           {returnActionsAvailable && <span className="contract-document-status">{selectedCount}／{returnTargets.length} 份已選擇</span>}
         </header>
-        {returnActionsAvailable ? <>
+        {archiveActivity.type === 'submitting' ? <p role="status">正在歸檔已簽 PDF…</p>
+        : archiveActivity.type === 'checking' ? <p role="status">正在查詢原歸檔結果…</p>
+        : archiveActivity.type === 'unresolved' ? (
+          <div className="contract-final-confirmation">
+            <p role="status">{archiveUnresolved}</p>
+            <button className="formal-recommendation-primary" type="button" onClick={() => {
+              const signal = archiveRequest.current?.signal;
+              if (signal) void confirmSignedArchive(archiveActivity.operation, signal);
+            }}>重新確認歸檔結果</button>
+          </div>
+        ) : returnActionsAvailable ? <>
           <p>客戶服務契約與月嫂委任契約分開上傳。每位月嫂的委任契約各自回收。</p>
           <p>人員確認完約後，選擇並儲存已簽 PDF。</p>
           <section className="contract-return-group"><h4>客戶服務契約</h4>{returnTargets.filter(row => row.scope === 'client').map(renderReturn)}</section>
           <section className="contract-return-group"><h4>月嫂委任契約</h4>{returnTargets.filter(row => row.scope === 'staff').map(renderReturn)}</section>
           {testingSkipAllowed && <details className="contract-signing-test-tools"><summary>測試模式 · 跳過文件回收</summary><div><p>使用 TEST ONLY 占位文件跳過回收。確認後可繼續測試簽約完成與後續收款。</p><button type="button" disabled={busy || finalProtected || !!handoffFlow} onClick={() => void prepareTestingSkip()}>測試用：跳過文件回收</button>{testingFiles.length > 0 && <ul>{testingFiles.map(name => <li key={name}>{name}</li>)}</ul>}</div></details>}
           <div className="contract-final-confirmation">
-            {archiveBusy && <p role="status">正在歸檔已簽 PDF…</p>}
             <button className="formal-recommendation-primary" type="button"
-              disabled={archiveBusy || returnTargets.some(target => !fileReturns[signedTargetKey(target)])}
-              onClick={() => void saveSignedArchive()}>{archiveUnknown ? '重新確認歸檔結果' : '儲存簽署文件'}</button>
+              disabled={returnTargets.some(target => !fileReturns[signedTargetKey(target)])}
+              onClick={() => void saveSignedArchive()}>儲存簽署文件</button>
           </div>
-        </> : archivedFiles !== null || completedReadback ? (
+        </> : (archiveIdle || archiveActivity.type === 'committed') && (archivedFiles !== null || completedReadback) ? (
           <section aria-label="契約完成">
             <div className="contract-completed-notice">
               <strong>{testingCompleted ? '測試簽約已完成' : '簽約已完成'}</strong>

@@ -7,6 +7,10 @@ on:
       - 'ui_react/**'
       - 'line/static/service-date-calendar.js'
       - '.github/workflows/candidate-pool-frontend.yml'
+      - 'api/routes/contract_external_signing.py'
+      - 'subsystems/contract_signing/final_document_workflow.py'
+      - 'tests/domains/contract-signing/**'
+      - '.arch-map/requirements/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +27,16 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 2
+      - name: Record candidate and actual checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          echo "head=$EXPECTED_HEAD_SHA base=$EVENT_BASE_SHA checkout=$(git rev-parse HEAD)"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
       - name: Install locked frontend dependencies without lifecycle hooks
         id: dependencies
         run: npm ci --ignore-scripts
@@ -31,6 +45,30 @@ jobs:
           npm test -- --reporter=verbose
           src/tests/order_workbench_v2_candidate_query.test.tsx
           src/tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/candidate_single_add.test.tsx
+      - name: Verify signed PDF original operation recovery
+        run: >-
+          npm test -- --reporter=verbose --reporter=junit --outputFile=signed-pdf-frontend.xml
+          src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx
+          src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts
+      - name: Confirm required frontend scenarios actually passed
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree
+          cases = ElementTree.parse("signed-pdf-frontend.xml").findall('.//testcase')
+          required = ["reads the original signed archive result and rejects unbound or malformed proof","keeps an absent or interrupted original result unresolved even with an unrelated archive","reopens the case and confirms the original signed archive without a second upload","ignores a late original archive result after navigating to a different case","blocks signed archive upload when the original operation cannot be stored","keeps selected PDFs after definite archive rejection and releases the local recovery marker","archives directly with no session, handoff, unsigned version, or ready scheduling","preserves a pending archive marker without querying it as a different administrator","recovers the original archive when the upload succeeds after leaving the case"]
+          for name in required:
+              matched = [case for case in cases if name in case.get('name', '')]
+              assert matched, f'Required case did not run: {name}'
+              assert all(case.find(tag) is None for case in matched for tag in ('failure', 'error', 'skipped')), name
+          print(f'{len(required)} required signed-PDF scenarios passed; {len(cases)} total reported cases')
+          PY
+      - name: Preserve signed PDF frontend cases
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-pdf-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ui_react/signed-pdf-frontend.xml
+          if-no-files-found: error
       - name: Lint affected frontend files
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: >-
@@ -39,6 +77,63 @@ jobs:
           src/components/CandidateAvailabilityNotice.tsx
           src/components/OrderCandidateQueryPanel.tsx
           src/tests/order_workbench_v2_candidate_query.test.tsx
+          src/components/ContractExternalSigningActions.tsx
+          src/api/orders/contract_external_signing_client.ts
+          src/adapters/orders/signed_archive_recovery.ts
+          src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx
+          src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts
       - name: Typecheck and build frontend
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npm run build
+
+  signed-pdf-api:
+    name: Signed PDF original operation API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Record candidate and actual checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          echo "head=$EXPECTED_HEAD_SHA base=$EVENT_BASE_SHA checkout=$(git rev-parse HEAD)"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install existing focused test dependencies
+        run: python -m pip install -r requirements.txt pytest httpx2==2.10.0
+      - name: Verify signed archive workflow and API
+        run: >-
+          python -m pytest -vv --junitxml=signed-pdf-api.xml
+          tests/domains/contract-signing/subsystems/contract-signing/integration/test_final_document_workflow.py
+          tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py
+      - name: Confirm required API scenarios actually passed
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree
+          cases = ElementTree.parse("signed-pdf-api.xml").findall('.//testcase')
+          required = ["test_signed_archive_result_reads_only_the_case_and_original_receipt","test_signed_archive_result_requires_persisted_admin_and_original_key","test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_session","test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files"]
+          for name in required:
+              matched = [case for case in cases if name in case.get('name', '')]
+              assert matched, f'Required case did not run: {name}'
+              assert all(case.find(tag) is None for case in matched for tag in ('failure', 'error', 'skipped')), name
+          print(f'{len(required)} required signed-PDF scenarios passed; {len(cases)} total reported cases')
+          PY
+      - name: Verify current specification hygiene and governance
+        run: |
+          python scripts/validate_spec_hygiene.py --mode strict
+          python -m scripts.validate_agent_governance
+          git diff --check ${{ github.event.pull_request.base.sha || github.sha }}
+      - name: Preserve actual cases and candidate
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-pdf-api-${{ github.run_id }}-${{ github.run_attempt }}
+          path: signed-pdf-api.xml
+          if-no-files-found: error

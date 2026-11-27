@@ -11,7 +11,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 import re
-from typing import Any, Literal, Mapping
+from typing import Annotated, Any, Literal, Mapping
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Path as ApiPath, UploadFile
@@ -52,6 +52,7 @@ from subsystems.contract_signing.final_document_workflow import (
     ApplyFinalSignedContractUpload,
     FinalDocumentWorkflowError,
     PreviewFinalSignedContractUpload,
+    SignedArchiveResult,
     SignedContractDocumentUpload,
     signed_contract_intent,
     signed_contract_object_key,
@@ -824,6 +825,26 @@ def query_signed_archive(
     application: ContractExternalSigningApplication = Depends(_application),
 ):
     return _call(lambda: BaseResponse(data=application.final_documents.signed_archive_status(case_no)), "signed-archive")
+
+
+SignedArchiveResultResponse = BaseResponse[Annotated[SignedArchiveResult, Field(discriminator="state")]]
+
+
+@router.get("/{case_no}/contract-external-signing/signed-archive/result")
+def query_signed_archive_result(
+    response: Response,
+    case_no: str = ApiPath(pattern=_CASE),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+) -> SignedArchiveResultResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return _call(
+        lambda: SignedArchiveResultResponse(
+            data=application.final_documents.signed_archive_result(case_no, IdempotencyKey(idempotency_key)),
+        ),
+        "signed-archive-result",
+    )
 
 
 @router.post("/{case_no}/contract-external-signing/signed-archive")

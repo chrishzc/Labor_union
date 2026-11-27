@@ -1101,3 +1101,44 @@ def test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_s
     assert response.status_code == 200, response.text
     assert captured[0][0] == (CASE_NO, (("client", "customer.pdf", b"%PDF-1.4\n%%EOF"),))
     assert response.json()["data"]["files"][0]["filename"] == "customer.pdf"
+
+
+def test_signed_archive_result_requires_persisted_admin_and_original_key(monkeypatch):
+    from subsystems.contract_signing.final_document_workflow import SignedArchiveCommitted, SignedArchiveFile, SignedArchiveUnresolved
+
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_auth")
+    application = FakeApplication()
+    lookups = []
+    file = SignedArchiveFile(target="client", filename="original.pdf", file_id="cf_" + "a" * 32)
+
+    def lookup(case_no, key):
+        lookups.append((case_no, key.value))
+        if case_no != CASE_NO:
+            raise route.FinalDocumentWorkflowError("contract_signing_case_not_found", category="not_found")
+        if key.value == "archive-1":
+            return SignedArchiveCommitted(case_no, key.value, (file,))
+        return SignedArchiveUnresolved(case_no, key.value)
+
+    application.final_documents = SimpleNamespace(signed_archive_result=lookup)
+    path = f"/api/v1/orders/{CASE_NO}/contract-external-signing/signed-archive/result"
+    headers = {"Idempotency-Key": "archive-1"}
+    assert _local_bypass_client(application).get(path, headers=headers).status_code == 401
+    client = _client(application)
+    assert client.get(path).status_code == 422
+    assert client.get(path, headers={"Idempotency-Key": "INVALID KEY"}).status_code == 422
+    assert lookups == []
+    committed = client.get(path, headers=headers)
+    assert committed.status_code == 200, committed.text
+    assert committed.headers["Cache-Control"] == "no-store"
+    assert committed.json()["data"] == {
+        "case_no": CASE_NO, "idempotency_key": "archive-1", "state": "committed", "files": [file.model_dump()],
+    }
+    unresolved = client.get(path, headers={"Idempotency-Key": "another-key"})
+    assert unresolved.status_code == 200, unresolved.text
+    assert unresolved.json()["data"] == {
+        "case_no": CASE_NO, "idempotency_key": "another-key", "state": "unresolved",
+    }
+    assert client.get(path.replace(CASE_NO, "MISSING-CASE"), headers=headers).status_code == 404
+    assert lookups == [(CASE_NO, "archive-1"), (CASE_NO, "another-key"), ("MISSING-CASE", "archive-1")]
