@@ -1,0 +1,42 @@
+name: DS-02 independent CI oracle
+on:
+  push:
+    branches: [verify/ds02-ci-oracle-20261127]
+    paths:
+      - ".github/workflows/ds02-ci-oracle.yml"
+      - ".ds02-oracle/verify.py"
+      - ".ds02-oracle/old-HistoricalPayableReview.tsx"
+permissions:
+  contents: read
+jobs:
+  oracle:
+    if: github.ref == 'refs/heads/verify/ds02-ci-oracle-20261127'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.22.3"
+      - name: Install identical lockfile once for both groups
+        working-directory: ui_react
+        run: npm ci --ignore-scripts
+      - name: Require four fixed passes and four old amount-display failures
+        run: python3 .ds02-oracle/verify.py
+      - name: Strict type check
+        if: ${{ !cancelled() }}
+        working-directory: ui_react
+        run: node_modules/.bin/tsc -p tsconfig.app.json --strict --noEmit --incremental false --pretty false
+      - name: Focused lint
+        if: ${{ !cancelled() }}
+        working-directory: ui_react
+        run: node_modules/.bin/oxlint src/components/HistoricalPayableReview.tsx src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/historical_payable_review.test.tsx
+      - name: Upload independent reports and JUnit
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: ds02-ci-oracle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ds02-oracle/results/
+          if-no-files-found: error
