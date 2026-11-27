@@ -127,15 +127,17 @@ jobs:
               environment.write(f'LABOR_UNION_TEST_MYSQL_PASSWORD={password}\n')
           PY
       - name: Run weekly report contracts with real imports
+        id: weekly_contracts
         run: >-
-          python -m pytest -v
+          python -m pytest -v --junitxml="${RUNNER_TEMP}/lu-weekly-contracts.xml"
           tests/test_weekly_operations_report_contract.py
           tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/test_subsidy_reconciliation_register.py
           tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py
           tests/test_weekly_operations_report_api_versions.py
       - name: Run session-authenticated API and export against MySQL
+        id: weekly_mysql
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
-        run: python -m pytest -q tests/test_weekly_operations_report_mysql.py
+        run: python -m pytest -q --junitxml="${RUNNER_TEMP}/lu-weekly-mysql.xml" tests/test_weekly_operations_report_mysql.py
       - name: Run canonical scheduling to weekly report MySQL regression
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
         run: >-
@@ -152,6 +154,98 @@ jobs:
           python -m pytest -q
           tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_pricing_mysql.py
           -k holiday
+      - name: Summarize weekly report acceptance evidence (pilot)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          CONTRACTS_OUTCOME: ${{ steps.weekly_contracts.outcome }}
+          MYSQL_OUTCOME: ${{ steps.weekly_mysql.outcome }}
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          def sha(value):
+              return value if isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) else "UNKNOWN"
+
+          def git(*args):
+              result = subprocess.run(["git", *args], capture_output=True, text=True)
+              return result.stdout.strip() if result.returncode == 0 else ""
+
+          def case_status(case):
+              if case.find("failure") is not None or case.find("error") is not None:
+                  return "failed"
+              return "not_run" if case.find("skipped") is not None else "passed"
+
+          def evidence(filename, outcome, module, name):
+              if outcome == "skipped":
+                  return "not_run", "step skipped"
+              try:
+                  root = ET.parse(Path(os.environ["RUNNER_TEMP"]) / filename).getroot()
+              except (OSError, ET.ParseError):
+                  return "UNKNOWN", "no readable JUnit"
+              cases = list(root.iter("testcase"))
+              counts = Counter(case_status(case) for case in cases)
+              totals = f"{counts['passed']} passed / {counts['failed']} failed / {counts['not_run']} skipped"
+              matches = [
+                  case for case in cases
+                  if case.get("classname", "").rsplit(".", 1)[-1] == module
+                  and case.get("name") == name
+              ]
+              if len(matches) > 1 or not cases or outcome not in {"success", "failure"}:
+                  return "UNKNOWN", totals
+              if not matches:
+                  return ("not_run" if outcome == "success" else "UNKNOWN"), totals
+              return case_status(matches[0]), totals
+
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+          pr = event.get("pull_request") or {}
+          actual = sha(git("rev-parse", "HEAD"))
+          expected = sha(os.environ["GITHUB_SHA"])
+          head = sha(pr.get("head", {}).get("sha")) if pr else expected
+          base = sha(pr.get("base", {}).get("sha"))
+          headers = git("cat-file", "-p", "HEAD").partition("\n\n")[0]
+          parents = [line[7:] for line in headers.splitlines() if line.startswith("parent ")]
+          provenance = "UNKNOWN"
+          if actual != "UNKNOWN" and actual == expected:
+              if actual == head:
+                  provenance = "head"
+              elif pr and base != "UNKNOWN" and head != "UNKNOWN" and parents == [base, head]:
+                  provenance = "pull-request merge"
+          rows = [
+              ("contract / fake DB", "lu-weekly-contracts.xml", "CONTRACTS_OUTCOME",
+               "test_subsidy_reconciliation_register",
+               "test_operations_report_counts_established_unserved_once_with_zero_subsidy_without_claim"),
+              ("API / isolated MySQL", "lu-weekly-mysql.xml", "MYSQL_OUTCOME",
+               "test_weekly_operations_report_mysql",
+               "test_real_export_matches_api_totals_without_mutating_business_rows"),
+          ]
+          lines = [
+              "### Weekly report acceptance evidence (pilot)",
+              "",
+              f"Run: {os.environ['GITHUB_RUN_ID']} · attempt {os.environ['GITHUB_RUN_ATTEMPT']}",
+              f"Checkout: `{actual}` ({provenance}); expected: `{expected}`",
+              f"Source head: `{head}`; PR base: `{base}`",
+              "",
+              "| Scope | Case | Case result | Suite counts / evidence |",
+              "| --- | --- | --- | --- |",
+          ]
+          for scope, filename, variable, module, name in rows:
+              result, note = evidence(filename, os.environ.get(variable), module, name)
+              lines.append(f"| {scope} | `{module}::{name}` | {result} | {note} |")
+          lines += [
+              "",
+              "The isolated MySQL case covers export/API parity. It does not establish the unserved-order exclusion in MySQL.",
+              "An unverified checkout or UNKNOWN case needs follow-up evidence. This summary does not change the job result.",
+          ]
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
 
   weekly-report-frontend:
     name: Weekly report frontend
