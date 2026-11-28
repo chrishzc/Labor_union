@@ -17,6 +17,20 @@ STAFF = PreviewStaff(1, "陳月嫂（範例）", "新竹市", 1, True, ("新竹�
 LEAVE = PreviewLeave(1, 1, "2026-11-10", "2026-11-11")
 DEFAULT_DRAFT = "請協助確認本次服務時段，謝謝。"
 STAFF_WEB_PREVIEW_URL = "https://preview.invalid/staff-web-profile"
+
+
+def group_operator_reply_sample_values(key):
+    from subsystems.line.order_group_application import _BIND_FORMAT
+
+    return {
+        "case_no": CASE.case_no,
+        "recipient_count": 2,
+        "command": "綁定案件群組" if key == "group-format-empty" else "綁定訂單",
+        "invite_command": "發送邀請",
+        "binding_format": _BIND_FORMAT,
+    }
+
+
 VALUES = {
     **asdict(CASE), "name": CASE.client_name, "planned_start_date": CASE.start_date,
     "staff_name": STAFF.name, "caregiver_name": STAFF.name, "service_date": "2026-11-03",
@@ -317,9 +331,12 @@ def current_message_sample(key):
     elif key == "payment-reminder-ack":
         from subsystems.line.deposit_notifications import PAYMENT_ACK_REPLY
         payload = text(PAYMENT_ACK_REPLY)
-    elif key == "group-bound":
-        from subsystems.line.order_group_application import group_binding_acknowledgement
-        payload = text(group_binding_acknowledgement(case()))
+    elif key in {"group-bound", "group-guided-bound", "group-invitations-queued"}:
+        from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY
+        variables = {"case_no": case()}
+        if key == "group-invitations-queued":
+            variables["recipient_count"] = field("邀請對象人數", "recipient_count", "2")
+        payload = text(GROUP_OPERATOR_REPLY_COPY[key].format(**variables))
     elif key in HELPER_SAMPLE_KEYS:
         payload = _helper_sample_payload(key, field, case)
     elif key == "service-start-inquiry":
@@ -333,10 +350,6 @@ def current_message_sample(key):
         name = field("月嫂姓名", "assignments[0].staff_name", STAFF.name)
         field("服務日期", "assignments[0].service_dates", '、'.join(dates))
         payload=service_date_record(case(),[{'staff_name':name,'service_dates':dates}])
-    elif key == "group-invitations-queued":
-        from subsystems.line.order_group_application import group_invitation_acknowledgement
-        count = field("邀請對象人數", "recipient_count", 2)
-        payload = text(group_invitation_acknowledgement(case(), count))
     elif key in {"group-invitation-customer", "group-invitation-staff"}:
         from subsystems.line.order_group_application import group_invitation_payload
         label = field("對象稱呼", "recipient_label", "媽媽" if key.endswith("customer") else "月嫂")
@@ -354,19 +367,18 @@ def current_message_sample(key):
                  "unpaid": "settled_deposit_required_for_line_group", "occupied": "line_group_already_bound_to_another_order"}
         payload = text(_safe_error_message(RuntimeError(codes[key.removeprefix("group-error-")])))
     elif key.startswith("group-format-"):
-        from subsystems.line.order_group_application import _parse_binding, LineOrderGroupCommandRejected
-        commands = {"empty": "綁定訂單", "case": "綁定訂單 https://line.me/R/ti/g/example",
+        from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY
+        commands = {"empty": "綁定案件群組", "case": "綁定訂單 https://line.me/R/ti/g/example",
                     "url": "綁定訂單 DEMO-CASE-001", "spacing": "綁定訂單DEMO-CASE-001 https://line.me/R/ti/g/example",
+                    "case-url-spacing": "綁定訂單 DEMO-CASE-001https://line.me/R/ti/g/example",
                     "split": "綁定訂單 DEMO-CASE-001 https://line.me/R/ti/g/ example",
                     "invalid-case": "綁定訂單 ??? https://line.me/R/ti/g/example",
-                    "invalid-url": "綁定訂單 DEMO-CASE-001 https://example.invalid/group"}
-        command = field("輸入的指令", "command", commands[key.removeprefix("group-format-")])
-        try:
-            _parse_binding(command)
-        except LineOrderGroupCommandRejected as error:
-            payload = text(str(error))
-        else:
-            raise ValueError("public group error example must be invalid")
+                    "invalid-url": "綁定訂單 DEMO-CASE-001 https://example.invalid/group",
+                    "guided-case": "https://line.me/R/ti/g/example",
+                    "guided-url": "https://example.invalid/group"}
+        field("輸入的文字", "command", commands[key.removeprefix("group-format-")])
+        command = "綁定案件群組" if key == "group-format-empty" else "綁定訂單"
+        payload = text(GROUP_OPERATOR_REPLY_COPY[key].format(command=command))
     elif key == "candidate-willing-received":
         from subsystems.line.message_copy import CANDIDATE_WILLING_RECEIVED
         payload = text(CANDIDATE_WILLING_RECEIVED)

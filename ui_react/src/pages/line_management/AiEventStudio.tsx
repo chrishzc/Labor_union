@@ -7,7 +7,6 @@ import {
   Bot,
   CheckCircle2,
   ExternalLink,
-  Navigation,
   Pencil,
   Play,
   Plus,
@@ -19,6 +18,11 @@ import {
 import { applicationFetch } from '../../api/shared/application_fetch';
 import { sessionClient } from '../../api/auth/session_client';
 import {
+  notificationMessageHref,
+  ORDER_GROUP_BIND_REPLY_TEMPLATES,
+  ORDER_GROUP_INVITE_REPLY_TEMPLATES,
+} from '../../adapters/line_configuration/line_message_flow_adapter';
+import {
   loadLineGuidanceCatalog,
   previewLineGuidance,
   type NavigationCatalog,
@@ -26,17 +30,25 @@ import {
 } from '../../api/line_configuration/line_guidance_client';
 import '../LineManagementPage.css';
 
-interface CatalogGroup {
-  routeKey: string;
-  tier: string;
-  publicRoute: string | null;
-  postbackIdentity: string | null;
-  sourceIdentity: string;
-  revision: number;
-  aliases: string[];
+type TierCategory = 'all' | 'navigation' | 'identity' | 'admin';
+type GuidanceTier = Exclude<TierCategory, 'all'>;
+
+interface GuidanceAction {
+  tier: GuidanceTier;
+  chat: string;
+  description: string;
+  editable?: boolean;
+  previewable?: boolean;
+  fixedAliases?: string[];
+  exampleSuffix?: string;
+  replyTemplates?: readonly { id: string; label: string }[];
 }
 
-type TierCategory = 'all' | 'navigation' | 'identity' | 'admin';
+interface CatalogGroup extends GuidanceAction {
+  routeKey: string;
+  aliases: string[];
+  catalogAliases: string[];
+}
 
 const TIER_LABELS: Record<string, string> = {
   navigation: '服務導覽',
@@ -44,11 +56,101 @@ const TIER_LABELS: Record<string, string> = {
   admin: '工會管理',
 };
 
-const EDITABLE_ROUTE_DESCRIPTIONS: Record<string, string> = {
-  admin_binding: '【一對一聊天室】取得工會後台帳號綁定連結，有效時間為 15 分鐘。',
-  order_group_bind: '【案件群組｜工會人員】輸入「指令 案件編號 邀請網址」，將群組綁定到該案件並儲存邀請網址。',
-  group_helper_menu: '【案件群組｜本案月嫂】輸入指令開啟小幫手選單。',
+const GUIDANCE_ACTIONS: Record<string, GuidanceAction> = {
+  admin_binding: {
+    tier: 'identity', chat: '一對一聊天室', editable: true, previewable: true,
+    description: '取得工會後台帳號綁定連結。連結有效時間為 15 分鐘。',
+    replyTemplates: [{ id: 'identity-admin-link', label: '工會帳號綁定連結' }],
+  },
+  customer_binding: {
+    tier: 'identity', chat: '一對一聊天室', previewable: true,
+    description: '取得客戶身分綁定連結。',
+    replyTemplates: [{ id: 'identity-customer-link', label: '客戶身分綁定連結' }],
+  },
+  staff_binding: {
+    tier: 'identity', chat: '一對一聊天室', previewable: true,
+    description: '取得月嫂身分認證連結。',
+    replyTemplates: [{ id: 'identity-staff-link', label: '月嫂身分認證連結' }],
+  },
+  registration: {
+    tier: 'navigation', chat: '一對一聊天室', previewable: true,
+    description: '開啟客戶身分綁定流程。新申請可從圖文選單的「預約與登記」進入。',
+    replyTemplates: [{ id: 'identity-customer-link', label: '客戶身分綁定連結' }],
+  },
+  service_help_menu: {
+    tier: 'navigation', chat: '一對一聊天室', previewable: true,
+    description: '開啟目前已發布的常見問答分類選單。',
+    fixedAliases: ['常見問題', '常用問題'],
+    replyTemplates: [{ id: 'service-menu', label: '常見問答選單' }],
+  },
+  service_progress: {
+    tier: 'navigation', chat: '一對一聊天室', previewable: true,
+    description: '查看已綁定案件的進度。尚未綁定時會收到綁定指引。',
+    replyTemplates: [
+      { id: 'service-progress', label: '案件進度' },
+      { id: 'service-progress-unbound', label: '尚未綁定提示' },
+    ],
+  },
+  customer_case_information: {
+    tier: 'navigation', chat: '一對一聊天室', fixedAliases: ['案件資訊', '服務條件與費用'],
+    description: '查閱已綁定案件的服務條件與費用。',
+  },
+  order_group_bind: {
+    tier: 'admin', chat: '案件群組', editable: true, fixedAliases: ['綁定群組', '綁定訂單'],
+    description: '工會人員可輸入「綁定群組」或「綁定訂單」，依提示分次傳送案號與邀請網址。也可一次輸入「指令 案件編號 邀請網址」。',
+    replyTemplates: ORDER_GROUP_BIND_REPLY_TEMPLATES,
+  },
+  order_group_invite: {
+    tier: 'admin', chat: '案件群組',
+    description: '工會人員可為已綁定的案件重新排入客戶與月嫂的私人邀請卡。系統會在群組回覆排入結果。',
+    replyTemplates: ORDER_GROUP_INVITE_REPLY_TEMPLATES,
+  },
+  group_helper_menu: {
+    tier: 'navigation', chat: '案件群組', editable: true,
+    description: '本案客戶、月嫂或有權限的工會人員可開啟小幫手選單。選單依身分及案件進度顯示可用功能。',
+    replyTemplates: [{ id: 'helper-menu-card', label: '小幫手選單' }],
+  },
+  group_postponement: {
+    tier: 'navigation', chat: '案件群組',
+    description: '本案月嫂可在指令後帶入原服務日與補班日。',
+    exampleSuffix: '：2026-12-01 順延至 2026-12-10',
+    replyTemplates: [
+      { id: 'helper-postponement-card', label: '延期確認卡' },
+      { id: 'helper-postponement-completed', label: '延期完成通知' },
+    ],
+  },
+  group_payment_ack: {
+    tier: 'navigation', chat: '案件群組', fixedAliases: ['已經匯款'],
+    description: '本案已驗證的客戶可在首期款提醒後回報匯款，入帳仍由工會核對。',
+    replyTemplates: [{ id: 'payment-reminder-ack', label: '已匯款受理回覆' }],
+  },
+  group_payment_assistance: {
+    tier: 'navigation', chat: '案件群組', fixedAliases: ['有疑問需要解決'],
+    description: '本案已驗證的客戶可在首期款提醒後查閱繳款疑問的處理方式。',
+  },
+  menu_switch_help: {
+    tier: 'admin', chat: '一對一聊天室',
+    description: '同時具有客戶與月嫂身分的使用者或工會人員可查閱切換圖文選單的指引。',
+  },
+  menu_switch_customer: {
+    tier: 'navigation', chat: '一對一聊天室',
+    description: '切換至客戶圖文選單。使用者需有對應身分或工會身分。',
+  },
+  menu_switch_visitor: {
+    tier: 'navigation', chat: '一對一聊天室', fixedAliases: ['服務選單'],
+    description: '切換至訪客圖文選單。',
+  },
+  menu_switch_staff: {
+    tier: 'navigation', chat: '一對一聊天室', fixedAliases: ['月嫂選單'],
+    description: '切換至月嫂圖文選單。使用者需有對應身分或工會身分。',
+  },
+  union_menu: {
+    tier: 'admin', chat: '一對一聊天室', fixedAliases: ['工會選單'],
+    description: '工會人員可切換至工會圖文選單。',
+  },
 };
+
+const UNION_MENU_SWITCH_ALIASES = new Set(['工會選單', '切換工會', '工會客服']);
 
 export const AiEventStudio: React.FC = () => {
   const [catalog, setCatalog] = useState<NavigationCatalog | null>(null);
@@ -61,7 +163,6 @@ export const AiEventStudio: React.FC = () => {
   const [routerNotice, setRouterNotice] = useState<string | null>(null);
   const [routerNoticeKind, setRouterNoticeKind] = useState<'success' | 'info' | 'error' | null>(null);
   const [routerBusy, setRouterBusy] = useState(false);
-  const [liffId, setLiffId] = useState<string | null>(null);
 
   // Alias editing state
   const [isEditingAliases, setIsEditingAliases] = useState(false);
@@ -72,14 +173,6 @@ export const AiEventStudio: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    applicationFetch('/api/v1/line/identity/runtime-config')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((payload: { data?: { liff_id?: string; public_base_url?: string } } | null) => {
-        if (!active || !payload?.data) return;
-        if (payload.data.liff_id) setLiffId(payload.data.liff_id);
-      })
-      .catch(() => {});
-
     loadLineGuidanceCatalog()
       .then((nextCatalog) => {
         if (!active) return;
@@ -95,26 +188,18 @@ export const AiEventStudio: React.FC = () => {
 
   const groupedRules = useMemo<CatalogGroup[]>(() => {
     if (!catalog) return [];
-    const groups = new Map<string, CatalogGroup>();
+    const aliasesByRoute = new Map<string, string[]>();
     for (const entry of catalog.entries) {
-      if (!Object.hasOwn(EDITABLE_ROUTE_DESCRIPTIONS, entry.route_key)) continue;
-      const key = `${entry.route_key}:${entry.tier}:${entry.source_identity}:${entry.revision}`;
-      const existing = groups.get(key);
-      if (existing) {
-        existing.aliases.push(entry.alias);
-      } else {
-        groups.set(key, {
-          routeKey: entry.route_key,
-          tier: entry.tier,
-          publicRoute: entry.public_route ?? null,
-          postbackIdentity: entry.postback_identity ?? null,
-          sourceIdentity: entry.source_identity,
-          revision: entry.revision,
-          aliases: [entry.alias],
-        });
-      }
+      if (entry.route_key === 'union_menu' && !UNION_MENU_SWITCH_ALIASES.has(entry.alias)) continue;
+      const aliases = aliasesByRoute.get(entry.route_key) ?? [];
+      aliases.push(entry.alias);
+      aliasesByRoute.set(entry.route_key, aliases);
     }
-    return Array.from(groups.values());
+    return Object.entries(GUIDANCE_ACTIONS).flatMap(([routeKey, action]) => {
+      const catalogAliases = aliasesByRoute.get(routeKey) ?? [];
+      const aliases = [...new Set([...catalogAliases, ...(action.fixedAliases ?? [])])];
+      return aliases.length ? [{ ...action, routeKey, aliases, catalogAliases }] : [];
+    });
   }, [catalog]);
 
   const filteredRules = useMemo(() => {
@@ -125,10 +210,8 @@ export const AiEventStudio: React.FC = () => {
       }
       if (!normalized) return true;
       return [
-        rule.routeKey,
-        rule.tier,
-        TIER_LABELS[rule.tier] ?? '',
-        rule.sourceIdentity,
+        rule.chat,
+        TIER_LABELS[rule.tier],
         ...rule.aliases,
       ].some((value) => value.toLocaleLowerCase('zh-TW').includes(normalized));
     });
@@ -142,6 +225,8 @@ export const AiEventStudio: React.FC = () => {
     return filteredRules[0] ?? groupedRules[0] ?? null;
   }, [groupedRules, filteredRules, selectedRouteKey]);
 
+  const previewedRule = groupedRules.find((rule) => rule.previewable && rule.routeKey === routerPreview?.route_key);
+
   const selectRule = (routeKey: string) => {
     setSelectedRouteKey(routeKey);
     setIsEditingAliases(false);
@@ -149,17 +234,10 @@ export const AiEventStudio: React.FC = () => {
     setNewAliasInput('');
   };
 
-  const getTrueLiffUrl = (publicRoute: string | null) => {
-    if (!publicRoute || !liffId) return null;
-    const queryIdx = publicRoute.indexOf('?');
-    const query = queryIdx !== -1 ? publicRoute.slice(queryIdx) : '';
-    return `https://liff.line.me/${liffId}${query ? `/${query}` : ''}`;
-  };
-
   const startEditing = () => {
-    if (!selectedRule) return;
+    if (!selectedRule?.editable) return;
     setSelectedRouteKey(selectedRule.routeKey);
-    setEditingAliases([...selectedRule.aliases]);
+    setEditingAliases([...selectedRule.catalogAliases]);
     setNewAliasInput('');
     setAliasEditError(null);
     setIsEditingAliases(true);
@@ -220,9 +298,9 @@ export const AiEventStudio: React.FC = () => {
     } catch (err: any) {
       const msg = err.message || '';
       if (msg.includes('alias_conflict')) {
-        setAliasEditError('部分指令已屬於其他引導動作，無法重複設定。');
+        setAliasEditError('部分指令已用於其他引導動作。請修改或移除重複指令，再儲存變更。');
       } else {
-        setAliasEditError(msg || '儲存指令失敗，請稍後再試。');
+        setAliasEditError('無法確認觸發指令是否已儲存。請先記下修改內容，再重新整理核對目前的指令。');
       }
     } finally {
       setAliasSaveBusy(false);
@@ -252,8 +330,8 @@ export const AiEventStudio: React.FC = () => {
       setIsEditingAliases(false);
       setRouterNotice(`已恢復「${selectedRule.aliases[0] || selectedRule.routeKey}」的預設觸發指令。`);
       setRouterNoticeKind('info');
-    } catch (err: any) {
-      setAliasEditError(err.message || '恢復預設失敗，請稍後再試。');
+    } catch {
+      setAliasEditError('無法確認指令是否已恢復預設。請重新整理，核對目前的觸發指令。');
     } finally {
       setAliasSaveBusy(false);
     }
@@ -269,20 +347,14 @@ export const AiEventStudio: React.FC = () => {
       const preview = await previewLineGuidance(testText);
       setRouterPreview(preview);
 
-      const matchedRoute = preview.route_key;
-      if (matchedRoute) {
-        const matchedRule = groupedRules.find((rule) => rule.routeKey === matchedRoute);
-        if (matchedRule) {
-          if (!isEditingAliases) selectRule(matchedRoute);
-          document.getElementById(`rule-card-${matchedRoute}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
-          setRouterNotice('已找到符合的引導動作。');
-          setRouterNoticeKind('success');
-        } else {
-          setRouterNotice('預覽命中系統路由。此動作沒有可在這裡維護的指令。');
-          setRouterNoticeKind('info');
-        }
+      const matchedRule = groupedRules.find((rule) => rule.previewable && rule.routeKey === preview.route_key);
+      if (matchedRule) {
+        if (!isEditingAliases) selectRule(matchedRule.routeKey);
+        document.getElementById(`rule-card-${matchedRule.routeKey}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+        setRouterNotice('已找到符合的引導動作。');
+        setRouterNoticeKind('success');
       } else {
-        setRouterNotice('未命中固定引導動作，請查看詳細結果。');
+        setRouterNotice('沒有可在此確認的引導動作。請依指令清單查看適用聊天室和使用條件。');
         setRouterNoticeKind('info');
       }
     } catch {
@@ -360,7 +432,7 @@ export const AiEventStudio: React.FC = () => {
         <div className="ai-rule-cards-list">
           {filteredRules.map((rule) => {
             const isSelected = selectedRule?.routeKey === rule.routeKey;
-            const isMatched = routerPreview?.route_key === rule.routeKey;
+            const isMatched = previewedRule?.routeKey === rule.routeKey;
             return (
               <button
                 type="button"
@@ -377,11 +449,11 @@ export const AiEventStudio: React.FC = () => {
                   </span>
                   {isMatched && <span className="ai-rule-state is-matched"><CheckCircle2 aria-hidden="true" />命中</span>}
                 </span>
-                <span className="ai-card-metric-row">{rule.aliases.length} 種常見問法 · {rule.publicRoute ? '導向服務頁面' : '依系統流程處理'}</span>
+                <span className="ai-card-metric-row">{rule.chat} · {rule.aliases.length} 個指令</span>
               </button>
             );
           })}
-          {catalog && filteredRules.length === 0 && <p className="studio-empty" role="status">沒有符合條件的引導動作。</p>}
+          {catalog && filteredRules.length === 0 && <p className="studio-empty" role="status">沒有符合條件的引導動作。請調整搜尋或篩選條件。</p>}
         </div>
         <p className="studio-readonly-note"><ShieldCheck aria-hidden="true" />自訂觸發指令儲存後立即於 LINE 生效</p>
       </aside>
@@ -392,41 +464,29 @@ export const AiEventStudio: React.FC = () => {
             <div className="ai-editor-header">
               <div>
                 <h2>{selectedRule.aliases[0] || selectedRule.routeKey}</h2>
-                <p className="studio-description">{EDITABLE_ROUTE_DESCRIPTIONS[selectedRule.routeKey]}</p>
+                <p className="studio-description">{selectedRule.chat}。{selectedRule.description}</p>
+                {selectedRule.exampleSuffix && (
+                  <p className="studio-description">輸入範例「{selectedRule.aliases[0]}{selectedRule.exampleSuffix}」。</p>
+                )}
               </div>
-              <span className="studio-editable-badge">可自訂觸發指令</span>
-            </div>
-
-            <div className="studio-guidance-target">
-              <Navigation aria-hidden="true" />
-              <div>
-                <small>觸發後的服務入口</small>
-                <strong>{selectedRule.publicRoute ? '導向服務頁面' : '依系統流程處理'}</strong>
-              </div>
-              {selectedRule.publicRoute && getTrueLiffUrl(selectedRule.publicRoute) && (
-                <a href={getTrueLiffUrl(selectedRule.publicRoute)!} target="_blank" rel="noreferrer" className="ai-route-link is-liff">
-                  <ExternalLink aria-hidden="true" />開啟服務頁面
-                </a>
-              )}
+              {selectedRule.editable && <span className="studio-editable-badge">可自訂觸發指令</span>}
             </div>
 
             {!isEditingAliases ? (
               <div className="ai-alias-section">
                 <div className="ai-alias-header">
-                  <strong>常見觸發問法</strong>
+                  <strong>觸發指令</strong>
                   <div className="studio-alias-header-actions">
-                    <small>點選帶入問句，再按「預覽引導動作」。</small>
-                    <button
-                      type="button"
-                      className="studio-edit-aliases-btn"
-                      onClick={startEditing}
-                    >
-                      <Pencil aria-hidden="true" /> 編輯指令
-                    </button>
+                    {selectedRule.previewable && <small>點選帶入問句，再按「預覽引導動作」。</small>}
+                    {selectedRule.editable && (
+                      <button type="button" className="studio-edit-aliases-btn" onClick={startEditing}>
+                        <Pencil aria-hidden="true" /> 編輯指令
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="ai-alias-list">
-                  {selectedRule.aliases.map((alias) => (
+                  {selectedRule.aliases.map((alias) => selectedRule.previewable ? (
                     <button
                       type="button"
                       key={alias}
@@ -440,6 +500,8 @@ export const AiEventStudio: React.FC = () => {
                     >
                       {alias}
                     </button>
+                  ) : (
+                    <span key={alias} className="studio-alias-tag">{alias}</span>
                   ))}
                 </div>
               </div>
@@ -447,7 +509,10 @@ export const AiEventStudio: React.FC = () => {
               <div className="ai-alias-section studio-alias-edit-box">
                 <div className="ai-alias-header">
                   <strong>編輯觸發指令（常見問法）</strong>
-                  <small>點選指令旁的 ✕ 可移除，輸入文字可新增別名；儲存後立即於 LINE 與預覽生效。</small>
+                  <small>點選指令旁的 ✕ 可移除，輸入文字可新增別名。儲存後立即於 LINE 生效。</small>
+                  {selectedRule.fixedAliases && (
+                    <small>分次操作固定使用「{selectedRule.fixedAliases.join('」或「')}」。</small>
+                  )}
                 </div>
 
                 <div className="studio-alias-edit-tags">
@@ -530,6 +595,20 @@ export const AiEventStudio: React.FC = () => {
               </div>
             )}
 
+            {!isEditingAliases && !!selectedRule.replyTemplates?.length && (
+              <section className="ai-alias-section" aria-labelledby="guidance-reply-copy">
+                <h3 id="guidance-reply-copy">編輯 Reply 文案</h3>
+                <ul>
+                  {selectedRule.replyTemplates.map(({ id, label }) => (
+                    <li key={id}>
+                      <a href={notificationMessageHref(id)}>
+                        {label}<ExternalLink aria-hidden="true" size={14} />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
         ) : (
           <div className="ai-editor-card">
@@ -544,7 +623,7 @@ export const AiEventStudio: React.FC = () => {
             <div className="ai-router-simulator-heading">
               <div>
                 <h3 id="ai-router-simulator-title">預覽引導動作</h3>
-                <p>確認問句會如何引導；不儲存變更、不產生實際 AI 回覆。</p>
+                <p>預覽部分一對一指令的文字比對。群組、身分、案件狀態與實際回覆請依各指令的使用條件確認。</p>
               </div>
             </div>
             <label htmlFor="server-router-input">測試問句</label>
@@ -566,28 +645,15 @@ export const AiEventStudio: React.FC = () => {
                 <Play aria-hidden="true" />{routerBusy ? '預覽中…' : '預覽引導動作'}
               </button>
             </div>
-            {!routerNotice && !routerPreview && <p className="ai-router-empty">尚未預覽引導動作。</p>}
+            {!routerNotice && !routerPreview && <p className="ai-router-empty">輸入要測試的文字，即可預覽會觸發的引導動作。</p>}
             {routerNotice && <div className={`ai-router-notice is-${routerNoticeKind ?? 'info'}`} role="status">{routerNotice}</div>}
-            {routerPreview && (
+            {previewedRule && (
               <div aria-label="問句處理預覽結果">
-                {routerPreview.route_key && (
-                  <p className="studio-description">
-                    {catalog?.entries.find((entry) => entry.route_key === routerPreview.route_key)?.alias || '已命中系統引導動作'}
-                  </p>
-                )}
+                <p className="studio-description">{previewedRule.aliases[0]}</p>
               </div>
             )}
           </section>
         </div>
-        <section className="ai-editor-card" aria-labelledby="guidance-menu-switch">
-          <h3 id="guidance-menu-switch">圖文選單切換指令</h3>
-          <p className="studio-description">請在 LINE 官方帳號的一對一聊天室輸入指令。</p>
-          <ul>
-            <li>「切換選單」可查看雙身分或工會帳號的切換指引。</li>
-            <li>「切換客戶」或「切換月嫂」可開啟對應的圖文選單。有雙重身分時也會記錄目前選用的身分。</li>
-            <li>工會人員可用「切換訪客」查看訪客選單，用「切換工會」返回工會選單。</li>
-          </ul>
-        </section>
         <section className="ai-editor-card" aria-labelledby="guidance-menu-entries">
           <h3 id="guidance-menu-entries">LINE 操作入口</h3>
           <ul>

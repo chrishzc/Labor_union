@@ -691,26 +691,59 @@ def test_unused_standalone_template_editors_are_closed_but_saved_settings_and_ac
         assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
 
 
-def test_fixed_feedback_and_liff_admin_alert_editors_are_closed_without_deleting_saved_settings(monkeypatch):
+def test_group_reply_copy_reopens_without_reusing_archived_overrides(monkeypatch):
     from copy import deepcopy
+    from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY
+
     client, application = _copy_client(monkeypatch)
-    keys = ('group-bound','group-invitations-queued','group-error-invitation-url','group-format-invite',
-            'group-error-admin','group-error-order','group-error-unbound','group-error-identity',
-            'group-error-cancelled','group-error-unpaid','group-error-occupied','group-format-empty',
-            'group-format-case','group-format-url','group-format-spacing','group-format-split',
-            'group-format-invalid-case','group-format-invalid-url','runtime-system-health')
+    fixed = ('group-error-invitation-url', 'group-error-admin', 'group-error-order', 'group-error-unbound',
+             'group-error-identity', 'group-error-cancelled', 'group-error-unpaid', 'group-error-occupied',
+             'runtime-system-health')
     saved = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates']
-    for key in keys:
+    archived = (*GROUP_OPERATOR_REPLY_COPY, *fixed)
+    for key in archived:
         saved.append({'id':'LINE-COPY-'+key,'name':key,'message_type':'text','enabled':True,'content':'歷史固定提示','variables':[]})
     before = deepcopy(application.definitions)
-    ids = (*keys,'LU96-M4-SAFE-ALERT-RULE-V1','LU96-M4-COMPLAINT-HIGH-RULE-V1')
+    ids = (*fixed, 'LU96-M4-SAFE-ALERT-RULE-V1', 'LU96-M4-COMPLAINT-HIGH-RULE-V1')
     for key in ids:
         endpoint=f'/api/v1/line/notification-rules/{key}/message-template'
         assert client.get(endpoint).status_code == 404
         assert client.put(endpoint,json={'content':'不應儲存','expected_revision':7}).status_code == 404
     assert application.revision == 7 and application.definitions == before
+
+    for key, default in GROUP_OPERATOR_REPLY_COPY.items():
+        endpoint = f'/api/v1/line/notification-rules/{key}/message-template'
+        loaded = client.get(endpoint)
+        assert loaded.status_code == 200, loaded.text
+        view = loaded.json()['data']
+        assert view['content'] == default
+        changed = '更新後的回覆。\n' + default
+        updated = client.put(endpoint, json={'content': changed, 'expected_revision': view['revision']})
+        assert updated.status_code == 200, updated.text
+        assert client.get(endpoint).json()['data']['content'] == changed
+
+    persisted = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates']
+    by_id = {template['id']: template['content'] for template in persisted}
+    assert all(by_id[f'LINE-COPY-{key}'] == '歷史固定提示' for key in archived)
     for key in ('group-invitation-customer','group-invitation-staff'):
         assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
+
+
+def test_group_reply_copy_rejects_oversize_rendered_text(monkeypatch):
+    client, application = _copy_client(monkeypatch)
+    endpoint = '/api/v1/line/notification-rules/group-format-invite/message-template'
+    view = client.get(endpoint).json()['data']
+    for content in ('A' * 4984 + '{binding_format}', '😀' * 2501):
+        response = client.put(endpoint, json={'content': content, 'expected_revision': view['revision']})
+        assert response.status_code == 422, response.text
+        assert 'LINE 字數上限' in response.json()['detail']
+    assert application.revision == view['revision']
+    assert client.get(endpoint).json()['data']['content'] == view['content']
+
+    boundary = '😀' * 2500
+    updated = client.put(endpoint, json={'content': boundary, 'expected_revision': view['revision']})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['data']['content'] == boundary
 
 
 def test_step5_group_helper_cards_and_copy_can_be_read_and_updated(monkeypatch) -> None:

@@ -53,16 +53,45 @@ from subsystems.line.order_group_contracts import (
 )
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
-from subsystems.line.message_copy_catalog import configured_payload
+from subsystems.line.message_configuration import LineMessageConfigurationError
+from subsystems.line.message_copy import message_definition
+from subsystems.line.message_copy_catalog import configured_payload, render_copy_payload
 from subsystems.line.navigation_catalog import route_aliases
 
-_BIND_FORMAT = "格式：綁定訂單 案件編號 邀請網址\n例如：綁定訂單 115000157 https://line.me/R/ti/g/xxxxx\n各項之間可用空白或換行，網址請完整貼上。"
-_INVITE_COMMAND_FORMAT = "邀請指令只需輸入「發送邀請」。\n首次設定或更新網址請使用：\n" + _BIND_FORMAT
+_BIND_FORMAT_COPY = "格式：{command} 案件編號 邀請網址\n例如：{command} 115000157 https://line.me/R/ti/g/xxxxx\n各項之間可用空白或換行，網址請完整貼上。"
+_BIND_FORMAT = _BIND_FORMAT_COPY.format(command="綁定訂單")
 _INVITATION_URL_REQUIRED = "請先設定本群組邀請網址。\n" + _BIND_FORMAT
 _START_BINDING_COMMANDS = ("綁定訂單", "綁定群組")
 _CASE_NO = re.compile(r"[A-Za-z0-9_-]{1,50}")
 _CASE_PROMPT = "請輸入案件標號。"
 _URL_PROMPT = "請輸入邀請連結。\n從右上角設定選擇「邀請」，再複製「邀請網址」。"
+
+_BINDING_FORMAT_ERRORS = {
+    "empty": "請填寫案件編號與邀請網址。",
+    "case": "請填寫案件編號。",
+    "url": "請貼上本群組邀請網址。",
+    "spacing": "請在指令、案件編號與網址之間加空白或換行。",
+    "case-url-spacing": "請在案件編號與網址之間加空白或換行。",
+    "split": "請只填寫案件編號與一個完整邀請網址；網址中間不要換行或加空白。",
+    "invalid-case": "案件編號格式不正確。",
+    "invalid-url": "邀請網址格式不正確，請從本群組複製完整的 LINE 群組邀請連結。",
+}
+GROUP_OPERATOR_REPLY_COPY = {
+    "group-bound": "已設定案件 {case_no} 的服務群組。",
+    "group-guided-bound": "已設定案件 {case_no} 的服務群組。\n已將客戶及月嫂的群組邀請連結排入發送。",
+    "group-invitations-queued": "訂單 {case_no} 的邀請已排入發送，共 {recipient_count} 位。",
+    "group-format-invite": "邀請指令只需輸入「{invite_command}」。\n首次設定或更新網址請使用：\n{binding_format}",
+    "group-format-guided-case": _CASE_PROMPT,
+    "group-format-guided-url": "邀請連結格式不正確。\n" + _URL_PROMPT,
+    **{f"group-format-{key}": reason + "\n" + _BIND_FORMAT_COPY for key, reason in _BINDING_FORMAT_ERRORS.items()},
+}
+_INVITE_COMMAND_FORMAT = GROUP_OPERATOR_REPLY_COPY["group-format-invite"].format(
+    invite_command="發送邀請", binding_format=_BIND_FORMAT,
+)
+_DEFAULT_OPERATOR_REPLY_FORMAT = {
+    "command": "綁定訂單", "invite_command": "發送邀請", "binding_format": _BIND_FORMAT,
+}
+_LINE_TEXT_UTF16_BYTE_LIMIT = 10_000
 
 
 def _group_command_aliases() -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -89,6 +118,13 @@ _ALERT_TARGET_COMMAND = "設定異常通知群組"
 
 class LineOrderGroupCommandRejected(ValueError):
     """A safe business rejection that can be returned to the source group."""
+
+
+class LineOrderGroupFormatRejected(LineOrderGroupCommandRejected):
+    def __init__(self, copy_key: str, **variables: str) -> None:
+        super().__init__(GROUP_OPERATOR_REPLY_COPY[copy_key].format(**variables))
+        self.copy_key = copy_key
+        self.variables = variables
 
 
 class LineOrderGroupApplication:
@@ -130,12 +166,14 @@ class LineOrderGroupApplication:
                 if text not in invite_aliases:
                     primary_invite = invite_aliases[0]
                     primary_bind = "綁定訂單" if "綁定訂單" in bind_aliases else bind_aliases[0]
-                    hint = (
-                        _INVITE_COMMAND_FORMAT
+                    binding_format = (
+                        _BIND_FORMAT
                         if primary_invite == "發送邀請" and primary_bind == "綁定訂單"
-                        else f"邀請指令只需輸入「{primary_invite}」。\n首次設定或更新網址請使用：\n格式：{primary_bind} 案件編號 邀請網址"
+                        else f"格式：{primary_bind} 案件編號 邀請網址"
                     )
-                    raise LineOrderGroupCommandRejected(hint)
+                    raise LineOrderGroupFormatRejected(
+                        "group-format-invite", invite_command=primary_invite, binding_format=binding_format,
+                    )
                 self._relay(inbox, unit_of_work)
             else:
                 return self._continue_binding(inbox, unit_of_work, text)
@@ -145,6 +183,8 @@ class LineOrderGroupApplication:
             ):
                 raise
             message = _safe_error_message(error)
+            if isinstance(error, LineOrderGroupFormatRejected):
+                message = _configured_operator_reply(unit_of_work, error.copy_key, error.variables)
             self._reply_to_group(inbox, unit_of_work, message, "error")
         return True
 
@@ -165,7 +205,7 @@ class LineOrderGroupApplication:
         _linked_actor(inbox, unit_of_work, LineCapability.ORDER_GROUP_BIND)
         if previous.stage is GroupBindingReplyStage.CASE:
             if not _CASE_NO.fullmatch(text):
-                raise LineOrderGroupCommandRejected(_CASE_PROMPT)
+                raise LineOrderGroupFormatRejected("group-format-guided-case")
             if unit_of_work.order_audiences.get(text) is None:
                 raise LineOrderGroupCommandRejected("找不到指定案件。" + _CASE_PROMPT)
             self._reply_to_group(inbox, unit_of_work, _URL_PROMPT, GroupBindingReplyStage.URL)
@@ -177,7 +217,7 @@ class LineOrderGroupApplication:
         try:
             validate_invitation_url(text)
         except ValueError as error:
-            raise LineOrderGroupCommandRejected("邀請連結格式不正確。\n" + _URL_PROMPT) from error
+            raise LineOrderGroupFormatRejected("group-format-guided-url") from error
         self._bind(inbox, unit_of_work, case_no, text, guided=True)
         return True
 
@@ -235,10 +275,11 @@ class LineOrderGroupApplication:
         unit_of_work.audit.append(
             LineAuditIntent("order_group.bind", actor.actor_id, "order", case_no)
         )
-        message = group_binding_acknowledgement(case_no)
         if guided:
             self._queue_invitations(inbox, unit_of_work, actor, binding, invitation_url, audience)
-            message += "\n已將客戶及月嫂的群組邀請連結排入發送。"
+        message = _configured_operator_reply(
+            unit_of_work, "group-guided-bound" if guided else "group-bound", {"case_no": case_no},
+        )
         self._reply_to_group(
             inbox,
             unit_of_work,
@@ -267,7 +308,10 @@ class LineOrderGroupApplication:
         self._reply_to_group(
             inbox,
             unit_of_work,
-            group_invitation_acknowledgement(binding.case_no, recipient_count),
+            _configured_operator_reply(
+                unit_of_work, "group-invitations-queued",
+                {"case_no": binding.case_no, "recipient_count": recipient_count},
+            ),
             "invite-queued",
         )
 
@@ -504,31 +548,29 @@ def _parse_binding(text: str, bind_prefixes: tuple[str, ...] = ("綁定訂單",)
     matched = _matched_prefix(text, bind_prefixes)
     remainder = text[len(matched):] if matched is not None else text
     args = remainder.split() if (matched is not None and (remainder == "" or remainder[0].isspace())) else []
-    reason = None
+    failure = None
     if matched is None or (remainder != "" and not remainder[0].isspace()):
-        reason = "請在指令、案件編號與網址之間加空白或換行。"
+        failure = "spacing"
     elif len(args) == 0:
-        reason = "請填寫案件編號與邀請網址。"
+        failure = "empty"
     elif len(args) == 1:
-        reason = ("請填寫案件編號。" if args[0].startswith("http")
-                  else "請在案件編號與網址之間加空白或換行。" if "https://" in args[0]
-                  else "請貼上本群組邀請網址。")
+        if args[0].startswith("http"):
+            failure = "case"
+        elif "https://" in args[0]:
+            failure = "case-url-spacing"
+        else:
+            failure = "url"
     elif len(args) > 2:
-        reason = "請只填寫案件編號與一個完整邀請網址；網址中間不要換行或加空白。"
+        failure = "split"
     elif not _CASE_NO.fullmatch(args[0]):
-        reason = "案件編號格式不正確。"
+        failure = "invalid-case"
     else:
         try:
             validate_invitation_url(args[1])
         except ValueError:
-            reason = "邀請網址格式不正確，請從本群組複製完整的 LINE 群組邀請連結。"
-    if reason is not None:
-        hint = _BIND_FORMAT if (matched or "綁定訂單") == "綁定訂單" else (
-            f"格式：{matched} 案件編號 邀請網址\n"
-            f"例如：{matched} 115000157 https://line.me/R/ti/g/xxxxx\n"
-            "各項之間可用空白或換行，網址請完整貼上。"
-        )
-        raise LineOrderGroupCommandRejected(reason + "\n" + hint)
+            failure = "invalid-url"
+    if failure is not None:
+        raise LineOrderGroupFormatRejected(f"group-format-{failure}", command=matched or "綁定訂單")
     return args[0], args[1]
 
 
@@ -609,9 +651,20 @@ def group_invitation_payload(case_no, label, invitation_url):
     return payload
 
 
-def group_binding_acknowledgement(case_no):
-    return f"已設定案件 {case_no} 的服務群組。"
+def _configured_operator_reply(unit_of_work, key, variables):
+    return render_group_operator_reply_copy(message_definition(unit_of_work), key, variables)
 
 
-def group_invitation_acknowledgement(case_no, recipient_count):
-    return f"訂單 {case_no} 的邀請已排入發送，共 {recipient_count} 位。"
+def render_group_operator_reply_copy(definition, key, variables, *, content=None):
+    default = GROUP_OPERATOR_REPLY_COPY[key].format(**variables)
+    rendered = render_copy_payload(
+        definition, key, {"type": "text", "text": default}, variables, content,
+    )["text"]
+    if len(rendered.encode("utf-16-le")) <= _LINE_TEXT_UTF16_BYTE_LIMIT:
+        return rendered
+    if content is not None:
+        raise LineMessageConfigurationError("群組 Reply 文案帶入變數後不可超過 LINE 字數上限。")
+    if len(default.encode("utf-16-le")) <= _LINE_TEXT_UTF16_BYTE_LIMIT:
+        return default
+    # A configured command alias can also make the built-in hint too long.
+    return GROUP_OPERATOR_REPLY_COPY[key].format(**{**variables, **_DEFAULT_OPERATOR_REPLY_FORMAT})

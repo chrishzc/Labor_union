@@ -20,6 +20,7 @@ from subsystems.line.message_copy_catalog import (
     RETIRED_SIGNING_REMINDER_TEMPLATE_IDS, RETIRED_START_DAY_REPORT_TEMPLATE_IDS,
     default_copy_templates, effective_copy_definition, render_copy_payload,
 )
+from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY, render_group_operator_reply_copy
 from subsystems.line.service_completion_notifications import RETIRED_SERVICE_COMPLETION_PUSH_EVENT_CODE
 
 
@@ -178,6 +179,20 @@ _CURRENT_FLOW_PREVIEWS = (
     ("payment-second-reminder", "第二期款繳費提醒卡", "flex"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
     ("payment-reminder-ack", "繳費提醒回覆－已匯款確認", "text"),
+    ("group-bound", "案件群組－單行綁定完成", "text"),
+    ("group-guided-bound", "案件群組－三步綁定完成", "text"),
+    ("group-invitations-queued", "案件群組－邀請排入發送", "text"),
+    ("group-format-empty", "群組指令－缺案件與網址", "text"),
+    ("group-format-case", "群組指令－缺案件編號", "text"),
+    ("group-format-url", "群組指令－缺邀請網址", "text"),
+    ("group-format-spacing", "群組指令－指令後缺空白", "text"),
+    ("group-format-case-url-spacing", "群組指令－案件編號與網址缺空白", "text"),
+    ("group-format-split", "群組指令－網址被拆開", "text"),
+    ("group-format-invalid-case", "群組指令－案件編號格式錯誤", "text"),
+    ("group-format-invalid-url", "群組指令－邀請網址格式錯誤", "text"),
+    ("group-format-guided-case", "三步綁定－案件編號格式錯誤", "text"),
+    ("group-format-guided-url", "三步綁定－邀請連結格式錯誤", "text"),
+    ("group-format-invite", "群組指令－發送邀請格式錯誤", "text"),
     ("group-invitation-customer", "案件群組邀請卡－客戶", "flex"),
     ("helper-menu-card", "案件群組－月嫂小幫手選單卡", "flex"),
     ("helper-menu-completed", "案件群組－服務已完成小幫手選單卡", "flex"),
@@ -417,7 +432,12 @@ class LineMessagePreviewApplication:
         else:
             payload = rendered_payload
         copy_key = "helper-menu-card" if key == "helper-menu-completed" else key
-        if copy_key in default_copy_templates():
+        if copy_key in GROUP_OPERATOR_REPLY_COPY:
+            from subsystems.line.message_preview_samples import group_operator_reply_sample_values
+            payload["text"] = render_group_operator_reply_copy(
+                templates, copy_key, group_operator_reply_sample_values(copy_key), content=content,
+            )
+        elif copy_key in default_copy_templates():
             if sample:
                 from subsystems.line.message_preview_samples import VALUES, CASE, STAFF
                 copy_values = {**VALUES, "staff_name": STAFF.name, "identity_url": VALUES["bind_url"], "registration_url": VALUES["url"],

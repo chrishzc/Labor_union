@@ -13,6 +13,7 @@
 - primary: `ui_react/src/components/HistoricalClientPaymentWorkbench.tsx`
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
 - composition: `ui_react/src/pages/FinancePage.tsx` — 四個主工作區：案件帳務（預設）、銀行對帳、政府補助清單、每月帳務；案件、清單及月報使用既有右側案件抽屜；銀行來源先依狀態進入單筆「核對交易」或唯讀「查看交易」，需要查整案再切到案件帳務。案件抽屜不代替銀行核銷入口，返回原流水時重查最新狀態，詳見 [Finance Import 單筆銀行工作台](../../../../finance-import/subsystems/finance-import/modules/statement-workspace.md#contracts)，既有收款／付款／人員付款／待確認／通知／逾期工具保留在相關工具，舊深連結仍解析。歷史工具保留低頻入口；舊全域帳戶維護於 2026-11-02 依使用者指示完整退役。
+- 案件帳務列表（載入、返回與資料刷新）：列表的組合接線與對應驗證見 [Finance Import 工作台](../../../../finance-import/subsystems/finance-import/modules/statement-workspace.md#implementation)，不是本頁的歷史人工核銷。
 - workbench referral: Finance 以 `case_no` 定位案件帳務，`from=workbench` 提供返回同案入口。歷史帳務完成由 Orders 依正式結清事實投影，帳務抽屜不提供手動完成入口。
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
 - shared collections: `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/components/FinancePaymentsWorkspace.tsx` — 應收由 Finance Import workspace 組合 owner 月份款項 Query，政府整期及付款沿既有 owner projection／cash planning；未定應收另列待確認，正式與預估分開加總，原 XLSX 匯出條件不受列表篩選改寫。
