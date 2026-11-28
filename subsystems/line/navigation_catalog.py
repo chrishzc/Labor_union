@@ -15,6 +15,16 @@ CATALOG_SOURCE_IDENTITY = "LU96-M2-ROUTER-REPLY-SOURCE-V1"
 CATALOG_STORAGE_PATH = (
     Path(__file__).resolve().parents[2] / "document" / "line" / "AI客服引導動作別名.json"
 )
+FAQ_MENU_COMMAND = "常見問題"
+SERVICE_PROGRESS_COMMAND = "查詢服務進度"
+GROUP_POSTPONEMENT_COMMAND = "雙方合意延期"
+_FIXED_ROUTE_COMMANDS = {
+    "service_help_menu": FAQ_MENU_COMMAND,
+    "service_progress": SERVICE_PROGRESS_COMMAND,
+    "group_postponement": GROUP_POSTPONEMENT_COMMAND,
+}
+_RESERVED_COMMANDS = frozenset(_FIXED_ROUTE_COMMANDS.values())
+_RETIRED_UNION_SWITCH_ALIASES = frozenset({"工會選單", "切換工會", "工會客服"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,17 +51,7 @@ class LineNavigationReplyReadback:
 
 
 _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
-    "customer_binding": {
-        "tier": "identity",
-        "public_route": "/line-identity",
-        "postback_identity": None,
-    },
     "admin_binding": {
-        "tier": "identity",
-        "public_route": "/line-identity",
-        "postback_identity": None,
-    },
-    "staff_binding": {
         "tier": "identity",
         "public_route": "/line-identity",
         "postback_identity": None,
@@ -70,11 +70,6 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
         "tier": "admin",
         "public_route": None,
         "postback_identity": "line:order-group-invite",
-    },
-    "registration": {
-        "tier": "navigation",
-        "public_route": "/line-identity",
-        "postback_identity": None,
     },
     "service_help_menu": {
         "tier": "navigation",
@@ -111,11 +106,6 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
         "public_route": None,
         "postback_identity": None,
     },
-    "other": {
-        "tier": "navigation",
-        "public_route": None,
-        "postback_identity": None,
-    },
     "resume_ai_assistant": {
         "tier": "navigation",
         "public_route": None,
@@ -131,26 +121,6 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
         "public_route": None,
         "postback_identity": None,
     },
-    "menu_switch_help": {
-        "tier": "admin",
-        "public_route": None,
-        "postback_identity": "line:menu-switch-help",
-    },
-    "menu_switch_customer": {
-        "tier": "navigation",
-        "public_route": None,
-        "postback_identity": "line:menu-switch-customer",
-    },
-    "menu_switch_visitor": {
-        "tier": "navigation",
-        "public_route": None,
-        "postback_identity": "line:menu-switch-visitor",
-    },
-    "menu_switch_staff": {
-        "tier": "navigation",
-        "public_route": None,
-        "postback_identity": "line:menu-switch-staff",
-    },
     "group_helper_menu": {
         "tier": "navigation",
         "public_route": None,
@@ -163,28 +133,16 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
 }
 
-# 1對1精確比對「綁定訂單」與群組帶參數前綴「綁定訂單 <案號> <邀請網址>」跨聊天室不互斥
-_SHARED_SCOPE_ROUTE_PAIRS: frozenset[frozenset[str]] = frozenset({
-    frozenset({"customer_binding", "order_group_bind"}),
-})
-
 _BASE_ALIASES: dict[str, list[str]] = {
-    "customer_binding": ["綁定訂單", "訂單查詢", "綁定", "查詢訂單"],
     "admin_binding": ["綁定後台帳號", "綁定工會帳號", "綁定system_admin"],
-    "staff_binding": ["我是月嫂", "我要綁定月嫂"],
     "union_menu": [
-        "工會選單",
         "開啟客服系統",
         "開啟待辦工作台",
         "開啟異常中心",
         "開啟營運摘要",
-        "切換工會",
-        "工會客服",
     ],
     "order_group_bind": ["綁定群組", "綁定案件群組", "綁定訂單"],
     "order_group_invite": ["發送邀請"],
-    "registration": ["服務登記"],
-    "service_help_menu": ["服務說明", "服務與問答", "常見問答", "問答", "FAQ"],
     "order_update_menu": ["修改訂單資訊"],
     "order_update_request": [
         "修改服務地址",
@@ -203,16 +161,7 @@ _BASE_ALIASES: dict[str, list[str]] = {
         "政府補助",
         "要付多少",
     ],
-    "service_progress": [
-        "查詢服務進度",
-        "查詢進度",
-        "服務進度",
-        "案件進度",
-        "訂單進度",
-        "目前狀態",
-    ],
     "profile_update": ["修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤"],
-    "other": ["其他問題", "其他", "不是以上", "問題", "詢問"],
     "resume_ai_assistant": [
         "恢復AI助理",
         "恢復AI",
@@ -223,12 +172,8 @@ _BASE_ALIASES: dict[str, list[str]] = {
     ],
     "feedback_resolved": ["有幫助", "👍 有幫助", "很有幫助", "有解決"],
     "feedback_unresolved": ["未解決", "👎 未解決", "沒解決", "沒有幫助", "未解決（通報專人客服）"],
-    "menu_switch_help": ["切換選單", "選單切換", "管理者選單"],
-    "menu_switch_customer": ["客戶選單", "客戶專區", "切換客戶"],
-    "menu_switch_visitor": ["訪客選單", "切換訪客", "一般選單", "一般用戶選單", "切換一般", "esc"],
-    "menu_switch_staff": ["月嫂專區", "切換月嫂"],
     "group_helper_menu": ["小幫手", "工會", "月嫂選單", "服務選單"],
-    "group_postponement": ["雙方合意延期"],
+    **{route: [command] for route, command in _FIXED_ROUTE_COMMANDS.items()},
 }
 
 
@@ -245,8 +190,11 @@ def load_persisted_aliases(
             routes = data.get("routes", {})
             result: dict[str, list[str]] = {}
             for k, default_aliases in _BASE_ALIASES.items():
-                if k in routes and isinstance(routes[k], list):
-                    cleaned = [str(a).strip() for a in routes[k] if str(a).strip()]
+                if k not in _FIXED_ROUTE_COMMANDS and k in routes and isinstance(routes[k], list):
+                    excluded = _RESERVED_COMMANDS
+                    if k == "union_menu":
+                        excluded |= _RETIRED_UNION_SWITCH_ALIASES
+                    cleaned = [alias for raw in routes[k] if (alias := str(raw).strip()) and alias not in excluded]
                     result[k] = cleaned if cleaned else list(default_aliases)
                 else:
                     result[k] = list(default_aliases)
@@ -329,13 +277,19 @@ def route_aliases(route_key: str, path: Path | None = None) -> tuple[str, ...]:
     return tuple(routes.get(route_key) or _BASE_ALIASES.get(route_key, ()))
 
 
+def _require_editable_route(route_key: str) -> None:
+    if route_key not in _ROUTE_METADATA:
+        raise KeyError(f"route_key_not_found:{route_key}")
+    if route_key in _FIXED_ROUTE_COMMANDS:
+        raise ValueError("route_aliases_fixed")
+
+
 def update_route_aliases(
     route_key: str,
     aliases: list[str],
     path: Path | None = None,
 ) -> tuple[int, tuple[LineNavigationEntry, ...]]:
-    if route_key not in _ROUTE_METADATA:
-        raise KeyError(f"route_key_not_found:{route_key}")
+    _require_editable_route(route_key)
 
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -348,12 +302,12 @@ def update_route_aliases(
 
     if not cleaned:
         raise ValueError("aliases_cannot_be_empty")
+    if route_key == "union_menu" and _RETIRED_UNION_SWITCH_ALIASES.intersection(cleaned):
+        raise ValueError("retired_menu_switch_alias")
 
     revision, current_routes = load_persisted_aliases(path)
     for other_route, other_aliases in current_routes.items():
         if other_route == route_key:
-            continue
-        if frozenset({route_key, other_route}) in _SHARED_SCOPE_ROUTE_PAIRS:
             continue
         collision = set(cleaned).intersection(set(other_aliases))
         if collision:
@@ -373,8 +327,7 @@ def reset_route_aliases(
 ) -> tuple[int, tuple[LineNavigationEntry, ...]]:
     revision, current_routes = load_persisted_aliases(path)
     if route_key:
-        if route_key not in _ROUTE_METADATA:
-            raise KeyError(f"route_key_not_found:{route_key}")
+        _require_editable_route(route_key)
         current_routes[route_key] = list(_BASE_ALIASES[route_key])
     else:
         current_routes = {k: list(v) for k, v in _BASE_ALIASES.items()}
@@ -388,6 +341,9 @@ __all__ = [
     "CATALOG_REVISION",
     "CATALOG_SOURCE_IDENTITY",
     "CATALOG_STORAGE_PATH",
+    "FAQ_MENU_COMMAND",
+    "GROUP_POSTPONEMENT_COMMAND",
+    "SERVICE_PROGRESS_COMMAND",
     "LineNavigationEntry",
     "LineNavigationReplyReadback",
     "catalog_entries",

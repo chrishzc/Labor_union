@@ -103,7 +103,9 @@ def reset_catalog_aliases(
         new_revision, entries = reset_route_aliases(route_key)
     except KeyError:
         raise HTTPException(status_code=404, detail="route_key_not_found")
-    except (OSError, ValueError) as error:
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except OSError as error:
         raise HTTPException(status_code=500, detail=str(error))
     return BaseResponse(
         data=LineNavigationCatalogView(

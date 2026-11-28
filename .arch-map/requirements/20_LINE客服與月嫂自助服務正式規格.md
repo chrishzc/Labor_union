@@ -150,7 +150,8 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 - **`#line-notifications`（通知與寄送）**：整合統一通知與發送工作台（`push_queue`，支援 `?tab=push_queue&message=<id>` 定位）與寄送追蹤／異常，並維護含 Flex 在內之通知文案／設計公版；繳款收據深連結（`#notifications?subtab=payment_receipt`）於通知事項頁跟催。
 - **`#line-interface`（LINE 介面設定）** 與 **`#line-faq`（LINE 常見問答）**：
   - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室提供現行官方 LIFF 表單與行動工作面預覽（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與三個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
-  - [LINE 介面設定的引導動作分頁](19_Global_Entry_Point_Governance.md#21-現行導航與頁面清冊)提供觸發指令編輯與唯讀預覽。不執行模型問答。
+  - [LINE 介面設定的引導動作分頁](19_Global_Entry_Point_Governance.md#21-現行導航與頁面清冊)提供觸發指令編輯與唯讀預覽。不執行模型問答。清單依系統內建流程標示「僅手動輸入」與「有其他入口」，並可篩出只靠聊天室手動送出文字的動作。系統按鈕會代送文字或可從其他入口完成同一動作時，詳情須指出該入口，例如「常見問題」的圖文選單按鈕。
+  - 「有其他入口」的四組動作各保留一個固定文字指令，分別為「常見問題」「查詢服務進度」「雙方合意延期」「已經匯款」。退役別名不再觸發，已保存的舊別名也不套用。群組「雙方合意延期」仍使用原服務日與補班日的參數格式，並可從小幫手開啟 LIFF。首期款私聊逾期卡繼續使用「已經匯款」按鈕事件。
 
   - LINE 常見問答提供「常見問答題庫」與「LINE 聊天室版面」兩個分頁。新增分類、編輯卡片和手機預覽留在同一管理入口；不提供公開 FAQ 網頁或 AI 問答。兩種發布的作用範圍依 [共用問答與聊天室版面](29_LINE服務說明、客服互動與選單角色正式規格.md#41-共用問答與聊天室版面)。
 

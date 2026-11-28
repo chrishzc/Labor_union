@@ -1,76 +1,41 @@
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 
-from domains.line.identities import LineUserId
-from domains.line.identity_binding import (
-    LineBindingSubjectType,
-    LineIdentityBindingSnapshot,
-    LineIdentityBindingStatus,
-)
-from shared_kernel.identities import ExpectedVersion
-from subsystems.line.menu_command_application import LineMenuCommandApplication
+import pytest
+
+from domains.line.identities import LineSourceType, LineUserId, LineWebhookEventId
+from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
 
-class _Outbox:
-    def __init__(self):
-        self.items = []
-
-    def append(self, item):
-        self.items.append(item)
-
-
-class _Audit:
-    def __init__(self):
-        self.items = []
-
-    def append(self, item):
-        self.items.append(item)
-
-
-def _inbox(event_id="event-1"):
-    return SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value=event_id)))
-
-
-def _uow(binding=None):
-    return SimpleNamespace(
-        identities=SimpleNamespace(list_by_user=lambda _line_user_id: (binding,) if binding else ()),
-        outbox=_Outbox(),
-        audit=_Audit(),
+@pytest.mark.parametrize("text", [
+    "切換選單", "選單切換", "管理者選單",
+    "客戶選單", "客戶專區", "切換客戶",
+    "訪客選單", "服務選單", "切換訪客", "一般選單", "一般用戶選單", "切換一般", "esc", "ESC",
+    "月嫂選單", "月嫂專區", "切換月嫂",
+    "工會選單", "工會客服", "切換工會",
+])
+def test_retired_private_menu_text_does_not_send_a_reply_or_change_the_menu(text: str) -> None:
+    now = datetime(2026, 11, 28, tzinfo=timezone.utc)
+    inbox = SimpleNamespace(event=SimpleNamespace(
+        event_id=LineWebhookEventId("synthetic-menu-command"),
+        source=SimpleNamespace(source_type=LineSourceType.USER, user_id=LineUserId("U-synthetic")),
+        occurred_at=now,
+        payload_json=json.dumps({"message": {"type": "text", "text": text}}),
+    ))
+    unit_of_work = Mock()
+    handlers = LineWebhookIdentityHandlers(
+        lambda: now,
+        lambda purpose, flow: "https://example.test/identity",
+        service_help_application=LineServiceHelpApplication(lambda: now),
     )
 
+    assert not handlers.handle_reply_message(inbox, unit_of_work)
+    handlers.handle_message(inbox, unit_of_work)
 
-def test_union_menu_requires_a_bound_admin_identity():
-    binding = LineIdentityBindingSnapshot(
-        LineUserId("U-admin"), LineIdentityBindingStatus.BOUND, ExpectedVersion(2),
-        LineBindingSubjectType.ADMIN, "admin-7",
-    )
-    unit_of_work = _uow(binding)
-
-    assert LineMenuCommandApplication().handle(_inbox(), unit_of_work, LineUserId("U-admin"), "工會選單") is True
-    assert json.loads(unit_of_work.outbox.items[0].payload_json)["menu_definition_id"] == "union_staff_menu"
-    assert unit_of_work.outbox.items[0].idempotency_identity == "line-menu-command:union-menu:event-1"
-
-
-def test_union_menu_rejects_a_non_admin_and_esc_resets_every_user_to_default_menu():
-    binding = LineIdentityBindingSnapshot(
-        LineUserId("U-customer"), LineIdentityBindingStatus.BOUND, ExpectedVersion(2),
-        LineBindingSubjectType.CUSTOMER, "client-7",
-    )
-    unit_of_work = _uow(binding)
-    application = LineMenuCommandApplication()
-
-    assert application.handle(_inbox(), unit_of_work, LineUserId("U-customer"), "工會選單") is False
-    assert application.handle(_inbox("event-2"), unit_of_work, LineUserId("U-customer"), "esc") is True
-    assert json.loads(unit_of_work.outbox.items[0].payload_json)["menu_definition_id"] == "default_menu"
-    assert unit_of_work.outbox.items[0].idempotency_identity == "line-menu-command:esc:event-2"
-
-
-def test_visitor_service_menu_command_switches_back_to_default_menu():
-    binding = LineIdentityBindingSnapshot(
-        LineUserId("U-customer"), LineIdentityBindingStatus.BOUND, ExpectedVersion(2),
-        LineBindingSubjectType.CUSTOMER, "client-7",
-    )
-    unit_of_work = _uow(binding)
-    assert LineMenuCommandApplication().handle(_inbox("event-3"), unit_of_work, LineUserId("U-customer"), "服務選單") is True
-    assert json.loads(unit_of_work.outbox.items[0].payload_json)["menu_definition_id"] == "default_menu"
-    assert unit_of_work.outbox.items[0].idempotency_identity == "line-menu-command:visitor-menu:event-3"
+    unit_of_work.delivery_tasks.enqueue.assert_not_called()
+    unit_of_work.outbox.append.assert_not_called()
+    unit_of_work.identities.select_role.assert_not_called()
+    unit_of_work.identity_flows.open.assert_not_called()

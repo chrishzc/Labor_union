@@ -25,7 +25,6 @@
   - `subsystems/line/identity_contracts.py`
   - `api/dependencies/line_identity.py` — NAS 管理員 credential binding 使用內部 access profile；外部客戶／月嫂仍用 LINE profile。
   - `subsystems/line/webhook_identity_handlers.py` — webhook identity dispatch 與未注入 canonical Service Help application 時的 bounded guidance fallback。
-  - `subsystems/line/menu_command_application.py` — 既有一對一切換指令接 role-selection application，共用 webhook outer commit，雙角色選擇與事件重播保護。
   - `subsystems/line/identity_management_application.py`
   - `subsystems/line/identity_management_contracts.py`
   - `subsystems/line/staff_retirement_effect.py`
@@ -82,7 +81,7 @@
   - `python -m py_compile domains/line/identity_binding.py subsystems/line/identity_application.py subsystems/line/identity_management_application.py infrastructure/mysql/line_identity_review_repository.py infrastructure/mysql/line_identity_management_repository.py`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`
 - higher_boundary: `tests/domains/external-integration/subsystems/line/integration/test_line_friend_feedback_regressions.py` — 由上位 LINE Subsystem 擁有；canonical webhook friend-state（follow 不再開啟流程或發送歡迎訊息）、binding link 與客服 feedback continuation 的交易 regression。
-- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_menu_command_application.py` — 既有 scoped menu command／admin 視角與訪客回復 regression；雙角色選擇的新驗證沿用本 Module contract root。
+- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_menu_command_application.py` — 私聊退役的選單切換文字不建立角色選擇或選單同步工作。
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_binding.py` — 個人選單讀回與有限重試。
 - test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_outbox_intent_claim.py` — 個人選單工作領取、嘗試上限與租約回收。
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/line-identity-management/` — identity presentation adapter masking and strict typed-state coverage.

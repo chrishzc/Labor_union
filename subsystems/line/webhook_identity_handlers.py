@@ -22,38 +22,33 @@ from domains.line.identities import LineSourceType
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.platform_user import LineFriendEvent, LineFriendEventType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.deterministic_ai_router import LEGACY_AI_MENU_COMMANDS
 from subsystems.line.feedback_contracts import FeedbackOutcome, RecordLineFeedback
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
-from subsystems.line.navigation_catalog import CATALOG_REVISION, route_aliases
+from subsystems.line.navigation_catalog import CATALOG_REVISION, FAQ_MENU_COMMAND, SERVICE_PROGRESS_COMMAND, route_aliases
 from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
+from subsystems.line.service_help_application import RETIRED_AI_GUIDANCE_TEXT
 
-_STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
-_CUSTOMER_COMMANDS = {"服務登記", "綁定", "查詢訂單", "綁定訂單", "訂單查詢"}
-_SERVICE_HELP_COMMANDS = {"服務與問答", "服務說明", "常見問答", "常見問題", "常用問題", "問答", "FAQ", "AI客服", "AI問答", "AI智慧問答"}
 _SERVICE_HELP_CATEGORIES = {
     "服務流程": None,
     "收費與補助": None,
-    "查詢服務進度": (
-        "若要查詢服務進度，請先完成服務登記或帳號綁定。\n\n"
+    SERVICE_PROGRESS_COMMAND: (
+        "若要查詢服務進度，請先從訪客圖文選單點選「預約與登記」完成 LINE 綁定。\n\n"
         "已完成登記者，請回覆您的案件編號或登記姓名，工會人員會依資料協助確認目前進度。"
     ),
     "修改登記資料": (
         "若要修改已送出的登記資料，請直接回覆要修改的項目與正確內容。"
         "工會人員核對後會人工補登；此對話不會直接變更正式資料。"
     ),
-    "其他問題": (
-        "請直接輸入您的問題內容。若已經有案件編號，也請一起提供，方便工會人員協助查詢。"
-    ),
 }
 _SERVICE_HELP_CATEGORY_KEYS = {
     "服務流程": "service-flow",
     "收費與補助": "payment-subsidy",
-    "查詢服務進度": "service-progress",
+    SERVICE_PROGRESS_COMMAND: "service-progress",
     "修改登記資料": "profile-update",
-    "其他問題": "other",
 }
 _KNOWLEDGE_FEEDBACK_POSTBACK = re.compile(
     r"^feedback:knowledge:([1-9][0-9]*):(resolved|unresolved)$"
@@ -77,7 +72,6 @@ class LineWebhookIdentityHandlers:
         matching_postback_application: object | None = None,
         knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
         service_help_application: object | None = None,
-        menu_command_application: object | None = None,
         feedback_application: object | None = None,
     ) -> None:
         self._now = now
@@ -91,7 +85,6 @@ class LineWebhookIdentityHandlers:
         self._matching_postback_application = matching_postback_application
         self._knowledge_question_scheduler = knowledge_question_scheduler
         self._service_help_application = service_help_application
-        self._menu_command_application = menu_command_application
         self._feedback_application = feedback_application
 
     def registry(self):
@@ -139,10 +132,6 @@ class LineWebhookIdentityHandlers:
         text = _message_text(inbox)
         if text is None:
             return
-        if text.strip() in {"案件資訊", "服務條件與費用"} and inbox.event.source.source_type is LineSourceType.USER:
-            if self._handle_customer_case_information(inbox, unit_of_work):
-                unit_of_work.platform_users.apply_friend_event(_friend_event(inbox, line_user_id, LineFriendEventType.ACTIVITY))
-                return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             normalized = text.strip()
@@ -153,10 +142,6 @@ class LineWebhookIdentityHandlers:
                 return
             if normalized in unresolved_aliases:
                 self._handle_feedback_unresolved(inbox, unit_of_work, line_user_id)
-                return
-            if self._menu_command_application is not None and self._menu_command_application.handle(
-                inbox, unit_of_work, line_user_id, text
-            ):
                 return
             if self._handle_service_help(
                 inbox,
@@ -192,18 +177,9 @@ class LineWebhookIdentityHandlers:
             return True
         if stripped in resolved_aliases:
             return False
-        if stripped in {"案件資訊", "服務條件與費用"}:
-            if self._handle_customer_case_information(inbox, unit_of_work):
-                unit_of_work.platform_users.apply_friend_event(_friend_event(inbox, line_user_id, LineFriendEventType.ACTIVITY))
-                return True
         purpose = _identity_purpose_for_text(text)
         if purpose is not None:
             self._open_and_notify(inbox, unit_of_work, line_user_id, purpose)
-            handled = True
-        elif (
-            self._menu_command_application is not None
-            and self._menu_command_application.handle_reply(inbox, unit_of_work, line_user_id, text)
-        ):
             handled = True
         else:
             handled = self._service_help_application is not None and self._service_help_application.handle(
@@ -453,7 +429,8 @@ class LineWebhookIdentityHandlers:
             if not binding or not binding.get("subject_reference"):
                 msg = (
                     "您好！目前尚未連結您的客戶身分資料。\n"
-                    "若您已在工會或市府完成登記，請先點選下方【服務申請入口】完成身分連結；或直接在此留言由專員為您查詢。"
+                    "若您已在工會或市府完成登記，請從訪客圖文選單點選「預約與登記」完成身分連結。"
+                    "若需協助，請直接在此留言。"
                 )
                 unit_of_work.delivery_tasks.enqueue(
                     _text_delivery(
@@ -586,7 +563,7 @@ def _handle_service_help_text(inbox, unit_of_work, line_user_id, text, scheduled
     normalized = text.strip()
     event_identity = inbox.event.event_id.value
     correlation_id = CorrelationId(f"line-event:{event_identity}")
-    if normalized in _SERVICE_HELP_COMMANDS:
+    if normalized == FAQ_MENU_COMMAND:
         unit_of_work.delivery_tasks.enqueue(
             _service_help_menu_delivery(
                 line_user_id,
@@ -596,23 +573,22 @@ def _handle_service_help_text(inbox, unit_of_work, line_user_id, text, scheduled
             )
         )
         return True
-    if normalized not in _SERVICE_HELP_CATEGORIES:
-        return False
-    reply_text = _SERVICE_HELP_CATEGORIES[normalized]
-    if reply_text is None:
-        payload = _text_message_payload("請輸入「常見問題」查看分類，或直接留言由工會人員協助。")
+    if normalized in LEGACY_AI_MENU_COMMANDS:
+        category_key = "retired-ai-action"
+        reply_text = RETIRED_AI_GUIDANCE_TEXT
+    elif normalized in _SERVICE_HELP_CATEGORIES:
+        category_key = _SERVICE_HELP_CATEGORY_KEYS[normalized]
+        reply_text = _SERVICE_HELP_CATEGORIES[normalized] or f"請輸入「{FAQ_MENU_COMMAND}」查看分類，或直接留言由工會人員協助。"
     else:
-        payload = _text_message_payload(reply_text)
-    if normalized == "月嫂身分認證":
-        payload["quickReply"] = {"items": [_quick_reply_item("我是月嫂")]}
+        return False
     unit_of_work.delivery_tasks.enqueue(
         _text_delivery(
             line_user_id,
-            payload,
+            _text_message_payload(reply_text),
             event_identity,
             correlation_id,
             scheduled_at,
-            f"service-help-category:{_SERVICE_HELP_CATEGORY_KEYS[normalized]}:{event_identity}",
+            f"service-help-category:{category_key}:{event_identity}",
         )
     )
     return True
@@ -716,18 +692,9 @@ def _identity_link_message(purpose, url, unit_of_work=None):
 
 def _identity_purpose_for_text(text):
     normalized = text.strip()
-    staff_aliases = route_aliases("staff_binding") or (_STAFF_COMMAND, "我要綁定月嫂")
-    if normalized in staff_aliases or any(alias in normalized for alias in staff_aliases):
-        return LineIdentityFlowPurpose.STAFF_VERIFICATION
     admin_aliases = set(route_aliases("admin_binding")) or _ADMIN_COMMANDS
     if normalized in admin_aliases:
         return LineIdentityFlowPurpose.ADMIN_BINDING
-    customer_aliases = (
-        set(route_aliases("customer_binding"))
-        | set(route_aliases("registration"))
-    ) or _CUSTOMER_COMMANDS
-    if normalized in customer_aliases:
-        return LineIdentityFlowPurpose.CUSTOMER_BINDING
     return None
 
 

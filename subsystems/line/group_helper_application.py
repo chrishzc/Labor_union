@@ -36,7 +36,7 @@ from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.message_copy_catalog import configured_payload
-from subsystems.line.navigation_catalog import load_persisted_aliases
+from subsystems.line.navigation_catalog import GROUP_POSTPONEMENT_COMMAND, load_persisted_aliases
 from subsystems.line.service_start_messages import (
     HELPER_TEXT_DEFAULTS,
     GROUP_ASSISTANCE_DIRECTIONS,
@@ -59,7 +59,6 @@ _ACTIVE_BINDING_STATUSES = frozenset({
     LineOrderGroupBindingStatus.ATTENTION,
 })
 _DEFAULT_MENU_ALIASES = ("小幫手", "工會", "月嫂選單", "服務選單")
-_DEFAULT_POSTPONE_PREFIXES = ("雙方合意延期",)
 _POSTPONEMENT_RANGE_RE = re.compile(
     r"[：:]\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*(?:順延至|延至|->|→)\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*$"
 )
@@ -72,11 +71,10 @@ _POSTPONEMENT_SEND_RE = re.compile(
 )
 
 
-def _match_postponement_text(text: str, prefixes: tuple[str, ...]) -> re.Match[str] | None:
-    for prefix in sorted(prefixes, key=len, reverse=True):
-        if text.startswith(prefix):
-            return _POSTPONEMENT_RANGE_RE.fullmatch(text[len(prefix):].lstrip())
-    return None
+def _match_postponement_text(text: str) -> re.Match[str] | None:
+    if not text.startswith(GROUP_POSTPONEMENT_COMMAND):
+        return None
+    return _POSTPONEMENT_RANGE_RE.fullmatch(text.removeprefix(GROUP_POSTPONEMENT_COMMAND).lstrip())
 _FAMILY_START_PROPOSAL = "group_helper_start_proposal"
 _FAMILY_POSTPONE_PROPOSAL = "group_helper_postpone_proposal"
 POSTPONEMENT_DRAFT_FAMILY = "group_helper_postpone_draft"
@@ -340,12 +338,9 @@ class LineGroupHelperApplication:
     def _business_today(self) -> date:
         return self._now().astimezone(_TAIPEI_TZ).date()
 
-    def _aliases(self) -> dict[str, tuple[str, ...]]:
+    def _menu_aliases(self) -> tuple[str, ...]:
         _, routes = self._aliases_provider()
-        return {
-            "group_helper_menu": tuple(routes.get("group_helper_menu") or _DEFAULT_MENU_ALIASES),
-            "group_postponement": tuple(routes.get("group_postponement") or _DEFAULT_POSTPONE_PREFIXES),
-        }
+        return tuple(routes.get("group_helper_menu") or _DEFAULT_MENU_ALIASES)
 
     def handle_reply(self, inbox: Any, unit_of_work: Any) -> bool:
         return self.handle_message(inbox, unit_of_work)
@@ -363,9 +358,8 @@ class LineGroupHelperApplication:
         if not text:
             return False
 
-        aliases = self._aliases()
-        is_menu_cmd = text in aliases["group_helper_menu"]
-        postpone_match = _match_postponement_text(text, aliases["group_postponement"])
+        is_menu_cmd = text in self._menu_aliases()
+        postpone_match = _match_postponement_text(text)
         saved_postpone_match = _POSTPONEMENT_SEND_RE.fullmatch(text)
         if not (is_menu_cmd or postpone_match or saved_postpone_match):
             return False

@@ -354,8 +354,9 @@ def test_satisfaction_survey_default_replies_plain_text_without_link() -> None:
 
 
 def test_menu_aliases_pre_start_shows_datetimepicker_and_post_start_hides_confirm_start() -> None:
-    app = _make_app()
-    for idx, alias in enumerate(("小幫手", "工會", "月嫂選單", "服務選單")):
+    menu_aliases = ["小幫手", "工會", "月嫂選單", "服務選單"]
+    app = _make_app(custom_aliases={"group_helper_menu": menu_aliases})
+    for idx, alias in enumerate(menu_aliases):
         uow = _FakeGroupHelperUoW(is_started=False)
         handled = app.handle_message(
             _make_inbox(f"evt-menu-{idx}", {"type": "message", "message": {"type": "text", "text": alias}}),
@@ -634,8 +635,19 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push(m
     else:
         monkeypatch.delenv("LINE_STAFF_SCHEDULE_LIFF_ID", raising=False)
     monkeypatch.setenv("LINE_LIFF_ID", "synthetic-shared-liff")
-    app = _make_app()
+    app = _make_app(custom_aliases={"group_postponement": ["順延日期"]})
     uow = _FakeGroupHelperUoW(is_started=True)
+
+    assert not app.handle_message(
+        _make_inbox(
+            "evt-postpone-retired-alias",
+            {"type": "message", "message": {"type": "text", "text": "順延日期：2026-06-12→2026-06-15"}},
+            user_id="U-staff-1",
+        ),
+        uow,
+    )
+    assert not uow.delivery_tasks.requests
+    assert not uow._helper_proposals
 
     # 1. Each menu opening returns the same case-specific LIFF entry.
     def open_entry(event_id):

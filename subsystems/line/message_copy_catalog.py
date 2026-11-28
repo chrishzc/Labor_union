@@ -77,7 +77,6 @@ def _text_defaults():
         STAFF_WEB_EXPIRY: STAFF_WEB_EXPIRY_COPY,
         "service-start-result": "服務日期安排\n案件：{case_no}\n{assignments}",
         "service-progress": "最新案件：{case_no}\n目前狀態：{status}\n服務期間：{start_date} 至 {end_date}",
-        "service-progress-unbound": help._unbound_progress_reply("{identity_url}"),
         "service-registration": help._registration_reply("{registration_url}"),
         "service-registration-unavailable": help._registration_reply(None),
         "identity-customer-link": _identity_link_message(LineIdentityFlowPurpose.CUSTOMER_BINDING, "{identity_url}"),
@@ -154,6 +153,7 @@ def default_copy_templates():
     """Virtual genesis entries; reads never persist or replace existing settings."""
     from subsystems.line.deposit_notifications import ASSISTANCE_ACK
     from subsystems.line.order_group_application import GROUP_OPERATOR_REPLY_COPY
+    from subsystems.line.service_help_application import _unbound_progress_reply
     from subsystems.line.service_start_messages import GROUP_ASSISTANCE_DIRECTIONS
     from subsystems.scheduling.matching_line_cards import MATCHING_ASSISTANCE_DIRECTIONS
 
@@ -161,6 +161,10 @@ def default_copy_templates():
     result = {}
     for key, content in _text_defaults().items():
         result[key] = _template(copy_template_id(key), key, content)
+    # The archived progress reply can contain a direct identity link.
+    result["service-progress-unbound"] = _template(
+        copy_template_id("service-progress-unbound-menu"), "service-progress-unbound", _unbound_progress_reply(),
+    )
     for key, content in GROUP_OPERATOR_REPLY_COPY.items():
         # Earlier overrides were retired. Opening the editor must not reactivate them.
         result[key] = _template(copy_template_id(f"{key}-reply-v2"), key, content)

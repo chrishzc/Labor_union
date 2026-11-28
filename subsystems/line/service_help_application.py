@@ -7,11 +7,10 @@ from __future__ import annotations
 
 from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
-from subsystems.line.navigation_catalog import route_aliases
+from subsystems.line.navigation_catalog import FAQ_MENU_COMMAND, SERVICE_PROGRESS_COMMAND, route_aliases
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-import os
+from datetime import datetime
 import re
 from typing import Callable
 
@@ -21,7 +20,6 @@ from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineReci
 from domains.knowledge_retrieval.qa_catalog import line_faq_reply_fits
 from domains.line.faq_chat_layout import FAQ_ID_PATTERN, FaqCardView, FaqCategory, faq_short_label
 from domains.line.legacy_faq import LEGACY_FAQ_CATEGORIES, LEGACY_FAQ_POLICY_LABELS
-from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.identities import LineSourceType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import fingerprint_payload
@@ -36,7 +34,6 @@ from subsystems.line.faq_chat_layout import (
     FaqChatLayoutApplication,
     FaqLayoutUnavailable,
 )
-from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.ai_router_contracts import (
     Clarification,
     DeterministicAnswer,
@@ -54,6 +51,7 @@ from subsystems.line.runtime_human_escalation_source import normalize_complaint_
 _FAQ_PREFIX = "faq:v1:"
 _FAQ_PAGE_SIZE = 6
 _FAQ_NOT_FOUND = "這個問答目前無法讀取。請返回常見問題，或直接在此聊天室留言。"
+RETIRED_AI_GUIDANCE_TEXT = f"此功能已停用。請在本聊天室輸入「{FAQ_MENU_COMMAND}」，或直接留言由工會人員協助。"
 _FAQ_UNAVAILABLE = "常見問答暫時無法使用。請稍後再試，或直接在此聊天室留言。"
 
 _HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-rejected"
@@ -68,7 +66,7 @@ _RESUME_AI_ALIASES = {
     "繼續讓機器人回答",
 }
 _REPLY_ONLY_SUFFIXES = frozenset({
-    "menu", "order-update-menu", "registration", "clarification", "unavailable",
+    "menu", "order-update-menu", "clarification", "unavailable",
     "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "profile-update-form", "other",
     "knowledge", "category_faq", "faq-guidance",
 })
@@ -89,14 +87,12 @@ class LineServiceHelpApplication:
     def __init__(
         self,
         now: Callable[[], datetime],
-        identity_url: Callable[[str, str], str] | None = None,
         *,
         faq_catalog: PublishedFaqCatalog | None = None,
         faq_layout: FaqChatLayoutApplication | None = None,
         faq_reader: Callable[[], ServiceHelpFaqReaders] | None = None,
     ) -> None:
         self._now = now
-        self._identity_url = identity_url
         self._faq_reader = faq_reader or (lambda: ServiceHelpFaqReaders(faq_catalog, faq_layout))
         self._router = DeterministicLineRouter()
 
@@ -118,20 +114,13 @@ class LineServiceHelpApplication:
         if reply_only and isinstance(outcome, DeterministicAnswer):
             return False
         if isinstance(outcome, DeterministicRoute):
-            if outcome.route_key == "registration":
-                self._reply_or_enqueue(
-                    inbox,
-                    unit_of_work,
-                    line_user_id,
-                    configured_payload(unit_of_work, "service-registration" if _registration_liff_url() else "service-registration-unavailable", _text_payload(_registration_reply(_registration_liff_url())), {"registration_url": _registration_liff_url()}),
-                    "registration",
-                    reason_code=outcome.reason_code,
-                )
-                return True
             if outcome.route_key == "service_help_menu":
                 return self._handle_faq_action(inbox, unit_of_work, line_user_id, "menu", "0")
             if outcome.route_key == "ai_assistant_menu":
-                return self._handle_faq_action(inbox, unit_of_work, line_user_id, "menu", "0")
+                if not _same_private_chat(inbox, line_user_id):
+                    return False
+                self._retired_ai_action(inbox, unit_of_work, line_user_id)
+                return True
             if outcome.route_key in {"order_update_menu", "order_update_request"}:
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _order_update_menu_payload(), "order-update-menu", reason_code=outcome.reason_code)
                 return True
@@ -195,7 +184,7 @@ class LineServiceHelpApplication:
             inbox,
             unit_of_work,
             line_user_id,
-            _text_payload("此功能已停用。請在本聊天室輸入「常見問題」，或直接留言由工會人員協助。"),
+            _text_payload(RETIRED_AI_GUIDANCE_TEXT),
             "retired-ai-action",
             reason_code="chat_ai_retired",
         )
@@ -204,7 +193,7 @@ class LineServiceHelpApplication:
         if category in {CustomerServiceCategory.SERVICE_FLOW, CustomerServiceCategory.PAYMENT_SUBSIDY}:
             return self._handle_faq_action(inbox, unit_of_work, line_user_id, "category", category.value)
         if category is CustomerServiceCategory.SERVICE_PROGRESS:
-            payload = self._progress_payload(inbox, unit_of_work, line_user_id)
+            payload = self._progress_payload(unit_of_work, line_user_id)
         elif category is CustomerServiceCategory.PROFILE_UPDATE:
             payload = _profile_update_payload()
         else:
@@ -309,26 +298,13 @@ class LineServiceHelpApplication:
             reason_code="faq_source_unavailable" if unavailable else "faq_not_available",
         )
 
-    def _progress_payload(self, inbox, unit_of_work, line_user_id):
+    def _progress_payload(self, unit_of_work, line_user_id):
         context = unit_of_work.customer_service.latest_client_case(line_user_id.value)
-        if context or self._identity_url is None:
-            if not context:
-                return _progress_payload(context)
-            return configured_payload(unit_of_work, "service-progress", _progress_payload(context), {
-                "case_no": (context or {}).get("case_no") or "尚未核發", "status": (context or {}).get("status") or "資料確認中",
-                "start_date": (context or {}).get("start_date") or "未定", "end_date": (context or {}).get("end_date") or "未定"})
-        event_id = inbox.event.event_id.value
-        opened = unit_of_work.identity_flows.open(
-            OpenLineIdentityFlowCommand(
-                LineIdentityFlowPurpose.CUSTOMER_BINDING,
-                line_user_id,
-                self._now() + timedelta(minutes=15),
-                IdempotencyKey(f"service-help-binding:{event_id}"),
-                CorrelationId(f"line-event:{event_id}"),
-            )
-        )
-        url = self._identity_url(opened.purpose.value, opened.flow_id.value)
-        return configured_payload(unit_of_work, "service-progress-unbound", _text_payload(_unbound_progress_reply(url)), {"identity_url": url})
+        if not context:
+            return configured_payload(unit_of_work, "service-progress-unbound", _progress_payload(context))
+        return configured_payload(unit_of_work, "service-progress", _progress_payload(context), {
+            "case_no": context.get("case_no") or "尚未核發", "status": context.get("status") or "資料確認中",
+            "start_date": context.get("start_date") or "未定", "end_date": context.get("end_date") or "未定"})
 
     def _enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
         event_id = inbox.event.event_id.value
@@ -398,25 +374,13 @@ def _text_payload(text):
 
 def _progress_payload(context):
     if not context:
-        return _text_payload("目前尚未找到您綁定的服務資料。請點選下方「服務登記」取得新的安全綁定入口。")
+        return _text_payload(_unbound_progress_reply())
     dates = f"{context.get('start_date') or '未定'} 至 {context.get('end_date') or '未定'}"
     return _text_payload(f"最新案件：{context.get('case_no') or '尚未核發'}\n目前狀態：{context.get('status') or '資料確認中'}\n服務期間：{dates}")
 
 
-def _unbound_progress_reply(identity_url):
-    return (
-        "目前尚未找到您綁定的服務資料。\n\n"
-        "若您已填過資料，請開啟以下安全綁定入口：\n"
-        f"{identity_url}\n\n"
-        "若您是新客戶，請點選下方「服務登記」完成資料填寫。"
-    )
-
-
-def _registration_liff_url():
-    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
-    if not liff_id or liff_id == "your_liff_id_here":
-        return None
-    return f"https://liff.line.me/{liff_id}?entry=registration"
+def _unbound_progress_reply() -> str:
+    return "目前尚未找到您綁定的服務資料。請從訪客圖文選單點選「預約與登記」。"
 
 
 def _registration_reply(registration_url):
@@ -429,7 +393,7 @@ def _fixed_service_quick_actions():
     return [
         {"type": "action", "action": {"type": "message", "label": label, "text": text}}
         for label, text in (
-            ("查詢進度", "查詢服務進度"),
+            ("查詢進度", SERVICE_PROGRESS_COMMAND),
             ("修改資料", "修改登記資料"),
         )
     ]
@@ -449,7 +413,7 @@ def _service_menu_payload(quick_reply=None):
     actions = (
         ("📋 服務流程與申請", "常見問題：服務流程", "secondary"),
         ("💰 費用收費與政府補助", "常見問題：收費與補助", "secondary"),
-        ("🔍 如何查詢目前服務進度？", "查詢服務進度", "secondary"),
+        ("🔍 如何查詢目前服務進度？", SERVICE_PROGRESS_COMMAND, "secondary"),
         ("✏️ 登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
     )
     return _navigation_card_payload(
@@ -474,7 +438,7 @@ def _quick_faq_action(action):
 def _faq_back_quick_reply(*, predecessor=False):
     if predecessor:
         return {"items": [
-            {"type": "action", "action": {"type": "message", "label": "返回常見問題", "text": "常見問題"}}
+            {"type": "action", "action": {"type": "message", "label": "返回常見問題", "text": FAQ_MENU_COMMAND}}
         ]}
     return {"items": [_quick_faq_action(_faq_action("menu", 0, "返回常見問題"))]}
 

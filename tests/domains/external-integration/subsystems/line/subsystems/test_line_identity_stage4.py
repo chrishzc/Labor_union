@@ -14,6 +14,7 @@ import pytest
 from domains.line.identities import (
     LineIdentityFlowId,
     LineReviewRequestId,
+    LineSourceType,
     LineUserId,
     LineWebhookEventId,
 )
@@ -59,6 +60,7 @@ from subsystems.line.review_contracts import (
     PreviewLineReviewDecisionCommand,
 )
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
+from subsystems.line.service_help_application import LineServiceHelpApplication
 
 NOW = datetime(2026, 8, 8, 12, tzinfo=timezone.utc)
 
@@ -219,41 +221,40 @@ def test_staff_self_service_flow_requires_current_staff_binding(binding) -> None
     assert uow.committed is False
 
 
-@pytest.mark.parametrize("message", ("我是月嫂", "我要綁定月嫂"))
-def test_staff_command_only_opens_flow_and_queues_liff_link(message) -> None:
-    flows = SimpleNamespace(open=lambda command: _opened_flow(command))
+@pytest.mark.parametrize("message", (
+    "我是月嫂", "我要綁定月嫂", "如果我是月嫂，要去哪裡看排班？", "服務登記",
+    "綁定訂單", "綁定", "查詢訂單", "訂單查詢", "請問怎麼綁定訂單？",
+))
+def test_retired_identity_text_does_not_open_flow_or_queue_reply(message) -> None:
+    def unexpected_flow(_command):
+        pytest.fail("retired text must not open an identity flow")
+
     deliveries = RecordingRepository()
     platform_events = []
     uow = FakeUow(
         platform_users=SimpleNamespace(apply_friend_event=platform_events.append),
-        identity_flows=flows,
+        identity_flows=SimpleNamespace(open=unexpected_flow),
         delivery_tasks=deliveries,
     )
     handler = LineWebhookIdentityHandlers(
         lambda: NOW,
         lambda purpose, flow_id: f"https://example.test/{purpose}/{flow_id}",
+        service_help_application=LineServiceHelpApplication(lambda: NOW),
     )
 
-    handler.handle_message(_message_inbox(message), uow)
+    inbox = _message_inbox(message)
+    assert handler.handle_reply_message(inbox, uow) is False
+    handler.handle_message(inbox, uow)
 
     assert platform_events[0].line_user_id == LineUserId("U-staff")
-    assert len(deliveries.items) == 1
-    assert "staff_verification" in deliveries.items[0].payload_json
-    assert not hasattr(uow, "identities")
+    assert deliveries.items == []
 
 
-@pytest.mark.parametrize(
-    ("message", "purpose"),
-    [
-        ("綁定", "customer_binding"),
-        ("綁定訂單", "customer_binding"),
-        ("訂單查詢", "customer_binding"),
-        ("綁定工會帳號", "admin_binding"),
-        ("綁定後台帳號", "admin_binding"),
-        ("綁定system_admin", "admin_binding"),
-    ],
-)
-def test_identity_commands_resolve_to_exact_flow(message, purpose) -> None:
+@pytest.mark.parametrize("message", ("綁定工會帳號", "綁定後台帳號", "綁定system_admin"))
+def test_default_admin_identity_commands_open_admin_flow(message, monkeypatch, tmp_path) -> None:
+    from subsystems.line import navigation_catalog
+
+    monkeypatch.setattr(navigation_catalog, "CATALOG_STORAGE_PATH", tmp_path / "aliases.json")
     deliveries = RecordingRepository()
     uow = FakeUow(
         platform_users=SimpleNamespace(apply_friend_event=lambda _: None),
@@ -267,12 +268,10 @@ def test_identity_commands_resolve_to_exact_flow(message, purpose) -> None:
 
     handler.handle_message(_message_inbox(message), uow)
 
-    assert purpose in deliveries.items[0].payload_json
-    if purpose == "customer_binding":
-        reply_text = json.loads(deliveries.items[0].payload_json)["text"]
-        assert "請開啟以下頁面完成客戶身分綁定或服務登記" in reply_text
-        assert "此連結將於 15 分鐘後失效" in reply_text
-        assert "歡迎加入" not in reply_text
+    reply_text = json.loads(deliveries.items[0].payload_json)["text"]
+    assert "https://example.test/admin_binding/" in reply_text
+    assert "此連結將於 15 分鐘後失效" in reply_text
+    assert "歡迎加入" not in reply_text
 
 
 def test_staff_apply_binds_exact_unclaimed_match_without_manual_review() -> None:
@@ -705,7 +704,7 @@ def _opened_flow(command):
 
 
 def _message_inbox(text):
-    source = SimpleNamespace(user_id=LineUserId("U-staff"))
+    source = SimpleNamespace(source_type=LineSourceType.USER, user_id=LineUserId("U-staff"))
     event = SimpleNamespace(
         event_id=LineWebhookEventId("event-staff"),
         source=source,

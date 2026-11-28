@@ -211,7 +211,7 @@ def test_development_router_preview_exposes_fixed_buckets_and_requested_confiden
         text="未命中問題", source_event_id="preview-safe-menu", score=20,
     )).data
     protected = preview_router(LineRouterPreviewRequest(
-        text="綁定訂單", source_event_id="preview-protected", score=100,
+        text="綁定後台帳號", source_event_id="preview-protected", score=100,
     )).data
     unavailable = preview_router(LineRouterPreviewRequest(
         text="高信心但沒有已發布答案", source_event_id="preview-unavailable", score=90,
@@ -224,7 +224,7 @@ def test_development_router_preview_exposes_fixed_buckets_and_requested_confiden
         "safe_menu", "unknown_intent", 0,
     )
     assert (protected.semantic_bucket, protected.route_key, protected.confidence) == (
-        "protected_route", "customer_binding", 100,
+        "protected_route", "admin_binding", 100,
     )
     assert (unavailable.semantic_bucket, unavailable.reason_code, unavailable.confidence, unavailable.score_band) == (
         "manual_fallback", "deterministic_answer_unavailable", 90, "gte_80",

@@ -4896,6 +4896,8 @@
 .line-guidance-panel .studio-guidance-layout { grid-template-columns: 285px minmax(0, 1fr); align-items: start; }
 .line-guidance-panel .ai-studio-sidebar { padding: 20px 14px; border-color: var(--line-color-border-subtle); border-radius: 16px; background: #fff; }
 .line-guidance-panel .ai-sidebar-top { padding: 0 5px 12px; }
+.line-guidance-panel .studio-trigger-filter { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-bottom: 8px; color: var(--line-color-text); font-size: 0.82rem; cursor: pointer; }
+.line-guidance-panel .studio-trigger-filter input { accent-color: var(--line-color-primary); }
 .line-guidance-panel .ai-rule-search-form { display: grid; gap: 8px; }
 .line-guidance-panel .ai-rule-search-form input { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-color-border); border-radius: var(--radius-md); color: var(--line-color-text); background: #fff; font: inherit; font-size: 0.82rem; }
 .line-guidance-panel .studio-rule-choice { display: block; width: 100%; text-align: left; font: inherit; }
@@ -4904,6 +4906,7 @@
 .line-guidance-panel .studio-rule-choice .ai-card-title-row { gap: 8px; }
 .line-guidance-panel .studio-rule-choice strong { font-size: 0.85rem; }
 .line-guidance-panel .studio-rule-choice .ai-card-metric-row { margin-top: 7px; font-size: 0.72rem; }
+.line-guidance-panel .studio-trigger-source { white-space: nowrap; font-weight: 600; }
 .studio-readonly-note { display: flex; align-items: center; gap: 6px; margin: 18px 4px 0; color: var(--line-color-text-muted); font-size: 0.72rem; }
 .studio-readonly-note svg { width: 15px; height: 15px; flex-shrink: 0; }
 .studio-muted-badge { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 6px; background: #f4efeb; color: var(--line-color-text-muted); font-size: 0.72rem; white-space: nowrap; }

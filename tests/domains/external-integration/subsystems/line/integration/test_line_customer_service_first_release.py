@@ -106,7 +106,7 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
         faq_layout=SimpleNamespace(published_layout=FaqLayout),
     )
 
-    handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "服務說明")
+    handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "常見問題")
 
     assert handled is True
     assert len(unit_of_work.delivery_tasks.requests) == 1
@@ -127,7 +127,7 @@ def test_service_help_never_uses_reply_token_before_durable_delivery():
         faq_layout=SimpleNamespace(published_layout=FaqLayout),
     )
 
-    handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "服務說明")
+    handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "常見問題")
 
     assert handled is True
     assert provider.calls == []
@@ -156,7 +156,7 @@ def test_old_handoff_postback_background_path_is_inert():
     assert unit_of_work.delivery_tasks.requests == []
 
 
-def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
+def test_service_help_accepts_canonical_progress_command_and_uses_approved_copy():
     def preview(category_id):
         assert category_id == "payment_subsidy"
         return FaqPreview(FaqCardView(
@@ -170,10 +170,10 @@ def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
         faq_layout=SimpleNamespace(preview_published=preview),
     )
 
-    handled = application.handle(_inbox("event-4"), unit_of_work, LineUserId("U123456789"), "訂單進度")
+    handled = application.handle(_inbox("event-4"), unit_of_work, LineUserId("U123456789"), "查詢服務進度")
 
     assert handled is True
-    assert "服務登記" in unit_of_work.delivery_tasks.requests[0].payload_json
+    assert "預約與登記" in unit_of_work.delivery_tasks.requests[0].payload_json
 
     application.handle(_inbox("event-5"), unit_of_work, LineUserId("U123456789"), "收費與補助")
 
@@ -182,32 +182,27 @@ def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
     assert button["action"] == {"type": "postback", "data": "faq:v1:question:qa-fee", "label": "費用說明"}
 
 
-def test_service_registration_text_returns_the_non_expiring_liff_entrypoint(monkeypatch):
-    monkeypatch.setenv("LINE_LIFF_ID", "1234567890-AbCdEf")
+def test_service_registration_text_does_not_reply():
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
 
     handled = application.handle(_inbox("event-registration"), unit_of_work, LineUserId("U123456789"), "服務登記")
 
-    assert handled is True
-    payload = unit_of_work.delivery_tasks.requests[0].payload_json
-    assert "https://liff.line.me/1234567890-AbCdEf?entry=registration" in payload
-    assert "target=registration" not in payload
+    assert handled is False
+    assert unit_of_work.delivery_tasks.requests == []
 
 
-def test_unbound_progress_creates_a_canonical_customer_binding_flow():
+def test_unbound_progress_directs_to_rich_menu_without_creating_binding_flow():
     unit_of_work = _unit_of_work()
-    unit_of_work.identity_flows = _IdentityFlows()
-    application = LineServiceHelpApplication(
-        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
-        lambda purpose, flow_id: f"https://example.test/{purpose}/{flow_id}",
-    )
+    unit_of_work.identity_flows = SimpleNamespace(open=lambda _: pytest.fail("progress must not open an identity flow"))
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
 
-    handled = application.handle(_inbox("event-6"), unit_of_work, LineUserId("U123456789"), "查詢進度")
+    handled = application.handle(_inbox("event-6"), unit_of_work, LineUserId("U123456789"), "查詢服務進度")
 
     assert handled is True
-    assert unit_of_work.identity_flows.commands[0].idempotency_key.value == "service-help-binding:event-6"
-    assert "https://example.test/customer_binding/flow-1" in unit_of_work.delivery_tasks.requests[0].payload_json
+    [reply] = unit_of_work.delivery_tasks.requests
+    assert "訪客圖文選單點選「預約與登記」" in reply.payload_json
+    assert "https://" not in reply.payload_json
 
 
 def test_webhook_handler_delegates_service_help_to_the_injected_owner_workflow():
@@ -221,7 +216,7 @@ def test_webhook_handler_delegates_service_help_to_the_injected_owner_workflow()
         event=SimpleNamespace(
             event_id=SimpleNamespace(value="event-3"),
             occurred_at=datetime(2026, 8, 11, tzinfo=timezone.utc),
-            payload_json='{"message":{"type":"text","text":"服務說明"}}',
+            payload_json='{"message":{"type":"text","text":"常見問題"}}',
             source=SimpleNamespace(
                 source_type=SimpleNamespace(value="user"),
                 user_id=LineUserId("U123456789"),
@@ -232,7 +227,7 @@ def test_webhook_handler_delegates_service_help_to_the_injected_owner_workflow()
 
     handler.handle_message(inbox, unit_of_work)
 
-    assert service_help.calls == [("U123456789", "服務說明")]
+    assert service_help.calls == [("U123456789", "常見問題")]
 
 
 class _RecordingServiceHelpApplication:
@@ -242,18 +237,6 @@ class _RecordingServiceHelpApplication:
     def handle(self, _inbox, _unit_of_work, line_user_id, text):
         self.calls.append((line_user_id.value, text))
         return True
-
-
-class _IdentityFlows:
-    def __init__(self):
-        self.commands = []
-
-    def open(self, command):
-        self.commands.append(command)
-        return SimpleNamespace(
-            purpose=command.purpose,
-            flow_id=SimpleNamespace(value="flow-1"),
-        )
 
 
 def test_first_release_schema_has_versioned_ticket_and_append_only_events():
@@ -453,7 +436,7 @@ def test_customer_service_preview_apply_routes_keep_legacy_patch_as_retired_guar
 
 
 def test_customer_menu_case_information_postback_replies_flex_card():
-    """驗證客戶選單點擊【案件資訊】或傳送「案件資訊」文字，直接以 Flex 卡片回傳服務條件與費用約定。"""
+    """實際點擊客戶選單時回覆案情，輸入相同文字時不查詢。"""
     from domains.line.identities import LineWebhookEventId, LineSourceType
     from domains.line.delivery import LineMessageKind
 
@@ -492,12 +475,11 @@ def test_customer_menu_case_information_postback_replies_flex_card():
     assert req1.message_kind is LineMessageKind.FLEX
     assert "115000179" in req1.payload_json
 
-    # 2. 聊天室打字「案件資訊」
-    inbox_msg = make_inbox(text_msg="案件資訊")
-    assert handlers.handle_reply_message(inbox_msg, uow) is True
-    assert len(uow.delivery_tasks.requests) == 2
-    req2 = uow.delivery_tasks.requests[1]
-    assert req2.message_kind is LineMessageKind.FLEX
+    for text in ("案件資訊", "服務條件與費用"):
+        inbox_msg = make_inbox(text_msg=text)
+        assert handlers.handle_reply_message(inbox_msg, uow) is False
+        handlers.handle_message(inbox_msg, uow)
+    assert uow.delivery_tasks.requests == [req1]
 
 
 def test_customer_menu_case_information_unbound_and_no_case_guidance():
@@ -518,13 +500,16 @@ def test_customer_menu_case_information_unbound_and_no_case_guidance():
 
     uow_unbound = SimpleNamespace(
         delivery_tasks=DeliveryTasks(),
-        customer_case_information=lambda uid: "您好！目前尚未連結您的客戶身分資料。\n若您已在工會或市府完成登記，請先點選下方【服務申請入口】完成身分連結；或直接在此留言由專員為您查詢。",
+        _connection=SimpleNamespace(cursor=lambda: nullcontext(SimpleNamespace(
+            execute=lambda *_: None,
+            fetchone=lambda: None,
+        ))),
     )
     assert handlers.handle_reply_postback(inbox, uow_unbound) is True
     assert len(uow_unbound.delivery_tasks.requests) == 1
     req = uow_unbound.delivery_tasks.requests[0]
     assert req.message_kind is LineMessageKind.TEXT
-    assert "服務申請入口" in req.payload_json
+    assert "預約與登記" in req.payload_json
 
 
 def test_case_bank_account_resolution_by_year_rules():

@@ -409,7 +409,7 @@ def current_message_sample(key):
         payload = _progress_payload(context)
     elif key == "service-progress-unbound":
         from subsystems.line.service_help_application import _unbound_progress_reply
-        payload = text(_unbound_progress_reply(field("身分綁定入口", "identity_url", VALUES["bind_url"])))
+        payload = text(_unbound_progress_reply())
     elif key in {"service-registration", "service-registration-unavailable"}:
         from subsystems.line.service_help_application import _registration_reply
         entry = field("服務登記入口", "registration_url", VALUES["url"]) if key == "service-registration" else None

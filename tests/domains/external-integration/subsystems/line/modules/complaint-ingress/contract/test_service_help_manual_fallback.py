@@ -97,20 +97,27 @@ def test_reply_token_is_never_used_as_a_precommit_provider_call() -> None:
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
 
-    application.handle(_inbox("event-2"), unit_of_work, LineUserId("U123456789"), "服務說明")
+    application.handle(_inbox("event-2"), unit_of_work, LineUserId("U123456789"), "常見問題")
 
     assert len(unit_of_work.delivery_tasks.requests) == 1
     assert "reply-event-2" not in unit_of_work.delivery_tasks.requests[0].payload_json
 
 
-@pytest.mark.parametrize('message', ['問題', '其他問題', '詢問其他問題', '其他', '5', '6'])
-def test_general_questions_open_self_service_without_creating_ticket(message):
+@pytest.mark.parametrize("message", [
+    "服務與問答", "服務說明", "常見問答", "問題", "其他問題",
+    "詢問其他問題", "其他", "5", "6", "查詢進度", "訂單進度", "3",
+])
+def test_retired_service_aliases_open_no_menu_and_create_no_delivery(message):
+    from subsystems.line.webhook_identity_handlers import _handle_service_help_text
+
     unit = _unit_of_work()
-    application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc))
-    assert application.handle(_inbox(), unit, LineUserId('U123456789'), message)
+    now = datetime.now(timezone.utc)
+    application = LineServiceHelpApplication(lambda: now)
+    user = LineUserId("U123456789")
+    assert not application.handle(_inbox(), unit, user, message)
+    assert not _handle_service_help_text(_inbox(), unit, user, message, now)
     assert not unit.customer_service.messages
-    payload = json.loads(unit.delivery_tasks.requests[0].payload_json)
-    assert payload['type'] == 'flex' and '服務與問答' in str(payload)
+    assert not unit.delivery_tasks.requests
 
 
 @pytest.mark.parametrize('message', [
@@ -141,11 +148,12 @@ def test_legacy_handler_keeps_chat_guidance(message):
 def test_legacy_menu_links_explanations_in_chat():
     from subsystems.line.webhook_identity_handlers import _handle_service_help_text
     unit = _unit_of_work()
-    assert _handle_service_help_text(_inbox(), unit, LineUserId('U123456789'), '服務說明', datetime.now(timezone.utc))
+    assert _handle_service_help_text(_inbox(), unit, LineUserId('U123456789'), '常見問題', datetime.now(timezone.utc))
     payload = json.loads(unit.delivery_tasks.requests[0].payload_json)
     actions = [item['action'] for item in payload['quickReply']['items']]
     assert [action['label'] for action in actions[:2]] == ['服務流程', '收費與補助']
     assert all(action['type'] == 'message' for action in actions)
+    assert actions[2]['text'] == '查詢服務進度'
     assert actions[3]['text'] == '修改登記資料'
 
 
@@ -168,7 +176,7 @@ def test_service_help_menu_preserves_service_actions_without_ai_liff():
         lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
         faq_layout=SimpleNamespace(published_layout=FaqLayout),
     )
-    assert application.handle(_inbox("event-menu"), unit, LineUserId("U123456789"), "服務說明")
+    assert application.handle(_inbox("event-menu"), unit, LineUserId("U123456789"), "常見問題")
     [request] = unit.delivery_tasks.requests
     payload = json.loads(request.payload_json)
     actions = [button["action"] for button in payload["contents"]["body"]["contents"]]
@@ -176,16 +184,21 @@ def test_service_help_menu_preserves_service_actions_without_ai_liff():
     assert "target=ai_assistant" not in request.payload_json
 
 
-def test_service_help_and_faq_aliases_share_one_card() -> None:
+def test_canonical_faq_text_and_existing_menu_postback_share_card() -> None:
+    from domains.line.faq_chat_layout import FaqLayout
+
     service_uow = _unit_of_work()
     faq_uow = _unit_of_work()
-    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
+        faq_layout=SimpleNamespace(published_layout=FaqLayout),
+    )
 
     assert application.handle(
-        _inbox("event-service"), service_uow, LineUserId("U123456789"), "服務與問答"
+        _inbox("event-service"), service_uow, LineUserId("U123456789"), "常見問題"
     ) is True
-    assert application.handle(
-        _inbox("event-faq"), faq_uow, LineUserId("U123456789"), "常見問答"
+    assert application.handle_postback(
+        _inbox("event-faq"), faq_uow, LineUserId("U123456789"), "faq:v1:menu:0"
     ) is True
 
     service_request = service_uow.delivery_tasks.requests[0]
@@ -195,14 +208,11 @@ def test_service_help_and_faq_aliases_share_one_card() -> None:
     assert service_request.idempotency_key.value == "service-help:menu:event-service"
     assert faq_request.idempotency_key.value == "service-help:menu:event-faq"
     assert service_payload == faq_payload
-    assert service_payload["contents"]["header"]["contents"][1]["text"] == "服務與問答"
-    assert [button["action"]["label"] for button in service_payload["contents"]["body"]["contents"]] == [
-        "如何申請服務？",
-        "費用與補助怎麼算？",
-        "如何查詢目前進度？",
-        "登記資料填錯怎麼辦？",
-        "詢問其他問題",
-    ]
+    assert service_payload["type"] == "flex"
+    assert any(
+        item["action"].get("text") == "查詢服務進度"
+        for item in service_payload["quickReply"]["items"]
+    )
     assert "月嫂身分認證" not in service_request.payload_json
 
 
@@ -247,10 +257,25 @@ def test_exact_replay_keeps_the_same_durable_delivery_identity() -> None:
     second_uow = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
 
-    application.handle(_inbox("event-3"), first_uow, LineUserId("U123456789"), "服務說明")
-    application.handle(_inbox("event-3"), second_uow, LineUserId("U123456789"), "服務說明")
+    application.handle(_inbox("event-3"), first_uow, LineUserId("U123456789"), "常見問題")
+    application.handle(_inbox("event-3"), second_uow, LineUserId("U123456789"), "常見問題")
 
     assert first_uow.delivery_tasks.requests[0].idempotency_key == second_uow.delivery_tasks.requests[0].idempotency_key
+
+
+@pytest.mark.parametrize("command", ["AI客服", "AI問答", "AI智慧問答"])
+def test_old_ai_text_only_guides_users_to_canonical_faq_or_chat(command):
+    unit = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc))
+    assert application.handle(_inbox(), unit, LineUserId("U123456789"), command)
+    [request] = unit.delivery_tasks.requests
+    assert request.source_aggregate_type == "line_webhook_reply"
+    assert json.loads(request.payload_json) == {
+        "type": "text",
+        "text": "此功能已停用。請在本聊天室輸入「常見問題」，或直接留言由工會人員協助。",
+    }
+    assert not unit.customer_service.messages
+    assert not unit.audit.intents
 
 
 @pytest.mark.parametrize("postback", [
@@ -265,7 +290,8 @@ def test_old_ai_postback_only_guides_direct_chat(postback):
     [request] = unit.delivery_tasks.requests
     assert request.source_aggregate_type == "line_webhook_reply"
     assert json.loads(request.payload_json) == {
-        "type": "text", "text": "此功能已停用。如需協助，請直接在此聊天室留言。",
+        "type": "text",
+        "text": "此功能已停用。請在本聊天室輸入「常見問題」，或直接留言由工會人員協助。",
     }
     assert not unit.customer_service.messages
     assert not unit.audit.intents

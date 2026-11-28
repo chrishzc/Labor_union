@@ -33,24 +33,43 @@ def test_retired_handoff_alias_is_a_regular_message(message):
 def test_only_exact_unmarked_identity_alias_routes_to_identity() -> None:
     router = DeterministicLineRouter()
 
-    outcome = router.route("綁定訂單", source_event_id="event-2")
-    near_miss = router.route("綁定訂單，謝謝", source_event_id="event-3")
+    outcome = router.route("綁定後台帳號", source_event_id="event-2")
+    near_miss = router.route("綁定後台帳號，謝謝", source_event_id="event-3")
 
     assert outcome == DeterministicRoute(
-        route_key="customer_binding",
+        route_key="admin_binding",
         category=None,
-        identity_flow_id="customer_binding",
+        identity_flow_id="admin_binding",
         reason_code="protected_identity_alias",
         source_revision=get_current_revision(),
     )
     assert isinstance(near_miss, SafeMenu)
 
 
-@pytest.mark.parametrize('message', ['問題', '其他問題', '詢問其他問題', '不是以上', '5', '6'])
-def test_general_question_is_self_service_and_not_a_ticket_referral(message):
-    outcome = DeterministicLineRouter().route(message, source_event_id='self-service')
+@pytest.mark.parametrize("score", [None, 60])
+def test_fallback_options_offer_only_available_text_commands(score):
+    outcome = DeterministicLineRouter().route("請問怎麼用", source_event_id="event-fallback", score=score)
+
+    assert outcome.options == ("常見問題",)
+
+
+@pytest.mark.parametrize("message", [
+    "服務與問答", "服務說明", "常見問答", "問題", "其他問題", "詢問其他問題",
+    "不是以上", "5", "6", "查詢進度", "訂單進度", "3",
+])
+def test_retired_alias_does_not_open_a_menu_or_progress(message):
+    outcome = DeterministicLineRouter().route(message, source_event_id="retired-service-alias")
+    assert isinstance(outcome, SafeMenu)
+
+
+@pytest.mark.parametrize(("message", "route"), [
+    ("常見問題", "service_help_menu"),
+    ("查詢服務進度", "service_progress"),
+])
+def test_canonical_service_menu_and_progress_are_exact_routes(message, route):
+    outcome = DeterministicLineRouter().route(message, source_event_id="canonical-service-command")
     assert isinstance(outcome, DeterministicRoute)
-    assert outcome.route_key == 'service_help_menu' and outcome.category is None
+    assert outcome.route_key == route
 
 
 @pytest.mark.parametrize("message", ("請幫我猜一個答案", "這個不對", "無法解決", "我不想要機器人回答", "客服幾點上班", "月嫂是真人嗎"))

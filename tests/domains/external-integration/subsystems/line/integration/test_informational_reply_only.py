@@ -16,14 +16,12 @@ from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (LineDeliveryLease, LineDeliveryRequest, LineDeliveryStatus,
     LineDeliveryTaskSnapshot, LineMessageKind, LineRecipient, LineRecipientType)
 from domains.line.identities import LineDeliveryTaskId, LineGroupId, LineRoomId, LineProviderMessageId, LineSourceType, LineUserId, LineWebhookEventId
-from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.line_notification_repository import MySqlLineNotificationRepository
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE, LineProviderOutcome, LineProviderOutcomeType, LineReplyOpportunity
 from subsystems.line.delivery_contracts import EnqueueLineDeliveryResult, LineDeliveryCommandOutcome
 from subsystems.line.delivery_worker import LineDeliveryWorker
-from subsystems.line.menu_command_application import LineMenuCommandApplication
 from subsystems.line.order_group_application import LineOrderGroupApplication
 from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
@@ -106,8 +104,6 @@ class Unit:
         )
         self.identity_flows = SimpleNamespace(open=Mock(return_value=SimpleNamespace(flow_id=SimpleNamespace(value="synthetic-flow"))))
         self.platform_users = SimpleNamespace(apply_friend_event=lambda event: SimpleNamespace(last_event_at=NOW))
-        self.identities = SimpleNamespace(list_by_user=lambda user: (
-            SimpleNamespace(status=LineIdentityBindingStatus.BOUND, subject_type=LineBindingSubjectType.ADMIN),))
 
     def __enter__(self):
         return self
@@ -119,7 +115,7 @@ class Unit:
         pass
 
 
-def inbox(text="服務說明", *, group=False, kind="message"):
+def inbox(text="常見問題", *, group=False, kind="message"):
     source = SimpleNamespace(source_type=LineSourceType.GROUP if group else LineSourceType.USER,
         user_id=USER, group_id=GROUP if group else None, source_id=GROUP.value if group else USER.value)
     payload = {"type": kind, "message": {"type": "text", "text": text}}
@@ -179,7 +175,7 @@ def test_line_unit_of_work_opens_and_cancels_retired_log_reminder_before_deliver
     sender.reply.assert_not_called()
 
 
-@pytest.mark.parametrize("text", ["服務說明", "服務流程", "收費與補助", "查詢服務進度", "服務登記", "其他問題", "恢復AI", "修改登記資料", "修改服務地址"])
+@pytest.mark.parametrize("text", ["常見問題", "服務流程", "收費與補助", "查詢服務進度", "AI客服", "恢復AI", "修改登記資料", "修改服務地址"])
 def test_information_and_disabled_prompts_are_new_reply_only_work(text):
     unit = Unit()
     assert LineServiceHelpApplication(lambda: NOW).handle(inbox(text), unit, USER, text)
@@ -202,11 +198,10 @@ def test_retired_contact_and_complaint_leave_no_webhook_delivery_or_ticket(text)
     assert unit.delivery_tasks.tasks == {}
 
 
-@pytest.mark.parametrize("text", ["綁定訂單", "我是月嫂", "綁定後台帳號"])
-def test_binding_entries_use_reply_without_changing_flow(text):
+def test_admin_binding_entry_uses_reply_without_changing_flow():
     unit = Unit()
     handlers = LineWebhookIdentityHandlers(lambda: NOW, lambda purpose, flow: "https://example.invalid/identity")
-    handlers.handle_message(inbox(text), unit)
+    handlers.handle_message(inbox("綁定後台帳號"), unit)
     assert unit.identity_flows.open.call_count == 1
     assert unit.delivery_tasks.tasks[1].request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
 
@@ -219,27 +214,15 @@ def test_follow_updates_friend_state_without_opening_flow_or_sending_welcome():
     assert not unit.delivery_tasks.tasks
 
 
-def test_menu_help_uses_reply():
-    unit = Unit()
-    assert LineMenuCommandApplication().handle(inbox("切換選單"), unit, USER, "切換選單")
-    assert unit.delivery_tasks.tasks[1].request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
-
-
 def test_faq_menu_does_not_reply_or_push_to_a_group_participant():
     unit, sender = Unit(), provider()
-    text = "服務說明"
+    text = "常見問題"
     application = LineServiceHelpApplication(lambda: NOW)
     assert not application.handle(inbox(text, group=True), unit, USER, text)
     assert not unit.delivery_tasks.tasks
     assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 0
     sender.send.assert_not_called()
     sender.reply.assert_not_called()
-
-
-def test_menu_help_in_group_remains_unhandled_without_delivery():
-    unit = Unit()
-    assert not LineMenuCommandApplication().handle(inbox("切換選單", group=True), unit, USER, "切換選單")
-    assert not unit.delivery_tasks.tasks
 
 
 @pytest.mark.parametrize("suffix", ["error", "bound", "invite-queued"])

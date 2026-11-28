@@ -62,7 +62,6 @@ from subsystems.line.candidate_contact_coordination_worker import (
 )
 from subsystems.line.matching_postback_application import LineMatchingPostbackApplication
 from subsystems.line.media_application import LineMediaArchiveWorker, schedule_line_media_archive
-from subsystems.line.menu_command_application import LineMenuCommandApplication
 from subsystems.line.order_group_application import LineOrderGroupApplication
 from subsystems.line.group_helper_application import LineGroupHelperApplication
 from subsystems.line.rich_menu_binding import (
@@ -178,10 +177,8 @@ def _event_handlers(now):
         knowledge_question_scheduler=None,
         service_help_application=LineServiceHelpApplication(
             now,
-            _identity_flow_url,
             faq_reader=get_service_help_faq_readers(),
         ),
-        menu_command_application=LineMenuCommandApplication(),
         feedback_application=LineFeedbackApplication(open_line_unit_of_work, now),
     )
     handlers = identity_handlers.registry()

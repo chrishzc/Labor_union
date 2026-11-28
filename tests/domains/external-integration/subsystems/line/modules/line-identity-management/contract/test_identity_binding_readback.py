@@ -78,7 +78,8 @@ def test_verified_binding_receipt_uses_role_and_distinguishes_new_and_existing(e
     if status == 'bound':
         assert result['message'] == f'{role}身分綁定成功'
         assert f'系統會稍後更新{menu}' in result['result']
-        assert ('切換月嫂' in result['result']) is (endpoint == 'staff')
+        assert '切換客戶' not in result['result']
+        assert '切換月嫂' not in result['result']
     else:
         assert result['message'] == f'{role}身分已完成綁定'
         assert '可直接返回 LINE 使用' in result['result']

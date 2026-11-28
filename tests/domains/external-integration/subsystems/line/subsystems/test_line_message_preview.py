@@ -759,9 +759,31 @@ def test_progress_without_owner_context_does_not_invent_case_facts_from_copy_def
     definition = effective_copy_definition({"templates": []})
     unit = SimpleNamespace(customer_service=SimpleNamespace(latest_client_case=lambda user: None),
         configurations=SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(kind, LineConfigurationRevision(1), canonical_line_payload_json(definition))))
-    result = LineServiceHelpApplication(lambda: None)._progress_payload(None, unit, SimpleNamespace(value="U-copy-test"))
+    result = LineServiceHelpApplication(lambda: None)._progress_payload(unit, SimpleNamespace(value="U-copy-test"))
     assert result == _progress_payload(None)
     assert "最新案件" not in result["text"]
+
+
+def test_unbound_progress_uses_menu_instead_of_saved_identity_link_copy():
+    from types import SimpleNamespace
+    from subsystems.line.message_copy import copy_template_id
+    from subsystems.line.message_copy_catalog import default_copy_templates
+    from subsystems.line.service_help_application import LineServiceHelpApplication
+
+    key = "service-progress-unbound"
+    archived = Configuration(copy_template_id(key), ("identity_url",), "舊綁定連結 {identity_url}")
+    current = Configuration(default_copy_templates()[key]["id"], (), "請點選圖文選單「預約與登記」完成綁定。")
+    for configuration, expected in (
+        (archived, "目前尚未找到您綁定的服務資料。請從訪客圖文選單點選「預約與登記」。"),
+        (current, current.content),
+    ):
+        unit = SimpleNamespace(
+            customer_service=SimpleNamespace(latest_client_case=lambda _: None),
+            configurations=SimpleNamespace(get=lambda kind: configuration.get(kind, actor())),
+        )
+        result = LineServiceHelpApplication(lambda: None)._progress_payload(unit, SimpleNamespace(value="U-copy-test"))
+        preview = app(configuration).render(key, None, None, None, actor(), sample=True)
+        assert result["text"] == preview.text == expected
 
 
 def test_every_builtin_card_supports_free_paragraphs_without_changing_provider_actions():

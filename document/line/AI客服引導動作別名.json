@@ -1,29 +1,16 @@
 {
-  "revision": 3,
+  "revision": 4,
   "routes": {
-    "customer_binding": [
-      "綁定訂單",
-      "訂單查詢",
-      "綁定",
-      "查詢訂單"
-    ],
     "admin_binding": [
       "綁定後台帳號",
       "綁定工會帳號",
       "綁定system_admin"
     ],
-    "staff_binding": [
-      "我是月嫂",
-      "我要綁定月嫂"
-    ],
     "union_menu": [
-      "工會選單",
       "開啟客服系統",
       "開啟待辦工作台",
       "開啟異常中心",
-      "開啟營運摘要",
-      "切換工會",
-      "工會客服"
+      "開啟營運摘要"
     ],
     "order_group_bind": [
       "綁定群組",
@@ -32,16 +19,6 @@
     ],
     "order_group_invite": [
       "發送邀請"
-    ],
-    "registration": [
-      "服務登記"
-    ],
-    "service_help_menu": [
-      "服務說明",
-      "服務與問答",
-      "常見問答",
-      "問答",
-      "FAQ"
     ],
     "order_update_menu": [
       "修改訂單資訊"
@@ -69,27 +46,12 @@
       "政府補助",
       "要付多少"
     ],
-    "service_progress": [
-      "查詢服務進度",
-      "查詢進度",
-      "服務進度",
-      "案件進度",
-      "訂單進度",
-      "目前狀態"
-    ],
     "profile_update": [
       "修改登記資料",
       "修改資料",
       "改資料",
       "電話錯誤",
       "地址錯誤"
-    ],
-    "other": [
-      "其他問題",
-      "其他",
-      "不是以上",
-      "問題",
-      "詢問"
     ],
     "resume_ai_assistant": [
       "恢復AI助理",
@@ -112,41 +74,20 @@
       "沒有幫助",
       "未解決（通報專人客服）"
     ],
-    "menu_switch_help": [
-      "切換選單",
-      "選單切換",
-      "管理者選單"
-    ],
-    "menu_switch_customer": [
-      "客戶選單",
-      "客戶專區",
-      "切換客戶"
-    ],
-    "menu_switch_visitor": [
-      "訪客選單",
-      "切換訪客",
-      "一般選單",
-      "一般用戶選單",
-      "切換一般",
-      "esc"
-    ],
-    "menu_switch_staff": [
-      "月嫂專區",
-      "切換月嫂"
-    ],
     "group_helper_menu": [
       "小幫手",
       "工會",
       "月嫂選單",
       "服務選單"
     ],
+    "service_help_menu": [
+      "常見問題"
+    ],
+    "service_progress": [
+      "查詢服務進度"
+    ],
     "group_postponement": [
       "雙方合意延期"
-    ],
-    "staff_assistance_close": [
-      "已處理結案",
-      "專員已處理結案",
-      "協助結案"
     ]
   }
 }

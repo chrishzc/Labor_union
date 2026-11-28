@@ -19,32 +19,22 @@ from subsystems.line.ai_router_contracts import (
 from subsystems.line.navigation_catalog import (
     CATALOG_REVISION,
     CATALOG_SOURCE_IDENTITY,
+    FAQ_MENU_COMMAND,
     entry_for_alias,
 )
 
 
-_IDENTITY_ALIASES = {"綁定訂單", "訂單查詢", "綁定後台帳號"}
-_GROUP_INTENTS = {"工會選單", "開啟客服系統", "月嫂驗證管理"}
+_GROUP_INTENTS = {"開啟客服系統", "月嫂驗證管理"}
+LEGACY_AI_MENU_COMMANDS = ("AI客服", "AI問答", "AI智慧問答")
 _SERVICE_ALIASES = {
-    "服務登記": (None, "registration"),
-    "服務說明": (None, "service_help_menu"),
-    "服務與問答": (None, "service_help_menu"),
-    "常見問答": (None, "service_help_menu"),
-    "常見問題": (None, "service_help_menu"),
-    "常用問題": (None, "service_help_menu"),
-    "問答": (None, "service_help_menu"),
-    "FAQ": (None, "service_help_menu"),
     "常見問題：服務流程": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
     "常見問題：收費與補助": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "常見問題：費用與補助": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
-    "常見問題：查詢進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "常見問題：修改資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "常見問題：月嫂媒合": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
     "常見問題：餐飲服務": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
     "常見問題：請假代班": (CustomerServiceCategory.SERVICE_FLOW, "service_flow"),
-    "AI客服": (None, "ai_assistant_menu"),
-    "AI問答": (None, "ai_assistant_menu"),
-    "AI智慧問答": (None, "ai_assistant_menu"),
+    **{command: (None, "ai_assistant_menu") for command in LEGACY_AI_MENU_COMMANDS},
     "修改訂單資訊": (None, "order_update_menu"),
     "改訂單內容": (None, "order_update_menu"),
     "修改服務地址": (CustomerServiceCategory.OTHER, "order_update_request"),
@@ -68,13 +58,6 @@ _SERVICE_ALIASES = {
     "2": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "一般市民（最高40小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "補助市民（最高120小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
-    "查詢服務進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
-    "查詢進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
-    "服務進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
-    "案件進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
-    "訂單進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
-    "目前狀態": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
-    "3": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "修改登記資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "改個人資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "修改資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
@@ -82,24 +65,15 @@ _SERVICE_ALIASES = {
     "電話錯誤": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "地址錯誤": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "4": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
-    "其他問題": (None, "service_help_menu"),
-    "詢問其他問題": (None, "service_help_menu"),
-    "其他": (None, "service_help_menu"),
-    "不是以上": (None, "service_help_menu"),
-    "問題": (None, "service_help_menu"),
-    "詢問": (None, "service_help_menu"),
-    "5": (None, "service_help_menu"),
-    "6": (None, "service_help_menu"),
 }
-_SAFE_MENU_OPTIONS = ("服務與問答", "服務登記")
-_CLARIFICATION_OPTIONS = ("服務與問答", "服務登記")
+_SAFE_MENU_OPTIONS = (FAQ_MENU_COMMAND,)
+_CLARIFICATION_OPTIONS = (FAQ_MENU_COMMAND,)
 _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
     "一般市民（最高40小時）",
     "補助市民（最高120小時）",
 )
 
 _ROUTE_CATEGORY_MAP: dict[str, CustomerServiceCategory | None] = {
-    "registration": None,
     "service_help_menu": None,
     "order_update_menu": None,
     "order_update_request": CustomerServiceCategory.OTHER,
@@ -107,7 +81,6 @@ _ROUTE_CATEGORY_MAP: dict[str, CustomerServiceCategory | None] = {
     "payment_subsidy": CustomerServiceCategory.PAYMENT_SUBSIDY,
     "service_progress": CustomerServiceCategory.SERVICE_PROGRESS,
     "profile_update": CustomerServiceCategory.PROFILE_UPDATE,
-    "other": None,
     "group_helper_menu": None,
 }
 
@@ -150,19 +123,11 @@ class DeterministicLineRouter:
                 )
             if entry.tier == "navigation":
                 category = _ROUTE_CATEGORY_MAP.get(entry.route_key)
-                route_key = "service_help_menu" if entry.route_key == "other" else entry.route_key
                 return DeterministicRoute(
-                    route_key, category, None, "approved_service_help_alias",
+                    entry.route_key, category, None, "approved_service_help_alias",
                     entry.source_identity, entry.revision, entry.source_identity,
                     "navigation", 100,
                 )
-
-        if normalized in _IDENTITY_ALIASES and entry is not None:
-            return DeterministicRoute(
-                entry.route_key, None, entry.route_key, "protected_identity_alias",
-                entry.source_identity, entry.revision, entry.source_identity,
-                "protected_route", 100,
-            )
 
         if normalized in _GROUP_INTENTS and entry is not None:
             return DeterministicRoute(

@@ -223,7 +223,6 @@ def _canonical_follow_handler(now=NOW):
             "LineOrderGroupApplication", "LineCandidateContactPostbackApplication",
             "LineMatchingPostbackApplication", "MatchingNotificationApplication",
             "MySqlSegmentedAvailabilityFactsRepository", "LineServiceHelpApplication",
-            "LineMenuCommandApplication",
             "LineFeedbackApplication", "LineWebhookEventConsumer", "LineEventDispatcher",
         ):
             stack.enter_context(patch.object(runtime, name))
@@ -319,11 +318,11 @@ class CanonicalWelcomeRegressionTests(unittest.TestCase):
         self.assertIs(state[0].friend_status, LineFriendStatus.BLOCKED)
         self.assert_no_follow_delivery(unit)
 
-    def test_customer_binding_text_command_still_replies_with_identity_link(self):
+    def test_admin_binding_text_command_still_replies_with_identity_link(self):
         unit, _ = _friend_unit(LineFriendStatus.ACTIVE)
         unit.configurations = _welcome_configuration()
         unit.configurations.get = Mock(return_value=SimpleNamespace(revision=SimpleNamespace(value=1), definition_json="{}"))
-        _handler().handle_message(_inbox("message", text="綁定訂單"), unit)
+        _handler().handle_message(_inbox("message", text="綁定後台帳號"), unit)
         unit.identity_flows.open.assert_called_once()
         unit.delivery_tasks.enqueue.assert_called_once()
         delivery = unit.delivery_tasks.enqueue.call_args.args[0]
