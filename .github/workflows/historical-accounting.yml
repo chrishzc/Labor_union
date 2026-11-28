@@ -4,6 +4,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      type_base_sha:
+        description: Baseline revision for the Pyright diff check
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -196,9 +202,12 @@ jobs:
       - name: Check Python types and lint at the affected boundaries
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
-          FINANCE_TYPE_BASE_SHA: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
+          FINANCE_TYPE_BASE_SHA: ${{ inputs.type_base_sha || github.event.pull_request.base.sha || 'HEAD^' }}
         run: |
-          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/subsidy_confirmation_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py subsystems/finance_import/query.py api/schemas/finance_import.py api/dependencies/finance_import.py api/routes/finance_statement_workspace.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/finance_import_owning_domain_composite.py infrastructure/mysql/accounts_payable_export_sources.py infrastructure/mysql/payroll_rebuild_repository.py infrastructure/mysql/finance_import_repository.py infrastructure/mysql/historical_staff_payout_repository.py subsystems/orders/historical_adoption_workflow.py
+          ruff check --select E9,F63,F7,F82 domains/client_finance/subsidy_coverage.py infrastructure/mysql/client_payments_query_repository.py infrastructure/mysql/case_staff_accounting_repository.py infrastructure/mysql/staff_payout_repository.py infrastructure/mysql/subsidy_confirmation_repository.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/finance_import/accounting_workspace.py subsystems/finance_import/query.py api/schemas/finance_import.py api/dependencies/finance_import.py api/routes/finance_statement_workspace.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/finance_import_owning_domain_composite.py infrastructure/mysql/accounts_payable_export_sources.py infrastructure/mysql/payroll_rebuild_repository.py infrastructure/mysql/finance_import_repository.py infrastructure/mysql/historical_staff_payout_repository.py subsystems/orders/historical_adoption_workflow.py \
+            infrastructure/mysql/accounting_workspace_repository.py \
+            tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_baseline_obligation_sync.py \
+            tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py
           pyright domains/client_finance/subsidy_coverage.py subsystems/client_finance/case_accounting_query.py subsystems/staff_payables/case_accounting_query.py subsystems/payroll/historical_baseline_obligation_sync.py infrastructure/mysql/accounts_payable_export_sources.py
           python - <<'PY'
           import ast
@@ -215,6 +224,9 @@ jobs:
               'infrastructure/mysql/staff_payout_repository.py',
               'api/dependencies/finance_import.py',
               'api/schemas/finance_import.py',
+              'infrastructure/mysql/accounting_workspace_repository.py',
+              'tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/unit/test_historical_baseline_obligation_sync.py',
+              'tests/domains/staff-payables/subsystems/staff-payables/integration/test_historical_payroll_reconciliation_decoupling_mysql.py',
           )
           candidate = Path.cwd().resolve()
           temporary = Path(os.environ['RUNNER_TEMP']).resolve()
@@ -286,11 +298,11 @@ jobs:
               removed = baseline - current
               new_errors = sum(count for key, count in added.items() if key[-1] == 'error')
               removed_errors = sum(count for key, count in removed.items() if key[-1] == 'error')
-              print(f'Additional five-file scope: {new_errors} new errors, {removed_errors} removed errors')
+              print(f'Additional {len(files)}-file scope: {new_errors} new errors, {removed_errors} removed errors')
               for (relative, owner, rule, message, severity), count in sorted(added.items()):
                   print(f'{relative}::{owner}: {severity} [{rule}] ({count} new): {message}')
               if new_errors:
-                  raise SystemExit('New Pyright errors in the additional five-file scope')
+                  raise SystemExit(f'New Pyright errors in the additional {len(files)}-file scope')
           finally:
               subprocess.run(['git', 'worktree', 'remove', str(base)], cwd=candidate, check=True)
           PY

@@ -637,7 +637,7 @@ def test_multi_caregiver_sync_allocates_prorated_floor_fee_without_a_probe_rate(
     caregiver_b = {**_ASSIGNMENT, "id": 18, "staff_id": 4, "schedule_service_days": 4}
     monkeypatch.setattr(
         "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
-        lambda *_, payroll_candidate_total: SubsidyPayableHandoff("unknown", False, True, 12000, False),
+        lambda *_, complete_payroll_total: SubsidyPayableHandoff("unknown", False, True, 12000, False),
     )
 
     result = synchronize_historical_payroll(

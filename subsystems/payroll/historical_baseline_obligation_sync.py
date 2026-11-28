@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
@@ -62,8 +62,8 @@ class _PlannedAssignmentSync:
     rate_snapshot: AssignmentRateSnapshot
     action: StaffObligationAction
     effective_amount: MoneyNTD
-    funding: HistoricalFundingSchedule
-    original_identity: str | None
+    source_end_date: date | None
+    original: dict[str, Any] | None
 
 
 def sync_historical_staff_baseline_obligations(connection, case_no=None, *, dry_run=False, actor=None):
@@ -274,13 +274,13 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             MoneyNTD(floor_fee_ntd),
         )
 
-    items: list[dict[str, Any]] = []
-    planned: list[_PlannedAssignmentSync] = []
+    outcomes: list[dict[str, Any] | _PlannedAssignmentSync] = []
+    effective_amounts_by_assignment: dict[int, MoneyNTD] = {}
     for entry in assignments:
         assignment_id = entry.get("id")
         staff_id = entry.get("staff_id") or entry.get("evidence_staff_id")
         if assignment_id is None or entry.get("staff_id") is None or assignment_id in duplicate_assignments:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped("historical_payroll_unique_assignment_required"),
@@ -289,7 +289,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
         assignment_id = int(assignment_id)
         staff_id = int(entry["staff_id"])
         if staff_id in orphan_staff_ids:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped("historical_payroll_obligation_binding_conflict"),
@@ -297,7 +297,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             continue
         existing_rows = existing_by_assignment.get(assignment_id, [])
         if len(existing_rows) > 1:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 "obligation_identity": existing_rows[0]["obligation_identity"],
@@ -305,13 +305,17 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             })
             continue
         original = existing_rows[0] if existing_rows else None
+        original_effective_amount = None
         if original is not None:
+            original_effective_amount = MoneyNTD(int(original["effective_amount_due_ntd"]))
+            if original_effective_amount.amount > 0:
+                effective_amounts_by_assignment[assignment_id] = original_effective_amount
             preserved = _preserved_existing_result(original)
             if preserved is not None:
-                items.append(_original_sync_outcome(original, preserved))
+                outcomes.append(_original_sync_outcome(original, preserved))
                 continue
         if original is None and order["status"] == _COMPLETED[1]:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped("historical_payroll_settled_source_required"),
@@ -319,7 +323,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             continue
         days = _positive_int_or_zero(entry.get("item_service_days") or entry.get("schedule_service_days"))
         if days <= 0 or service_hours is None:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped("historical_payroll_service_basis_missing"),
@@ -328,7 +332,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
         identity = f"assignment:{assignment_id}"
         person_rate = _historical_assignment_rate(identity, entry)
         if person_rate is None:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped("payroll_rate_policy_not_found"),
@@ -336,7 +340,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             continue
         item_floor = entry.get("item_floor_fee_ntd")
         if floor_fee_ntd > 0 and floor_fee_blocked and item_floor is None:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped(
@@ -361,26 +365,17 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             person_adjustments,
         )
         source_amount = MoneyNTD(int(original["amount_due_ntd"])) if original else person_payroll.total_payable
-        effective_amount = MoneyNTD(int(original["effective_amount_due_ntd"])) if original else source_amount
+        effective_amount = original_effective_amount if original_effective_amount is not None else source_amount
         if effective_amount.amount <= 0:
-            items.append({
+            outcomes.append({
                 "assignment_id": assignment_id,
                 "staff_id": staff_id,
                 **_skipped("historical_payroll_nonpositive_amount"),
             })
             continue
-        person_order = {**order, "actual_end_date": entry.get("source_end_date")}
-        funding = _funding_schedule(
-            connection,
-            case_no,
-            person_order,
-            effective_amount.amount,
-            allow_split_installments=False,
-        )
+        if original is None:
+            effective_amounts_by_assignment[assignment_id] = effective_amount
         obligation_identity = original["obligation_identity"] if original else f"staff-obligation:{identity}"
-        if original and funding.due_date is None:
-            items.append(_original_sync_outcome(original, _already_synced_pending(funding)))
-            continue
         before = source_amount if original else MoneyNTD(0)
         action = StaffObligationAction(
             identity,
@@ -389,18 +384,43 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             before,
             source_amount,
             source_amount - before,
-            funding.due_date,
+            None,
         )
-        planned.append(_PlannedAssignmentSync(
-            assignment_id, staff_id, person_fact, person_rate, action, effective_amount, funding,
-            original["obligation_identity"] if original else None,
+        outcomes.append(_PlannedAssignmentSync(
+            assignment_id, staff_id, person_fact, person_rate, action, effective_amount,
+            entry.get("source_end_date"), original,
         ))
+
+    case_payroll_total = (
+        sum(amount.amount for amount in effective_amounts_by_assignment.values())
+        if not orphans and len(effective_amounts_by_assignment) == len(assignments)
+        else None
+    )
+    items: list[dict[str, Any]] = []
+    planned: list[_PlannedAssignmentSync] = []
+    for outcome in outcomes:
+        if not isinstance(outcome, _PlannedAssignmentSync):
+            items.append(outcome)
+            continue
+        funding = _funding_schedule(
+            connection,
+            case_no,
+            {**order, "actual_end_date": outcome.source_end_date},
+            outcome.effective_amount.amount,
+            complete_payroll_total=case_payroll_total,
+            allow_split_installments=False,
+        )
+        original = outcome.original
+        if original is not None and funding.due_date is None:
+            items.append(_original_sync_outcome(original, _already_synced_pending(funding)))
+            continue
+        planned.append(replace(outcome, action=replace(outcome.action, due_date=funding.due_date)))
         items.append(_single_sync_outcome(
             action_name="updated" if original else "created",
-            assignment_id=assignment_id,
-            staff_id=staff_id,
-            obligation_identity=obligation_identity,
-            amount_ntd=effective_amount.amount,
+            assignment_id=outcome.assignment_id,
+            staff_id=outcome.staff_id,
+            obligation_identity=outcome.action.obligation_identity,
+            amount_ntd=outcome.effective_amount.amount,
             funding=funding,
         ))
 
@@ -418,7 +438,6 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             PayrollTerms(int(order.get("service_days") or sum(i.service_fact.actual_service_days for i in ordered)),
                          service_hours, MoneyNTD(floor_fee_ntd))
             if floor_fee_ntd > 0 and not floor_fee_blocked and len(ordered) == len(valid_entries)
-            and all(i.funding for i in ordered)
             else PayrollTerms(ordered[0].service_fact.actual_service_days, service_hours, MoneyNTD(0))
         )
         batch_adjustments = _payroll_adjustments({
@@ -432,7 +451,7 @@ def _synchronize_multiple_assignments(connection, cursor, case_no, order, assign
             batch_terms,
             batch_adjustments,
         )
-        all_dates = {item.funding.due_date for item in ordered}
+        all_dates = {item.action.due_date for item in ordered}
         has_skipped = any(item["action"] == "skipped" for item in items)
         case_due_date = next(iter(all_dates)) if not has_skipped and len(all_dates) == 1 else None
         _persist_historical_batch(
@@ -631,11 +650,12 @@ def _read_attributed_payables(cursor, case_no, attribution):
 
 def _funding_schedule(
     connection,
-    case_no,
-    order,
-    amount,
+    case_no: str,
+    order: Mapping[str, Any],
+    amount: int,
     *,
-    allow_split_installments=True,
+    allow_split_installments: bool = True,
+    complete_payroll_total: int | None = None,
 ) -> HistoricalFundingSchedule:
     from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
 
@@ -646,7 +666,14 @@ def _funding_schedule(
             pending_reason="historical_payroll_end_date_missing",
             pending_detail="缺少實際結束日，正式應付預計付款日與分期保留待確認。",
         )
-    funding = query_subsidy_payable_handoff(connection, case_no, payroll_candidate_total=amount)
+    if complete_payroll_total is not None:
+        funding = query_subsidy_payable_handoff(
+            connection, case_no, complete_payroll_total=complete_payroll_total,
+        )
+    else:
+        funding = query_subsidy_payable_handoff(
+            connection, case_no, payroll_candidate_total=amount if allow_split_installments else None,
+        )
     if funding.staff_subsidy_reason:
         return HistoricalFundingSchedule(
             due_date=None,
