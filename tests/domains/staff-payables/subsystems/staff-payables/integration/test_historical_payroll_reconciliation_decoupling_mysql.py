@@ -1244,6 +1244,63 @@ def test_star_case3_multi_caregiver_partial_sync_and_preserve_paid_mysql(mysql_c
     mysql_connection.commit()
 
 
+def test_ds02_same_name_returns_both_formal_payables_by_assignment_mysql(mysql_connection):
+    case_no = "115000449"
+    with mysql_connection.cursor() as cursor:
+        _, caregivers = _seed_historical_case(
+            cursor, case_no=case_no, client_name="DS-02 readback",
+            staff_specs=(
+                {
+                    "name": "DS-02 same name", "identity_card": "F223456049",
+                    "start_date": date(2026, 8, 1), "end_date": date(2026, 8, 12),
+                    "schedule_days": 12,
+                },
+                {
+                    "name": "DS-02 same name", "identity_card": "F223456050",
+                    "start_date": date(2026, 8, 13), "end_date": date(2026, 8, 20),
+                    "schedule_days": 8,
+                },
+            ),
+        )
+    mysql_connection.commit()
+
+    with _bank_api_client(mysql_connection) as client:
+        applied = client.post(f"/api/v1/orders/{case_no}/payroll/sync-historical-baseline-obligations")
+        assert applied.status_code == 200, applied.text
+        receipt = applied.json()["data"]["details"][0]
+        assert receipt["case_no"] == case_no
+        receipt_rows = receipt["items"]
+        assert len(receipt_rows) == 2
+        assert {(row["staff_id"], row["assignment_id"]) for row in receipt_rows} == {
+            (person["staff_id"], person["assignment_id"]) for person in caregivers
+        }
+        assert all(row["action"] == "created" and row["obligation_identity"] for row in receipt_rows), receipt_rows
+        query = f"/api/v1/finance-import/cases/{case_no}/accounting"
+        response = client.get(query)
+        assert response.status_code == 200, response.text
+        accounting = response.json()["data"]
+        assert accounting["case_no"] == case_no
+        assert len(accounting["staff_items"]) == len(accounting["staff_accounting_availability"]) == 2
+        by_person = {
+            (row["staff_id"], row["assignment_id"]): row for row in accounting["staff_accounting_availability"]
+        }
+        by_identity = {row["identity"]: row for row in accounting["staff_items"]}
+        from_receipt = {row["staff_id"]: row["obligation_identity"] for row in receipt["items"]}
+        for person, amount in zip(caregivers, (28800, 19200), strict=True):
+            readback = by_person[(person["staff_id"], person["assignment_id"])]
+            assert readback["status"] == "formal"
+            assert readback["obligation_identities"] == [from_receipt[person["staff_id"]]]
+            payable = by_identity[readback["obligation_identities"][0]]
+            assert payable["direction"] == "payable" and payable["expected_ntd"] == amount
+            assert payable["party"] == "DS-02 same name"
+        second = client.get(query)
+        assert second.status_code == 200 and second.json()["data"]["staff_items"] == accounting["staff_items"]
+
+    with mysql_connection.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) AS cnt FROM staff_obligations WHERE case_no=%s", (case_no,))
+        assert int(cursor.fetchone()["cnt"]) == 2
+
+
 def test_star_case5_ap_export_guardrails_for_undated_and_missing_account_mysql(mysql_connection):
     undated_case = "115000429"
     no_acct_case = "115000430"

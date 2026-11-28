@@ -114,6 +114,7 @@ export const FinancePage: React.FC = () => {
   const [caseDrawer, setCaseDrawer] = useState(entry.caseNo);
   const [caseFromBankDetail, setCaseFromBankDetail] = useState(false);
   const [payableReview, setPayableReview] = useState<HistoricalPayableAuditItem | null>(null);
+  const [payableRecheckCases, setPayableRecheckCases] = useState<ReadonlySet<string>>(() => new Set());
   const [bankReview, setBankReview] = useState<FinanceBankTransaction | null>(null);
   const [bankReviewCurrent, setBankReviewCurrent] = useState<LoadState<FinanceBankTransaction>>({ kind: 'idle' });
   const [bankCaseView, setBankCaseView] = useState<string | null>(null);
@@ -610,6 +611,8 @@ export const FinancePage: React.FC = () => {
           {payableReview && <HistoricalPayableEditor
             key={`${payableReview.case_no}:${payableReview.staff_id}:${payableReview.obligation_identity}`}
             item={payableReview} onSaved={() => setReload(value => value + 1)}
+            recheckRequired={payableRecheckCases.has(payableReview.case_no)}
+            onRecheckRequired={caseNo => setPayableRecheckCases(cases => new Set([...cases, caseNo]))}
           />}
           {cancellationPosted ? <section aria-label="取消結算核銷結果">
             <p role="status">已記錄本次核銷，請查看本案帳務確認最新餘額。</p>
