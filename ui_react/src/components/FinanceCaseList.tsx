@@ -1,5 +1,5 @@
 /** Ongoing and all cases list; owner queries supply stages and accounting amounts. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import './FinanceCaseAccounting.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import type { OrderSummaryItem } from '../api/orders/order_query_schemas';
@@ -10,7 +10,7 @@ import { financeMoney } from './FinanceReceiptsWorkspace';
 import { paymentOverdueReminderClient, type CasePaymentReminder } from '../api/line_order_groups/payment_overdue_reminder_client';
 import { lastNotification, notificationTime, notificationStatus } from './FinanceCaseNotice';
 
-type Row = { order: OrderSummaryItem; accounting?: CaseAccounting; notices?: CasePaymentReminder[]; timeline?: OrderCoreStageTimeline };
+type Row = { order: OrderSummaryItem; accounting?: CaseAccounting; notices?: CasePaymentReminder[]; timeline?: OrderCoreStageTimeline; freshness: 'current' | 'stale' };
 type Stage = 'deposit' | 'first' | 'second' | 'scheme';
 const stageLabels = { deposit: '訂金', first: '第一期', second: '第二期', scheme: '設定補助退款方案' };
 const money = (value: number | null | undefined) => value == null ? '待確認' : financeMoney(value);
@@ -49,12 +49,15 @@ export function FinanceCaseList({
   const [request, setRequest] = useState(0);
   const [unknownScope, setUnknownScope] = useState(0);
   const scopeRef = useRef('');
+  const staleDescriptionId = useId();
   const today = taipeiDate();
 
   useEffect(() => {
     if (scopeRef.current !== query) {
       scopeRef.current = query;
       setRows([]);
+    } else {
+      setRows(previous => previous.map(row => ({ ...row, freshness: 'stale' })));
     }
     const controller = new AbortController();
     setLoading(true);
@@ -72,7 +75,21 @@ export function FinanceCaseList({
       const byCase = new Map(timelines.items.map(item => [item.case_no, item]));
       const eligible = page.items;
       setUnknownScope(page.items.filter(order => !byCase.has(order.case_no)).length);
-      const collected: Row[] = new Array(eligible.length);
+      const collected: Array<Row | undefined> = new Array(eligible.length);
+      let completed = 0;
+      let nextPublication = 1;
+      const publishCompletedRows = (): void => {
+        if (controller.signal.aborted) return;
+        const snapshot = collected.slice();
+        setRows(previous => {
+          if (controller.signal.aborted) return previous;
+          const previousByCase = new Map(previous.map(row => [row.order.case_no, row]));
+          return eligible.flatMap((order, current) => {
+            const row = snapshot[current] ?? previousByCase.get(order.case_no);
+            return row ? [row] : [];
+          });
+        });
+      };
       let index = 0;
       await Promise.all(Array.from({ length: Math.min(4, eligible.length) }, async () => {
         while (index < eligible.length && !controller.signal.aborted) {
@@ -90,17 +107,23 @@ export function FinanceCaseList({
                 order,
                 accounting: accounting.status === 'fulfilled' ? accounting.value : undefined,
                 notices: notices.status === 'fulfilled' ? notices.value : undefined,
-                timeline
+                timeline,
+                freshness: 'current'
               };
             } catch {
-              collected[current] = { order, timeline };
+              collected[current] = { order, timeline, freshness: 'current' };
             }
           } else {
-            collected[current] = { order, timeline };
+            collected[current] = { order, timeline, freshness: 'current' };
+          }
+          completed += 1;
+          if (completed >= nextPublication) {
+            nextPublication *= 2;
+            publishCompletedRows();
           }
         }
       }));
-      if (!controller.signal.aborted) setRows(collected);
+      if (!controller.signal.aborted) setRows(collected.filter((row): row is Row => row !== undefined));
     }).catch(() => {
       if (!controller.signal.aborted) setError('暫時無法讀取案件帳務或案件進度。請按「查詢案件」重試。');
     }).finally(() => {
@@ -227,13 +250,15 @@ export function FinanceCaseList({
                 const state = dateStatus(row, today);
                 const notice = row.notices?.find(item => item.payment_stage === current);
                 const last = lastNotification(notice);
+                const staleId = row.freshness === 'stale' ? `${staleDescriptionId}-${order.case_no}` : undefined;
                 return (
-                  <tr key={order.case_no} data-accounting-case={order.case_no}>
+                  <tr key={order.case_no} data-accounting-case={order.case_no} aria-describedby={staleId}>
                     <td>
-                      <button className="finance-btn-link" onClick={() => onCase(order.case_no)}>
+                      <button className="finance-btn-link" aria-describedby={staleId} onClick={() => onCase(order.case_no)}>
                         {order.case_no}
                       </button>
                       <small>{order.client_name}</small>
+                      {staleId && <small id={staleId}>更新中，顯示上次資料</small>}
                     </td>
                     <td>
                       <span>實際開始 {order.actual_start_date ?? '待確認'}</span>
@@ -307,7 +332,7 @@ export function FinanceCaseList({
       )}
 
       <div className="finance-row-actions">
-        <span>搜尋範圍共 {matched.length} 案；已顯示全部{subTab === 'ongoing' ? '進行中案件' : '案件'}</span>
+        <span>{loading ? '正在讀取完整搜尋結果…' : <>搜尋範圍共 {matched.length} 案；已顯示全部{subTab === 'ongoing' ? '進行中案件' : '案件'}</>}</span>
       </div>
     </section>
   );

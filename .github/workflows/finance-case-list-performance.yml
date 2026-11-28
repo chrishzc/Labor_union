@@ -1,0 +1,164 @@
+name: Finance case list synthetic performance
+
+on:
+  push:
+    branches: [codex/finance-list-perf-36]
+  pull_request:
+    paths:
+      - 'ui_react/src/components/FinanceCaseList.tsx'
+      - 'ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_browser.mjs'
+      - 'ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_progressive.test.tsx'
+      - 'ui_react/src/tests/domains/client-finance/subsystems/client-finance/integration/finance_workspaces.test.tsx'
+      - 'ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_performance.test.tsx'
+      - '.github/workflows/finance-case-list-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Synthetic frontend A B A B and existing regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      REVIEWED_SHA: 5bc4dd82eca8f74e5426f070b7970a9045d20957
+      BASELINE_SHA: e6bc4adc1919127884b7672c62adaff650188ec3
+      REACT_ADMIN_ARTIFACT_BUILD: '1'
+      VITE_PUBLIC_PATH_PREFIX: ''
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Pin actual candidate and preserve identical harness
+        run: |
+          mkdir -p "$RUNNER_TEMP/finance-evidence" "$RUNNER_TEMP/finance-harness"
+          printf '%s\n' '${{ github.sha }}' > "$RUNNER_TEMP/finance-evidence/event-sha.txt"
+          printf '%s\n' '${{ github.event.pull_request.head.sha }}' > "$RUNNER_TEMP/finance-evidence/pr-head-sha.txt"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/finance-evidence/candidate-sha.txt"
+          echo "CANDIDATE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          cp ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_performance.test.tsx "$RUNNER_TEMP/finance-harness/"
+          sha256sum "$RUNNER_TEMP/finance-harness/finance_case_list_performance.test.tsx" | tee "$RUNNER_TEMP/finance-evidence/harness-sha256.txt"
+          cp ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_browser.mjs "$RUNNER_TEMP/finance-harness/"
+          sha256sum "$RUNNER_TEMP/finance-harness/finance_case_list_browser.mjs" | tee "$RUNNER_TEMP/finance-evidence/browser-harness-sha256.txt"
+          cp ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_progressive.test.tsx "$RUNNER_TEMP/finance-harness/"
+          sha256sum "$RUNNER_TEMP/finance-harness/finance_case_list_progressive.test.tsx" | tee "$RUNNER_TEMP/finance-evidence/progressive-harness-sha256.txt"
+          uptime | tee "$RUNNER_TEMP/finance-evidence/runner-uptime.txt"
+          nproc | tee "$RUNNER_TEMP/finance-evidence/runner-cores.txt"
+          node --version | tee "$RUNNER_TEMP/finance-evidence/node-version.txt"
+      - name: Install locked frontend dependencies
+        working-directory: ui_react
+        run: npm ci --ignore-scripts
+      - name: Install isolated Chromium measurement tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/finance-browser-tools" --no-save --package-lock=false playwright@1.51.1
+          node "$RUNNER_TEMP/finance-browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
+          sha256sum ui_react/package-lock.json | tee "$RUNNER_TEMP/finance-evidence/browser-product-lock-sha256.txt"
+      - name: Compare same synthetic inputs in interleaved order
+        env:
+          FINANCE_EVIDENCE_DIR: ${{ runner.temp }}/finance-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          harness_path=ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_performance.test.tsx
+          for repetition in 1 2; do
+            for side in baseline candidate; do
+              if [ "$side" = baseline ]; then target="$BASELINE_SHA"; else target="$CANDIDATE_SHA"; fi
+              rm -f "$harness_path"
+              git checkout --detach "$target"
+              actual="$(git rev-parse HEAD)"
+              test "$actual" = "$target"
+              printf '%s %s %s\n' "$repetition" "$side" "$actual" | tee -a "$FINANCE_EVIDENCE_DIR/checkouts.txt"
+              mkdir -p "$(dirname "$harness_path")"
+              cp "$RUNNER_TEMP/finance-harness/finance_case_list_performance.test.tsx" "$harness_path"
+              (cd ui_react && FINANCE_SIDE="$side" FINANCE_REPETITION="$repetition" FINANCE_CHECKOUT_SHA="$actual" npm test -- src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_performance.test.tsx) 2>&1 | tee "$FINANCE_EVIDENCE_DIR/frontend-$side-$repetition.log"
+              (cd ui_react && PLAYWRIGHT_PACKAGE_DIR="$RUNNER_TEMP/finance-browser-tools" FINANCE_SIDE="$side" FINANCE_REPETITION="$repetition" FINANCE_CHECKOUT_SHA="$actual" node "$RUNNER_TEMP/finance-harness/finance_case_list_browser.mjs") 2>&1 | tee "$FINANCE_EVIDENCE_DIR/browser-$side-$repetition.log"
+            done
+          done
+      - name: Prove reviewed checkout fails the same stale row oracles
+        env:
+          FINANCE_EVIDENCE_DIR: ${{ runner.temp }}/finance-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          progressive_path=ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_progressive.test.tsx
+          git checkout --detach "$REVIEWED_SHA"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$REVIEWED_SHA"
+          printf 'stale-negative reviewed %s\n' "$actual" | tee -a "$FINANCE_EVIDENCE_DIR/checkouts.txt"
+          cp "$RUNNER_TEMP/finance-harness/finance_case_list_progressive.test.tsx" "$progressive_path"
+          set +e
+          (cd ui_react && npm test -- "${progressive_path#ui_react/}" -t 'marks stale refresh rows accessibly' --reporter=default --reporter=json --outputFile="$FINANCE_EVIDENCE_DIR/stale-negative-progressive.json") > "$FINANCE_EVIDENCE_DIR/stale-negative-progressive.log" 2>&1
+          progressive_status=$?
+          (cd ui_react && PLAYWRIGHT_PACKAGE_DIR="$RUNNER_TEMP/finance-browser-tools" FINANCE_BROWSER_MODE=stale FINANCE_SIDE=reviewed FINANCE_REPETITION=stale FINANCE_CHECKOUT_SHA="$actual" node "$RUNNER_TEMP/finance-harness/finance_case_list_browser.mjs") > "$FINANCE_EVIDENCE_DIR/stale-negative-browser.log" 2>&1
+          browser_status=$?
+          set -e
+          test "$progressive_status" -ne 0
+          grep -F 'STALE_ROW_MARK_MISSING' "$FINANCE_EVIDENCE_DIR/stale-negative-progressive.log"
+          test "$browser_status" -ne 0
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { readFileSync, writeFileSync } from "node:fs";
+            const dir = process.env.FINANCE_EVIDENCE_DIR;
+            const result = JSON.parse(readFileSync(`${dir}/browser-reviewed-stale.json`, "utf8"));
+            const progressive = JSON.parse(readFileSync(`${dir}/stale-negative-progressive.json`, "utf8"));
+            const tests = progressive.testResults.flatMap(file => file.assertionResults);
+            const failed = tests.filter(test => test.status === "failed");
+            assert.equal(failed.length, 1);
+            assert(failed[0].title.startsWith("marks stale refresh rows accessibly"));
+            assert(failed[0].failureMessages.some(message => message.includes("STALE_ROW_MARK_MISSING")));
+            assert.equal(result.sha, process.env.REVIEWED_SHA);
+            assert.equal(result.completed, false);
+            assert.equal(result.staleOracle.status, "failed");
+            assert.equal(result.staleOracle.failure, "STALE_ROW_MARK_MISSING");
+            assert(result.staleOracle.observations.some(row => row.phase === "after-fast" && row.caseNo === "SYN-0002" && !row.stale && row.amount === "NT$ 76,544" && !row.visible));
+            assert(result.staleOracle.observations.some(row => row.phase === "after-fast" && row.caseNo === "SYN-0004" && row.stale && row.amount === "NT$ 10,004" && !row.visible));
+            writeFileSync(`${dir}/stale-negative-verdict.json`, JSON.stringify({ verdict: "EXPECTED_FAILURE", checkout: result.sha, browser: result.staleOracle, progressive: "STALE_ROW_MARK_MISSING" }, null, 2));
+          '
+          git restore --source="$REVIEWED_SHA" -- "$progressive_path"
+      - name: Restore exact candidate
+        if: always()
+        run: |
+          harness_path=ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_performance.test.tsx
+          rm -f "$harness_path" ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_progressive.test.tsx
+          git checkout --detach "$CANDIDATE_SHA"
+          git restore --source="$CANDIDATE_SHA" -- "$harness_path" ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_progressive.test.tsx
+      - name: Verify candidate stale row browser oracle
+        env:
+          FINANCE_EVIDENCE_DIR: ${{ runner.temp }}/finance-evidence
+        working-directory: ui_react
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$CANDIDATE_SHA"
+          printf 'stale-positive candidate %s\n' "$actual" | tee -a "$FINANCE_EVIDENCE_DIR/checkouts.txt"
+          PLAYWRIGHT_PACKAGE_DIR="$RUNNER_TEMP/finance-browser-tools" FINANCE_BROWSER_MODE=stale FINANCE_SIDE=candidate FINANCE_REPETITION=stale FINANCE_CHECKOUT_SHA="$actual" node "$RUNNER_TEMP/finance-harness/finance_case_list_browser.mjs" 2>&1 | tee "$FINANCE_EVIDENCE_DIR/stale-positive-browser.log"
+      - name: Run directly related existing regressions
+        working-directory: ui_react
+        run: >-
+          npm test --
+          src/tests/finance_request_lifecycle.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/finance_case_list_progressive.test.tsx
+          src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/compact_case_drawer.test.tsx
+          src/tests/domains/client-finance/subsystems/client-finance/integration/finance_workspaces.test.tsx
+      - name: Lint
+        working-directory: ui_react
+        run: npm run lint
+      - name: Type check and production build
+        working-directory: ui_react
+        run: npm run build
+      - name: Upload exact checkouts and synthetic observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-case-list-synthetic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/finance-evidence
+          if-no-files-found: error
