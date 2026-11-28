@@ -314,6 +314,27 @@ describe('ClientRosterPage', () => {
     }
   });
 
+  it('labels the previous page and its filters while a different search is pending', async () => {
+    let finishSearch!: (result: { items: []; next_cursor: null; next_offset: null }) => void;
+    mocks.list.mockResolvedValueOnce({ items: [item], next_cursor: null, next_offset: null });
+    mocks.list.mockImplementationOnce(() => new Promise(resolve => { finishSearch = resolve; }));
+    render(<ClientRosterPage />);
+    const row = await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' });
+    fireEvent.change(screen.getByLabelText('搜尋客戶名冊清單'), { target: { value: '查無此人' } });
+    fireEvent.click(screen.getByRole('button', { name: '搜尋' }));
+
+    const region = screen.getByRole('region', { name: '客戶名冊，可上下及左右捲動' });
+    expect(region).toHaveAccessibleDescription(/暫時顯示上次查詢的第 1 頁與原篩選條件/);
+    expect(row).toBeInTheDocument();
+    expect(screen.queryByText(/搜尋文字已變更/)).not.toBeInTheDocument();
+    expect(screen.queryByText('沒有符合篩選條件的案件。')).not.toBeInTheDocument();
+
+    finishSearch({ items: [], next_cursor: null, next_offset: null });
+    await screen.findByText('沒有符合篩選條件的案件。');
+    expect(region).not.toHaveAccessibleDescription();
+    expect(row).not.toBeInTheDocument();
+  });
+
   it('requests server filters, displays roster fields, and exposes no mutation controls', async () => {
     mocks.list.mockResolvedValueOnce({
       items: [

@@ -37,6 +37,7 @@ export async function loadAllStaffDirectoryPages(
   query: (params?: StaffDirectoryQueryParams, options?: StaffDirectoryQueryOptions) => Promise<StaffDirectoryPage>,
   params: Pick<StaffDirectoryQueryParams, 'pageSize' | 'includeProfile' | 'lifecycleState'> = {},
   options?: StaffDirectoryQueryOptions,
+  onPage?: (page: StaffDirectoryPage) => void,
 ): Promise<StaffDirectoryPage> {
   const items: StaffDirectoryPage['items'] = [];
   const seenCursors = new Set<number>();
@@ -45,13 +46,16 @@ export async function loadAllStaffDirectoryPages(
   while (true) {
     if (options?.signal?.aborted) throw new StaffDirectoryAbortedError();
     const page = await query({ ...params, ...(afterId === undefined ? {} : { afterId }) }, options);
-    items.push(...page.items);
-    if (page.next_cursor === null) return { items, next_cursor: null };
-    if (page.items.length === 0 || seenCursors.has(page.next_cursor) || page.items[page.items.length - 1].id !== page.next_cursor) {
+    if (options?.signal?.aborted) throw new StaffDirectoryAbortedError();
+    const nextCursor = page.next_cursor;
+    if (nextCursor !== null && (page.items.length === 0 || seenCursors.has(nextCursor) || page.items[page.items.length - 1].id !== nextCursor)) {
       throw new StaffDirectoryValidationError('服務人員清單分頁未向前推進，無法取得完整名冊。');
     }
-    seenCursors.add(page.next_cursor);
-    afterId = page.next_cursor;
+    items.push(...page.items);
+    onPage?.(page);
+    if (nextCursor === null) return { items, next_cursor: null };
+    seenCursors.add(nextCursor);
+    afterId = nextCursor;
   }
 }
 

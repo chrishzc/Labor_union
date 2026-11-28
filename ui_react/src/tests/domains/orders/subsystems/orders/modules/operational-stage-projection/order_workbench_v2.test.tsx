@@ -2,7 +2,7 @@
  * File: order_workbench_v2.test.tsx
  * Description: 驗證待辦看板十三階段 projection 與三軌案件受理統計呈現。
  */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CORE_STAGE_CODES,
@@ -378,6 +378,32 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(screen.queryByLabelText('案件顯示方式')).not.toBeInTheDocument();
   });
 
+  it('姓名摘要讀取前保留案號搜尋，正式摘要完成後才判定查無案件', async () => {
+    let publishSummaries!: (page: ReturnType<typeof summaryPage>) => void;
+    clientMocks.loadSummaries.mockReturnValue(new Promise(resolve => { publishSummaries = resolve; }));
+    clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
+      timeline('CASE-PENDING-NAME', 'formal_service'),
+    ], { stageCounts: { formal_service: 1 } }));
+    render(<OrderWorkbenchV2Page />);
+
+    await screen.findByText('CASE-PENDING-NAME');
+    expect(cardFor('CASE-PENDING-NAME')).toHaveTextContent('摘要載入中');
+    const search = screen.getByRole('textbox', { name: '搜尋案件編號或姓名' });
+    fireEvent.change(search, { target: { value: 'CASE-PENDING' } });
+    expect(cardFor('CASE-PENDING-NAME')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '陳小芳' } });
+    expect(screen.getByText(/姓名搜尋尚無法比對，目前只比對案件編號/)).toBeInTheDocument();
+    expect(screen.queryByText('目前沒有符合條件的案件。')).not.toBeInTheDocument();
+
+    await act(async () => publishSummaries(summaryPage([
+      orderSummary('CASE-PENDING-NAME', '陳小芳', null, '2026-10-01', '2026-10-20'),
+    ])));
+    expect(cardFor('CASE-PENDING-NAME')).toHaveTextContent('陳小芳');
+    expect(screen.queryByText(/姓名搜尋尚無法比對/)).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '查無此人' } });
+    expect(screen.getByText('目前沒有符合條件的案件。')).toBeInTheDocument();
+  });
+
   it('保留正式階段總數與案件摘要，不再提供已移除的小狀態篩選', async () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([
       {
@@ -612,7 +638,9 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: /10 服務中 0/ }));
+    const pendingStage = screen.getByRole('button', { name: /10 服務中/ });
+    expect(pendingStage).toHaveTextContent('—');
+    fireEvent.click(pendingStage);
 
     await waitFor(() => expect(screen.getByText('CASE-FRESH')).toBeInTheDocument());
     resolveInitial(corePage([

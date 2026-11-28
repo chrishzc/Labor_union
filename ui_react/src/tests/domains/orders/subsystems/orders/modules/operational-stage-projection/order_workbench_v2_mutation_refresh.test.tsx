@@ -104,7 +104,9 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
       mocks.core.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
       rerender(route(true));
       expect(screen.getByText('CASE-REFRESH')).toBeInTheDocument();
-      expect(screen.getByText('清單更新中，暫時無法操作案件。')).toBeInTheDocument();
+      expect(screen.getByText('清單更新中，顯示上次資料。重新讀取完成後可處理案件。')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: '待辦案件清單，可橫向捲動' })).toHaveAttribute('tabindex', '0');
+      expect(screen.getByRole('table', { name: '待辦案件清單' })).toHaveAccessibleDescription(/顯示上次資料/);
       expect(screen.getByText('居住型態')).toBeInTheDocument();
       expect(screen.queryByRole('link', { name: '修正資料' })).not.toBeInTheDocument();
       await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(initialReads + 1));

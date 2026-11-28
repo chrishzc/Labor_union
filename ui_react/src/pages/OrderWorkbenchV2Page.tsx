@@ -215,6 +215,15 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   const selectedDefinition = selectedStage === null ? null : coreStageDefinition(selectedStage);
   const selectedStageCount = selectedStage === null ? view?.items.length ?? 0 : view?.stageCounts[selectedStage] ?? 0;
   const displayedCount = displayedItems.length;
+  const previewOnly = refreshing || error !== null;
+  const nameSearchIncomplete = normalizedSearch !== '' && view !== null && view.items.length > 0
+    && (summaryLoading || summaryQueryFailed);
+  const showEmpty = view !== null && !previewOnly && !nameSearchIncomplete && displayedCount === 0;
+  const tableDescriptions = [
+    refreshing ? 'workbench-refresh-status' : null,
+    view !== null && error !== null ? 'workbench-list-error' : null,
+    view !== null && (summaryLoading || summaryQueryFailed) ? 'workbench-summary-status' : null,
+  ].filter(Boolean).join(' ');
   const clearFilters = () => { setSearch(''); setSelectedStage(null); };
 
   const selectStage = (stage: CoreStageCode | null) => {
@@ -263,7 +272,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
               aria-pressed={selectedStage === definition.code} onClick={() => selectStage(definition.code)}>
               <span className="order-v2-stage-number">{definition.ordinal}</span>
               <span className="order-v2-stage-label">{definition.shortLabel}</span>
-              <span className="pipeline-step-badge">{view?.stageCounts[definition.code] ?? 0}</span>
+              <span className="pipeline-step-badge">{view?.stageCounts[definition.code] ?? '—'}</span>
             </button>
           ))}
         </section>
@@ -293,33 +302,42 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
             {selectedDefinition ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}` : '進行中案件'}
           </h2>
           <p className="pipeline-stage-desc">
-            點選案件列，進入案件處理。
+            {view !== null && previewOnly ? '可搜尋及查閱上次的案件編號、目前待辦與提醒。' : '點選案件列，進入案件處理。'}
           </p>
         </div>
         <div className="order-v2-result-count" aria-live="polite">
-          顯示 <strong>{displayedCount}</strong>
-          <span>／ {selectedStageCount} 筆</span>
+          顯示 <strong>{view === null || (nameSearchIncomplete && displayedCount === 0) ? '—' : displayedCount}</strong>
+          <span>／ {view === null ? '—' : selectedStageCount} 筆</span>
         </div>
       </div>
 
-      {summaryQueryFailed && !loading && !error && (
-        <div className="order-v2-summary-warning" role="status">
-          {summaries.snapshot
-            ? <>案件摘要更新失敗，顯示 {viewTimestamp(summaries.snapshot.updatedAt)} 的資料。 <button type="button" onClick={refreshProjection}>重試</button></>
-            : <>客戶、日期與月嫂資料暫時無法載入。可先查看案件分類。 <button type="button" onClick={refreshProjection}>重試</button></>}
+      {view !== null && (summaryLoading || summaryQueryFailed) && (
+        <div id="workbench-summary-status" className="order-v2-summary-warning" role="status">
+          {summaryLoading
+            ? (summaries.snapshot ? '案件摘要更新中，顯示上次的客戶、日期與月嫂資料。' : '正在載入客戶、日期與月嫂資料。可先查看案件編號和辦理階段。')
+            : (summaries.snapshot ? `案件摘要更新失敗，顯示 ${viewTimestamp(summaries.snapshot.updatedAt)} 的資料。` : '客戶、日期與月嫂資料暫時無法載入。可先查看案件分類。')}
+          {nameSearchIncomplete && (summaries.snapshot
+            ? ' 姓名搜尋暫以更新前的摘要比對。'
+            : ' 姓名搜尋尚無法比對，目前只比對案件編號。')}
+          {summaryQueryFailed && !previewOnly && <> <button type="button" onClick={refreshProjection}>重試</button></>}
         </div>
       )}
 
       {loading && <div className="order-v2-empty">正在查詢訂單資料…</div>}
-      {error && <div className="order-v2-error" role="alert">
+      {error && <div id="workbench-list-error" className="order-v2-error" role="alert">
         {error}
-        {core.snapshot && <> 顯示 {viewTimestamp(core.snapshot.updatedAt)} 的資料。</>}
+        {core.snapshot && <> 顯示 {viewTimestamp(core.snapshot.updatedAt)} 的資料，重新讀取成功後可處理案件。</>}
         {' '}<button type="button" onClick={refreshProjection}>重試</button>
       </div>}
       {refreshing && (
-        <div className="order-v2-summary-warning" role="status">清單更新中，暫時無法操作案件。</div>
+        <div id="workbench-refresh-status" className="order-v2-summary-warning" role="status">
+          清單更新中，顯示上次資料。重新讀取完成後可處理案件。
+        </div>
       )}
-      {!loading && !error && displayedCount === 0 && (
+      {view !== null && previewOnly && !nameSearchIncomplete && displayedCount === 0 && (
+        <p className="order-v2-empty">上次清單沒有符合目前條件的案件。</p>
+      )}
+      {showEmpty && (
         <div className="stage-empty-state">
           <span className="stage-empty-icon" aria-hidden="true">☕</span>
           <strong className="stage-empty-text">目前沒有符合條件的案件。</strong>
@@ -327,10 +345,9 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
           <span className="stage-empty-hint">可切換作業階段，或調整搜尋與篩選條件。</span>
         </div>
       )}
-      {!loading && displayedCount > 0 && (
-        <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0 }}>
+      {displayedCount > 0 && (
         <div className="order-v2-table-wrap" tabIndex={0} role="region" aria-label="待辦案件清單，可橫向捲動">
-        <table className="order-v2-table" aria-label="待辦案件清單">
+        <table className="order-v2-table" aria-label="待辦案件清單" aria-describedby={tableDescriptions || undefined}>
           <thead><tr>
             <th scope="col">案件編號</th>
             <th scope="col">客戶姓名</th>
@@ -345,7 +362,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
             const summary = summaryIndex.get(item.id) ?? null;
             const stage = item.currentStage;
             const primaryNotice = item.blockers[0] ?? item.warnings[0] ?? null;
-            const entryDisabled = refreshing || error !== null;
+            const entryDisabled = previewOnly;
             const openWork = () => {
               if (entryDisabled) return;
               if (stage?.code === 'intake_validation') window.location.hash = importFieldIssueHref(item.id, intakeReviews.get(item.id)?.issues[0]);
@@ -368,7 +385,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
                 }}
               >
                 <td className="order-v2-case-number">{item.id}</td>
-                <td>{summary ? summary.clientName.trim() || '客戶姓名未登錄' : <span title={summaryUnavailableMessage(summaryLoading, summaryQueryFailed)}>案件摘要不可用</span>}</td>
+                <td>{summary ? summary.clientName.trim() || '客戶姓名未登錄' : <span title={summaryUnavailableMessage(summaryLoading, summaryQueryFailed)}>{summaryLoading ? '摘要載入中' : '案件摘要不可用'}</span>}</td>
                 <td className="order-v2-service-dates">
                   {summary ? <>
                     <span>{summary.serviceRange}</span>
@@ -416,7 +433,6 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
           </tbody>
         </table>
         </div>
-        </fieldset>
       )}
 
       </section>

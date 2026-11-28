@@ -658,14 +658,21 @@ const StaffRosterPage: React.FC = () => {
     activeControllerRef.current = controller;
     setDirectory({ status: 'loading', items: [] });
     try {
-      const response = await loadAllStaffDirectoryPages(
+      await loadAllStaffDirectoryPages(
         staffDirectoryClient.queryPage.bind(staffDirectoryClient),
         { pageSize: 200, includeProfile: true, lifecycleState: rosterLifecycle },
-        { signal: controller.signal }
+        { signal: controller.signal },
+        response => {
+          if (!mountedRef.current || generation !== requestGenerationRef.current) return;
+          const page = adaptStaffDirectoryPage(response);
+          setDirectory(current => {
+            const items = [...current.items, ...page.items];
+            return page.nextCursor === null
+              ? { status: 'ready', items, nextCursor: null }
+              : { status: 'loading', items };
+          });
+        },
       );
-      if (!mountedRef.current || generation !== requestGenerationRef.current) return;
-      const page = adaptStaffDirectoryPage(response);
-      setDirectory({ status: 'ready', items: page.items, nextCursor: page.nextCursor });
     } catch (error) {
       if (
         error instanceof StaffDirectoryAbortedError ||
@@ -1118,7 +1125,13 @@ const StaffRosterPage: React.FC = () => {
     if (id === selectedRosterTab) return;
     const select = () => {
       setShowWebProfiles(id === 'web');
-      if (id !== 'web') setRosterLifecycle(id);
+      if (id !== 'web' && id !== rosterLifecycle) {
+        activeControllerRef.current?.abort();
+        searchControllerRef.current?.abort();
+        setDirectory({ status: 'loading', items: [] });
+        setDirectorySearch({ status: 'idle', items: [] });
+        setRosterLifecycle(id);
+      }
       focus?.();
     };
     if (id === 'web' || showWebProfiles) requestLeave(select);
@@ -1314,7 +1327,11 @@ const StaffRosterPage: React.FC = () => {
               : directorySearch.status === 'error'
                 ? '搜尋未完成'
                 : `搜尋結果 ${filteredStaffItems.length} 位服務人員`
-            : `目前已載入 ${directory.items.length} 位服務人員`}
+            : directory.status === 'error' && directory.items.length === 0
+              ? '名冊未載入完成'
+              : directory.status === 'loading'
+                ? directory.items.length > 0 ? `目前已載入 ${directory.items.length} 位，名冊仍在載入` : '名冊載入中…'
+                : `目前已載入 ${directory.items.length} 位服務人員`}
         </span>
         </>}
       </div>
@@ -1325,7 +1342,9 @@ const StaffRosterPage: React.FC = () => {
         <section data-surface-id="staff.directory" role="tabpanel" id={`${rosterTabsId}-panel`} aria-labelledby={`${rosterTabsId}-${rosterLifecycle}`}>
           {directory.status === 'loading' && (
             <div className="staff-directory-message" data-control-id="staff.directory.query" role="status">
-              正在載入服務人員摘要名冊…
+              {directory.items.length > 0
+                ? '名冊尚未完整載入，公會編號排序與人數會在載入完成後更新。'
+                : '正在載入服務人員摘要名冊…'}
             </div>
           )}
           {directory.status === 'error' && (
@@ -1341,7 +1360,7 @@ const StaffRosterPage: React.FC = () => {
           )}
 
           {searchQuery.trim() && directorySearch.status === 'loading' && (
-            <div className="staff-directory-message" role="status">正在搜尋完整服務人員名冊…</div>
+            <div className="staff-directory-message" role="status">正在搜尋完整服務人員名冊，目前只比對已載入的人員。</div>
           )}
           {searchQuery.trim() && directorySearch.status === 'error' && (
             <div className="staff-directory-message error" role="alert">搜尋服務人員失敗：{directorySearch.message}</div>

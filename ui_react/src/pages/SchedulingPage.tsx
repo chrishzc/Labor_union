@@ -2504,7 +2504,7 @@ const SchedulingWorkbench: React.FC = () => {
           {calendarLoading && (
             <div className="scheduling-status" role="status">正在載入排班月曆…</div>
           )}
-          {calendarUpdating && <div className="scheduling-status" role="status">正在更新排班月曆…</div>}
+          {calendarUpdating && <div className="scheduling-status" role="status">正在更新排班月曆。標示「更新中」的月份仍可能顯示上次查詢的班次。</div>}
           {selectedRangeEmpty && !calendarLoading && !calendarUpdating && failedCalendarStaff.size === 0 && (
             <div className="scheduling-status">目前範圍沒有排班資料。</div>
           )}
@@ -2611,7 +2611,8 @@ const SchedulingWorkbench: React.FC = () => {
                 }}
               >
                 <div className="gantt-matrix-table">
-                {!directoryLoading && filteredStaff.length === 0 && (
+                {!directoryLoading && filteredStaff.length === 0
+                  && (statusFilter === 'all' || (!calendarLoading && !calendarUpdating && failedCalendarStaff.size === 0)) && (
                   <div className="scheduling-status">
                     {staffList.length === 0 ? '目前沒有可顯示的服務人員摘要。' : '目前範圍沒有排班資料。'}
                   </div>
@@ -2707,13 +2708,23 @@ const SchedulingWorkbench: React.FC = () => {
                             const targetMonth = startMonth + offset;
                             const state = getCalendarMonth(staff.id, targetMonth);
                             const cachedMonth = calendarCache.get(calendarMonthKey(staff.id, month.year, targetMonth));
-                            const text = cachedMonth && monthRefresh(cachedMonth) ? '更新中'
-                              : state.kind === 'unloaded' ? '尚未載入'
-                              : state.kind === 'loading' ? '載入中'
-                              : calendarMonthFailed(state) ? '載入失敗，可重試'
-                              : (state.canonical?.days.some(day => day.entries.length > 0)
+                            let text: string;
+                            if (state.kind === 'unloaded') text = '尚未載入';
+                            else if (state.kind === 'loading') text = '載入中';
+                            else if (cachedMonth && monthRefresh(cachedMonth)) {
+                              const shown = calendarMonthDisplay(cachedMonth);
+                              text = shown.canonical || shown.monthly ? '更新中，顯示上次資料' : '更新中';
+                            } else if (calendarMonthFailed(state)) {
+                              const previous = cachedMonth?.previous;
+                              const showingPrevious = (!state.canonical && !state.canonicalDenied && previous?.canonical)
+                                || (!state.monthly && !state.historicalDenied && previous?.monthly);
+                              const failureLabel = state.canonical || state.monthly ? '部分載入失敗' : '載入失敗';
+                              text = showingPrevious ? `${failureLabel}，含上次資料，可重試` : `${failureLabel}，可重試`;
+                            } else {
+                              text = (state.canonical?.days.some(day => day.entries.length > 0)
                                 || state.monthly?.days.some(day => day.status !== 'available'))
                                 ? '已載入' : '已查無班';
+                            }
                             return <small key={targetMonth}>{targetMonth}月：{text} </small>;
                           })}
                         </div>

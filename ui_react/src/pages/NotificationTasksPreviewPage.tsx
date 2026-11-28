@@ -10,6 +10,7 @@ import {
   RefreshCw, Search, Send, ShieldCheck, TriangleAlert, Wallet, X,
 } from 'lucide-react';
 import { notificationTasksClient as client, notificationFailure, notifyNotificationTasksChanged, type NotificationItem, type NotificationPage, type NotificationSource, type NotificationCatalog } from '../api/line_notifications/notification_tasks_client';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import { importFieldIssueHref } from '../api/case_import/import_field_issues';
 import { NotificationTaskActions, notificationHref, OptionalImportFieldSkip } from '../components/NotificationTaskActions';
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
@@ -41,6 +42,14 @@ const PRIMARY:Record<NotificationSource,string> = {
   notification_failure:'處理通知建立異常',
 };
 type Row = NotificationItem & {caseLabel:string;personLabel:string;primary:string;secondary?:string;tone?:'attention'|'danger'};
+type SourceRead = {kind: 'refreshing' | 'ready'} | {kind: 'refresh-failed' | 'page-failed'; message: string};
+const REFRESHING_ROW = '更新中，顯示上次資料';
+const FAILED_ROW = '更新失敗，顯示上次資料';
+
+function sourceAccessLost(error: unknown): boolean {
+  return error instanceof ApiHttpError && (error.status === 401 || error.status === 403 || error.status === 410);
+}
+
 function row(item:NotificationItem):Row {
   const caseLabel = item.source==='registration' ? `申請編號：${item.reference_id ?? '未提供'}`
     : item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項');
@@ -60,27 +69,50 @@ export function NotificationTasksPage() {
   const [page,setPage]=useState(1);const [selectedId,setSelectedId]=useState('');const [notice,setNotice]=useState('');
   const [catalog,setCatalog]=useState<NotificationCatalog>([]);
   const [pools,setPools]=useState<Partial<Record<NotificationSource,NotificationPage>>>({});
-  const [failures,setFailures]=useState<Partial<Record<NotificationSource,string>>>({});
+  const [sourceReads,setSourceReads]=useState<Partial<Record<NotificationSource,SourceRead>>>({});
   const [queryError,setQueryError]=useState('');const [loading,setLoading]=useState(true);const [moreBusy,setMoreBusy]=useState(false);
   const [revision,setRevision]=useState(0);const [busy,setBusy]=useState(false);const [expanded,setExpanded]=useState('');
   const detailRef=useRef<HTMLElement>(null);const generation=useRef(0);const locked=useRef(false);
   const intents=useRef<Record<string,string>>({});
-  const importFieldReads = useRef({ loadedPages: 1, version: 0 });
+  const importFieldLoadedPages = useRef(1);
+  const sourceReadVersions = useRef<Partial<Record<NotificationSource, number>>>({});
+  const setSourceRead = useCallback((source: NotificationSource, state: SourceRead) => {
+    setSourceReads(old => ({...old, [source]: state}));
+  }, []);
+  const recordRefreshFailure = useCallback((source: NotificationSource, error: unknown) => {
+    if (sourceAccessLost(error)) setPools(old => ({...old, [source]: undefined}));
+    setSourceRead(source, {kind: 'refresh-failed', message: notificationFailure(error)});
+  }, [setSourceRead]);
   useEffect(()=>{
     const abort=new AbortController();const version=++generation.current;
-    importFieldReads.current = { loadedPages: 1, version: 0 };
-    setLoading(true);setQueryError('');setFailures({});setPools({});setExpanded('');
+    importFieldLoadedPages.current = 1;
+    setLoading(true);setQueryError('');setSourceReads({});setExpanded('');
     void client.catalog(abort.signal).then(async sources=>{
       if(abort.signal.aborted)return;
       setCatalog(sources);
+      setPools(old => Object.fromEntries(sources.map(({source}) => [source, old[source]])));
       setGroup(previous=>previous==='all' || sources.some(source=>categoryId(source)===previous) ? previous : 'all');
       await Promise.all(sources.map(async source=>{
-        try {const result=await client.list(source.source,0,abort.signal);if(!abort.signal.aborted && generation.current===version)setPools(old=>({...old,[source.source]:result}));}
-        catch(error){if(!abort.signal.aborted && generation.current===version)setFailures(old=>({...old,[source.source]:notificationFailure(error)}));}
+        const readVersion = sourceReadVersions.current[source.source];
+        const isCurrent = () => !abort.signal.aborted && generation.current === version
+          && sourceReadVersions.current[source.source] === readVersion;
+        try {
+          const result = await client.list(source.source, 0, abort.signal);
+          if (!isCurrent()) return;
+          setPools(old => ({...old, [source.source]: result}));
+          setSourceRead(source.source, {kind: 'ready'});
+        } catch (error) {
+          if (isCurrent()) recordRefreshFailure(source.source, error);
+        }
       }));
-    }).catch(error=>{if(!abort.signal.aborted)setQueryError(notificationFailure(error));}).finally(()=>{if(!abort.signal.aborted)setLoading(false);});
+    }).catch(error => {
+      if (abort.signal.aborted) return;
+      setCatalog([]);
+      setPools({});
+      setQueryError(notificationFailure(error));
+    }).finally(()=>{if(!abort.signal.aborted)setLoading(false);});
     return()=>abort.abort();
-  },[revision]);
+  },[revision, recordRefreshFailure, setSourceRead]);
   useEffect(()=>{
     const recheck=()=>{if(window.location.hash.split('?')[0]==='#notifications'){setRevision(value=>value+1);}};
     window.addEventListener('hashchange',recheck);
@@ -88,38 +120,49 @@ export function NotificationTasksPage() {
   },[]);
   const refreshSource=useCallback(async(source:NotificationSource)=>{
     const version = generation.current;
-    const importRead = source === 'import_fields' ? importFieldReads.current : null;
-    const importVersion = importRead ? ++importRead.version : 0;
-    const isCurrent = () => version === generation.current && (!importRead || importRead.version === importVersion);
+    const sourceVersion = (sourceReadVersions.current[source] ?? 0) + 1;
+    sourceReadVersions.current[source] = sourceVersion;
+    const importPagesToReload = source === 'import_fields' ? importFieldLoadedPages.current : 1;
+    const isCurrent = () => version === generation.current && sourceReadVersions.current[source] === sourceVersion;
+    setSourceRead(source, {kind: 'refreshing'});
     try {
       let result = await client.list(source);
       const items = [...result.items];
       let loadedPages = 1;
-      while (isCurrent() && importRead && loadedPages < importRead.loadedPages && result.next_cursor != null) {
+      while (isCurrent() && loadedPages < importPagesToReload && result.next_cursor != null) {
         result = await client.list(source, result.next_cursor);
         items.push(...result.items);
         loadedPages += 1;
       }
       if (!isCurrent()) return;
-      if (importRead) {
-        importRead.loadedPages = loadedPages;
-        importRead.version += 1;
-      }
+      if (source === 'import_fields') importFieldLoadedPages.current = loadedPages;
       setPools(old => ({...old, [source]: {...result, items}}));
-      setFailures(old => ({...old, [source]: undefined}));
+      setSourceRead(source, {kind: 'ready'});
     } catch (error) {
       if (!isCurrent()) return;
-      if (importRead) importRead.version += 1;
-      setFailures(old => ({...old, [source]: notificationFailure(error)}));
+      recordRefreshFailure(source, error);
     }
-  },[]);
+  },[recordRefreshFailure, setSourceRead]);
   const refreshAfterCommit=useCallback(async()=>{
     notifyNotificationTasksChanged();
     await Promise.all(catalog.map(({source}) => refreshSource(source)));
   },[catalog,refreshSource]);
+  const sourceIsRefreshing = (source: NotificationSource): boolean => (
+    sourceReads[source]?.kind === 'refreshing' || (loading && !sourceReads[source])
+  );
+  const previousDataLabel = (source: NotificationSource): string => {
+    if (sourceIsRefreshing(source)) return REFRESHING_ROW;
+    return sourceReads[source]?.kind === 'refresh-failed' ? FAILED_ROW : '';
+  };
   const loaded=catalog.flatMap(source=>pools[source.source]?.items ?? []);
-  const coveredTasks=new Set(loaded.flatMap(item=>item.failure?.related_task_ids ?? []));
-  const allItems=[...new Map(loaded.filter(item=>item.source!=='delivery' || !coveredTasks.has(item.reference_id!)).map(value=>row(value)).map(item=>[item.id,item])).values()];
+  const confirmedDeliveryIds = new Set(loaded.filter(item => item.source === 'delivery' && !previousDataLabel(item.source))
+    .map(item => item.reference_id));
+  const displayCandidates = loaded.filter(item => !previousDataLabel(item.source)
+    || !item.failure?.related_task_ids.some(taskId => confirmedDeliveryIds.has(taskId)));
+  const coveredTasks = new Set(displayCandidates.flatMap(item => item.failure?.related_task_ids ?? []));
+  const allItems = [...new Map(displayCandidates.filter(item => item.source !== 'delivery'
+    || item.reference_id === null || !coveredTasks.has(item.reference_id))
+    .map(value => row(value)).map(item => [item.id, item])).values()];
   const sourceCategories=new Map(catalog.map(source=>[source.source,categoryId(source)]));
   const categories=new Map(catalog.map(source=>{
     const id=categoryId(source);
@@ -127,9 +170,14 @@ export function NotificationTasksPage() {
   }));
   const groupOptions=[ALL_TASKS,...categories.values()];
   const matchesGroup=(source:NotificationSource,id:string)=>id==='all' || sourceCategories.get(source)===id;
+  const failureMessage = (source: NotificationSource): string => {
+    const read = sourceReads[source];
+    return read?.kind === 'refresh-failed' || read?.kind === 'page-failed' ? read.message : '';
+  };
+  const hasPreviousData = allItems.some(item => previousDataLabel(item.source));
   const groupCount=(id:string)=>{
     const sources=catalog.filter(source=>matchesGroup(source.source,id));
-    if(loading || queryError || sources.some(({source})=>failures[source] || !pools[source]))return '—';
+    if(loading || queryError || sources.some(({source})=>sourceIsRefreshing(source) || failureMessage(source) || !pools[source]))return '—';
     const count=allItems.filter(item=>matchesGroup(item.source,id)).length;
     return sources.some(({source})=>pools[source]?.next_cursor!=null) ? `${count}+` : count;
   };
@@ -139,13 +187,14 @@ export function NotificationTasksPage() {
   const visible=filtered.slice((currentPage-1)*PAGE_SIZE,currentPage*PAGE_SIZE);
   const selected=visible.find(item=>item.id===selectedId) ?? visible[0];
   const selectedCaseNo=selected?.case_no;
+  const selectedPreviousData = selected ? previousDataLabel(selected.source) : '';
   const scopedSources=catalog.filter(s=>matchesGroup(s.source,group));
-  const pendingMore=scopedSources.filter(s=>pools[s.source]?.next_cursor!=null);
-  const failedSources=scopedSources.filter(s=>failures[s.source]);
-  const emptyLoading=loading;
+  const pendingMore=scopedSources.filter(s=>pools[s.source]?.next_cursor!=null && !previousDataLabel(s.source));
+  const failedSources=scopedSources.filter(s=>failureMessage(s.source));
+  const emptyLoading=loading || scopedSources.some(s=>sourceIsRefreshing(s.source));
   const emptyError=queryError || (failedSources.length?'目前分類仍有來源無法讀取，請使用來源旁的重試按鈕。':'');
   const emptyTitle=emptyLoading?'讀取中':emptyError?'目前無法完整讀取事項':pendingMore.length?'尚有事項待載入':search.trim()?'沒有符合搜尋條件的事項':'目前沒有待辦事項';
-  const emptyMessage=emptyLoading?'正在確認目前事項，請稍候。':emptyError?'無法確認是否還有待辦。已載入的事項仍可使用，請重新整理。':pendingMore.length?'目前這批沒有符合的事項，請載入更多後再確認。':search.trim()?'搜尋只涵蓋已載入事項，可清除搜尋條件後查看。':'此分類目前沒有新事項。可重新整理查看最新結果。';
+  const emptyMessage=emptyLoading?'正在確認目前事項，請稍候。':emptyError?'無法確認是否還有待辦。請重新整理或重試該來源。':pendingMore.length?'目前這批沒有符合的事項，請載入更多後再確認。':search.trim()?'搜尋只涵蓋已載入事項，可清除搜尋條件後查看。':'此分類目前沒有新事項。可重新整理查看最新結果。';
   const reset=()=>{setSearch('');setGroup('all');setPage(1);setNotice('');setExpanded('');};
   const select=(item:Row)=>requestLeave(()=>{setSelectedId(item.id);setNotice('');setExpanded('');if(window.matchMedia('(max-width: 1000px)').matches)window.requestAnimationFrame(()=>detailRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));});
   const loadMore=async()=>{
@@ -153,17 +202,18 @@ export function NotificationTasksPage() {
     await Promise.all(pendingMore.map(async ({source}) => {
       const cursor = pools[source]?.next_cursor;
       if (cursor == null) return;
-      const importRead = source === 'import_fields' ? importFieldReads.current : null;
-      const importVersion = importRead?.version;
-      const isCurrent = () => version === generation.current && importRead?.version === importVersion;
+      const readVersion = sourceReadVersions.current[source];
+      const isCurrent = () => version === generation.current && sourceReadVersions.current[source] === readVersion;
       try {
         const next = await client.list(source, cursor);
         if (!isCurrent()) return;
-        if (importRead) importRead.loadedPages += 1;
+        if (source === 'import_fields') importFieldLoadedPages.current += 1;
         setPools(old => ({...old, [source]: {...next, items: [...new Map([...(old[source]?.items ?? []), ...next.items].map(item => [item.id, item])).values()]}}));
-        setFailures(old => ({...old, [source]: undefined}));
+        setSourceRead(source, {kind: 'ready'});
       } catch (error) {
-        if (isCurrent()) setFailures(old => ({...old, [source]: notificationFailure(error)}));
+        if (!isCurrent()) return;
+        if (sourceAccessLost(error)) recordRefreshFailure(source, error);
+        else setSourceRead(source, {kind: 'page-failed', message: notificationFailure(error)});
       }
     }));
     setMoreBusy(false);
@@ -200,8 +250,8 @@ export function NotificationTasksPage() {
     </ManagementPageHeader>
     <div className="notification-preview-page">
 
-    {(queryError || failedSources.length>0) && <div className="notification-preview-banner" role="alert"><strong>{queryError || failedSources.length===scopedSources.length?'目前無法讀取事項':'部分事項未能載入'}</strong>{queryError && <p>{queryError}</p>}{failedSources.map(s=><p key={s.source}>{s.label}：{failures[s.source]} <button type="button" className="np-button" onClick={()=>void refreshSource(s.source)}>重試{s.label}</button></p>)}</div>}
-    {loading && <p role="status">正在讀取待處理事項…</p>}
+    {(queryError || failedSources.length>0) && <div className="notification-preview-banner" role="alert"><strong>{queryError || failedSources.length===scopedSources.length?'目前無法讀取事項':'部分事項未能載入'}</strong>{queryError && <p>{queryError}</p>}{failedSources.map(s=><p key={s.source}>{s.label}：{failureMessage(s.source)} <button type="button" className="np-button" onClick={()=>void refreshSource(s.source)}>重試{s.label}</button></p>)}</div>}
+    {emptyLoading && <p role="status">正在讀取待處理事項…</p>}
     <div className="notification-preview-toolbar">
       <div className="notification-preview-groups" role="group" aria-label="事項分類">{groupOptions.map(({ id, label, icon: Icon }) => <button type="button" key={id} aria-pressed={group === id} className={group === id ? 'active' : ''} onClick={() => requestLeave(() => { setGroup(id); setPage(1); setNotice(''); })}><Icon size={15} aria-hidden="true" />{label}<span>{groupCount(id)}</span></button>)}</div>
       <div className="notification-preview-searches"><label className="notification-preview-search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="搜尋通知事項" placeholder="搜尋已載入的事項" value={search} onChange={event => { const value=event.target.value;requestLeave(() => { setSearch(value); setPage(1); setNotice(''); }); }} /></label>
@@ -210,12 +260,13 @@ export function NotificationTasksPage() {
 
     <div className="notification-preview-grid">
       <section className="notification-preview-list" aria-label="通知事項清單">
-        <div className="notification-preview-list-heading"><strong>待處理事項</strong><span>{`已載入 ${allItems.length} 筆，符合 ${filtered.length} 筆`}</span></div>
+        <div className="notification-preview-list-heading"><strong>待處理事項</strong><span>{`${hasPreviousData ? '目前清單（含上次資料）' : '已載入'} ${allItems.length} 筆，符合 ${filtered.length} 筆`}</span></div>
         {visible.length ? <div className="notification-preview-rows">{visible.map(item => {
           const Icon = item.tone === 'danger' ? TriangleAlert : item.group === 'review' ? ClipboardCheck : item.group === 'reminder' ? Bell : MessageCircle;
+          const previousData = previousDataLabel(item.source);
           return <button type="button" key={item.id} data-notification-id={item.id} className={`notification-preview-row${selected?.id === item.id ? ' selected' : ''}`} aria-pressed={selected?.id === item.id} onClick={() => select(item)}>
             <span className={`notification-preview-item-icon ${item.tone ?? ''}`}><Icon size={19} aria-hidden="true" /></span>
-            <span className="notification-preview-row-content"><span className="notification-preview-row-title"><strong>{item.title}</strong>{item.source!=='registration' && <span className={`np-tag ${item.tone ?? ''}`}>{item.tag}</span>}</span><span className="notification-preview-row-subject">{item.caseLabel}{item.source!=='registration' && item.person && <><span>·</span>{item.person}</>}</span>{item.source!=='registration' && <span className="notification-preview-row-summary">{item.summary}</span>}{item.time && <span className="notification-preview-row-time"><Clock3 size={12} aria-hidden="true" />{item.time}</span>}</span>
+            <span className="notification-preview-row-content"><span className="notification-preview-row-title"><strong>{item.title}</strong>{item.source!=='registration' && <span className={`np-tag ${item.tone ?? ''}`}>{item.tag}</span>}</span>{previousData && <span className="notification-preview-read-state">{previousData}</span>}<span className="notification-preview-row-subject">{item.caseLabel}{item.source!=='registration' && item.person && <><span>·</span>{item.person}</>}</span>{item.source!=='registration' && <span className="notification-preview-row-summary">{item.summary}</span>}{item.time && <span className="notification-preview-row-time"><Clock3 size={12} aria-hidden="true" />{item.time}</span>}</span>
             <ChevronRight className="notification-preview-row-arrow" size={17} aria-hidden="true" />
           </button>;
         })}</div> : <div className="notification-preview-empty"><Inbox size={34} aria-hidden="true" /><h2>{emptyTitle}</h2><p>{emptyMessage}</p>
@@ -229,6 +280,7 @@ export function NotificationTasksPage() {
         {selected ? <>
           <div className="notification-preview-detail-heading"><span>事項詳細內容</span>{selected.source!=='registration' && <span className={`np-tag ${selected.tone ?? ''}`}>{selected.tag}</span>}</div>
           <h2>{selected.title}</h2>
+          {selectedPreviousData && <p className="notification-preview-read-state" role="status">{selectedPreviousData}。請等最新資料確認後再處理。</p>}
           {selected.source!=='registration' && <p className="notification-preview-detail-summary">{selected.summary}</p>}
           <dl className="notification-preview-facts">{selected.source==='registration'
             ? <><div><dt>申請編號</dt><dd>{selected.reference_id ?? '未提供'}</dd></div><div><dt>收件時間</dt><dd>{selected.time || '未提供'}</dd></div></>
@@ -238,7 +290,9 @@ export function NotificationTasksPage() {
             <h3>待修正欄位</h3>
             <ul>{selected.import_field_issues?.map(issue => <li key={JSON.stringify([issue.source, issue.owner, issue.field, issue.source_field, issue.code, issue.optional_skip_review_identity])}>
               <a href={importFieldIssueHref(selectedCaseNo, issue)}>{issue.message}</a>
-              {issue.optional_skip_review_identity && !failures.import_fields && <OptionalImportFieldSkip caseNo={selectedCaseNo} reviewIdentity={issue.optional_skip_review_identity} sourceField={issue.source_field} onCommitted={refreshAfterCommit} />}
+              {issue.optional_skip_review_identity && !failureMessage('import_fields') && <fieldset className="notification-preview-operation-guard" disabled={!!selectedPreviousData}>
+                <OptionalImportFieldSkip caseNo={selectedCaseNo} reviewIdentity={issue.optional_skip_review_identity} sourceField={issue.source_field} onCommitted={refreshAfterCommit} />
+              </fieldset>}
             </li>)}</ul>
           </section>}
           {selected.recipient && selected.source!=='customer_binding' && selected.source!=='registration' && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>
@@ -251,10 +305,14 @@ export function NotificationTasksPage() {
           </div>}
           {selected.delivery_status && <p>最近寄送狀態：{Object.hasOwn(DELIVERY_LABELS, selected.delivery_status)
             ? DELIVERY_LABELS[selected.delivery_status] : '目前無法判讀。請到「通知與寄送」核對最新紀錄。'}</p>}
-          <div className="notification-preview-actions">{!['customer_binding','staff_binding'].includes(selected.source) && <button type="button" className="np-button primary" disabled={busy || loading || (!!selected.unavailable_reason && selected.primary.includes('發送'))} onClick={()=>void act(selected)}>{selected.primary.includes('發送')?<Send size={16} aria-hidden="true" />:<ExternalLink size={16} aria-hidden="true" />}{busy?'處理中…':selected.primary}</button>}
-            {selected.secondary && selected.source!=='customer_binding' && selected.source!=='registration' && <button type="button" className="np-button" disabled={busy} onClick={()=>void secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
+          <div className="notification-preview-actions">{!['customer_binding','staff_binding'].includes(selected.source) && <button type="button" className="np-button primary" disabled={busy || loading || !!selectedPreviousData || (!!selected.unavailable_reason && selected.primary.includes('發送'))} onClick={()=>void act(selected)}>{selected.primary.includes('發送')?<Send size={16} aria-hidden="true" />:<ExternalLink size={16} aria-hidden="true" />}{busy?'處理中…':selected.primary}</button>}
+            {selected.secondary && selected.source!=='customer_binding' && selected.source!=='registration' && <button type="button" className="np-button" disabled={busy || !!selectedPreviousData} onClick={()=>void secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
           </div>
-          {(selected.can_dismiss || expanded===selected.id || ['customer_binding','staff_binding'].includes(selected.source)) && <div className="notification-task-operation" key={selected.id}><NotificationTaskActions item={selected} expanded={expanded===selected.id} onCommitted={refreshAfterCommit} /></div>}
+          {(selected.can_dismiss || expanded===selected.id || selected.source==='customer_binding' || (selected.source==='staff_binding' && !selectedPreviousData)) && <div className="notification-task-operation" key={selected.id}>
+            <fieldset className="notification-preview-operation-guard" disabled={!!selectedPreviousData}>
+              <NotificationTaskActions item={selected} expanded={expanded===selected.id && !selectedPreviousData} onCommitted={refreshAfterCommit} />
+            </fieldset>
+          </div>}
           <p className="notification-preview-footnote"><ShieldCheck size={14} aria-hidden="true" />處理完成後，待辦會自動更新。</p>
           {notice && <div className="notification-preview-notice" role="status"><MessageCircle size={17} aria-hidden="true" /><p>{notice}</p><button type="button" aria-label="關閉操作訊息" onClick={() => setNotice('')}><X size={15} aria-hidden="true" /></button></div>}
         </> : <div className="notification-preview-empty detail-empty"><Check size={28} aria-hidden="true" /><p>選擇事項即可查看明細。</p></div>}

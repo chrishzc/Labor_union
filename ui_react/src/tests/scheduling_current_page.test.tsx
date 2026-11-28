@@ -1167,8 +1167,16 @@ describe('SchedulingPage query-only presentation', () => {
     await waitFor(() => expect(schedulingEligibilityCollisionClient.query).toHaveBeenCalled());
     const beforeCalendar = vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mock.calls.length;
     const beforeEligibility = vi.mocked(schedulingEligibilityCollisionClient.query).mock.calls.length;
+    let failRefresh!: (reason: Error) => void;
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar)
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { failRefresh = reject; }));
     act(() => publishStaffAvailabilityChange(11));
     await waitFor(() => expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(beforeCalendar + 1));
+    const changedRow = document.querySelector('[data-staff-id="11"]');
+    expect(changedRow).toHaveTextContent('更新中，顯示上次資料');
+    expect(document.querySelector('[data-staff-id="12"]')).not.toHaveTextContent('更新中，顯示上次資料');
+    failRefresh(new Error('synthetic refresh failed'));
+    await waitFor(() => expect(changedRow).toHaveTextContent('部分載入失敗，含上次資料，可重試'));
     expect(vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mock.calls.at(-1)?.[0].staffId).toBe(11);
     await waitFor(() => expect(vi.mocked(schedulingEligibilityCollisionClient.query).mock.calls.length).toBeGreaterThan(beforeEligibility));
     act(() => publishStaffAvailabilityChange(999999));

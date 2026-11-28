@@ -376,13 +376,17 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       <span className="client-roster-filter-help">點欄名旁的 ▾ 可篩選、隱藏或凍結；拖曳欄位右緣調整寬度（雙擊自動貼齊）。不同欄位的條件會同時套用。</span>
       {appliedFilters.query.trim() && <span className="client-roster-filter-chip">搜尋：{appliedFilters.query}<button type="button" disabled={loading} aria-label="清除搜尋條件" onClick={() => { const next = { ...appliedFilters, query: '' }; setFilters(next); void load(next); }}>×</button></span>}
       {appliedFilters.columnFilters.map((predicate) => <span className="client-roster-filter-chip" key={predicate.field}>{rosterFilterSummary(predicate)}<button type="button" disabled={loading} aria-label={`清除${rosterFilterColumns.find((item) => item.field === predicate.field)!.label}篩選`} onClick={() => applyColumn(predicate.field)}>×</button></span>)}
-      {filters.query !== appliedFilters.query && <span role="status">搜尋文字已變更，請按「搜尋」更新清單。</span>}
+      {!loading && filters.query !== appliedFilters.query && <span role="status">搜尋文字已變更，請按「搜尋」更新清單。</span>}
     </div>
     {exportMessage && <p role="status" className="client-roster-message">{exportMessage}</p>}
     {exportError && <p role="alert" className="client-roster-message">{exportError}</p>}
     {error && <p role="alert" className="client-roster-message">{error} 請按「搜尋」重新讀取清單。</p>}
     {listIssuesError && <p role="alert" className="client-roster-message">暫時無法確認哪些案件有進件欄位問題。請按「搜尋」重新讀取名冊。</p>}
-    {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
+    {loading && <p id={`${tableTitleId}-loading`} role="status" className="client-roster-message">
+      {page
+        ? `正在更新客戶名冊，暫時顯示上次查詢的第 ${Math.floor(pageOffset / pageSize) + 1} 頁與原篩選條件。`
+        : '正在載入客戶名冊清單…'}
+    </p>}
     {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
     {(page || error) && <div className="client-roster-table-frame">
       <div className="client-roster-table-title">
@@ -392,7 +396,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           <button type="button" disabled={loading} onClick={clearFilters}>清除全部篩選</button>
         </div>
       </div>
-      {!error && page && <div ref={tableViewport} id="client-roster-table-viewport" className="client-roster-table-wrap" role="region" aria-label="客戶名冊，可上下及左右捲動" tabIndex={0} aria-busy={loading} onScroll={syncScrollRail}><table ref={tableRef} aria-labelledby={tableTitleId} className="roster-table-adjustable" style={{ width: `${tableLayout.totalWidth}px` }}>
+      {!error && page && <div ref={tableViewport} id="client-roster-table-viewport" className="client-roster-table-wrap" role="region" aria-label="客戶名冊，可上下及左右捲動" aria-describedby={loading ? `${tableTitleId}-loading` : undefined} tabIndex={0} aria-busy={loading} onScroll={syncScrollRail}><table ref={tableRef} aria-labelledby={tableTitleId} className="roster-table-adjustable" style={{ width: `${tableLayout.totalWidth}px` }}>
       <RosterColGroup layout={tableLayout} />
       <thead><tr>{tableLayout.orderedVisibleColumns.map(renderHeaderCell)}</tr></thead>
       <tbody>{page.items.map((item) => <tr

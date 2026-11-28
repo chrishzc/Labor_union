@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationTasksPage } from '../../../../../../pages/NotificationTasksPreviewPage';
-import { notificationTasksClient as client, notificationFailure, type NotificationItem } from '../../../../../../api/line_notifications/notification_tasks_client';
+import { notificationTasksClient as client, notificationFailure, type NotificationItem, type NotificationPage } from '../../../../../../api/line_notifications/notification_tasks_client';
 import { lineDeliveryQueryClient } from '../../../../../../api/line_delivery/line_delivery_query_client';
 import { ApiHttpError } from '../../../../../../api/shared/typed_errors';
 import { transport } from '../../../../../../api/shared/transport';
@@ -284,6 +284,104 @@ it('從設定頁返回時重讀待辦及計數，不沿用離頁前清單',async
   await screen.findByRole('heading',{name:'目前沒有待辦事項'});
   expect(screen.getByLabelText('通知事項清單')).toHaveTextContent('已載入 0 筆，符合 0 筆');
   expect(screen.getByRole('button',{name:/款項與群組/})).toBeVisible();
+});
+
+it('重新整理逐來源採用新資料，舊事項的操作暫停至該來源讀回', async () => {
+  const overdue = item({unavailable_reason: null});
+  const recommendation = item({id: 'recommendation:7', source: 'recommendation', title: '原推薦待辦', payment: null});
+  vi.mocked(client.catalog).mockResolvedValue([
+    {source: 'overdue', label: '各期款項逾期', group: 'reminder'},
+    {source: 'recommendation', label: '推薦確認', group: 'review'},
+  ]);
+  vi.mocked(client.list).mockImplementation(async source => ({items: [source === 'overdue' ? overdue : recommendation], total: 1, next_cursor: null}));
+  const send = vi.spyOn(client, 'send');
+  render(<NotificationTasksPage />);
+  const refresh = await screen.findByRole('button', {name: '重新整理'});
+  await waitFor(() => expect(refresh).toBeEnabled());
+  expect(screen.getByRole('button', {name: '發送提醒'})).toBeEnabled();
+
+  let publishRecommendation!: (page: NotificationPage) => void;
+  let failOverdue!: (error: Error) => void;
+  const recommendationRead = new Promise<NotificationPage>(resolve => { publishRecommendation = resolve; });
+  const overdueRead = new Promise<NotificationPage>((_resolve, reject) => { failOverdue = reject; });
+  vi.mocked(client.list).mockImplementation(source => source === 'overdue' ? overdueRead : recommendationRead);
+  fireEvent.click(refresh);
+  expect(screen.getByRole('button', {name: /訂金逾期未清.*更新中，顯示上次資料/})).toBeVisible();
+  expect(screen.getByRole('button', {name: /原推薦待辦.*更新中，顯示上次資料/})).toBeVisible();
+  expect(screen.getByRole('button', {name: '發送提醒'})).toBeDisabled();
+  expect(screen.getByRole('button', {name: /全部事項/})).toHaveTextContent('—');
+
+  await act(async () => publishRecommendation({items: [{...recommendation, title: '新推薦待辦'}], total: 1, next_cursor: null}));
+  const freshRow = await screen.findByRole('button', {name: /新推薦待辦/});
+  expect(freshRow).not.toHaveTextContent('顯示上次資料');
+  expect(screen.getByRole('button', {name: /訂金逾期未清.*更新中，顯示上次資料/})).toBeVisible();
+  await act(async () => failOverdue(new ApiHttpError(503, 'notification_source_unavailable', '款項來源暫時無法讀取。')));
+  expect(screen.getByRole('button', {name: /訂金逾期未清.*更新失敗，顯示上次資料/})).toBeVisible();
+  expect(screen.getByRole('button', {name: '發送提醒'})).toBeDisabled();
+  expect(screen.getByRole('button', {name: /全部事項/})).toHaveTextContent('—');
+  expect(send).not.toHaveBeenCalled();
+
+  vi.mocked(client.list).mockResolvedValue({items: [], total: 0, next_cursor: null});
+  fireEvent.click(screen.getByRole('button', {name: '重試各期款項逾期'}));
+  await waitFor(() => expect(screen.queryByRole('button', {name: /訂金逾期未清/})).not.toBeInTheDocument());
+  expect(screen.getByRole('button', {name: /全部事項/})).toHaveTextContent('1');
+  expect(screen.getByRole('button', {name: '開啟案件工作區'})).toBeEnabled();
+});
+
+it('寄送工作更新後取代同一任務的舊異常，異常來源重試成功後再依新資料去重', async () => {
+  const fault = item({
+    id: 'notification_failure:case', source: 'notification_failure', title: '舊通知異常',
+    payment: null, unavailable_reason: null,
+    failure: {issue_key: 'ci_' + 'a'.repeat(64), notification_reason: 'recipient_unavailable', related_task_ids: [17]},
+  });
+  const delivery = item({
+    id: 'delivery:17', source: 'delivery', title: '寄送工作 #17', reference_id: 17,
+    payment: null, unavailable_reason: null,
+  });
+  const result = (value: NotificationItem): NotificationPage => ({items: [value], total: 1, next_cursor: null});
+  vi.mocked(client.catalog).mockResolvedValue([
+    {source: 'notification_failure', label: '通知建立異常', group: 'review'},
+    {source: 'delivery', label: '寄送工作', group: 'review'},
+  ]);
+  vi.mocked(client.list).mockImplementation(async source => result(source === 'delivery' ? delivery : fault));
+  render(<NotificationTasksPage />);
+  const refresh = await screen.findByRole('button', {name: '重新整理'});
+  await waitFor(() => expect(refresh).toBeEnabled());
+  expect(screen.getByRole('button', {name: /舊通知異常/})).toBeVisible();
+  expect(screen.queryByRole('button', {name: /寄送工作 #17/})).not.toBeInTheDocument();
+
+  let failFault!: (error: Error) => void;
+  const delayedFault = new Promise<NotificationPage>((_resolve, reject) => { failFault = reject; });
+  const freshDelivery = {...delivery, title: '已更新寄送工作 #17'};
+  vi.mocked(client.list).mockImplementation(source => source === 'delivery'
+    ? Promise.resolve(result(freshDelivery)) : delayedFault);
+  fireEvent.click(refresh);
+  const refreshedRow = await screen.findByRole('button', {name: /已更新寄送工作 #17/});
+  expect(refreshedRow).not.toHaveTextContent('顯示上次資料');
+  expect(screen.queryByRole('button', {name: /舊通知異常/})).not.toBeInTheDocument();
+
+  await act(async () => failFault(new ApiHttpError(503, 'notification_source_unavailable', '異常來源暫時無法讀取。')));
+  expect(refreshedRow).toBeVisible();
+  expect(screen.queryByRole('button', {name: /舊通知異常/})).not.toBeInTheDocument();
+  expect(screen.getByRole('button', {name: /全部事項/})).toHaveTextContent('—');
+
+  vi.mocked(client.list).mockResolvedValue(result({...fault, title: '已確認通知異常'}));
+  fireEvent.click(screen.getByRole('button', {name: '重試通知建立異常'}));
+  await screen.findByRole('button', {name: /已確認通知異常/});
+  expect(screen.queryByRole('button', {name: /已更新寄送工作 #17/})).not.toBeInTheDocument();
+  expect(screen.getByRole('button', {name: /全部事項/})).toHaveTextContent('1');
+});
+
+it('重新整理的目錄撤掉來源時，舊事項隨即移除', async () => {
+  render(<NotificationTasksPage />);
+  await screen.findByRole('heading', {name: '訂金逾期未清'});
+  const refresh = screen.getByRole('button', {name: '重新整理'});
+  await waitFor(() => expect(refresh).toBeEnabled());
+  vi.mocked(client.catalog).mockResolvedValue([]);
+  fireEvent.click(refresh);
+  await screen.findByRole('heading', {name: '目前沒有待辦事項'});
+  expect(screen.queryByText('訂金逾期未清')).not.toBeInTheDocument();
+  expect(client.list).toHaveBeenCalledTimes(1);
 });
 
 it('使用來源目錄的五類篩選，非市民待審只顯示申請編號與收件時間並開啟原申請',async()=>{
