@@ -70,6 +70,10 @@ POST /api/v1/system/storage-retention/apply
 - **Apply 與回執**（`POST /api/v1/storage/files/apply`、`GET /api/v1/storage/receipts/{receipt_id}`）：使用 typed command 與 idempotency identity（exact replay 回原 committed receipt；同鍵異 payload 回 conflict），確保 bytes staging 與 DB metadata commit 一致，失敗不遺留可誤認為正式的 provisional bytes。回傳 `ControlledFileReceiptView`，並維持 `"controlled-file-apply-receipt.v1"` 與 `"controlled-file-record.v1"` 語意。
 - **Query／Download**：`GET /api/v1/storage/files`、`GET /api/v1/storage/files/{file_id}` 與 `GET /api/v1/storage/files/{file_id}/download` 限經 authorization（同時驗 actor、purpose／domain 與 owning business ref）串流 committed bytes；missing／hash mismatch／unavailable／unauthorized 一律 fail closed，不暴露 filesystem 實體路徑。
 
+<a id="registered-read-evidence"></a>
+
+- **已登錄檔案讀取證據**：受控儲存只有在確認 staging payload 缺失、metadata 指向的正式位置查無檔案，且可確認讀取登錄資訊前與重讀相同 metadata 後的儲存根目錄身分一致時，才回報正式檔案缺失。相同儲存路徑與 metadata 內容不足以證明根目錄身分一致。根目錄身分無法確認、登錄資訊不足、讀取過程中檔案消失、儲存或權限故障時，缺失未獲確認。已讀檔案的大小或 SHA-256 不符時，回報完整性不符。讀取本身不執行對帳或修復。
+
 ## 6. Storage／Backup Readiness
 
 - **Storage readiness**：由 `ControlledFileStoragePort.readiness()`（`FileSystemControlledFileStorage.readiness()`）檢查本機受控儲存根目錄、temp／staging directory、必要目錄、read／write／create／rename／delete 能力與 backend identity，並透過 `GET /api/v1/system/database-backup` 唯讀投影 `storage_ready`／`disaster_recovery_ready`；任一缺失即 `false`。

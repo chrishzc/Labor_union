@@ -19,12 +19,19 @@ from shared_kernel.ports import UnitOfWork
 from subsystems.controlled_files.workflow import (
     ApplyControlledFile,
     ControlledFileIntent,
-    ControlledFileOwner,
-    ControlledFilePurpose,
     ControlledFileReadback,
     ControlledFileWorkflow,
     ControlledFileWorkflowError,
     StageControlledFile,
+)
+from subsystems.staff.published_photo_integrity import (
+    STAFF_WEB_CROPS as _CROPS,
+    STAFF_WEB_FILE_OWNER as _OWNER,
+    STAFF_WEB_FILE_PURPOSE as _PURPOSE,
+    STAFF_WEB_ORIGINALS as _ORIGINALS,
+    PublishedPhotoIntegrity,
+    inspect_published_photo,
+    matches_staff_web_file,
 )
 
 
@@ -47,12 +54,6 @@ class WebProfileRepository(Protocol):
     def record_approval(
         self, operation_id: UUID, staff_id: int, results: tuple[dict, ...], *, command: dict | None = None,
     ) -> None: ...
-
-
-_OWNER = ControlledFileOwner.STAFF
-_PURPOSE = ControlledFilePurpose.STAFF_PROFILE_PHOTO
-_ORIGINALS = "staff-web/original"
-_CROPS = "staff-web/crop"
 
 
 class StaffWebProfile:
@@ -257,6 +258,17 @@ class StaffWebProfile:
             {"category": category, "images": images} for category, images in groups.items() if images
         ]}
 
+    def published_photo_integrity(
+        self, staff_id: int, decode: Callable[[bytes], object],
+    ) -> tuple[PublishedPhotoIntegrity, ...]:
+        if self.repository.staff_name(staff_id) is None:
+            raise LookupError("staff_web_staff_not_found")
+        photos = self.repository.current(staff_id)
+        if not photos:
+            return ()
+        files = self._files()
+        return tuple(inspect_published_photo(photo, files, decode) for photo in photos)
+
     def customer_image(self, staff_id: int, entry_id: int, version: int):
         published = self.repository.entry(staff_id, entry_id)
         if published is None or published.version != version:
@@ -265,10 +277,7 @@ class StaffWebProfile:
 
     def _owned_file(self, staff_id: int, file_id: str, folder: str) -> None:
         file = self._files().readback(file_id)
-        if (
-            file.owner != _OWNER or file.purpose != _PURPOSE
-            or file.subject_reference != str(staff_id) or file.logical_folder != folder
-        ):
+        if not matches_staff_web_file(file, staff_id, folder):
             raise ValueError("staff_web_file_owner_mismatch")
 
     def _store(
